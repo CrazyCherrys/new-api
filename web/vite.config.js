@@ -19,16 +19,18 @@ For commercial licensing, please contact support@quantumnous.com
 
 import react from '@vitejs/plugin-react';
 import { defineConfig, transformWithEsbuild } from 'vite';
-import pkg from '@douyinfe/vite-plugin-semi';
 import path from 'path';
 import { codeInspectorPlugin } from 'code-inspector-plugin';
-const { vitePluginSemi } = pkg;
 
 // https://vitejs.dev/config/
 export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@douyinfe/semi-ui/dist/css/semi.min.css': path.resolve(
+        __dirname,
+        'node_modules/@douyinfe/semi-ui/dist/css/semi.min.css'
+      ),
     },
   },
   plugins: [
@@ -51,9 +53,6 @@ export default defineConfig({
       },
     },
     react(),
-    vitePluginSemi({
-      cssLayer: true,
-    }),
   ],
   optimizeDeps: {
     force: true,

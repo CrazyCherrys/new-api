@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -121,6 +124,20 @@ func main() {
 		return a
 	}
 
+	// Initialize and start image generation worker
+	var imageTaskService *service.ImageTaskService
+	if common.IsMasterNode {
+		imageStorageService, err := service.NewImageStorageService()
+		if err != nil {
+			common.SysError(fmt.Sprintf("failed to initialize ImageStorageService: %v", err))
+		} else {
+			imageGenerationService := service.NewImageGenerationService(imageStorageService)
+			modelRPMService := service.NewModelRPMService()
+			imageTaskService = service.NewImageTaskService(imageGenerationService, modelRPMService)
+			imageTaskService.Start()
+		}
+	}
+
 	if common.IsMasterNode && constant.UpdateTask {
 		gopool.Go(func() {
 			controller.UpdateMidjourneyTaskBulk()
@@ -189,10 +206,40 @@ func main() {
 	// Log startup success message
 	common.LogStartupSuccess(startTime, port)
 
-	err = server.Run(":" + port)
-	if err != nil {
-		common.FatalLog("failed to start HTTP server: " + err.Error())
+	// Create HTTP server with graceful shutdown support
+	httpServer := &http.Server{
+		Addr:    ":" + port,
+		Handler: server,
 	}
+
+	// Start server in a goroutine
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			common.FatalLog("failed to start HTTP server: " + err.Error())
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown the server
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	common.SysLog("Shutting down server...")
+
+	// Stop image task service if running
+	if imageTaskService != nil {
+		imageTaskService.Stop()
+	}
+
+	// Graceful shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := httpServer.Shutdown(ctx); err != nil {
+		common.SysLog("Server forced to shutdown: " + err.Error())
+	}
+
+	common.SysLog("Server exited")
 }
 
 func InjectUmamiAnalytics() {

@@ -149,6 +149,18 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticRetryStatusCodes"] = operation_setting.AutomaticRetryStatusCodesToString()
 	common.OptionMap["ExposeRatioEnabled"] = strconv.FormatBool(ratio_setting.IsExposeRatioEnabled())
 
+	// 图片存储配置
+	common.OptionMap["ImageStorageS3Enabled"] = "false"
+	common.OptionMap["ImageStorageS3Endpoint"] = ""
+	common.OptionMap["ImageStorageS3Region"] = "us-east-1"
+	common.OptionMap["ImageStorageS3Bucket"] = ""
+	common.OptionMap["ImageStorageS3AccessKey"] = ""
+	common.OptionMap["ImageStorageS3SecretKey"] = ""
+	common.OptionMap["ImageStorageS3PublicURL"] = ""
+	common.OptionMap["ImageStorageS3UseSSL"] = "true"
+	common.OptionMap["ImageStorageS3PathStyle"] = "false"
+	common.OptionMap["ImageStorageLocalRoot"] = "./storage/images"
+
 	// 自动添加所有注册的模型配置
 	modelConfigs := config.GlobalConfig.ExportAllConfigs()
 	for k, v := range modelConfigs {
@@ -458,6 +470,26 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.StreamCacheQueueLength, _ = strconv.Atoi(value)
 	case "PayMethods":
 		err = operation_setting.UpdatePayMethodsByJsonString(value)
+	case "ImageStorageS3Enabled":
+		// 布尔值配置，已在上面的 Enabled 处理中统一处理
+	case "ImageStorageS3Endpoint":
+		// 字符串配置，已存储在 OptionMap 中
+	case "ImageStorageS3Region":
+		// 字符串配置，已存储在 OptionMap 中
+	case "ImageStorageS3Bucket":
+		// 字符串配置，已存储在 OptionMap 中
+	case "ImageStorageS3AccessKey":
+		// 字符串配置，已存储在 OptionMap 中
+	case "ImageStorageS3SecretKey":
+		// 字符串配置，已存储在 OptionMap 中
+	case "ImageStorageS3PublicURL":
+		// 字符串配置，已存储在 OptionMap 中
+	case "ImageStorageS3UseSSL":
+		// 布尔值配置，已在上面的 Enabled 处理中统一处理
+	case "ImageStorageS3PathStyle":
+		// 布尔值配置，已在上面的 Enabled 处理中统一处理
+	case "ImageStorageLocalRoot":
+		// 字符串配置，已存储在 OptionMap 中
 	}
 	return err
 }

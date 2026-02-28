@@ -314,6 +314,15 @@ func SetApiRouter(router *gin.Engine) {
 			taskRoute.GET("/", middleware.AdminAuth(), controller.GetAllTask)
 		}
 
+		// Image generation routes
+		imageRoute := apiRouter.Group("/images")
+		imageRoute.Use(middleware.UserAuth())
+		{
+			imageRoute.POST("/generate", controller.CreateImageTask)
+			imageRoute.GET("/history", controller.ListImageTasks)
+			imageRoute.GET("/history/:id", controller.GetImageTask)
+		}
+
 		vendorRoute := apiRouter.Group("/vendors")
 		vendorRoute.Use(middleware.AdminAuth())
 		{

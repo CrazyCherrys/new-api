@@ -27,3 +27,10 @@ data/
 .gomodcache/
 .gocache-temp
 .gopath
+.ace-tool/
+
+# Claude AI 工作目录
+.claude/
+
+# 备份文件
+*.bak
