@@ -17,15 +17,28 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Tabs, TabPane } from '@douyinfe/semi-ui';
 import { IconImage, IconHistogram, IconGallery } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import GenerationView from './views/GenerationView';
+import HistoryView from './views/HistoryView';
+import GalleryView from './views/GalleryView';
 
 const ImagePage = () => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('generation');
+  const [regenerateData, setRegenerateData] = useState(null);
+
+  const handleRegenerate = useCallback((task) => {
+    setRegenerateData({
+      prompt: task.prompt,
+      model: task.model || task.model_id,
+      resolution: task.resolution,
+      aspectRatio: task.aspect_ratio,
+    });
+    setActiveTab('generation');
+  }, []);
 
   return (
     <div className="w-full h-full mt-[60px] px-4 py-4">
@@ -45,7 +58,7 @@ const ImagePage = () => {
           itemKey="generation"
         >
           <div className="mt-4">
-            <GenerationView />
+            <GenerationView regenerateData={regenerateData} />
           </div>
         </TabPane>
 
@@ -58,10 +71,8 @@ const ImagePage = () => {
           }
           itemKey="history"
         >
-          <div className="mt-4 flex items-center justify-center h-64">
-            <div className="text-center text-gray-400">
-              {t('生成历史功能即将推出')}
-            </div>
+          <div className="mt-4">
+            <HistoryView onRegenerate={handleRegenerate} />
           </div>
         </TabPane>
 
@@ -74,10 +85,8 @@ const ImagePage = () => {
           }
           itemKey="gallery"
         >
-          <div className="mt-4 flex items-center justify-center h-64">
-            <div className="text-center text-gray-400">
-              {t('图片库功能即将推出')}
-            </div>
+          <div className="mt-4">
+            <GalleryView onRegenerate={handleRegenerate} />
           </div>
         </TabPane>
       </Tabs>

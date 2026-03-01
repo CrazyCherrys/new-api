@@ -30,7 +30,8 @@ import {
 } from '@douyinfe/semi-ui';
 import { IconSearch, IconRefresh } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess } from '../../../helpers';
+import { showError, showSuccess } from '../../../helpers';
+import { listImageTasks, deleteImageTask } from '../../../api/image';
 import { useTaskPolling } from '../../../hooks/useTaskPolling';
 import TaskTable from '../components/TaskTable';
 
@@ -108,8 +109,8 @@ const HistoryView = ({ onRegenerate }) => {
         params.search = filters.search.trim();
       }
 
-      const res = await API.get('/api/image/tasks', { params });
-      const { success, message, data } = res.data;
+      const res = await listImageTasks(params);
+      const { success, message, data } = res;
 
       if (success) {
         setTasks(data.tasks || []);
@@ -136,8 +137,8 @@ const HistoryView = ({ onRegenerate }) => {
   // 删除任务
   const handleDelete = async (taskId) => {
     try {
-      const res = await API.delete(`/api/image/task/${taskId}`);
-      const { success, message } = res.data;
+      const res = await deleteImageTask(taskId);
+      const { success, message } = res;
 
       if (success) {
         showSuccess(t('任务删除成功'));

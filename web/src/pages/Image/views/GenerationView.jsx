@@ -17,17 +17,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
-import { Card, Button, Space, Toast } from '@douyinfe/semi-ui';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Card, Button, Space, Banner, Spin } from '@douyinfe/semi-ui';
 import { IconSetting } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../../helpers';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
+import { useTaskPolling } from '../../../hooks/useTaskPolling';
 import ModelSelector from '../components/ModelSelector';
 import PromptArea from '../components/PromptArea';
 import ParameterSidebar from '../components/ParameterSidebar';
+import ImageGrid from '../components/ImageGrid';
 
-const GenerationView = () => {
+const GenerationView = ({ regenerateData }) => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
 
@@ -42,6 +44,33 @@ const GenerationView = () => {
 
   const [loading, setLoading] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [activeTask, setActiveTask] = useState(null);
+
+  // 处理从其他标签页传递的重新生成数据
+  useEffect(() => {
+    if (regenerateData) {
+      setFormState((prev) => ({
+        ...prev,
+        prompt: regenerateData.prompt || '',
+        model: regenerateData.model || prev.model,
+        resolution: regenerateData.resolution || prev.resolution,
+        aspectRatio: regenerateData.aspectRatio || prev.aspectRatio,
+      }));
+    }
+  }, [regenerateData]);
+
+  // 任务更新回调
+  const handleTaskUpdate = useCallback((updatedTask) => {
+    setActiveTask(updatedTask);
+  }, []);
+
+  // 启用任务轮询
+  useTaskPolling(
+    activeTask && ['pending', 'running'].includes(activeTask.status) ? [activeTask.id] : [],
+    handleTaskUpdate,
+    handleTaskUpdate,
+    { enabled: true }
+  );
 
   const handleFieldChange = (field, value) => {
     setFormState((prev) => ({
@@ -80,9 +109,11 @@ const GenerationView = () => {
       const { success, message, data } = res.data;
 
       if (success) {
-        showSuccess(t('图片生成成功'));
-        // TODO: 处理生成的图片数据
-        console.log('Generated images:', data);
+        showSuccess(t('图片生成任务已提交'));
+        // 保存任务以启动轮询
+        if (data) {
+          setActiveTask(data);
+        }
       } else {
         showError(message || t('图片生成失败'));
       }
@@ -132,9 +163,43 @@ const GenerationView = () => {
           {/* 生成结果展示区 */}
           <Card className="flex-1">
             <div className="flex items-center justify-center h-full min-h-[300px]">
-              <div className="text-center text-gray-400">
-                {loading ? t('生成中...') : t('生成的图片将显示在这里')}
-              </div>
+              {activeTask ? (
+                <div className="w-full h-full">
+                  {activeTask.status === 'pending' && (
+                    <div className="flex flex-col items-center justify-center h-full">
+                      <Spin size="large" />
+                      <div className="mt-4 text-gray-600">{t('任务排队中...')}</div>
+                    </div>
+                  )}
+                  {activeTask.status === 'running' && (
+                    <div className="flex flex-col items-center justify-center h-full">
+                      <Spin size="large" />
+                      <div className="mt-4 text-gray-600">{t('生成中...')}</div>
+                    </div>
+                  )}
+                  {activeTask.status === 'succeeded' && activeTask.image_urls && activeTask.image_urls.length > 0 && (
+                    <div className="w-full">
+                      <ImageGrid images={activeTask.image_urls.map((url, index) => ({
+                        id: `${activeTask.id}-${index}`,
+                        url: url,
+                        prompt: activeTask.prompt,
+                        model: activeTask.model || activeTask.model_id,
+                      }))} />
+                    </div>
+                  )}
+                  {activeTask.status === 'failed' && (
+                    <Banner
+                      type="danger"
+                      description={activeTask.error_message || t('图片生成失败')}
+                      closeIcon={null}
+                    />
+                  )}
+                </div>
+              ) : (
+                <div className="text-center text-gray-400">
+                  {loading ? t('生成中...') : t('生成的图片将显示在这里')}
+                </div>
+              )}
             </div>
           </Card>
         </div>

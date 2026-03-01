@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // CreateImageTask 创建图像生成任务
@@ -181,6 +182,9 @@ func ListImageTasks(c *gin.Context) {
 	if req.EndTime > 0 {
 		filters["end_time"] = req.EndTime
 	}
+	if req.Search != "" {
+		filters["search"] = req.Search
+	}
 
 	// 4. 查询任务列表
 	tasks, total, err := model.ListByUser(userID, req.Page, req.PageSize, filters)
@@ -195,6 +199,48 @@ func ListImageTasks(c *gin.Context) {
 		"total":     total,
 		"page":      req.Page,
 		"page_size": req.PageSize,
+	})
+}
+
+// DeleteImageTask 删除图像任务
+func DeleteImageTask(c *gin.Context) {
+	// 1. 用户认证检查
+	userID := c.GetInt("id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "未授权，请先登录",
+		})
+		return
+	}
+
+	// 2. 任务 ID 验证
+	taskID := c.Param("id")
+	if taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "任务 ID 不能为空",
+		})
+		return
+	}
+
+	// 3. 删除任务（防越权）
+	err := model.DeleteImageTaskByID(taskID, userID)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "任务不存在或无权删除",
+			})
+			return
+		}
+		common.ApiError(c, fmt.Errorf("删除任务失败: %w", err))
+		return
+	}
+
+	// 4. 返回成功
+	common.ApiSuccess(c, gin.H{
+		"message": "任务删除成功",
 	})
 }
 

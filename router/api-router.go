@@ -321,6 +321,7 @@ func SetApiRouter(router *gin.Engine) {
 			imageRoute.POST("/generate", controller.CreateImageTask)
 			imageRoute.GET("/history", controller.ListImageTasks)
 			imageRoute.GET("/history/:id", controller.GetImageTask)
+			imageRoute.DELETE("/history/:id", controller.DeleteImageTask)
 		}
 
 		vendorRoute := apiRouter.Group("/vendors")

@@ -37,6 +37,7 @@ type ListImageTasksRequest struct {
 	Model     string `form:"model"`
 	StartTime int64  `form:"start_time"`
 	EndTime   int64  `form:"end_time"`
+	Search    string `form:"search"`
 }
 
 // ListImageTasksResponse 列表响应

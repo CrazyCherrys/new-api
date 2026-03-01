@@ -20,6 +20,33 @@ For commercial licensing, please contact support@quantumnous.com
 import { API } from '../helpers/api';
 
 /**
+ * 归一化任务数据，处理后端字段差异
+ * @param {Object} task - 原始任务数据
+ * @returns {Object} 归一化后的任务数据
+ */
+const normalizeTask = (task) => {
+  if (!task) return null;
+
+  return {
+    ...task,
+    // 确保 id 字段存在（后端现在返回 id 而非 task_id）
+    id: task.id || task.task_id,
+    // 保持 image_urls 数组格式
+    image_urls: task.image_urls || [],
+    // 为兼容性添加 result_url（首图）
+    result_url: task.image_urls && task.image_urls.length > 0 ? task.image_urls[0] : null,
+  };
+};
+
+/**
+ * 归一化任务列表
+ */
+const normalizeTasks = (tasks) => {
+  if (!Array.isArray(tasks)) return [];
+  return tasks.map(normalizeTask);
+};
+
+/**
  * 创建图像生成任务
  * @param {Object} payload - 任务参数
  * @param {string} payload.model - 模型名称
@@ -32,6 +59,9 @@ import { API } from '../helpers/api';
  */
 export const createImageTask = async (payload) => {
   const res = await API.post('/api/images/generate', payload);
+  if (res.data.success && res.data.data) {
+    res.data.data = normalizeTask(res.data.data);
+  }
   return res.data;
 };
 
@@ -42,6 +72,9 @@ export const createImageTask = async (payload) => {
  */
 export const getImageTask = async (taskId) => {
   const res = await API.get(`/api/images/history/${taskId}`);
+  if (res.data.success && res.data.data) {
+    res.data.data = normalizeTask(res.data.data);
+  }
   return res.data;
 };
 
@@ -58,6 +91,15 @@ export const getImageTask = async (taskId) => {
  */
 export const listImageTasks = async (params = {}) => {
   const res = await API.get('/api/images/history', { params });
+  if (res.data.success && res.data.data) {
+    // 后端返回 data.data，归一化为 data.tasks
+    res.data.data = {
+      tasks: normalizeTasks(res.data.data.data || res.data.data),
+      total: res.data.data.total || 0,
+      page: res.data.data.page || params.page || 1,
+      page_size: res.data.data.page_size || params.page_size || 10,
+    };
+  }
   return res.data;
 };
 

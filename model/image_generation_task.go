@@ -171,6 +171,9 @@ func ListByUser(userID int, page, pageSize int, filters map[string]interface{}) 
 	if endTime, ok := filters["end_time"].(int64); ok && endTime > 0 {
 		query = query.Where("created_at <= ?", endTime)
 	}
+	if search, ok := filters["search"].(string); ok && search != "" {
+		query = query.Where("prompt LIKE ?", "%"+search+"%")
+	}
 
 	// 统计总数
 	if err := query.Count(&total).Error; err != nil {
@@ -335,7 +338,7 @@ func ResetZombieRunning(staleAfter time.Duration) (int64, error) {
 // ToDTO 将 ImageGenerationTask 转换为 DTO 响应格式
 func (t *ImageGenerationTask) ToDTO() map[string]interface{} {
 	return map[string]interface{}{
-		"task_id":         t.ID,
+		"id":              t.ID,
 		"user_id":         t.UserID,
 		"model":           t.ModelID,
 		"prompt":          t.Prompt,
@@ -351,6 +354,18 @@ func (t *ImageGenerationTask) ToDTO() map[string]interface{} {
 		"updated_at":      t.UpdatedAt,
 		"completed_at":    t.CompletedAt,
 	}
+}
+
+// DeleteImageTaskByID 删除图像任务（防越权）
+func DeleteImageTaskByID(id string, userID int) error {
+	result := DB.Where("id = ? AND user_id = ?", id, userID).Delete(&ImageGenerationTask{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 // TaskListToDTO 批量转换任务列表为 DTO 格式

@@ -35,7 +35,8 @@ import {
   IconChevronRight,
 } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess } from '../../../helpers';
+import { showError, showSuccess } from '../../../helpers';
+import { deleteImageTask } from '../../../api/image';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 
 const { Text, Title, Paragraph } = Typography;
@@ -87,8 +88,8 @@ const ImageDetailModal = ({
   const handleDelete = async () => {
     try {
       setLoading(true);
-      const res = await API.delete(`/api/image/task/${image.id}`);
-      const { success, message } = res.data;
+      const res = await deleteImageTask(image.id);
+      const { success, message } = res;
 
       if (success) {
         showSuccess(t('图片删除成功'));

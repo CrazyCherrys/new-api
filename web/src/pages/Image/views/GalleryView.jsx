@@ -30,7 +30,8 @@ import {
 } from '@douyinfe/semi-ui';
 import { IconRefresh, IconImage } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
-import { API, showError } from '../../../helpers';
+import { showError } from '../../../helpers';
+import { listImageTasks } from '../../../api/image';
 import ImageGrid from '../components/ImageGrid';
 import ImageDetailModal from '../components/ImageDetailModal';
 
@@ -70,8 +71,8 @@ const GalleryView = ({ onRegenerate }) => {
         params.end_time = Math.floor(filters.dateRange[1].getTime() / 1000);
       }
 
-      const res = await API.get('/api/image/tasks', { params });
-      const { success, message, data } = res.data;
+      const res = await listImageTasks(params);
+      const { success, message, data } = res;
 
       if (success) {
         setImages(data.tasks || []);

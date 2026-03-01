@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useEffect, useRef, useCallback } from 'react';
-import { API } from '../helpers';
+import { getImageTask } from '../api/image';
 
 /**
  * 智能轮询 Hook，用于实时更新任务状态
@@ -58,10 +58,9 @@ export const useTaskPolling = (
   const fetchTaskStatus = useCallback(
     async (taskId) => {
       try {
-        const res = await API.get(`/api/image/task/${taskId}`);
-        const { success, data } = res.data;
-        if (success && data) {
-          return data;
+        const res = await getImageTask(taskId);
+        if (res.success && res.data) {
+          return res.data;
         }
         return null;
       } catch (error) {
