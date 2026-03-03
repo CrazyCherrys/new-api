@@ -42,6 +42,7 @@ import Midjourney from './pages/Midjourney';
 import Pricing from './pages/Pricing';
 import Task from './pages/Task';
 import ModelPage from './pages/Model';
+import ModelSettingsPage from './pages/ModelSettings';
 import ModelDeploymentPage from './pages/ModelDeployment';
 import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
@@ -121,6 +122,14 @@ function App() {
           element={
             <AdminRoute>
               <ModelDeploymentPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/model-settings'
+          element={
+            <AdminRoute>
+              <ModelSettingsPage />
             </AdminRoute>
           }
         />

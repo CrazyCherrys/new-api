@@ -18,20 +18,18 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Button, Card, Spin, Typography } from '@douyinfe/semi-ui';
+import { Card, Spin, Typography } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
 import { showError } from '../../helpers';
 import { getImageConfig } from '../../helpers/imageApi';
-import SettingsImageGenerationBase from '../../pages/Setting/ImageGeneration/SettingsImageGenerationBase';
+import SettingsImageGenerationModelManagement from '../Setting/ImageGeneration/SettingsImageGenerationModelManagement';
 import {
   defaultImageGenerationInputs,
   transformToFrontend,
-} from '../../pages/Setting/ImageGeneration/shared';
+} from '../Setting/ImageGeneration/shared';
 
-const ImageGenerationSetting = () => {
+const ModelSettingsPage = () => {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [loading, setLoading] = React.useState(false);
   const [inputs, setInputs] = React.useState(defaultImageGenerationInputs);
 
@@ -54,31 +52,25 @@ const ImageGenerationSetting = () => {
   }, [onRefresh]);
 
   return (
-    <Spin spinning={loading} size='large'>
-      <Card style={{ marginTop: '10px' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 12,
-          }}
-        >
-          <div>
-            <Typography.Text strong>{t('模型管理')}</Typography.Text>
-            <br />
-            <Typography.Text type='tertiary' size='small'>
-              {t('图像模型已迁移到独立侧边栏页面。')}
-            </Typography.Text>
-          </div>
-          <Button onClick={() => navigate('/console/model-settings')}>
-            {t('前往图像模型设置')}
-          </Button>
-        </div>
-        <SettingsImageGenerationBase options={inputs} refresh={onRefresh} />
-      </Card>
-    </Spin>
+    <div className='mt-[60px] px-2'>
+      <Spin spinning={loading} size='large'>
+        <Card>
+          <Typography.Title heading={5} style={{ margin: 0 }}>
+            {t('图像模型设置')}
+          </Typography.Title>
+          <Typography.Text type='tertiary'>
+            {t('按模型独立配置模型ID、模型名称、类型、请求端点、RPM、分辨率和宽高比。')}
+          </Typography.Text>
+        </Card>
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsImageGenerationModelManagement
+            options={inputs}
+            refresh={onRefresh}
+          />
+        </Card>
+      </Spin>
+    </div>
   );
 };
 
-export default ImageGenerationSetting;
+export default ModelSettingsPage;
