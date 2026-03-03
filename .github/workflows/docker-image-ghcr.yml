@@ -2,13 +2,15 @@ name: Publish Docker image (GHCR amd64 only)
 
 on:
   push:
+    branches:
+      - main
     tags:
       - '*'
   workflow_dispatch:
     inputs:
       tag:
         description: 'Tag name to build (e.g., v1.0.0)'
-        required: true
+        required: false
         type: string
 
 jobs:
@@ -37,8 +39,11 @@ jobs:
               echo "Error: Tag '$TAG' does not exist in the repository"
               exit 1
             fi
-          else
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG=${GITHUB_REF#refs/tags/}
+          else
+            # Push to branch - use 'latest' tag
+            TAG="latest"
           fi
           echo "TAG=$TAG" >> $GITHUB_ENV
           echo "$TAG" > VERSION
