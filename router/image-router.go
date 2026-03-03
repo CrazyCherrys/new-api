@@ -22,8 +22,8 @@ func SetImageRouter(router *gin.Engine) {
 		imageGroup.GET("/history/:id", controller.GetImageTask)
 		imageGroup.DELETE("/history/:id", controller.DeleteImageTask)
 
-		// 配置管理（仅管理员）
-		imageGroup.GET("/config", middleware.AdminAuth(), controller.GetImageGenerationConfig)
-		imageGroup.PUT("/config", middleware.AdminAuth(), controller.UpdateImageGenerationConfig)
+		// 配置管理
+		imageGroup.GET("/config", controller.GetImageGenerationConfig) // 所有用户可读取配置
+		imageGroup.PUT("/config", middleware.AdminAuth(), controller.UpdateImageGenerationConfig) // 仅管理员可修改
 	}
 }
