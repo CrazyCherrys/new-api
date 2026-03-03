@@ -264,6 +264,7 @@ func migrateDB() error {
 		&TopUp{},
 		&QuotaData{},
 		&Task{},
+		&ImageTask{}, // AI 图像生成任务表
 		&Model{},
 		&Vendor{},
 		&PrefillGroup{},

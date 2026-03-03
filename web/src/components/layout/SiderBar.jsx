@@ -40,6 +40,7 @@ const routerMap = {
   subscription: '/console/subscription',
   log: '/console/log',
   midjourney: '/console/midjourney',
+  dreamstudio: '/console/dreamstudio',
   setting: '/console/setting',
   about: '/about',
   detail: '/console',
@@ -99,6 +100,15 @@ const SiderBar = ({ onNavigate = () => {} }) => {
             : 'tableHiddle',
       },
       {
+        text: t('AI 绘画'),
+        itemKey: 'dreamstudio',
+        to: '/dreamstudio',
+        className:
+          localStorage.getItem('enable_image_generation') === 'true'
+            ? ''
+            : 'tableHiddle',
+      },
+      {
         text: t('任务日志'),
         itemKey: 'task',
         to: '/task',
@@ -117,6 +127,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   }, [
     localStorage.getItem('enable_data_export'),
     localStorage.getItem('enable_drawing'),
+    localStorage.getItem('enable_image_generation'),
     localStorage.getItem('enable_task'),
     t,
     isModuleVisible,

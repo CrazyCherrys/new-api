@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -148,6 +151,21 @@ func main() {
 		common.SysError(fmt.Sprintf("start pyroscope error : %v", err))
 	}
 
+	// Wire image generation function (breaks service -> relay import cycle)
+	service.GenerateImageFunc = relay.GenerateImageProgrammatic
+
+	// Initialize image generation service
+	common.SysLog("initializing image generation service")
+	imageGenService := service.NewImageGenerationService()
+	imageTaskService := service.NewImageTaskService(imageGenService)
+
+	// Start image task worker
+	imageTaskService.Start()
+	common.SysLog("image generation worker started")
+
+	// Initialize image task controller
+	controller.InitImageTaskController(imageTaskService)
+
 	// Initialize HTTP server
 	server := gin.New()
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
@@ -189,10 +207,39 @@ func main() {
 	// Log startup success message
 	common.LogStartupSuccess(startTime, port)
 
-	err = server.Run(":" + port)
-	if err != nil {
-		common.FatalLog("failed to start HTTP server: " + err.Error())
+	// Create HTTP server with graceful shutdown support
+	httpServer := &http.Server{
+		Addr:    ":" + port,
+		Handler: server,
 	}
+
+	// Start HTTP server in a goroutine
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			common.FatalLog("failed to start HTTP server: " + err.Error())
+		}
+	}()
+
+	// Wait for interrupt signal for graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	common.SysLog("shutting down server...")
+
+	// Stop image task worker
+	common.SysLog("stopping image generation worker...")
+	imageTaskService.Stop()
+
+	// Graceful shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := httpServer.Shutdown(ctx); err != nil {
+		common.SysLog("server forced to shutdown: " + err.Error())
+	}
+
+	common.SysLog("server exited")
 }
 
 func InjectUmamiAnalytics() {

@@ -1,0 +1,220 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Row, Col, Select, DatePicker, Button, Empty, Spin, Toast } from '@douyinfe/semi-ui';
+import { IconRefresh } from '@douyinfe/semi-icons';
+import { useTranslation } from 'react-i18next';
+import TaskCard from './TaskCard';
+import { listImageTasks, deleteImageTask, createImageTask } from '../../helpers/imageApi';
+
+const usePolling = (callback, dependencies = [], enabled = true) => {
+  const savedCallback = useRef(callback);
+  const intervalRef = useRef(null);
+  const startTimeRef = useRef(Date.now());
+
+  useEffect(() => {
+    savedCallback.current = callback;
+  }, [callback]);
+
+  useEffect(() => {
+    if (!enabled) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
+
+    startTimeRef.current = Date.now();
+
+    const poll = () => {
+      const elapsed = Date.now() - startTimeRef.current;
+      const interval = elapsed < 30000 ? 3000 : 10000;
+
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+
+      savedCallback.current();
+
+      intervalRef.current = setInterval(() => {
+        savedCallback.current();
+      }, interval);
+    };
+
+    poll();
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [...dependencies, enabled]);
+};
+
+const TaskGallery = () => {
+  const { t } = useTranslation();
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [dateRange, setDateRange] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(20);
+  const [total, setTotal] = useState(0);
+
+  const hasRunningTasks = tasks.some(task =>
+    task.status === 'pending' || task.status === 'running'
+  );
+
+  const fetchTasks = useCallback(async () => {
+    try {
+      setLoading(true);
+      const params = {
+        page,
+        page_size: pageSize
+      };
+
+      if (statusFilter !== 'all') {
+        params.status = statusFilter;
+      }
+
+      if (dateRange && dateRange.length === 2) {
+        params.start_date = dateRange[0].toISOString();
+        params.end_date = dateRange[1].toISOString();
+      }
+
+      const response = await listImageTasks(params);
+      if (response.success) {
+        setTasks(response.data?.tasks || []);
+        setTotal(response.data?.total || 0);
+      }
+    } catch (error) {
+      Toast.error(t('加载任务列表失败'));
+    } finally {
+      setLoading(false);
+    }
+  }, [page, pageSize, statusFilter, dateRange, t]);
+
+  usePolling(fetchTasks, [page, pageSize, statusFilter, dateRange], hasRunningTasks);
+
+  useEffect(() => {
+    fetchTasks();
+  }, [fetchTasks]);
+
+  const handleDelete = async (taskId) => {
+    try {
+      const response = await deleteImageTask(taskId);
+      if (response.success) {
+        Toast.success(t('删除成功'));
+        fetchTasks();
+      } else {
+        Toast.error(response.message || t('删除失败'));
+      }
+    } catch (error) {
+      Toast.error(t('删除失败'));
+    }
+  };
+
+  const handleRegenerate = async (task) => {
+    try {
+      const payload = {
+        prompt: task.prompt,
+        ...task.params
+      };
+      const response = await createImageTask(payload);
+      if (response.success) {
+        Toast.success(t('已重新提交生成任务'));
+        fetchTasks();
+      } else {
+        Toast.error(response.message || t('提交失败'));
+      }
+    } catch (error) {
+      Toast.error(t('提交失败'));
+    }
+  };
+
+  const handleViewDetail = (task) => {
+    console.log('View detail:', task);
+  };
+
+  const handleRefresh = () => {
+    setPage(1);
+    fetchTasks();
+  };
+
+  return (
+    <div style={{ padding: '20px' }}>
+      <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <Select
+          value={statusFilter}
+          onChange={setStatusFilter}
+          style={{ width: 150 }}
+          placeholder={t('状态筛选')}
+        >
+          <Select.Option value="all">{t('全部')}</Select.Option>
+          <Select.Option value="pending">{t('等待中')}</Select.Option>
+          <Select.Option value="running">{t('生成中')}</Select.Option>
+          <Select.Option value="succeeded">{t('成功')}</Select.Option>
+          <Select.Option value="failed">{t('失败')}</Select.Option>
+        </Select>
+
+        <DatePicker
+          type="dateRange"
+          value={dateRange}
+          onChange={setDateRange}
+          style={{ width: 300 }}
+          placeholder={t('选择日期范围')}
+        />
+
+        <Button
+          icon={<IconRefresh />}
+          onClick={handleRefresh}
+          loading={loading}
+        >
+          {t('刷新')}
+        </Button>
+      </div>
+
+      <Spin spinning={loading}>
+        {tasks.length === 0 ? (
+          <Empty
+            description={t('暂无任务记录')}
+            style={{ padding: '60px 0' }}
+          />
+        ) : (
+          <Row gutter={[16, 16]}>
+            {tasks.map(task => (
+              <Col key={task.id} xs={24} sm={12} md={8} lg={6} xl={4}>
+                <TaskCard
+                  task={task}
+                  onDelete={handleDelete}
+                  onRegenerate={handleRegenerate}
+                  onViewDetail={handleViewDetail}
+                />
+              </Col>
+            ))}
+          </Row>
+        )}
+      </Spin>
+    </div>
+  );
+};
+
+export default TaskGallery;
