@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -67,4 +68,55 @@ func (l *InMemoryRateLimiter) Request(key string, maxRequestNum int, duration in
 		*(l.store[key]) = append(*(l.store[key]), now)
 	}
 	return true
+}
+
+// RedisRateLimitRequest checks whether a request can pass within a sliding window.
+// duration is in seconds.
+func RedisRateLimitRequest(key string, maxRequestNum int, duration int64) (bool, error) {
+	if maxRequestNum <= 0 {
+		return true, nil
+	}
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	length, err := RDB.LLen(ctx, key).Result()
+	if err != nil {
+		return false, err
+	}
+
+	if length < int64(maxRequestNum) {
+		txn := RDB.TxPipeline()
+		txn.LPush(ctx, key, now)
+		txn.LTrim(ctx, key, 0, int64(maxRequestNum-1))
+		txn.Expire(ctx, key, time.Duration(duration)*time.Second)
+		_, err = txn.Exec(ctx)
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	oldest, err := RDB.LIndex(ctx, key, -1).Int64()
+	if err != nil {
+		return false, err
+	}
+
+	if now-oldest >= duration {
+		txn := RDB.TxPipeline()
+		txn.RPop(ctx, key)
+		txn.LPush(ctx, key, now)
+		txn.LTrim(ctx, key, 0, int64(maxRequestNum-1))
+		txn.Expire(ctx, key, time.Duration(duration)*time.Second)
+		_, err = txn.Exec(ctx)
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	if err = RDB.Expire(ctx, key, time.Duration(duration)*time.Second).Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
