@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
 // ImageGeneratorFunc 图像生成函数类型
@@ -42,9 +44,17 @@ func (s *ImageGenerationService) Generate(ctx context.Context, task *model.Image
 	log.Printf("[ImageGen] Task #%d: model=%s, prompt=%s",
 		task.ID, task.ModelID, truncateString(task.Prompt, 50))
 
+	requestModelID := task.ModelID
+	cfg := system_setting.GetImageGenerationSetting()
+	if modelCfg, ok := resolveImageModelSetting(cfg, task.ModelID); ok {
+		if strings.TrimSpace(modelCfg.RequestModelID) != "" {
+			requestModelID = modelCfg.RequestModelID
+		}
+	}
+
 	// 构建图像生成请求
 	imageReq := &dto.ImageRequest{
-		Model:  task.ModelID,
+		Model:  requestModelID,
 		Prompt: task.Prompt,
 	}
 

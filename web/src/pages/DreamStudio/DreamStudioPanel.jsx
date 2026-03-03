@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next';
 import { getImageConfig } from '../../helpers/imageApi';
 import { showError, showSuccess } from '../../helpers';
 import { API } from '../../helpers/api';
+import { normalizeModelSettings } from '../Setting/ImageGeneration/shared';
 
 const { Sider, Content } = Layout;
 const { TextArea } = Input;
@@ -47,6 +48,7 @@ const DreamStudioPanel = ({
   const [collapsed, setCollapsed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [visibleModels, setVisibleModels] = useState([]);
+  const [modelSettings, setModelSettings] = useState({});
   const [uploading, setUploading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, message: '' });
@@ -86,17 +88,41 @@ const DreamStudioPanel = ({
       const res = await getImageConfig();
       if (res.data?.success && res.data?.data) {
         const config = res.data.data;
-        if (config.visible_models && config.visible_models.length > 0) {
-          setVisibleModels(config.visible_models);
-          if (!model && config.default_model) {
-            setModel(config.default_model);
-          }
+        const normalizedModelSettings = normalizeModelSettings(
+          config.model_settings,
+          config.enabled_models || config.visible_models || [],
+          config,
+        );
+        const modelIDs = Object.keys(normalizedModelSettings);
+        setModelSettings(normalizedModelSettings);
+        setVisibleModels(modelIDs);
+
+        const selectedModel =
+          model ||
+          (config.default_model && modelIDs.includes(config.default_model)
+            ? config.default_model
+            : modelIDs[0]);
+        if (!model && selectedModel) {
+          setModel(selectedModel);
         }
-        if (config.default_resolution && !resolution) {
-          setResolution(config.default_resolution);
+
+        const selectedSetting =
+          normalizedModelSettings[selectedModel] ||
+          normalizedModelSettings[config.default_model] ||
+          null;
+        if (!resolution) {
+          setResolution(
+            selectedSetting?.default_resolution ||
+              config.default_resolution ||
+              '1024x1024',
+          );
         }
-        if (config.default_aspect_ratio && !aspectRatio) {
-          setAspectRatio(config.default_aspect_ratio);
+        if (!aspectRatio) {
+          setAspectRatio(
+            selectedSetting?.default_aspect_ratio ||
+              config.default_aspect_ratio ||
+              '1:1',
+          );
         }
       }
     } catch (error) {
@@ -105,6 +131,38 @@ const DreamStudioPanel = ({
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!model || !modelSettings[model]) {
+      return;
+    }
+    const setting = modelSettings[model];
+
+    if (!resolution) {
+      setResolution(setting.default_resolution || '1024x1024');
+    } else if (
+      Array.isArray(setting.resolutions) &&
+      setting.resolutions.length > 0 &&
+      !setting.resolutions.includes(resolution)
+    ) {
+      setResolution(setting.default_resolution || setting.resolutions[0]);
+    }
+
+    if (!aspectRatio) {
+      setAspectRatio(setting.default_aspect_ratio || '1:1');
+    } else if (
+      Array.isArray(setting.aspect_ratios) &&
+      setting.aspect_ratios.length > 0 &&
+      !setting.aspect_ratios.includes(aspectRatio)
+    ) {
+      setAspectRatio(setting.default_aspect_ratio || setting.aspect_ratios[0]);
+    }
+
+    const maxCount = setting.max_image_count || 10;
+    if (count > maxCount) {
+      setCount(maxCount);
+    }
+  }, [model, modelSettings]);
 
   // 上传参考图
   const handleUpload = async ({ file, onSuccess, onError }) => {
@@ -148,6 +206,12 @@ const DreamStudioPanel = ({
     }
     if (!model) {
       showError(t('请选择模型'));
+      return;
+    }
+    const selectedSetting = modelSettings[model];
+    const maxCount = selectedSetting?.max_image_count || 10;
+    if (count > maxCount) {
+      showError(t('生成数量超过模型限制'));
       return;
     }
 
@@ -264,7 +328,7 @@ const DreamStudioPanel = ({
                 >
                   {visibleModels.map((m) => (
                     <Select.Option key={m} value={m}>
-                      {m}
+                      {modelSettings[m]?.display_name || m}
                     </Select.Option>
                   ))}
                 </Select>
@@ -278,9 +342,12 @@ const DreamStudioPanel = ({
                   placeholder={t('选择分辨率')}
                   style={{ width: '100%' }}
                 >
-                  {resolutionOptions.map((opt) => (
-                    <Select.Option key={opt.value} value={opt.value}>
-                      {opt.label}
+                  {(modelSettings[model]?.resolutions?.length > 0
+                    ? modelSettings[model].resolutions
+                    : resolutionOptions.map((opt) => opt.value)
+                  ).map((opt) => (
+                    <Select.Option key={opt} value={opt}>
+                      {opt}
                     </Select.Option>
                   ))}
                 </Select>
@@ -294,9 +361,12 @@ const DreamStudioPanel = ({
                   placeholder={t('选择宽高比')}
                   style={{ width: '100%' }}
                 >
-                  {aspectRatioOptions.map((opt) => (
-                    <Select.Option key={opt.value} value={opt.value}>
-                      {opt.label}
+                  {(modelSettings[model]?.aspect_ratios?.length > 0
+                    ? modelSettings[model].aspect_ratios
+                    : aspectRatioOptions.map((opt) => opt.value)
+                  ).map((opt) => (
+                    <Select.Option key={opt} value={opt}>
+                      {opt}
                     </Select.Option>
                   ))}
                 </Select>
@@ -308,7 +378,7 @@ const DreamStudioPanel = ({
                   value={count}
                   onChange={setCount}
                   min={1}
-                  max={10}
+                  max={modelSettings[model]?.max_image_count || 10}
                   style={{ width: '100%' }}
                 />
               </div>

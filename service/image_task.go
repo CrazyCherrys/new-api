@@ -26,13 +26,17 @@ const (
 
 // 重试间隔配置（指数退避）
 var imageTaskRetryBackoff = []time.Duration{
-	10 * time.Second,  // 第1次重试：10秒后
-	30 * time.Second,  // 第2次重试：30秒后
-	2 * time.Minute,   // 第3次重试：2分钟后
+	10 * time.Second, // 第1次重试：10秒后
+	30 * time.Second, // 第2次重试：30秒后
+	2 * time.Minute,  // 第3次重试：2分钟后
 }
 
 // 限流错误
 var ErrRateLimited = errors.New("rate limit exceeded")
+var ErrInvalidModel = errors.New("invalid image model")
+var ErrInvalidResolution = errors.New("invalid image resolution")
+var ErrInvalidAspectRatio = errors.New("invalid image aspect ratio")
+var ErrInvalidImageCount = errors.New("invalid image count")
 
 // 内存限流器（Redis 不可用时使用）
 var imageRateLimiter = &common.InMemoryRateLimiter{}
@@ -87,9 +91,8 @@ func (s *ImageTaskService) Stop() {
 }
 
 // checkRpmLimit 检查 RPM 限流
-func checkRpmLimit(userID int, modelID string) error {
-	cfg := system_setting.GetImageGenerationSetting()
-	if cfg.RpmLimit <= 0 {
+func checkRpmLimit(userID int, modelID string, rpmLimit int) error {
+	if rpmLimit <= 0 {
 		return nil // 限流未启用
 	}
 
@@ -99,7 +102,7 @@ func checkRpmLimit(userID int, modelID string) error {
 	// 尝试使用 Redis（如果可用）
 	if common.RedisEnabled {
 		// Redis 限流逻辑
-		success, err := common.RedisRateLimitRequest(key, cfg.RpmLimit, 60)
+		success, err := common.RedisRateLimitRequest(key, rpmLimit, 60)
 		if err != nil {
 			// Redis 失败，回退到内存限流
 			log.Printf("[ImageTask] Redis rate limit failed, fallback to memory: %v", err)
@@ -112,7 +115,7 @@ func checkRpmLimit(userID int, modelID string) error {
 	}
 
 	// 使用内存限流器
-	if !imageRateLimiter.Request(key, cfg.RpmLimit, 60) {
+	if !imageRateLimiter.Request(key, rpmLimit, 60) {
 		return ErrRateLimited
 	}
 
@@ -121,8 +124,51 @@ func checkRpmLimit(userID int, modelID string) error {
 
 // CreateTask 创建新的图像生成任务
 func (s *ImageTaskService) CreateTask(ctx context.Context, userID int, modelID, prompt, resolution, aspectRatio, referenceImage string, count int) (*model.ImageTask, error) {
+	cfg := system_setting.GetImageGenerationSetting()
+	modelCfg, allowed := resolveImageModelSetting(cfg, modelID)
+	if !allowed {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidModel, modelID)
+	}
+	if strings.ToLower(modelCfg.ModelType) != "image" {
+		return nil, fmt.Errorf("%w: %s is not an image model", ErrInvalidModel, modelID)
+	}
+
+	if resolution == "" {
+		resolution = modelCfg.DefaultResolution
+	}
+	if aspectRatio == "" {
+		aspectRatio = modelCfg.DefaultAspectRatio
+	}
+
+	if count <= 0 {
+		count = 1
+	}
+
+	if len(modelCfg.Resolutions) > 0 && resolution != "" && !containsExact(modelCfg.Resolutions, resolution) {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidResolution, resolution)
+	}
+	if len(modelCfg.AspectRatios) > 0 && aspectRatio != "" && !containsExact(modelCfg.AspectRatios, aspectRatio) {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidAspectRatio, aspectRatio)
+	}
+
+	maxImageCount := modelCfg.MaxImageCount
+	if maxImageCount <= 0 {
+		maxImageCount = 10
+	}
+	if count > maxImageCount {
+		return nil, fmt.Errorf("%w: max=%d", ErrInvalidImageCount, maxImageCount)
+	}
+
+	rpmLimit := cfg.RpmLimit
+	if modelCfg.RpmEnabled {
+		rpmLimit = modelCfg.RpmLimit
+	} else if rpmLimit <= 0 && modelCfg.RpmLimit > 0 {
+		// 兼容旧配置：当全局 RPM 未设置时，允许模型独立 RPM 生效
+		rpmLimit = modelCfg.RpmLimit
+	}
+
 	// 限流检查
-	if err := checkRpmLimit(userID, modelID); err != nil {
+	if err := checkRpmLimit(userID, modelID, rpmLimit); err != nil {
 		return nil, err
 	}
 
@@ -354,6 +400,99 @@ func sanitizeError(err error) string {
 // contains 字符串包含检查（不区分大小写）
 func contains(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+func containsExact(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultImageModelSetting(cfg *system_setting.ImageGenerationSetting, modelID string) system_setting.ImageGenerationModelSetting {
+	defaultResolution := cfg.DefaultResolution
+	if defaultResolution == "" {
+		defaultResolution = "1024x1024"
+	}
+	defaultAspectRatio := cfg.DefaultAspectRatio
+	if defaultAspectRatio == "" {
+		defaultAspectRatio = "1:1"
+	}
+	maxImageCount := cfg.MaxImageCount
+	if maxImageCount <= 0 {
+		maxImageCount = 10
+	}
+	return system_setting.ImageGenerationModelSetting{
+		DisplayName:        modelID,
+		RequestModelID:     modelID,
+		RequestEndpoint:    "openai",
+		ModelType:          "image",
+		DefaultResolution:  defaultResolution,
+		DefaultAspectRatio: defaultAspectRatio,
+		Resolutions:        []string{defaultResolution},
+		AspectRatios:       []string{defaultAspectRatio},
+		Durations:          []string{},
+		MaxImageCount:      maxImageCount,
+		RpmLimit:           cfg.RpmLimit,
+		RpmEnabled:         false,
+	}
+}
+
+func resolveImageModelSetting(cfg *system_setting.ImageGenerationSetting, modelID string) (system_setting.ImageGenerationModelSetting, bool) {
+	if cfg == nil || strings.TrimSpace(modelID) == "" {
+		return system_setting.ImageGenerationModelSetting{}, false
+	}
+
+	if len(cfg.ModelSettings) > 0 {
+		if setting, ok := cfg.ModelSettings[modelID]; ok {
+			base := defaultImageModelSetting(cfg, modelID)
+			if setting.DisplayName != "" {
+				base.DisplayName = setting.DisplayName
+			}
+			if setting.RequestModelID != "" {
+				base.RequestModelID = setting.RequestModelID
+			}
+			if setting.DefaultResolution != "" {
+				base.DefaultResolution = setting.DefaultResolution
+			}
+			if setting.DefaultAspectRatio != "" {
+				base.DefaultAspectRatio = setting.DefaultAspectRatio
+			}
+			if setting.RequestEndpoint != "" {
+				base.RequestEndpoint = setting.RequestEndpoint
+			}
+			if setting.ModelType != "" {
+				base.ModelType = setting.ModelType
+			}
+			if len(setting.Resolutions) > 0 {
+				base.Resolutions = setting.Resolutions
+			}
+			if len(setting.AspectRatios) > 0 {
+				base.AspectRatios = setting.AspectRatios
+			}
+			if len(setting.Durations) > 0 {
+				base.Durations = setting.Durations
+			}
+			if setting.MaxImageCount > 0 {
+				base.MaxImageCount = setting.MaxImageCount
+			}
+			if setting.RpmLimit > 0 {
+				base.RpmLimit = setting.RpmLimit
+			}
+			base.RpmEnabled = setting.RpmEnabled
+			return base, true
+		}
+		// 配置了独立模型但找不到指定模型时，严格拒绝
+		return system_setting.ImageGenerationModelSetting{}, false
+	}
+
+	if len(cfg.EnabledModels) > 0 && !containsExact(cfg.EnabledModels, modelID) {
+		return system_setting.ImageGenerationModelSetting{}, false
+	}
+
+	return defaultImageModelSetting(cfg, modelID), true
 }
 
 // getMaxAttempts 获取最大重试次数

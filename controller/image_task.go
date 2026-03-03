@@ -3,7 +3,9 @@ package controller
 import (
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -58,13 +60,6 @@ func (ctrl *ImageTaskController) CreateImageTask(c *gin.Context) {
 	if req.Count <= 0 {
 		req.Count = 1
 	}
-	if req.Count > 10 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "count must be between 1 and 10",
-		})
-		return
-	}
 
 	// 创建任务
 	task, err := ctrl.taskService.CreateTask(
@@ -83,6 +78,16 @@ func (ctrl *ImageTaskController) CreateImageTask(c *gin.Context) {
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"success": false,
 				"message": "rate limit exceeded for model " + req.ModelID,
+			})
+			return
+		}
+		if errors.Is(err, service.ErrInvalidModel) ||
+			errors.Is(err, service.ErrInvalidResolution) ||
+			errors.Is(err, service.ErrInvalidAspectRatio) ||
+			errors.Is(err, service.ErrInvalidImageCount) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": err.Error(),
 			})
 			return
 		}
@@ -315,7 +320,7 @@ func DeleteImageTask(c *gin.Context) {
 }
 
 func GetImageGenerationConfig(c *gin.Context) {
-	cfg := system_setting.GetImageGenerationSetting()
+	cfg := normalizeImageGenerationConfig(system_setting.GetImageGenerationSetting())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    cfg,
@@ -331,6 +336,7 @@ func UpdateImageGenerationConfig(c *gin.Context) {
 		})
 		return
 	}
+	req = normalizeImageGenerationConfig(&req)
 
 	configMap, err := config.ConfigToMap(&req)
 	if err != nil {
@@ -386,6 +392,128 @@ func UpdateImageGenerationConfig(c *gin.Context) {
 		"success": true,
 		"message": "config updated successfully",
 	})
+}
+
+func normalizeImageGenerationConfig(cfg *system_setting.ImageGenerationSetting) system_setting.ImageGenerationSetting {
+	if cfg == nil {
+		return system_setting.ImageGenerationSetting{}
+	}
+
+	normalized := *cfg
+	if normalized.ModelSettings == nil {
+		normalized.ModelSettings = make(map[string]system_setting.ImageGenerationModelSetting)
+	}
+
+	defaultResolution := normalized.DefaultResolution
+	if defaultResolution == "" {
+		defaultResolution = "1024x1024"
+	}
+	defaultAspectRatio := normalized.DefaultAspectRatio
+	if defaultAspectRatio == "" {
+		defaultAspectRatio = "1:1"
+	}
+	maxImageCount := normalized.MaxImageCount
+	if maxImageCount <= 0 {
+		maxImageCount = 10
+	}
+
+	trimmedModelSettings := make(map[string]system_setting.ImageGenerationModelSetting)
+	for modelID, setting := range normalized.ModelSettings {
+		id := strings.TrimSpace(modelID)
+		if id == "" {
+			continue
+		}
+		normalizedSetting := setting
+		if normalizedSetting.DisplayName == "" {
+			normalizedSetting.DisplayName = id
+		}
+		if normalizedSetting.RequestModelID == "" {
+			normalizedSetting.RequestModelID = id
+		}
+		if normalizedSetting.RequestEndpoint == "" {
+			normalizedSetting.RequestEndpoint = "openai"
+		}
+		if normalizedSetting.ModelType == "" {
+			normalizedSetting.ModelType = "image"
+		}
+		if normalizedSetting.DefaultResolution == "" {
+			normalizedSetting.DefaultResolution = defaultResolution
+		}
+		if normalizedSetting.DefaultAspectRatio == "" {
+			normalizedSetting.DefaultAspectRatio = defaultAspectRatio
+		}
+		if len(normalizedSetting.Resolutions) == 0 && normalizedSetting.DefaultResolution != "" {
+			normalizedSetting.Resolutions = []string{normalizedSetting.DefaultResolution}
+		}
+		if len(normalizedSetting.AspectRatios) == 0 && normalizedSetting.DefaultAspectRatio != "" {
+			normalizedSetting.AspectRatios = []string{normalizedSetting.DefaultAspectRatio}
+		}
+		if normalizedSetting.MaxImageCount <= 0 {
+			normalizedSetting.MaxImageCount = maxImageCount
+		}
+		if normalizedSetting.RpmLimit <= 0 {
+			normalizedSetting.RpmLimit = normalized.RpmLimit
+		}
+		trimmedModelSettings[id] = normalizedSetting
+	}
+	normalized.ModelSettings = trimmedModelSettings
+
+	enabledSet := make(map[string]struct{})
+	enabledModels := make([]string, 0, len(normalized.EnabledModels))
+	for _, modelID := range normalized.EnabledModels {
+		id := strings.TrimSpace(modelID)
+		if id == "" {
+			continue
+		}
+		if _, ok := enabledSet[id]; ok {
+			continue
+		}
+		enabledSet[id] = struct{}{}
+		enabledModels = append(enabledModels, id)
+	}
+	if len(enabledModels) == 0 && len(normalized.ModelSettings) > 0 {
+		for modelID := range normalized.ModelSettings {
+			enabledModels = append(enabledModels, modelID)
+		}
+		sort.Strings(enabledModels)
+	}
+	normalized.EnabledModels = enabledModels
+
+	for _, modelID := range normalized.EnabledModels {
+		if _, ok := normalized.ModelSettings[modelID]; ok {
+			continue
+		}
+		normalized.ModelSettings[modelID] = system_setting.ImageGenerationModelSetting{
+			DisplayName:        modelID,
+			RequestModelID:     modelID,
+			RequestEndpoint:    "openai",
+			ModelType:          "image",
+			DefaultResolution:  defaultResolution,
+			DefaultAspectRatio: defaultAspectRatio,
+			Resolutions:        []string{defaultResolution},
+			AspectRatios:       []string{defaultAspectRatio},
+			Durations:          []string{},
+			MaxImageCount:      maxImageCount,
+			RpmLimit:           normalized.RpmLimit,
+			RpmEnabled:         false,
+		}
+	}
+	enabledSet = make(map[string]struct{}, len(normalized.EnabledModels))
+	for _, modelID := range normalized.EnabledModels {
+		enabledSet[modelID] = struct{}{}
+	}
+
+	if normalized.DefaultModel == "" {
+		if len(normalized.EnabledModels) > 0 {
+			normalized.DefaultModel = normalized.EnabledModels[0]
+		}
+	} else {
+		if _, ok := enabledSet[normalized.DefaultModel]; !ok && len(normalized.EnabledModels) > 0 {
+			normalized.DefaultModel = normalized.EnabledModels[0]
+		}
+	}
+
+	return normalized
 }
 
 func UploadReferenceImage(c *gin.Context) {

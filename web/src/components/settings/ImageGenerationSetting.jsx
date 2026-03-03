@@ -18,14 +18,52 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Card } from '@douyinfe/semi-ui';
-import SettingsImageGeneration from '../../pages/Setting/ImageGeneration/SettingsImageGeneration';
+import { Card, Spin } from '@douyinfe/semi-ui';
+import { useTranslation } from 'react-i18next';
+import { showError } from '../../helpers';
+import { getImageConfig } from '../../helpers/imageApi';
+import SettingsImageGenerationBase from '../../pages/Setting/ImageGeneration/SettingsImageGenerationBase';
+import SettingsImageGenerationModelManagement from '../../pages/Setting/ImageGeneration/SettingsImageGenerationModelManagement';
+import {
+  defaultImageGenerationInputs,
+  transformToFrontend,
+} from '../../pages/Setting/ImageGeneration/shared';
 
 const ImageGenerationSetting = () => {
+  const { t } = useTranslation();
+  const [loading, setLoading] = React.useState(false);
+  const [inputs, setInputs] = React.useState(defaultImageGenerationInputs);
+
+  const onRefresh = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await getImageConfig();
+      if (res.data?.success && res.data?.data) {
+        setInputs(transformToFrontend(res.data.data));
+      }
+    } catch (error) {
+      showError(t('加载配置失败'));
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
+  React.useEffect(() => {
+    onRefresh();
+  }, [onRefresh]);
+
   return (
-    <Card style={{ marginTop: '10px' }}>
-      <SettingsImageGeneration />
-    </Card>
+    <Spin spinning={loading} size='large'>
+      <Card style={{ marginTop: '10px' }}>
+        <SettingsImageGenerationBase options={inputs} refresh={onRefresh} />
+      </Card>
+      <Card style={{ marginTop: '10px' }}>
+        <SettingsImageGenerationModelManagement
+          options={inputs}
+          refresh={onRefresh}
+        />
+      </Card>
+    </Spin>
   );
 };
 
