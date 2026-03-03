@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Button, Col, Form, Row, Spin, InputNumber, Input, Switch } from '@douyinfe/semi-ui';
+import { Button, Col, Form, Row, Spin, InputNumber, Input, Switch, TagInput } from '@douyinfe/semi-ui';
 import { showError, showSuccess, showWarning } from '../../../helpers';
 import { getImageConfig, updateImageConfig } from '../../../helpers/imageApi';
 import { useTranslation } from 'react-i18next';
@@ -35,6 +35,8 @@ export default function SettingsImageGeneration() {
     timeout_seconds: 300,
     max_retries: 3,
     retry_interval_seconds: 5,
+    visible_models: [],
+    default_model: '',
     rpm_limit: 10,
   });
   const refForm = useRef();
@@ -208,6 +210,39 @@ export default function SettingsImageGeneration() {
                     setInputs({
                       ...inputs,
                       retry_interval_seconds: value,
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+          </Form.Section>
+
+          <Form.Section text={t('模型管理')}>
+            <Row gutter={16}>
+              <Col xs={24}>
+                <Form.TagInput
+                  field={'visible_models'}
+                  label={t('可见模型列表')}
+                  placeholder={t('输入模型名称后按回车')}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      visible_models: value,
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col xs={24} sm={12}>
+                <Form.Input
+                  field={'default_model'}
+                  label={t('默认模型')}
+                  placeholder='dall-e-3'
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      default_model: value,
                     })
                   }
                 />
