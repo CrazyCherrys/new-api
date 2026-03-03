@@ -17,8 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import DreamStudioPanel from './DreamStudioPanel';
+import TaskGallery from './TaskGallery';
 
 const DreamStudio = () => {
   const [prompt, setPrompt] = useState('');
@@ -27,6 +28,11 @@ const DreamStudio = () => {
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [referenceImage, setReferenceImage] = useState(null);
   const [count, setCount] = useState(1);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  const handleRefreshHistory = useCallback(() => {
+    setRefreshTrigger(prev => prev + 1);
+  }, []);
 
   return (
     <div style={{ marginTop: '60px' }}>
@@ -43,7 +49,9 @@ const DreamStudio = () => {
         setReferenceImage={setReferenceImage}
         count={count}
         setCount={setCount}
+        refreshHistory={handleRefreshHistory}
       />
+      <TaskGallery key={refreshTrigger} />
     </div>
   );
 };
