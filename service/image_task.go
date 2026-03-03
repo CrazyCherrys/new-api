@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
 const (
@@ -27,6 +29,17 @@ var imageTaskRetryBackoff = []time.Duration{
 	10 * time.Second,  // 第1次重试：10秒后
 	30 * time.Second,  // 第2次重试：30秒后
 	2 * time.Minute,   // 第3次重试：2分钟后
+}
+
+// 限流错误
+var ErrRateLimited = errors.New("rate limit exceeded")
+
+// 内存限流器（Redis 不可用时使用）
+var imageRateLimiter = &common.InMemoryRateLimiter{}
+
+func init() {
+	// 初始化内存限流器，过期时间设为 2 分钟
+	imageRateLimiter.Init(2 * time.Minute)
 }
 
 // ImageTaskService 图像生成任务服务
@@ -73,8 +86,46 @@ func (s *ImageTaskService) Stop() {
 	close(s.stopCh)
 }
 
+// checkRpmLimit 检查 RPM 限流
+func checkRpmLimit(userID int, modelID string) error {
+	cfg := system_setting.GetImageGenerationSetting()
+	if cfg.RpmLimit <= 0 {
+		return nil // 限流未启用
+	}
+
+	// 限流 key: img_rpm:{userID}:{modelID}
+	key := fmt.Sprintf("img_rpm:%d:%s", userID, modelID)
+
+	// 尝试使用 Redis（如果可用）
+	if common.RedisEnabled {
+		// Redis 限流逻辑
+		success, err := common.RedisRateLimitRequest(key, cfg.RpmLimit, 60)
+		if err != nil {
+			// Redis 失败，回退到内存限流
+			log.Printf("[ImageTask] Redis rate limit failed, fallback to memory: %v", err)
+		} else {
+			if !success {
+				return ErrRateLimited
+			}
+			return nil
+		}
+	}
+
+	// 使用内存限流器
+	if !imageRateLimiter.Request(key, cfg.RpmLimit, 60) {
+		return ErrRateLimited
+	}
+
+	return nil
+}
+
 // CreateTask 创建新的图像生成任务
 func (s *ImageTaskService) CreateTask(ctx context.Context, userID int, modelID, prompt, resolution, aspectRatio, referenceImage string, count int) (*model.ImageTask, error) {
+	// 限流检查
+	if err := checkRpmLimit(userID, modelID); err != nil {
+		return nil, err
+	}
+
 	task := &model.ImageTask{
 		CreatedAt:      common.GetTimestamp(),
 		UpdatedAt:      common.GetTimestamp(),
@@ -112,8 +163,8 @@ func (s *ImageTaskService) GetTaskByID(taskID int64, userID int) (*model.ImageTa
 }
 
 // ListTasksByUser 获取用户的任务列表
-func (s *ImageTaskService) ListTasksByUser(userID int, page, pageSize int, status string) ([]*model.ImageTask, int64, error) {
-	return model.GetImageTasksByUserID(userID, page, pageSize, status)
+func (s *ImageTaskService) ListTasksByUser(userID int, page, pageSize int, status, modelID, startTime, endTime string) ([]*model.ImageTask, int64, error) {
+	return model.GetImageTasksByUserID(userID, page, pageSize, status, modelID, startTime, endTime)
 }
 
 // DeleteTask 删除任务
@@ -302,10 +353,7 @@ func sanitizeError(err error) string {
 
 // contains 字符串包含检查（不区分大小写）
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(s == substr || len(s) > len(substr) &&
-		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-		len(s) > len(substr)*2))
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
 // getMaxAttempts 获取最大重试次数

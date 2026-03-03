@@ -17,80 +17,33 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useReducer } from 'react';
+import React, { useState } from 'react';
 import DreamStudioPanel from './DreamStudioPanel';
 
-const initialState = {
-  prompt: '',
-  negativePrompt: '',
-  model: 'stable-diffusion-xl-1024-v1-0',
-  width: 1024,
-  height: 1024,
-  steps: 30,
-  cfgScale: 7,
-  seed: -1,
-  samples: 1,
-  sampler: 'K_DPMPP_2M',
-  stylePreset: '',
-  clipGuidancePreset: 'NONE',
-  initImage: null,
-  initImageMode: 'IMAGE_STRENGTH',
-  imageStrength: 0.35,
-  stepScheduleStart: 0.65,
-  stepScheduleEnd: 1.0,
-};
-
-const reducer = (state, action) => {
-  switch (action.type) {
-    case 'SET_PROMPT':
-      return { ...state, prompt: action.payload };
-    case 'SET_NEGATIVE_PROMPT':
-      return { ...state, negativePrompt: action.payload };
-    case 'SET_MODEL':
-      return { ...state, model: action.payload };
-    case 'SET_RESOLUTION':
-      return { ...state, width: action.payload.width, height: action.payload.height };
-    case 'SET_WIDTH':
-      return { ...state, width: action.payload };
-    case 'SET_HEIGHT':
-      return { ...state, height: action.payload };
-    case 'SET_STEPS':
-      return { ...state, steps: action.payload };
-    case 'SET_CFG_SCALE':
-      return { ...state, cfgScale: action.payload };
-    case 'SET_SEED':
-      return { ...state, seed: action.payload };
-    case 'SET_SAMPLES':
-      return { ...state, samples: action.payload };
-    case 'SET_SAMPLER':
-      return { ...state, sampler: action.payload };
-    case 'SET_STYLE_PRESET':
-      return { ...state, stylePreset: action.payload };
-    case 'SET_CLIP_GUIDANCE_PRESET':
-      return { ...state, clipGuidancePreset: action.payload };
-    case 'SET_INIT_IMAGE':
-      return { ...state, initImage: action.payload };
-    case 'SET_INIT_IMAGE_MODE':
-      return { ...state, initImageMode: action.payload };
-    case 'SET_IMAGE_STRENGTH':
-      return { ...state, imageStrength: action.payload };
-    case 'SET_STEP_SCHEDULE_START':
-      return { ...state, stepScheduleStart: action.payload };
-    case 'SET_STEP_SCHEDULE_END':
-      return { ...state, stepScheduleEnd: action.payload };
-    case 'RESET':
-      return initialState;
-    default:
-      return state;
-  }
-};
-
 const DreamStudio = () => {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [prompt, setPrompt] = useState('');
+  const [model, setModel] = useState('');
+  const [resolution, setResolution] = useState('1024x1024');
+  const [aspectRatio, setAspectRatio] = useState('1:1');
+  const [referenceImage, setReferenceImage] = useState(null);
+  const [count, setCount] = useState(1);
 
   return (
-    <div className='mt-[60px]'>
-      <DreamStudioPanel state={state} dispatch={dispatch} />
+    <div style={{ marginTop: '60px' }}>
+      <DreamStudioPanel
+        prompt={prompt}
+        setPrompt={setPrompt}
+        model={model}
+        setModel={setModel}
+        resolution={resolution}
+        setResolution={setResolution}
+        aspectRatio={aspectRatio}
+        setAspectRatio={setAspectRatio}
+        referenceImage={referenceImage}
+        setReferenceImage={setReferenceImage}
+        count={count}
+        setCount={setCount}
+      />
     </div>
   );
 };

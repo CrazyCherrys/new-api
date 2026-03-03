@@ -19,6 +19,16 @@ func SetRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte) {
 	SetRelayRouter(router)
 	SetVideoRouter(router)
 	SetImageRouter(router) // 图像生成任务路由
+
+	// 静态文件服务 - 图像存储
+	imagesDir := "./images"
+	if _, err := os.Stat(imagesDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(imagesDir, 0755); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to create images directory: %v", err))
+		}
+	}
+	router.Static("/images", imagesDir)
+
 	frontendBaseUrl := os.Getenv("FRONTEND_BASE_URL")
 	if common.IsMasterNode && frontendBaseUrl != "" {
 		frontendBaseUrl = ""

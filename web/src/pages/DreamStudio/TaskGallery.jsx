@@ -22,66 +22,69 @@ import { Row, Col, Select, DatePicker, Button, Empty, Spin, Toast } from '@douyi
 import { IconRefresh } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import TaskCard from './TaskCard';
-import { listImageTasks, deleteImageTask, createImageTask } from '../../helpers/imageApi';
-
-const usePolling = (callback, dependencies = [], enabled = true) => {
-  const savedCallback = useRef(callback);
-  const intervalRef = useRef(null);
-  const startTimeRef = useRef(Date.now());
-
-  useEffect(() => {
-    savedCallback.current = callback;
-  }, [callback]);
-
-  useEffect(() => {
-    if (!enabled) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      return;
-    }
-
-    startTimeRef.current = Date.now();
-
-    const poll = () => {
-      const elapsed = Date.now() - startTimeRef.current;
-      const interval = elapsed < 30000 ? 3000 : 10000;
-
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-
-      savedCallback.current();
-
-      intervalRef.current = setInterval(() => {
-        savedCallback.current();
-      }, interval);
-    };
-
-    poll();
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [...dependencies, enabled]);
-};
+import { listImageTasks, deleteImageTask, createImageTask, getImageTask } from '../../helpers/imageApi';
 
 const TaskGallery = () => {
   const { t } = useTranslation();
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [modelFilter, setModelFilter] = useState('all');
   const [dateRange, setDateRange] = useState(null);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [total, setTotal] = useState(0);
 
-  const hasRunningTasks = tasks.some(task =>
-    task.status === 'pending' || task.status === 'running'
-  );
+  const pollingTimersRef = useRef(new Map());
+
+  const updateTaskInList = useCallback((taskId, updatedTask) => {
+    setTasks(prevTasks =>
+      prevTasks.map(task =>
+        task.id === taskId ? { ...task, ...updatedTask } : task
+      )
+    );
+  }, []);
+
+  const pollTask = useCallback(async (taskId, attempt = 0) => {
+    try {
+      const response = await getImageTask(taskId);
+
+      if (response.success && response.data) {
+        const taskData = response.data;
+        updateTaskInList(taskId, taskData);
+
+        if (taskData.status === 'pending' || taskData.status === 'running') {
+          const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+
+          const timerId = setTimeout(() => {
+            pollTask(taskId, attempt + 1);
+          }, delay);
+
+          pollingTimersRef.current.set(taskId, timerId);
+        } else {
+          pollingTimersRef.current.delete(taskId);
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to poll task ${taskId}:`, error);
+      pollingTimersRef.current.delete(taskId);
+    }
+  }, [updateTaskInList]);
+
+  const startPollingForTask = useCallback((taskId) => {
+    if (pollingTimersRef.current.has(taskId)) {
+      return;
+    }
+    pollTask(taskId, 0);
+  }, [pollTask]);
+
+  const stopPollingForTask = useCallback((taskId) => {
+    const timerId = pollingTimersRef.current.get(taskId);
+    if (timerId) {
+      clearTimeout(timerId);
+      pollingTimersRef.current.delete(taskId);
+    }
+  }, []);
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -95,31 +98,53 @@ const TaskGallery = () => {
         params.status = statusFilter;
       }
 
+      if (modelFilter !== 'all') {
+        params.model = modelFilter;
+      }
+
       if (dateRange && dateRange.length === 2) {
-        params.start_date = dateRange[0].toISOString();
-        params.end_date = dateRange[1].toISOString();
+        params.start_time = dateRange[0].toISOString();
+        params.end_time = dateRange[1].toISOString();
       }
 
       const response = await listImageTasks(params);
       if (response.success) {
-        setTasks(response.data?.tasks || []);
+        const fetchedTasks = response.data?.tasks || [];
+        setTasks(fetchedTasks);
         setTotal(response.data?.total || 0);
+
+        fetchedTasks.forEach(task => {
+          if (task.status === 'pending' || task.status === 'running') {
+            startPollingForTask(task.id);
+          } else {
+            stopPollingForTask(task.id);
+          }
+        });
       }
     } catch (error) {
       Toast.error(t('加载任务列表失败'));
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, statusFilter, dateRange, t]);
-
-  usePolling(fetchTasks, [page, pageSize, statusFilter, dateRange], hasRunningTasks);
+  }, [page, pageSize, statusFilter, modelFilter, dateRange, t, startPollingForTask, stopPollingForTask]);
 
   useEffect(() => {
     fetchTasks();
   }, [fetchTasks]);
 
+  useEffect(() => {
+    return () => {
+      pollingTimersRef.current.forEach((timerId) => {
+        clearTimeout(timerId);
+      });
+      pollingTimersRef.current.clear();
+    };
+  }, []);
+
   const handleDelete = async (taskId) => {
     try {
+      stopPollingForTask(taskId);
+
       const response = await deleteImageTask(taskId);
       if (response.success) {
         Toast.success(t('删除成功'));
@@ -141,6 +166,11 @@ const TaskGallery = () => {
       const response = await createImageTask(payload);
       if (response.success) {
         Toast.success(t('已重新提交生成任务'));
+
+        if (response.data?.id) {
+          startPollingForTask(response.data.id);
+        }
+
         fetchTasks();
       } else {
         Toast.error(response.message || t('提交失败'));
@@ -173,6 +203,19 @@ const TaskGallery = () => {
           <Select.Option value="running">{t('生成中')}</Select.Option>
           <Select.Option value="succeeded">{t('成功')}</Select.Option>
           <Select.Option value="failed">{t('失败')}</Select.Option>
+        </Select>
+
+        <Select
+          value={modelFilter}
+          onChange={setModelFilter}
+          style={{ width: 200 }}
+          placeholder={t('模型筛选')}
+        >
+          <Select.Option value="all">{t('全部模型')}</Select.Option>
+          <Select.Option value="dall-e-2">DALL-E 2</Select.Option>
+          <Select.Option value="dall-e-3">DALL-E 3</Select.Option>
+          <Select.Option value="midjourney">Midjourney</Select.Option>
+          <Select.Option value="stable-diffusion">Stable Diffusion</Select.Option>
         </Select>
 
         <DatePicker

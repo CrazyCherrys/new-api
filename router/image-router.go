@@ -14,6 +14,9 @@ func SetImageRouter(router *gin.Engine) {
 		// 创建图像生成任务
 		imageGroup.POST("/generate", controller.CreateImageTask)
 
+		// 参考图上传
+		imageGroup.POST("/upload-reference", controller.UploadReferenceImage)
+
 		// 任务历史记录
 		imageGroup.GET("/history", controller.ListImageTasks)
 		imageGroup.GET("/history/:id", controller.GetImageTask)

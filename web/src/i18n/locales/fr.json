@@ -3152,6 +3152,16 @@
     "默认折叠侧边栏": "Réduire la barre latérale par défaut",
     "默认测试模型": "Modèle de test par défaut",
     "默认用户消息": "Bonjour",
-    "默认补全倍率": "Taux de complétion par défaut"
+    "默认补全倍率": "Taux de complétion par défaut",
+    "本地存储路径": "Chemin de stockage local",
+    "S3 区域": "Région S3",
+    "S3 路径前缀": "Préfixe de chemin S3",
+    "Worker 数量": "Nombre de workers",
+    "僵尸任务判定时间（分钟）": "Délai d'expiration des tâches (minutes)",
+    "启用的模型列表": "Modèles activés",
+    "默认分辨率": "Résolution par défaut",
+    "默认宽高比": "Rapport d'aspect par défaut",
+    "单次最大生成数量": "Nombre maximum d'images",
+    "限流配置": "Limitation de débit"
   }
 }

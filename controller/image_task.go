@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -44,7 +45,7 @@ func (ctrl *ImageTaskController) CreateImageTask(c *gin.Context) {
 	}
 
 	// 获取用户ID
-	userID := c.GetInt("user_id")
+	userID := c.GetInt("id")
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
@@ -77,6 +78,14 @@ func (ctrl *ImageTaskController) CreateImageTask(c *gin.Context) {
 		req.Count,
 	)
 	if err != nil {
+		// 检查是否是限流错误
+		if errors.Is(err, service.ErrRateLimited) {
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"success": false,
+				"message": "rate limit exceeded for model " + req.ModelID,
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": "failed to create task: " + err.Error(),
@@ -107,7 +116,7 @@ func (ctrl *ImageTaskController) GetImageTask(c *gin.Context) {
 		return
 	}
 
-	userID := c.GetInt("user_id")
+	userID := c.GetInt("id")
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
@@ -152,7 +161,7 @@ func (ctrl *ImageTaskController) GetImageTask(c *gin.Context) {
 // ListImageTasks 获取任务列表
 // GET /api/v1/image-tasks/history
 func (ctrl *ImageTaskController) ListImageTasks(c *gin.Context) {
-	userID := c.GetInt("user_id")
+	userID := c.GetInt("id")
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
@@ -165,6 +174,9 @@ func (ctrl *ImageTaskController) ListImageTasks(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	status := c.Query("status")
+	model := c.Query("model")
+	startTime := c.Query("start_time")
+	endTime := c.Query("end_time")
 
 	if page < 1 {
 		page = 1
@@ -173,7 +185,7 @@ func (ctrl *ImageTaskController) ListImageTasks(c *gin.Context) {
 		pageSize = 20
 	}
 
-	tasks, total, err := ctrl.taskService.ListTasksByUser(userID, page, pageSize, status)
+	tasks, total, err := ctrl.taskService.ListTasksByUser(userID, page, pageSize, status, model, startTime, endTime)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -224,7 +236,7 @@ func (ctrl *ImageTaskController) DeleteImageTask(c *gin.Context) {
 		return
 	}
 
-	userID := c.GetInt("user_id")
+	userID := c.GetInt("id")
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
@@ -329,26 +341,100 @@ func UpdateImageGenerationConfig(c *gin.Context) {
 		return
 	}
 
+	// 添加前缀并准备批量更新
+	updates := make(map[string]string)
 	for key, value := range configMap {
 		dbKey := "image_generation_setting." + key
-		if err := model.UpdateOption(dbKey, value); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"success": false,
-				"message": "failed to update config: " + err.Error(),
-			})
-			return
-		}
+		updates[dbKey] = value
 	}
 
-	options, _ := model.AllOption()
+	// 使用事务批量更新
+	if err := model.UpdateOptionsAtomic(updates); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "failed to update config: " + err.Error(),
+		})
+		return
+	}
+
+	// 重新加载所有配置
+	options, err := model.AllOption()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "failed to reload config: " + err.Error(),
+		})
+		return
+	}
 	optionMap := make(map[string]string)
 	for _, opt := range options {
 		optionMap[opt.Key] = opt.Value
 	}
-	config.GlobalConfig.LoadFromDB(optionMap)
+	if err := config.GlobalConfig.LoadFromDB(optionMap); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "failed to apply config: " + err.Error(),
+		})
+		return
+	}
+
+	// 注意：ImageStorageService 每次创建新实例时会自动读取最新配置
+	// 因此配置更新后，新的图像生成任务会使用新配置（包括 S3 切换）
+	// ImageTaskService 的超时和重试参数也会在下次任务创建时生效
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "config updated successfully",
+	})
+}
+
+func UploadReferenceImage(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "no file uploaded",
+		})
+		return
+	}
+
+	// 打开上传的文件
+	src, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "failed to open uploaded file: " + err.Error(),
+		})
+		return
+	}
+	defer src.Close()
+
+	// 读取文件内容
+	fileData := make([]byte, file.Size)
+	_, err = src.Read(fileData)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "failed to read file: " + err.Error(),
+		})
+		return
+	}
+
+	// 创建存储服务并保存文件
+	storageService := service.NewImageStorageService()
+	uploadedURL, err := storageService.StoreImageFromBytes(fileData, file.Filename)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "failed to store image: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"url": uploadedURL,
+		},
 	})
 }

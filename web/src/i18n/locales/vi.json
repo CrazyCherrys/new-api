@@ -3705,6 +3705,16 @@
     "默认折叠侧边栏": "Mặc định thu gọn thanh bên",
     "默认测试模型": "Mô hình kiểm tra mặc định",
     "默认用户消息": "Xin chào",
-    "默认补全倍率": "Tỷ lệ hoàn thành mặc định"
+    "默认补全倍率": "Tỷ lệ hoàn thành mặc định",
+    "本地存储路径": "Đường dẫn lưu trữ cục bộ",
+    "S3 区域": "Vùng S3",
+    "S3 路径前缀": "Tiền tố đường dẫn S3",
+    "Worker 数量": "Số lượng worker",
+    "僵尸任务判定时间（分钟）": "Thời gian chờ tác vụ cũ (phút)",
+    "启用的模型列表": "Danh sách mô hình được kích hoạt",
+    "默认分辨率": "Độ phân giải mặc định",
+    "默认宽高比": "Tỷ lệ khung hình mặc định",
+    "单次最大生成数量": "Số lượng hình ảnh tối đa",
+    "限流配置": "Giới hạn tốc độ"
   }
 }

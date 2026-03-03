@@ -67,6 +67,35 @@ func (s *ImageStorageService) initS3Client() {
 		s.config.StorageS3Endpoint, s.config.StorageS3Bucket, s.config.StorageS3Region))
 }
 
+// ReloadConfig 重新加载配置并刷新 S3 客户端
+func (s *ImageStorageService) ReloadConfig() {
+	// 获取最新配置
+	newConfig := system_setting.GetImageGenerationSetting()
+
+	// 检查存储类型是否变化
+	storageTypeChanged := s.config.StorageType != newConfig.StorageType
+
+	// 检查 S3 配置是否变化
+	s3ConfigChanged := s.config.StorageS3Endpoint != newConfig.StorageS3Endpoint ||
+		s.config.StorageS3Bucket != newConfig.StorageS3Bucket ||
+		s.config.StorageS3AccessKey != newConfig.StorageS3AccessKey ||
+		s.config.StorageS3SecretKey != newConfig.StorageS3SecretKey ||
+		s.config.StorageS3Region != newConfig.StorageS3Region
+
+	// 更新配置引用
+	s.config = newConfig
+
+	// 如果切换到 S3 或 S3 配置变化，重新初始化 S3 客户端
+	if newConfig.StorageType == "s3" && (storageTypeChanged || s3ConfigChanged) {
+		s.initS3Client()
+		common.SysLog("Image storage config reloaded: switched to S3 or S3 config changed")
+	} else if storageTypeChanged && newConfig.StorageType == "local" {
+		// 切换到本地存储，清理 S3 客户端
+		s.s3Client = nil
+		common.SysLog("Image storage config reloaded: switched to local storage")
+	}
+}
+
 // StoreImageFromURL 从 URL 下载图片并存储
 func (s *ImageStorageService) StoreImageFromURL(imageURL string) (string, error) {
 	// 下载图片

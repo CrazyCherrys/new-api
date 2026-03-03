@@ -56,6 +56,12 @@ func (s *ImageGenerationService) Generate(ctx context.Context, task *model.Image
 	if task.Resolution != "" {
 		imageReq.Size = task.Resolution
 	}
+	if task.AspectRatio != "" {
+		imageReq.AspectRatio = task.AspectRatio
+	}
+	if task.ReferenceImage != "" {
+		imageReq.ReferenceImage = task.ReferenceImage
+	}
 
 	// 调用注入的图像生成函数
 	resp, err := GenerateImageFunc(ctx, task.UserID, imageReq)

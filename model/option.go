@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"gorm.io/gorm"
 )
 
 type Option struct {
@@ -183,14 +184,46 @@ func UpdateOption(key string, value string) error {
 		Key: key,
 	}
 	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
+	if err := DB.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
 	option.Value = value
 	// Save is a combination function.
 	// If save value does not contain primary key, it will execute Create,
 	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
+	if err := DB.Save(&option).Error; err != nil {
+		return err
+	}
 	// Update OptionMap
 	return updateOptionMap(key, value)
+}
+
+// UpdateOptionsAtomic 原子性批量更新配置选项（使用事务）
+func UpdateOptionsAtomic(updates map[string]string) error {
+	// 使用事务确保原子性
+	return DB.Transaction(func(tx *gorm.DB) error {
+		// 批量更新数据库
+		for key, value := range updates {
+			option := Option{Key: key}
+			if err := tx.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+				return err
+			}
+			option.Value = value
+			if err := tx.Save(&option).Error; err != nil {
+				return err
+			}
+		}
+
+		// 事务成功后更新内存映射
+		for key, value := range updates {
+			if err := updateOptionMap(key, value); err != nil {
+				// 内存更新失败不回滚数据库，但记录错误
+				common.SysError("failed to update option map for key " + key + ": " + err.Error())
+			}
+		}
+
+		return nil
+	})
 }
 
 func updateOptionMap(key string, value string) (err error) {

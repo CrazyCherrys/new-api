@@ -20,6 +20,7 @@ type ImageGenerationSetting struct {
 	ImageRetryIntervalSeconds int `json:"image_retry_interval_seconds"` // 重试间隔（秒）
 	ImageWorkerCount         int `json:"image_worker_count"`          // Worker 数量
 	ImageStaleAfterMinutes   int `json:"image_stale_after_minutes"`   // 僵尸任务判定时间（分钟）
+	RpmLimit                 int `json:"rpm_limit"`                   // 单模型请求频率限制（每分钟）
 
 	// 模型配置
 	EnabledModels    []string `json:"enabled_models"`     // 启用的模型列表
@@ -46,6 +47,7 @@ var defaultImageGenerationSetting = ImageGenerationSetting{
 	ImageRetryIntervalSeconds: 10,   // 重试间隔10秒
 	ImageWorkerCount:          2,    // 2个Worker
 	ImageStaleAfterMinutes:    10,   // 10分钟后判定为僵尸任务
+	RpmLimit:                  60,   // 每分钟60次请求
 
 	// 模型配置默认值
 	EnabledModels: []string{

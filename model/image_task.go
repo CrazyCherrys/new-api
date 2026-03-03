@@ -168,13 +168,19 @@ func GetImageTaskByID(id int64) (*ImageTask, error) {
 }
 
 // GetImageTasksByUserID 获取用户的任务列表（分页）
-func GetImageTasksByUserID(userID int, page, pageSize int, status string) ([]*ImageTask, int64, error) {
+func GetImageTasksByUserID(userID int, page, pageSize int, status, modelID, startTime, endTime string) ([]*ImageTask, int64, error) {
 	var tasks []*ImageTask
 	var total int64
 
 	query := DB.Where("user_id = ?", userID)
 	if status != "" {
 		query = query.Where("status = ?", status)
+	}
+	if modelID != "" {
+		query = query.Where("model_id = ?", modelID)
+	}
+	if startTime != "" && endTime != "" {
+		query = query.Where("created_at BETWEEN ? AND ?", startTime, endTime)
 	}
 
 	// 统计总数

@@ -22,6 +22,7 @@ import { TextArea, Button, Collapsible, Tag, Toast } from '@douyinfe/semi-ui';
 import { IconChevronDown, IconChevronUp } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import { createImageTask } from '../../helpers/imageApi';
+import { API } from '../../helpers/api';
 
 const PROMPT_MAX_LENGTH = 2000;
 const NEGATIVE_PROMPT_MAX_LENGTH = 2000;
@@ -37,6 +38,40 @@ const PromptEditor = ({ state, dispatch, onTaskCreated }) => {
   const { t } = useTranslation();
   const [negativeExpanded, setNegativeExpanded] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+
+  const optimizePrompt = async () => {
+    if (!state.prompt.trim()) {
+      Toast.warning(t('请输入提示词'));
+      return;
+    }
+
+    setIsOptimizing(true);
+    try {
+      const response = await API.post('/api/v1/chat/completions', {
+        model: 'gpt-4',
+        messages: [
+          {
+            role: 'system',
+            content: '你是一个图像生成 prompt 优化专家，帮助用户优化图像生成提示词，使其更加详细、准确、富有表现力。请直接返回优化后的 prompt，不要添加任何解释。'
+          },
+          { role: 'user', content: state.prompt }
+        ]
+      });
+
+      if (response.data && response.data.choices && response.data.choices[0]) {
+        const optimizedPrompt = response.data.choices[0].message.content;
+        dispatch({ type: 'SET_PROMPT', payload: optimizedPrompt });
+        Toast.success(t('提示词优化成功'));
+      } else {
+        Toast.error(t('优化失败，请重试'));
+      }
+    } catch (error) {
+      Toast.error(error.message || t('优化失败，请重试'));
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
 
   const handleGenerate = async () => {
     if (!state.prompt.trim()) {
@@ -91,11 +126,11 @@ const PromptEditor = ({ state, dispatch, onTaskCreated }) => {
   };
 
   return (
-    <div className='space-y-4'>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div>
-        <div className='flex justify-between items-center mb-2'>
-          <label className='text-sm font-medium'>{t('提示词')}</label>
-          <span className='text-xs text-gray-500'>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <label style={{ fontSize: '14px', fontWeight: 500 }}>{t('提示词')}</label>
+          <span style={{ fontSize: '12px', color: '#8c8c8c' }}>
             {state.prompt.length} / {PROMPT_MAX_LENGTH}
           </span>
         </div>
@@ -107,19 +142,30 @@ const PromptEditor = ({ state, dispatch, onTaskCreated }) => {
           maxLength={PROMPT_MAX_LENGTH}
           showClear
         />
+        <div style={{ marginTop: '8px' }}>
+          <Button
+            theme='light'
+            type='tertiary'
+            onClick={optimizePrompt}
+            loading={isOptimizing}
+            disabled={isOptimizing || !state.prompt.trim()}
+          >
+            {isOptimizing ? t('优化中...') : t('优化提示词')}
+          </Button>
+        </div>
       </div>
 
       <div>
         <div
-          className='flex items-center justify-between cursor-pointer mb-2'
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', marginBottom: '8px' }}
           onClick={() => setNegativeExpanded(!negativeExpanded)}
         >
-          <label className='text-sm font-medium'>{t('负向提示词')}</label>
+          <label style={{ fontSize: '14px', fontWeight: 500 }}>{t('负向提示词')}</label>
           {negativeExpanded ? <IconChevronUp /> : <IconChevronDown />}
         </div>
         <Collapsible isOpen={negativeExpanded}>
-          <div className='flex justify-end mb-2'>
-            <span className='text-xs text-gray-500'>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+            <span style={{ fontSize: '12px', color: '#8c8c8c' }}>
               {state.negativePrompt.length} / {NEGATIVE_PROMPT_MAX_LENGTH}
             </span>
           </div>
@@ -135,14 +181,14 @@ const PromptEditor = ({ state, dispatch, onTaskCreated }) => {
       </div>
 
       <div>
-        <label className='text-sm font-medium mb-2 block'>{t('快速模板')}</label>
-        <div className='flex flex-wrap gap-2'>
+        <label style={{ fontSize: '14px', fontWeight: 500, marginBottom: '8px', display: 'block' }}>{t('快速模板')}</label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
           {QUICK_TEMPLATES.map((template, index) => (
             <Tag
               key={index}
               color='blue'
               onClick={() => applyTemplate(template)}
-              className='cursor-pointer hover:opacity-80'
+              style={{ cursor: 'pointer' }}
             >
               {t(template.label)}
             </Tag>
@@ -150,9 +196,9 @@ const PromptEditor = ({ state, dispatch, onTaskCreated }) => {
         </div>
       </div>
 
-      <div className='flex items-center justify-between pt-4 border-t'>
-        <div className='text-sm text-gray-600'>
-          {t('预估成本')}: <span className='font-semibold'>${estimateCost()}</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '16px', borderTop: '1px solid #e8e8e8' }}>
+        <div style={{ fontSize: '14px', color: '#666' }}>
+          {t('预估成本')}: <span style={{ fontWeight: 600 }}>${estimateCost()}</span>
         </div>
         <Button
           theme='solid'
