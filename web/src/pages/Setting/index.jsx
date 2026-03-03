@@ -46,6 +46,7 @@ import DashboardSetting from '../../components/settings/DashboardSetting';
 import RatioSetting from '../../components/settings/RatioSetting';
 import ChatsSetting from '../../components/settings/ChatsSetting';
 import DrawingSetting from '../../components/settings/DrawingSetting';
+import ImageGenerationSetting from '../../components/settings/ImageGenerationSetting';
 import PaymentSetting from '../../components/settings/PaymentSetting';
 import ModelDeploymentSetting from '../../components/settings/ModelDeploymentSetting';
 import PerformanceSetting from '../../components/settings/PerformanceSetting';
@@ -97,6 +98,16 @@ const Setting = () => {
       ),
       content: <DrawingSetting />,
       itemKey: 'drawing',
+    });
+    panes.push({
+      tab: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <Palette size={18} />
+          {t('AI 图像生成设置')}
+        </span>
+      ),
+      content: <ImageGenerationSetting />,
+      itemKey: 'image-generation',
     });
     panes.push({
       tab: (
