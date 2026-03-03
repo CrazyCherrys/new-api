@@ -19,12 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Card } from '@douyinfe/semi-ui';
-import AdminSettings from '../../pages/DreamStudio/AdminSettings';
+import SettingsImageGeneration from '../../pages/Setting/ImageGeneration/SettingsImageGeneration';
 
 const ImageGenerationSetting = () => {
   return (
     <Card style={{ marginTop: '10px' }}>
-      <AdminSettings />
+      <SettingsImageGeneration />
     </Card>
   );
 };
