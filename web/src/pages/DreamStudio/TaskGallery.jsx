@@ -49,9 +49,15 @@ const TaskGallery = () => {
     try {
       const response = await getImageTask(taskId);
 
-      if (response.success && response.data) {
-        const taskData = response.data;
-        updateTaskInList(taskId, taskData);
+      if (response.data?.success && response.data.data) {
+        const taskData = response.data.data;
+        // 标准化字段映射
+        const normalizedTask = {
+          ...taskData,
+          image_url: taskData.image_urls?.[0],
+          model: taskData.model_id
+        };
+        updateTaskInList(taskId, normalizedTask);
 
         if (taskData.status === 'pending' || taskData.status === 'running') {
           const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
@@ -102,16 +108,22 @@ const TaskGallery = () => {
         params.model = modelFilter;
       }
 
-      if (dateRange && dateRange.length === 2) {
+      if (dateRange && dateRange.length === 2 && dateRange[0] && dateRange[1]) {
         params.start_time = dateRange[0].toISOString();
         params.end_time = dateRange[1].toISOString();
       }
 
       const response = await listImageTasks(params);
-      if (response.success) {
-        const fetchedTasks = response.data?.tasks || [];
+      if (response.data?.success) {
+        const rawTasks = response.data.data?.tasks || [];
+        // 标准化字段映射：后端返回 image_urls/model_id，前端需要 image_url/model
+        const fetchedTasks = rawTasks.map(task => ({
+          ...task,
+          image_url: task.image_urls?.[0], // 取第一张图片
+          model: task.model_id // 统一字段名
+        }));
         setTasks(fetchedTasks);
-        setTotal(response.data?.total || 0);
+        setTotal(response.data.data?.total || 0);
 
         fetchedTasks.forEach(task => {
           if (task.status === 'pending' || task.status === 'running') {
@@ -146,11 +158,11 @@ const TaskGallery = () => {
       stopPollingForTask(taskId);
 
       const response = await deleteImageTask(taskId);
-      if (response.success) {
+      if (response.data?.success) {
         Toast.success(t('删除成功'));
         fetchTasks();
       } else {
-        Toast.error(response.message || t('删除失败'));
+        Toast.error(response.data?.message || t('删除失败'));
       }
     } catch (error) {
       Toast.error(t('删除失败'));
@@ -164,16 +176,16 @@ const TaskGallery = () => {
         ...task.params
       };
       const response = await createImageTask(payload);
-      if (response.success) {
+      if (response.data?.success) {
         Toast.success(t('已重新提交生成任务'));
 
-        if (response.data?.id) {
-          startPollingForTask(response.data.id);
+        if (response.data.data?.id) {
+          startPollingForTask(response.data.data.id);
         }
 
         fetchTasks();
       } else {
-        Toast.error(response.message || t('提交失败'));
+        Toast.error(response.data?.message || t('提交失败'));
       }
     } catch (error) {
       Toast.error(t('提交失败'));
