@@ -219,6 +219,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/playground',
       },
       {
+        text: t('AI 绘画'),
+        itemKey: 'dreamstudio',
+        to: '/dreamstudio',
+      },
+      {
         text: t('聊天'),
         itemKey: 'chat',
         items: chatItems,
