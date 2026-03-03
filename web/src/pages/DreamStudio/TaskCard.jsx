@@ -20,7 +20,6 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useState } from 'react';
 import { Card, Tag, Button, Typography, Space, Image, Modal } from '@douyinfe/semi-ui';
 import { IconDelete, IconRefresh, IconEyeOpened } from '@douyinfe/semi-icons';
-import PropTypes from 'prop-types';
 import { useTranslation } from 'react-i18next';
 
 const { Text, Paragraph } = Typography;
@@ -149,21 +148,6 @@ const TaskCard = ({ task, onDelete, onRegenerate, onViewDetail }) => {
       </Modal>
     </>
   );
-};
-
-TaskCard.propTypes = {
-  task: PropTypes.shape({
-    id: PropTypes.string.isRequired,
-    status: PropTypes.oneOf(['pending', 'running', 'succeeded', 'failed']).isRequired,
-    prompt: PropTypes.string.isRequired,
-    image_url: PropTypes.string,
-    error_message: PropTypes.string,
-    created_at: PropTypes.string.isRequired,
-    params: PropTypes.object
-  }).isRequired,
-  onDelete: PropTypes.func,
-  onRegenerate: PropTypes.func,
-  onViewDetail: PropTypes.func
 };
 
 export default TaskCard;
