@@ -34,6 +34,7 @@ import {
   CreditCard,
   Server,
   Activity,
+  Cpu,
 } from 'lucide-react';
 
 import SystemSetting from '../../components/settings/SystemSetting';
@@ -46,6 +47,7 @@ import DashboardSetting from '../../components/settings/DashboardSetting';
 import RatioSetting from '../../components/settings/RatioSetting';
 import ChatsSetting from '../../components/settings/ChatsSetting';
 import DrawingSetting from '../../components/settings/DrawingSetting';
+import WorkerSetting from '../../components/settings/WorkerSetting';
 import PaymentSetting from '../../components/settings/PaymentSetting';
 import ModelDeploymentSetting from '../../components/settings/ModelDeploymentSetting';
 import PerformanceSetting from '../../components/settings/PerformanceSetting';
@@ -97,6 +99,16 @@ const Setting = () => {
       ),
       content: <DrawingSetting />,
       itemKey: 'drawing',
+    });
+    panes.push({
+      tab: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <Cpu size={18} />
+          {t('Worker 设置')}
+        </span>
+      ),
+      content: <WorkerSetting />,
+      itemKey: 'worker',
     });
     panes.push({
       tab: (
