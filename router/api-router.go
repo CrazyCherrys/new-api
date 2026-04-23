@@ -350,6 +350,18 @@ func SetApiRouter(router *gin.Engine) {
 			modelsRoute.DELETE("/:id", controller.DeleteModelMeta)
 		}
 
+		// Model Mapping (模型映射管理)
+		modelMappingRoute := apiRouter.Group("/model-mapping")
+		modelMappingRoute.Use(middleware.AdminAuth())
+		{
+			modelMappingRoute.GET("/", controller.GetAllModelMappings)
+			modelMappingRoute.GET("/search", controller.SearchModelMappings)
+			modelMappingRoute.GET("/:id", controller.GetModelMapping)
+			modelMappingRoute.POST("/", controller.CreateModelMapping)
+			modelMappingRoute.PUT("/", controller.UpdateModelMapping)
+			modelMappingRoute.DELETE("/:id", controller.DeleteModelMapping)
+		}
+
 		// Deployments (model deployment management)
 		deploymentsRoute := apiRouter.Group("/deployments")
 		deploymentsRoute.Use(middleware.AdminAuth())

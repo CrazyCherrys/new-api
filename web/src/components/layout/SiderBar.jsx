@@ -49,6 +49,7 @@ const routerMap = {
   deployment: '/console/deployment',
   playground: '/console/playground',
   personal: '/console/personal',
+  'model-mapping': '/console/model-mapping',
 };
 
 const SiderBar = ({ onNavigate = () => {} }) => {
@@ -151,6 +152,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('渠道管理'),
         itemKey: 'channel',
         to: '/channel',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('模型映射'),
+        itemKey: 'model-mapping',
+        to: '/console/model-mapping',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {
