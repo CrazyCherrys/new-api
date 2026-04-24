@@ -20,34 +20,35 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Card,
   Select,
-  Input,
   Button,
   Upload,
-  Space,
   Spin,
   Typography,
-  Toast,
   Image,
-  Row,
-  Col,
+  InputNumber,
+  TextArea,
 } from '@douyinfe/semi-ui';
-import { IconUpload, IconDelete } from '@douyinfe/semi-icons';
+import {
+  IconPlus,
+  IconDelete,
+  IconClock,
+  IconImage,
+  IconBolt,
+} from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 const ImageGeneration = () => {
   const { t } = useTranslation();
 
-  // 状态管理
   const [loading, setLoading] = useState(false);
   const [modelSeries, setModelSeries] = useState([]);
   const [models, setModels] = useState([]);
   const [filteredModels, setFilteredModels] = useState([]);
 
-  const [selectedSeries, setSelectedSeries] = useState('');
+  const [selectedSeries, setSelectedSeries] = useState('all');
   const [selectedModel, setSelectedModel] = useState('');
   const [prompt, setPrompt] = useState('');
   const [referenceImages, setReferenceImages] = useState([]);
@@ -57,11 +58,14 @@ const ImageGeneration = () => {
   const [generatedImages, setGeneratedImages] = useState([]);
   const [generating, setGenerating] = useState(false);
 
-  // 可用的宽高比和分辨率选项
   const [availableAspectRatios, setAvailableAspectRatios] = useState([]);
   const [availableResolutions, setAvailableResolutions] = useState([]);
 
-  // 加载绘画模型
+  const [activeTab, setActiveTab] = useState('history');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterModel, setFilterModel] = useState('all');
+  const [filterTime, setFilterTime] = useState('all');
+
   useEffect(() => {
     loadDrawingModels();
   }, []);
@@ -69,13 +73,11 @@ const ImageGeneration = () => {
   const loadDrawingModels = async () => {
     setLoading(true);
     try {
-      // 获取模型类型为2（绘画）的模型
       const res = await API.get('/api/model-mapping/search?model_type=2');
       if (res.data.success) {
         const drawingModels = res.data.data.items || [];
         setModels(drawingModels);
 
-        // 提取唯一的模型系列
         const seriesSet = new Set();
         drawingModels.forEach((model) => {
           if (model.model_series) {
@@ -93,28 +95,27 @@ const ImageGeneration = () => {
     }
   };
 
-  // 当选择模型系列时，过滤对应的模型
   useEffect(() => {
-    if (selectedSeries) {
+    if (selectedSeries === 'all') {
+      const filtered = models.filter((model) => model.status === 1);
+      setFilteredModels(filtered);
+    } else if (selectedSeries) {
       const filtered = models.filter(
-        (model) => model.model_series === selectedSeries && model.status === 1
+        (model) => model.model_series === selectedSeries && model.status === 1,
       );
       setFilteredModels(filtered);
-      setSelectedModel('');
-      setAvailableAspectRatios([]);
-      setAvailableResolutions([]);
     } else {
       setFilteredModels([]);
-      setSelectedModel('');
     }
+    setSelectedModel('');
+    setAvailableAspectRatios([]);
+    setAvailableResolutions([]);
   }, [selectedSeries, models]);
 
-  // 当选择具体模型时，加载该模型的宽高比和分辨率
   useEffect(() => {
     if (selectedModel) {
       const model = models.find((m) => m.request_model === selectedModel);
       if (model) {
-        // 解析宽高比
         if (model.aspect_ratios) {
           try {
             const ratios = JSON.parse(model.aspect_ratios);
@@ -126,8 +127,6 @@ const ImageGeneration = () => {
             setAvailableAspectRatios([]);
           }
         }
-
-        // 解析分辨率
         if (model.resolutions) {
           try {
             const resolutions = JSON.parse(model.resolutions);
@@ -148,17 +147,14 @@ const ImageGeneration = () => {
     }
   }, [selectedModel, models]);
 
-  // 处理图片上传
   const handleImageUpload = ({ fileList }) => {
     setReferenceImages(fileList);
   };
 
-  // 处理图片删除
   const handleImageRemove = (file) => {
     setReferenceImages(referenceImages.filter((img) => img.uid !== file.uid));
   };
 
-  // 生成图片
   const handleGenerate = async () => {
     if (!selectedModel) {
       showError(t('请选择模型'));
@@ -171,7 +167,6 @@ const ImageGeneration = () => {
 
     setGenerating(true);
     try {
-      // 构建请求参数
       const params = {
         model: selectedModel,
         prompt: prompt,
@@ -185,7 +180,6 @@ const ImageGeneration = () => {
         params.size = resolution;
       }
 
-      // 如果有参考图，转换为base64
       if (referenceImages.length > 0) {
         const imagePromises = referenceImages.map((file) => {
           return new Promise((resolve, reject) => {
@@ -199,7 +193,6 @@ const ImageGeneration = () => {
         params.reference_images = base64Images;
       }
 
-      // 调用API生成图片
       const res = await API.post('/v1/images/generations', params);
       if (res.data.data && res.data.data.length > 0) {
         setGeneratedImages(res.data.data);
@@ -214,183 +207,550 @@ const ImageGeneration = () => {
     }
   };
 
-  return (
-    <div className='mt-[60px] px-2'>
-      <Card bordered>
+  const styles = {
+    container: {
+      display: 'flex',
+      height: 'calc(100vh - 60px)',
+      marginTop: 60,
+      overflow: 'hidden',
+    },
+    leftPanel: {
+      width: 320,
+      minWidth: 320,
+      display: 'flex',
+      flexDirection: 'column',
+      borderRight: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+    },
+    leftContent: {
+      flex: 1,
+      overflowY: 'auto',
+      padding: '20px 16px 0',
+    },
+    leftBottom: {
+      padding: '16px',
+      borderTop: '1px solid var(--semi-color-border)',
+    },
+    rightPanel: {
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      background: 'var(--semi-color-bg-1)',
+      overflow: 'hidden',
+    },
+    rightTopBar: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '12px 16px',
+      borderBottom: '1px solid var(--semi-color-border)',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    rightContent: {
+      flex: 1,
+      overflow: 'auto',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    label: {
+      display: 'block',
+      fontSize: 13,
+      fontWeight: 500,
+      color: 'var(--semi-color-text-0)',
+      marginBottom: 6,
+    },
+    fieldGroup: {
+      marginBottom: 16,
+    },
+    tabBtn: (active) => ({
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      padding: '6px 14px',
+      borderRadius: 20,
+      border: 'none',
+      cursor: 'pointer',
+      fontSize: 13,
+      fontWeight: 500,
+      transition: 'all 0.2s',
+      background: active
+        ? 'var(--semi-color-primary-light-default)'
+        : 'transparent',
+      color: active
+        ? 'var(--semi-color-primary)'
+        : 'var(--semi-color-text-2)',
+    }),
+    tabDot: {
+      width: 8,
+      height: 8,
+      borderRadius: '50%',
+      background: '#ff6b35',
+      display: 'inline-block',
+    },
+    generateBtn: {
+      width: '100%',
+      height: 44,
+      borderRadius: 10,
+      border: 'none',
+      cursor: 'pointer',
+      fontSize: 15,
+      fontWeight: 600,
+      color: '#fff',
+      background: 'linear-gradient(135deg, #e8593c 0%, #d4a843 50%, #5a9e6f 100%)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      transition: 'opacity 0.2s',
+      marginTop: 12,
+    },
+    addImageBtn: {
+      width: 48,
+      height: 48,
+      borderRadius: 8,
+      border: '1px dashed var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      cursor: 'pointer',
+      color: 'var(--semi-color-text-2)',
+      transition: 'border-color 0.2s',
+    },
+    textareaWrapper: {
+      position: 'relative',
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
+      padding: 0,
+    },
+    charCount: {
+      fontSize: 12,
+      color: 'var(--semi-color-text-3)',
+      padding: '4px 12px 8px',
+      textAlign: 'left',
+    },
+    emptyState: {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 12,
+    },
+    emptyIcon: {
+      width: 64,
+      height: 64,
+      borderRadius: '50%',
+      background: 'rgba(232, 89, 60, 0.12)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    paramRow: {
+      display: 'flex',
+      gap: 12,
+      alignItems: 'flex-end',
+    },
+    paramItem: {
+      flex: 1,
+    },
+    paramLabel: {
+      fontSize: 12,
+      color: 'var(--semi-color-text-2)',
+      marginBottom: 4,
+      display: 'block',
+    },
+    referenceImageThumb: {
+      width: 48,
+      height: 48,
+      borderRadius: 8,
+      objectFit: 'cover',
+      border: '1px solid var(--semi-color-border)',
+    },
+    referenceImageContainer: {
+      position: 'relative',
+      display: 'inline-block',
+    },
+    removeImageBtn: {
+      position: 'absolute',
+      top: -6,
+      right: -6,
+      width: 18,
+      height: 18,
+      borderRadius: '50%',
+      background: 'var(--semi-color-danger)',
+      border: 'none',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: '#fff',
+      fontSize: 10,
+      padding: 0,
+    },
+    filterGroup: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: 'wrap',
+    },
+    filterLabel: {
+      fontSize: 13,
+      color: 'var(--semi-color-text-2)',
+    },
+    imagesGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+      gap: 16,
+      padding: 16,
+      width: '100%',
+      alignContent: 'start',
+    },
+  };
+
+  const renderLeftPanel = () => (
+    <div style={styles.leftPanel}>
+      <div style={styles.leftContent}>
         <Spin spinning={loading}>
-          <Space vertical spacing='large' style={{ width: '100%' }}>
-            {/* 标题 */}
-            <Title heading={3}>{t('AI绘画')}</Title>
-            {/* 模型系列选择 */}
-            <div>
-              <Text strong>{t('模型系列')}</Text>
-              <Select
-                placeholder={t('请选择模型系列')}
-                style={{ width: '100%', marginTop: 8 }}
-                value={selectedSeries}
-                onChange={setSelectedSeries}
-                disabled={modelSeries.length === 0}
-              >
-                {modelSeries.map((series) => (
-                  <Select.Option key={series} value={series}>
-                    {series}
-                  </Select.Option>
-                ))}
-              </Select>
-            </div>
+          <div style={styles.fieldGroup}>
+            <span style={styles.label}>{t('模型系列')}</span>
+            <Select
+              style={{ width: '100%' }}
+              value={selectedSeries}
+              onChange={setSelectedSeries}
+              disabled={modelSeries.length === 0}
+            >
+              <Select.Option value='all'>{t('全部系列')}</Select.Option>
+              {modelSeries.map((series) => (
+                <Select.Option key={series} value={series}>
+                  {series}
+                </Select.Option>
+              ))}
+            </Select>
+          </div>
 
-            {/* 模型选择 */}
-            <div>
-              <Text strong>{t('模型')}</Text>
-              <Select
-                placeholder={t('请选择模型')}
-                style={{ width: '100%', marginTop: 8 }}
-                value={selectedModel}
-                onChange={setSelectedModel}
-                disabled={!selectedSeries || filteredModels.length === 0}
-                filter
-              >
-                {filteredModels.map((model) => (
-                  <Select.Option
-                    key={model.request_model}
-                    value={model.request_model}
-                  >
-                    {model.display_name || model.request_model}
-                  </Select.Option>
-                ))}
-              </Select>
-            </div>
+          <div style={styles.fieldGroup}>
+            <span style={styles.label}>{t('模型')}</span>
+            <Select
+              style={{ width: '100%' }}
+              value={selectedModel}
+              onChange={setSelectedModel}
+              disabled={filteredModels.length === 0}
+              filter
+              placeholder={t('请选择模型')}
+            >
+              {filteredModels.map((model) => (
+                <Select.Option
+                  key={model.request_model}
+                  value={model.request_model}
+                >
+                  {model.display_name || model.request_model}
+                </Select.Option>
+              ))}
+            </Select>
+          </div>
 
-            {/* 提示词输入 */}
-            <div>
-              <Text strong>{t('提示词')}</Text>
-              <Input
-                placeholder={t('请输入提示词描述您想要生成的图片')}
-                style={{ marginTop: 8 }}
+          <div style={styles.fieldGroup}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 6,
+              }}
+            >
+              <span style={styles.label}>{t('描述你的创意')}</span>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: 'var(--semi-color-primary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <IconBolt size='small' />
+                {t('AI优化')}
+              </span>
+            </div>
+            <div style={styles.textareaWrapper}>
+              <TextArea
+                placeholder={t('描述你的创意...')}
                 value={prompt}
                 onChange={setPrompt}
-                maxLength={2000}
+                maxCount={5000}
                 showClear
+                autosize={{ minRows: 6, maxRows: 12 }}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  resize: 'none',
+                }}
+              />
+              <div style={styles.charCount}>
+                {prompt.length}/5000
+              </div>
+            </div>
+          </div>
+
+          <div style={styles.fieldGroup}>
+            <span style={styles.label}>{t('参考图像')}</span>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {referenceImages.map((file, idx) => (
+                <div key={file.uid || idx} style={styles.referenceImageContainer}>
+                  <img
+                    src={
+                      file.url ||
+                      (file.fileInstance &&
+                        URL.createObjectURL(file.fileInstance))
+                    }
+                    alt=''
+                    style={styles.referenceImageThumb}
+                  />
+                  <button
+                    style={styles.removeImageBtn}
+                    onClick={() => handleImageRemove(file)}
+                  >
+                    <IconDelete size='extra-small' />
+                  </button>
+                </div>
+              ))}
+              <Upload
+                action=''
+                accept='image/*'
+                multiple
+                fileList={referenceImages}
+                onChange={handleImageUpload}
+                showUploadList={false}
+                beforeUpload={() => false}
+              >
+                <div style={styles.addImageBtn}>
+                  <IconPlus size='large' />
+                </div>
+              </Upload>
+            </div>
+          </div>
+        </Spin>
+      </div>
+
+      <div style={styles.leftBottom}>
+        <div style={styles.paramRow}>
+          <div style={styles.paramItem}>
+            <span style={styles.paramLabel}>{t('生成比例')}</span>
+            <Select
+              style={{ width: '100%' }}
+              value={aspectRatio || 'auto'}
+              onChange={(val) => setAspectRatio(val === 'auto' ? '' : val)}
+              size='default'
+            >
+              <Select.Option value='auto'>Auto</Select.Option>
+              {availableAspectRatios.map((ratio) => (
+                <Select.Option key={ratio} value={ratio}>
+                  {ratio}
+                </Select.Option>
+              ))}
+            </Select>
+          </div>
+          <div style={styles.paramItem}>
+            <span style={styles.paramLabel}>{t('分辨率')}</span>
+            <Select
+              style={{ width: '100%' }}
+              value={resolution || 'auto'}
+              onChange={(val) => setResolution(val === 'auto' ? '' : val)}
+              size='default'
+            >
+              <Select.Option value='auto'>Auto</Select.Option>
+              {availableResolutions.map((res) => (
+                <Select.Option key={res} value={res}>
+                  {res}
+                </Select.Option>
+              ))}
+            </Select>
+          </div>
+          <div style={styles.paramItem}>
+            <span style={styles.paramLabel}>{t('生成数目')}</span>
+            <InputNumber
+              min={1}
+              max={4}
+              value={quantity}
+              onChange={(val) => setQuantity(val || 1)}
+              style={{ width: '100%' }}
+            />
+          </div>
+        </div>
+
+        <button
+          style={{
+            ...styles.generateBtn,
+            opacity: generating || !selectedModel || !prompt.trim() ? 0.6 : 1,
+            pointerEvents:
+              generating || !selectedModel || !prompt.trim()
+                ? 'none'
+                : 'auto',
+          }}
+          onClick={handleGenerate}
+          disabled={generating || !selectedModel || !prompt.trim()}
+        >
+          {generating ? (
+            <Spin size='small' />
+          ) : (
+            <>
+              <IconImage size='small' />
+              {t('生成')}
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderRightPanel = () => (
+    <div style={styles.rightPanel}>
+      <div style={styles.rightTopBar}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button
+            style={styles.tabBtn(activeTab === 'history')}
+            onClick={() => setActiveTab('history')}
+          >
+            <span style={styles.tabDot} />
+            {t('生成记录')}
+          </button>
+          <button
+            style={styles.tabBtn(activeTab === 'creative')}
+            onClick={() => setActiveTab('creative')}
+          >
+            <IconImage size='small' />
+            {t('创意')}
+          </button>
+        </div>
+
+        <div style={styles.filterGroup}>
+          <span style={styles.filterLabel}>{t('状态')}</span>
+          <Select
+            size='small'
+            value={filterStatus}
+            onChange={setFilterStatus}
+            style={{ width: 80 }}
+          >
+            <Select.Option value='all'>{t('全部')}</Select.Option>
+            <Select.Option value='success'>{t('成功')}</Select.Option>
+            <Select.Option value='failed'>{t('失败')}</Select.Option>
+          </Select>
+
+          <span style={styles.filterLabel}>{t('模型')}</span>
+          <Select
+            size='small'
+            value={filterModel}
+            onChange={setFilterModel}
+            style={{ width: 80 }}
+          >
+            <Select.Option value='all'>{t('全部')}</Select.Option>
+          </Select>
+
+          <span style={styles.filterLabel}>{t('时间')}</span>
+          <Select
+            size='small'
+            value={filterTime}
+            onChange={setFilterTime}
+            style={{ width: 80 }}
+          >
+            <Select.Option value='all'>{t('全部')}</Select.Option>
+          </Select>
+
+          <Button
+            size='small'
+            type='danger'
+            theme='solid'
+            style={{ fontSize: 12 }}
+          >
+            {t('批量勾选')}
+          </Button>
+          <Button
+            size='small'
+            type='warning'
+            theme='borderless'
+            style={{ fontSize: 12 }}
+          >
+            {t('批量多选')}
+          </Button>
+          <Button size='small' theme='borderless' style={{ fontSize: 12 }}>
+            {t('一键清除')}
+          </Button>
+          <Button
+            size='small'
+            type='danger'
+            theme='borderless'
+            style={{ fontSize: 12 }}
+          >
+            {t('删除所选')}
+          </Button>
+          <Text type='tertiary' size='small'>
+            {t('已选 0 张')}
+          </Text>
+        </div>
+      </div>
+
+      <div
+        style={{
+          ...styles.rightContent,
+          ...(generatedImages.length > 0
+            ? { alignItems: 'flex-start', justifyContent: 'flex-start' }
+            : {}),
+        }}
+      >
+        {generatedImages.length > 0 ? (
+          <div style={styles.imagesGrid}>
+            {generatedImages.map((img, index) => (
+              <div
+                key={index}
+                style={{
+                  borderRadius: 8,
+                  overflow: 'hidden',
+                  border: '1px solid var(--semi-color-border)',
+                }}
+              >
+                <Image
+                  src={img.url}
+                  alt={`Generated ${index + 1}`}
+                  width='100%'
+                  preview
+                  style={{ display: 'block' }}
+                />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={styles.emptyState}>
+            <div style={styles.emptyIcon}>
+              <IconClock
+                size='extra-large'
+                style={{ color: '#e8593c', fontSize: 28 }}
               />
             </div>
-
-            {/* 参考图上传 */}
-            <div>
-              <Text strong>{t('参考图')}</Text>
-              <Text type='tertiary' size='small' style={{ marginLeft: 8 }}>
-                ({t('可选')})
-              </Text>
-              <div style={{ marginTop: 8 }}>
-                <Upload
-                  action=''
-                  accept='image/*'
-                  multiple
-                  fileList={referenceImages}
-                  onChange={handleImageUpload}
-                  onRemove={handleImageRemove}
-                  listType='picture'
-                  beforeUpload={() => false}
-                >
-                  <Button icon={<IconUpload />} theme='light'>
-                    {t('上传参考图')}
-                  </Button>
-                </Upload>
-              </div>
-            </div>
-
-            {/* 宽高比和分辨率 */}
-            <Row gutter={16}>
-              <Col span={12}>
-                <div>
-                  <Text strong>{t('宽高比')}</Text>
-                  <Select
-                    placeholder={t('请选择宽高比')}
-                    style={{ width: '100%', marginTop: 8 }}
-                    value={aspectRatio}
-                    onChange={setAspectRatio}
-                    disabled={availableAspectRatios.length === 0}
-                  >
-                    {availableAspectRatios.map((ratio) => (
-                      <Select.Option key={ratio} value={ratio}>
-                        {ratio}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </div>
-              </Col>
-              <Col span={12}>
-                <div>
-                  <Text strong>{t('分辨率')}</Text>
-                  <Select
-                    placeholder={t('请选择分辨率')}
-                    style={{ width: '100%', marginTop: 8 }}
-                    value={resolution}
-                    onChange={setResolution}
-                    disabled={availableResolutions.length === 0}
-                  >
-                    {availableResolutions.map((res) => (
-                      <Select.Option key={res} value={res}>
-                        {res}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </div>
-              </Col>
-            </Row>
-
-            {/* 生成数量 */}
-            <div>
-              <Text strong>{t('生成数量')}</Text>
-              <Select
-                placeholder={t('请选择生成数量')}
-                style={{ width: '100%', marginTop: 8 }}
-                value={quantity}
-                onChange={setQuantity}
-              >
-                {[1, 2, 3, 4].map((num) => (
-                  <Select.Option key={num} value={num}>
-                    {num}
-                  </Select.Option>
-                ))}
-              </Select>
-            </div>
-
-            {/* 生成按钮 */}
-            <Button
-              theme='solid'
-              type='primary'
-              size='large'
-              block
-              onClick={handleGenerate}
-              loading={generating}
-              disabled={!selectedModel || !prompt.trim()}
+            <Text
+              strong
+              style={{ fontSize: 16, color: 'var(--semi-color-text-0)' }}
             >
-              {generating ? t('生成中...') : t('生成图片')}
-            </Button>
+              {t('暂无生成录')}
+            </Text>
+            <Text
+              type='tertiary'
+              style={{ fontSize: 13, textAlign: 'center', maxWidth: 280 }}
+            >
+              {t('完成一次生成后，这里会保留你的创作历史记录。')}
+            </Text>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
-            {/* 生成结果展示 */}
-            {generatedImages.length > 0 && (
-              <div style={{ marginTop: 24 }}>
-                <Text strong style={{ fontSize: 16 }}>
-                  {t('生成结果')}
-                </Text>
-                <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-                  {generatedImages.map((img, index) => (
-                    <Col key={index} span={12}>
-                      <Image
-                        src={img.url}
-                        alt={`Generated ${index + 1}`}
-                        width='100%'
-                        preview
-                      />
-                    </Col>
-                  ))}
-                </Row>
-              </div>
-            )}
-          </Space>
-        </Spin>
-      </Card>
+  return (
+    <div style={styles.container}>
+      {renderLeftPanel()}
+      {renderRightPanel()}
     </div>
   );
 };
