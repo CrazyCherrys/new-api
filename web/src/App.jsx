@@ -166,7 +166,7 @@ function App() {
           }
         />
         <Route
-          path='/console/image-generation'
+          path='/image-generation'
           element={
             <PrivateRoute>
               <ImageGeneration />

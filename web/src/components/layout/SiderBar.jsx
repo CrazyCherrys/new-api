@@ -48,7 +48,7 @@ const routerMap = {
   models: '/console/models',
   deployment: '/console/deployment',
   playground: '/console/playground',
-  'image-generation': '/console/image-generation',
+  'image-generation': '/image-generation',
   personal: '/console/personal',
   'model-mapping': '/console/model-mapping',
 };
