@@ -209,12 +209,6 @@ const EditModelMappingModal = ({
           optionList={modelTypeOptions}
           rules={[{ required: true, message: t('请选择模型类型') }]}
         />
-        <Form.TextArea
-          field='description'
-          label={t('描述')}
-          placeholder={t('模型描述信息')}
-          rows={3}
-        />
         <Form.Select
           field='request_endpoint'
           label={t('请求端点')}
