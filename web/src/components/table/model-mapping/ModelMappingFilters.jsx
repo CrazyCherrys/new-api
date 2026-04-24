@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Form, Select, Button, Space } from '@douyinfe/semi-ui';
+import { Input, Select, Button, Space } from '@douyinfe/semi-ui';
 import { IconSearch, IconPlus, IconRefresh } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 
@@ -44,8 +44,7 @@ const ModelMappingFilters = ({
 
   return (
     <Space>
-      <Form.Input
-        field='keyword'
+      <Input
         placeholder={t('搜索模型ID或名称')}
         value={searchKeyword}
         onChange={(value) => setSearchKeyword(value)}
@@ -53,7 +52,6 @@ const ModelMappingFilters = ({
         style={{ width: 200 }}
       />
       <Select
-        field='model_type'
         placeholder={t('模型类型')}
         value={searchModelType}
         onChange={(value) => setSearchModelType(value)}
