@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useState, useEffect, useCallback } from 'react';
-import { API, showError, showSuccess } from '../../../helpers';
+import { API, showError, showSuccess } from '../../helpers';
 
 export const useModelMappingData = () => {
   const [mappings, setMappings] = useState([]);
