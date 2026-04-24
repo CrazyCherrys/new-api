@@ -215,14 +215,12 @@ const ImageGeneration = () => {
   };
 
   return (
-    <div className='mt-[60px] px-4 pb-8'>
-      <Card
-        title={<Title heading={3}>{t('AI绘画')}</Title>}
-        bordered
-        style={{ maxWidth: 1200, margin: '0 auto' }}
-      >
+    <div className='mt-[60px] px-2'>
+      <Card bordered>
         <Spin spinning={loading}>
           <Space vertical spacing='large' style={{ width: '100%' }}>
+            {/* 标题 */}
+            <Title heading={3}>{t('AI绘画')}</Title>
             {/* 模型系列选择 */}
             <div>
               <Text strong>{t('模型系列')}</Text>
