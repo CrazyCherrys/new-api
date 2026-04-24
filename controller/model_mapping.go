@@ -77,14 +77,14 @@ func CreateModelMapping(c *gin.Context) {
 		return
 	}
 
-	if mm.ActualModel == "" {
-		common.ApiErrorMsg(c, "实际调用模型ID不能为空")
-		return
-	}
-
 	if mm.DisplayName == "" {
 		common.ApiErrorMsg(c, "模型显示名称不能为空")
 		return
+	}
+
+	// 如果 ActualModel 为空，使用 RequestModel 作为默认值
+	if mm.ActualModel == "" {
+		mm.ActualModel = mm.RequestModel
 	}
 
 	// 检查是否已存在
@@ -120,14 +120,14 @@ func UpdateModelMapping(c *gin.Context) {
 		return
 	}
 
-	if mm.ActualModel == "" {
-		common.ApiErrorMsg(c, "实际调用模型ID不能为空")
-		return
-	}
-
 	if mm.DisplayName == "" {
 		common.ApiErrorMsg(c, "模型显示名称不能为空")
 		return
+	}
+
+	// 如果 ActualModel 为空，使用 RequestModel 作为默认值
+	if mm.ActualModel == "" {
+		mm.ActualModel = mm.RequestModel
 	}
 
 	if err := mm.Update(); err != nil {
