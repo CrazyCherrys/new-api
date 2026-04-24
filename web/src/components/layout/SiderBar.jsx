@@ -155,7 +155,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {
-        text: t('模型映射'),
+        text: t('模型设置'),
         itemKey: 'model-mapping',
         to: '/console/model-mapping',
         className: isAdmin() ? '' : 'tableHiddle',

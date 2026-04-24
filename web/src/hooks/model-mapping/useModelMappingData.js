@@ -37,11 +37,10 @@ export const useModelMappingData = () => {
       try {
         let url = '';
         if (searchKeyword || searchModelType > 0) {
-          url = `/api/model-mapping/search?keyword=${searchKeyword}&model_type=${searchModelType}`;
+          url = `/api/model-mapping/search?keyword=${searchKeyword}&model_type=${searchModelType}&p=${startIdx}&page_size=${pageSize}`;
         } else {
-          url = '/api/model-mapping/';
+          url = `/api/model-mapping/?p=${startIdx}&page_size=${pageSize}`;
         }
-        url += `&p=${startIdx}&page_size=${pageSize}`;
 
         const res = await API.get(url);
         const { success, message, data } = res.data;

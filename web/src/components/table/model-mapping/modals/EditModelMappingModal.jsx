@@ -173,7 +173,7 @@ const EditModelMappingModal = ({
 
   return (
     <Modal
-      title={editingMapping ? t('编辑模型映射') : t('添加模型映射')}
+      title={editingMapping ? t('编辑模型设置') : t('添加模型设置')}
       visible={visible}
       onCancel={handleClose}
       footer={null}

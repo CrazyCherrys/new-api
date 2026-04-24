@@ -3565,6 +3565,9 @@
     "绘画": "Image",
     "音频": "Audio",
     "模型类型": "Model Type",
-    "搜索": "Search"
+    "搜索": "Search",
+    "模型设置": "Model Settings",
+    "添加模型设置": "Add Model Setting",
+    "编辑模型设置": "Edit Model Setting"
   }
 }
