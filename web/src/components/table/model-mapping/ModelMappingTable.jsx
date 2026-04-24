@@ -46,6 +46,46 @@ const ModelMappingTable = ({
 }) => {
   const { t } = useTranslation();
 
+  const formatModelSeries = (series) => {
+    if (!series) return '-';
+
+    const seriesMap = {
+      'openai': 'OpenAI',
+      'gemini': 'Gemini',
+      'claude': 'Claude',
+      'grok': 'Grok',
+      'deepseek': 'DeepSeek',
+      'qwen': 'Qwen',
+      'glm': 'GLM',
+      'hunyuan': 'Hunyuan',
+      'doubao': 'Doubao',
+      'spark': 'Spark',
+      'baichuan': 'Baichuan',
+      'minimax': 'Minimax',
+      'moonshot': 'Moonshot',
+      'yi': 'Yi',
+      'chatglm': 'ChatGLM',
+      'ernie': 'ERNIE',
+      'wenxin': 'Wenxin',
+      'tongyi': 'Tongyi',
+      'azure': 'Azure',
+      'aws': 'AWS',
+      'cohere': 'Cohere',
+      'anthropic': 'Anthropic',
+      'mistral': 'Mistral',
+      'llama': 'Llama',
+      'palm': 'PaLM',
+      'bard': 'Bard',
+      'midjourney': 'Midjourney',
+      'dalle': 'DALL-E',
+      'stable-diffusion': 'Stable Diffusion',
+      'flux': 'Flux',
+      'suno': 'Suno',
+    };
+
+    return seriesMap[series.toLowerCase()] || series.charAt(0).toUpperCase() + series.slice(1);
+  };
+
   const handleStatusToggle = async (record) => {
     try {
       const newStatus = record.status === 1 ? 0 : 1;
@@ -117,7 +157,7 @@ const ModelMappingTable = ({
     {
       title: t('模型系列'),
       dataIndex: 'model_series',
-      render: (text) => text || '-',
+      render: (text) => formatModelSeries(text),
     },
     {
       title: t('模型类型'),

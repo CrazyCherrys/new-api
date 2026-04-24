@@ -66,6 +66,46 @@ const ImageGeneration = () => {
   const [filterModel, setFilterModel] = useState('all');
   const [filterTime, setFilterTime] = useState('all');
 
+  const formatModelSeries = (series) => {
+    if (!series) return '';
+
+    const seriesMap = {
+      'openai': 'OpenAI',
+      'gemini': 'Gemini',
+      'claude': 'Claude',
+      'grok': 'Grok',
+      'deepseek': 'DeepSeek',
+      'qwen': 'Qwen',
+      'glm': 'GLM',
+      'hunyuan': 'Hunyuan',
+      'doubao': 'Doubao',
+      'spark': 'Spark',
+      'baichuan': 'Baichuan',
+      'minimax': 'Minimax',
+      'moonshot': 'Moonshot',
+      'yi': 'Yi',
+      'chatglm': 'ChatGLM',
+      'ernie': 'ERNIE',
+      'wenxin': 'Wenxin',
+      'tongyi': 'Tongyi',
+      'azure': 'Azure',
+      'aws': 'AWS',
+      'cohere': 'Cohere',
+      'anthropic': 'Anthropic',
+      'mistral': 'Mistral',
+      'llama': 'Llama',
+      'palm': 'PaLM',
+      'bard': 'Bard',
+      'midjourney': 'Midjourney',
+      'dalle': 'DALL-E',
+      'stable-diffusion': 'Stable Diffusion',
+      'flux': 'Flux',
+      'suno': 'Suno',
+    };
+
+    return seriesMap[series.toLowerCase()] || series.charAt(0).toUpperCase() + series.slice(1);
+  };
+
   useEffect(() => {
     loadDrawingModels();
   }, []);
@@ -424,7 +464,7 @@ const ImageGeneration = () => {
               <Select.Option value='all'>{t('全部系列')}</Select.Option>
               {modelSeries.map((series) => (
                 <Select.Option key={series} value={series}>
-                  {series}
+                  {formatModelSeries(series)}
                 </Select.Option>
               ))}
             </Select>
