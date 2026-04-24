@@ -50,6 +50,7 @@ const ImageGeneration = () => {
 
   const [selectedSeries, setSelectedSeries] = useState('all');
   const [selectedModel, setSelectedModel] = useState('');
+  const [selectedModelData, setSelectedModelData] = useState(null);
   const [prompt, setPrompt] = useState('');
   const [referenceImages, setReferenceImages] = useState([]);
   const [aspectRatio, setAspectRatio] = useState('');
@@ -156,30 +157,46 @@ const ImageGeneration = () => {
     if (selectedModel) {
       const model = models.find((m) => m.request_model === selectedModel);
       if (model) {
+        setSelectedModelData(model);
+
         if (model.aspect_ratios) {
           try {
             const ratios = JSON.parse(model.aspect_ratios);
             setAvailableAspectRatios(ratios);
             if (ratios.length > 0) {
               setAspectRatio(ratios[0]);
+            } else {
+              setAspectRatio('');
             }
           } catch (e) {
             setAvailableAspectRatios([]);
+            setAspectRatio('');
           }
+        } else {
+          setAvailableAspectRatios([]);
+          setAspectRatio('');
         }
+
         if (model.resolutions) {
           try {
             const resolutions = JSON.parse(model.resolutions);
             setAvailableResolutions(resolutions);
             if (resolutions.length > 0) {
               setResolution(resolutions[0]);
+            } else {
+              setResolution('');
             }
           } catch (e) {
             setAvailableResolutions([]);
+            setResolution('');
           }
+        } else {
+          setAvailableResolutions([]);
+          setResolution('');
         }
       }
     } else {
+      setSelectedModelData(null);
       setAvailableAspectRatios([]);
       setAvailableResolutions([]);
       setAspectRatio('');
@@ -207,12 +224,89 @@ const ImageGeneration = () => {
 
     setGenerating(true);
     try {
+      const hasReferenceImages = referenceImages.length > 0;
+      const requestEndpoint = selectedModelData?.request_endpoint || 'openai';
+
+      let apiUrl = '/v1/images/generations';
       const params = {
         model: selectedModel,
         prompt: prompt,
         n: quantity,
       };
 
+      // 根据请求端点选择 API 接口
+      if (requestEndpoint.toLowerCase() === 'openai') {
+        if (hasReferenceImages) {
+          // OpenAI 有参考图使用 edits 接口
+          apiUrl = '/v1/images/edits';
+
+          // 转换参考图为 base64
+          const imagePromises = referenceImages.map((file) => {
+            return new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = (e) => resolve(e.target.result);
+              reader.onerror = reject;
+              reader.readAsDataURL(file.fileInstance);
+            });
+          });
+          const base64Images = await Promise.all(imagePromises);
+          params.image = base64Images[0]; // edits 接口只支持单张图片
+        } else {
+          // OpenAI 无参考图使用 generations 接口
+          apiUrl = '/v1/images/generations';
+        }
+      } else if (requestEndpoint.toLowerCase() === 'gemini') {
+        // Gemini 使用专用接口
+        apiUrl = '/v1beta/models/' + selectedModel + ':generateContent';
+
+        // Gemini 参数格式不同
+        params.contents = [{
+          parts: [{
+            text: prompt
+          }]
+        }];
+
+        if (hasReferenceImages) {
+          const imagePromises = referenceImages.map((file) => {
+            return new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                const base64 = e.target.result.split(',')[1];
+                resolve({
+                  inline_data: {
+                    mime_type: file.fileInstance.type,
+                    data: base64
+                  }
+                });
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(file.fileInstance);
+            });
+          });
+          const imageParts = await Promise.all(imagePromises);
+          params.contents[0].parts = [...imageParts, { text: prompt }];
+        }
+
+        delete params.model;
+        delete params.prompt;
+        delete params.n;
+      } else {
+        // 其他端点使用默认 generations 接口
+        if (hasReferenceImages) {
+          const imagePromises = referenceImages.map((file) => {
+            return new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = (e) => resolve(e.target.result);
+              reader.onerror = reject;
+              reader.readAsDataURL(file.fileInstance);
+            });
+          });
+          const base64Images = await Promise.all(imagePromises);
+          params.reference_images = base64Images;
+        }
+      }
+
+      // 添加分辨率和宽高比参数
       if (aspectRatio) {
         params.aspect_ratio = aspectRatio;
       }
@@ -220,22 +314,26 @@ const ImageGeneration = () => {
         params.size = resolution;
       }
 
-      if (referenceImages.length > 0) {
-        const imagePromises = referenceImages.map((file) => {
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(file.fileInstance);
-          });
-        });
-        const base64Images = await Promise.all(imagePromises);
-        params.reference_images = base64Images;
+      const res = await API.post(apiUrl, params);
+
+      // 处理不同端点的响应格式
+      let images = [];
+      if (requestEndpoint.toLowerCase() === 'gemini') {
+        // Gemini 响应格式
+        if (res.data.candidates && res.data.candidates.length > 0) {
+          images = res.data.candidates.map(candidate => ({
+            url: candidate.content?.parts?.[0]?.text || ''
+          }));
+        }
+      } else {
+        // OpenAI 格式
+        if (res.data.data && res.data.data.length > 0) {
+          images = res.data.data;
+        }
       }
 
-      const res = await API.post('/v1/images/generations', params);
-      if (res.data.data && res.data.data.length > 0) {
-        setGeneratedImages(res.data.data);
+      if (images.length > 0) {
+        setGeneratedImages(images);
         showSuccess(t('图片生成成功'));
       } else {
         showError(t('图片生成失败'));
@@ -581,11 +679,12 @@ const ImageGeneration = () => {
             <span style={styles.paramLabel}>{t('生成比例')}</span>
             <Select
               style={{ width: '100%' }}
-              value={aspectRatio || 'auto'}
-              onChange={(val) => setAspectRatio(val === 'auto' ? '' : val)}
+              value={aspectRatio}
+              onChange={setAspectRatio}
               size='default'
+              disabled={availableAspectRatios.length === 0}
+              placeholder={t('请选择')}
             >
-              <Select.Option value='auto'>Auto</Select.Option>
               {availableAspectRatios.map((ratio) => (
                 <Select.Option key={ratio} value={ratio}>
                   {ratio}
@@ -597,11 +696,12 @@ const ImageGeneration = () => {
             <span style={styles.paramLabel}>{t('分辨率')}</span>
             <Select
               style={{ width: '100%' }}
-              value={resolution || 'auto'}
-              onChange={(val) => setResolution(val === 'auto' ? '' : val)}
+              value={resolution}
+              onChange={setResolution}
               size='default'
+              disabled={availableResolutions.length === 0}
+              placeholder={t('请选择')}
             >
-              <Select.Option value='auto'>Auto</Select.Option>
               {availableResolutions.map((res) => (
                 <Select.Option key={res} value={res}>
                   {res}
