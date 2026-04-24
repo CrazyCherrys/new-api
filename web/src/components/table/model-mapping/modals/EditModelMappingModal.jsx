@@ -27,7 +27,6 @@ import {
   InputNumber,
   Button,
   Space,
-  Checkbox,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../../../helpers';

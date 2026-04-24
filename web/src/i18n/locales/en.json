@@ -3564,6 +3564,7 @@
     "对话": "Chat",
     "绘画": "Image",
     "音频": "Audio",
-    "模型类型": "Model Type"
+    "模型类型": "Model Type",
+    "搜索": "Search"
   }
 }
