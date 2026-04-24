@@ -39,6 +39,7 @@ const EditModelMappingModal = ({
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [formApi, setFormApi] = useState(null);
+  const [selectedResolutions, setSelectedResolutions] = useState([]);
   const [selectedAspectRatios, setSelectedAspectRatios] = useState([]);
 
   const modelSeriesOptions = [
@@ -73,6 +74,12 @@ const EditModelMappingModal = ({
     { value: 'dalle', label: 'DALL·E' },
   ];
 
+  const resolutionOptions = [
+    { value: '1K', label: '1K' },
+    { value: '2K', label: '2K' },
+    { value: '4K', label: '4K' },
+  ];
+
   const aspectRatioOptions = [
     { value: 'auto', label: 'Auto' },
     { value: '1:1', label: '1:1' },
@@ -91,22 +98,29 @@ const EditModelMappingModal = ({
     if (visible && formApi) {
       if (editingMapping) {
         // 解析 JSON 字符串为数组
+        let resolutions = [];
         let aspectRatios = [];
         try {
+          if (editingMapping.resolutions) {
+            resolutions = JSON.parse(editingMapping.resolutions);
+          }
           if (editingMapping.aspect_ratios) {
             aspectRatios = JSON.parse(editingMapping.aspect_ratios);
           }
         } catch (e) {
-          console.error('Failed to parse aspect_ratios:', e);
+          console.error('Failed to parse resolutions or aspect_ratios:', e);
         }
 
+        setSelectedResolutions(resolutions);
         setSelectedAspectRatios(aspectRatios);
 
         formApi.setValues({
           ...editingMapping,
+          resolutions,
           aspect_ratios: aspectRatios,
         });
       } else {
+        setSelectedResolutions([]);
         setSelectedAspectRatios([]);
 
         formApi.setValues({
@@ -116,6 +130,7 @@ const EditModelMappingModal = ({
           model_type: 1,
           description: '',
           request_endpoint: '',
+          resolutions: [],
           aspect_ratios: [],
         });
       }
@@ -128,6 +143,7 @@ const EditModelMappingModal = ({
       const payload = {
         ...values,
         // 将数组转换为 JSON 字符串
+        resolutions: values.resolutions ? JSON.stringify(values.resolutions) : '',
         aspect_ratios: values.aspect_ratios ? JSON.stringify(values.aspect_ratios) : '',
       };
 
@@ -166,6 +182,17 @@ const EditModelMappingModal = ({
   const handleDeselectAllAspectRatios = () => {
     setSelectedAspectRatios([]);
     formApi?.setValue('aspect_ratios', []);
+  };
+
+  const handleSelectAllResolutions = () => {
+    const allValues = resolutionOptions.map(opt => opt.value);
+    setSelectedResolutions(allValues);
+    formApi?.setValue('resolutions', allValues);
+  };
+
+  const handleDeselectAllResolutions = () => {
+    setSelectedResolutions([]);
+    formApi?.setValue('resolutions', []);
   };
 
   return (
@@ -215,6 +242,24 @@ const EditModelMappingModal = ({
           placeholder={t('选择请求端点类型')}
           optionList={requestEndpointOptions}
         />
+        <div>
+          <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{t('分辨率')}</span>
+            <Space>
+              <Button size='small' onClick={handleSelectAllResolutions}>
+                {t('全选')}
+              </Button>
+              <Button size='small' onClick={handleDeselectAllResolutions}>
+                {t('取消全选')}
+              </Button>
+            </Space>
+          </div>
+          <Form.CheckboxGroup
+            field='resolutions'
+            options={resolutionOptions}
+            direction='horizontal'
+          />
+        </div>
         <div>
           <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 14, fontWeight: 600 }}>{t('宽高比')}</span>

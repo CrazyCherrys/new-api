@@ -130,6 +130,19 @@ const ModelMappingTable = ({
       render: (text) => text || '-',
     },
     {
+      title: t('分辨率'),
+      dataIndex: 'resolutions',
+      render: (text) => {
+        if (!text) return '-';
+        try {
+          const resolutions = JSON.parse(text);
+          return resolutions.join(', ');
+        } catch (e) {
+          return '-';
+        }
+      },
+    },
+    {
       title: t('宽高比'),
       dataIndex: 'aspect_ratios',
       render: (text) => {
