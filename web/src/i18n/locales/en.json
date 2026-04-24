@@ -3568,6 +3568,8 @@
     "搜索": "Search",
     "模型设置": "Model Settings",
     "添加模型设置": "Add Model Setting",
-    "编辑模型设置": "Edit Model Setting"
+    "编辑模型设置": "Edit Model Setting",
+    "状态更新成功": "Status updated successfully",
+    "状态更新失败": "Failed to update status"
   }
 }

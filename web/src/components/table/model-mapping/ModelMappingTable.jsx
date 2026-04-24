@@ -18,9 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Table, Tag, Typography, Popconfirm, Button, Space } from '@douyinfe/semi-ui';
+import { Table, Tag, Typography, Popconfirm, Button, Space, Switch } from '@douyinfe/semi-ui';
 import { IconEdit, IconDelete } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
+import { API, showError, showSuccess } from '../../../helpers';
 
 const { Text } = Typography;
 
@@ -41,8 +42,28 @@ const ModelMappingTable = ({
   loading,
   openEditModal,
   deleteMapping,
+  refresh,
 }) => {
   const { t } = useTranslation();
+
+  const handleStatusToggle = async (record) => {
+    try {
+      const newStatus = record.status === 1 ? 0 : 1;
+      const res = await API.put(`/api/model-mapping/${record.id}`, {
+        ...record,
+        status: newStatus,
+      });
+
+      if (res.data.success) {
+        showSuccess(t('状态更新成功'));
+        refresh();
+      } else {
+        showError(res.data.message || t('状态更新失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('状态更新失败'));
+    }
+  };
 
   const getModelTypeTag = (type) => {
     const typeMap = {
@@ -68,6 +89,17 @@ const ModelMappingTable = ({
       title: 'ID',
       dataIndex: 'id',
       width: 80,
+    },
+    {
+      title: t('启用'),
+      dataIndex: 'status',
+      width: 80,
+      render: (status, record) => (
+        <Switch
+          checked={status === 1}
+          onChange={() => handleStatusToggle(record)}
+        />
+      ),
     },
     {
       title: t('模型ID'),
@@ -98,19 +130,6 @@ const ModelMappingTable = ({
       render: (text) => text || '-',
     },
     {
-      title: t('分辨率'),
-      dataIndex: 'resolutions',
-      render: (text) => {
-        if (!text) return '-';
-        try {
-          const resolutions = JSON.parse(text);
-          return resolutions.join(', ');
-        } catch (e) {
-          return '-';
-        }
-      },
-    },
-    {
       title: t('宽高比'),
       dataIndex: 'aspect_ratios',
       render: (text) => {
@@ -122,16 +141,6 @@ const ModelMappingTable = ({
           return '-';
         }
       },
-    },
-    {
-      title: t('状态'),
-      dataIndex: 'status',
-      render: (status) => getStatusTag(status),
-    },
-    {
-      title: t('优先级'),
-      dataIndex: 'priority',
-      width: 100,
     },
     {
       title: t('创建时间'),
