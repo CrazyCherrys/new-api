@@ -43,7 +43,6 @@ const ModelMappingPage = () => {
       />
       <CardPro
         type='type3'
-        actionsArea={<ModelMappingActions {...mappingData} />}
         searchArea={<ModelMappingFilters {...mappingData} />}
         paginationArea={createCardProPagination({
           currentPage: mappingData.activePage,

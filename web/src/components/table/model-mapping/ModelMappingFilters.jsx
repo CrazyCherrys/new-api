@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Form, Select, Button, Space } from '@douyinfe/semi-ui';
-import { IconSearch } from '@douyinfe/semi-icons';
+import { IconSearch, IconPlus, IconRefresh } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 
 const ModelMappingFilters = ({
@@ -28,6 +28,9 @@ const ModelMappingFilters = ({
   setSearchKeyword,
   setSearchModelType,
   handleSearch,
+  openEditModal,
+  refresh,
+  loading,
 }) => {
   const { t } = useTranslation();
 
@@ -64,6 +67,23 @@ const ModelMappingFilters = ({
         onClick={handleSearch}
       >
         {t('搜索')}
+      </Button>
+      <Button
+        theme='light'
+        type='primary'
+        icon={<IconPlus />}
+        onClick={() => openEditModal(null)}
+      >
+        {t('添加')}
+      </Button>
+      <Button
+        theme='light'
+        type='secondary'
+        icon={<IconRefresh />}
+        onClick={refresh}
+        loading={loading}
+      >
+        {t('刷新')}
       </Button>
     </Space>
   );

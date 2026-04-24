@@ -40,6 +40,8 @@ const EditModelMappingModal = ({
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [formApi, setFormApi] = useState(null);
+  const [selectedResolutions, setSelectedResolutions] = useState([]);
+  const [selectedAspectRatios, setSelectedAspectRatios] = useState([]);
 
   const modelSeriesOptions = [
     { value: 'openai', label: 'OpenAI' },
@@ -119,7 +121,6 @@ const EditModelMappingModal = ({
       } else {
         formApi.setValues({
           request_model: '',
-          actual_model: '',
           display_name: '',
           model_series: '',
           model_type: 1,
@@ -187,16 +188,10 @@ const EditModelMappingModal = ({
       >
         <Form.Input
           field='request_model'
-          label={t('请求模型ID')}
+          label={t('模型ID')}
           placeholder={t('用户请求时使用的模型ID')}
-          rules={[{ required: true, message: t('请输入请求模型ID') }]}
+          rules={[{ required: true, message: t('请输入模型ID') }]}
           disabled={!!editingMapping}
-        />
-        <Form.Input
-          field='actual_model'
-          label={t('实际调用模型ID')}
-          placeholder={t('转发到上游时使用的模型ID')}
-          rules={[{ required: true, message: t('请输入实际调用模型ID') }]}
         />
         <Form.Input
           field='display_name'

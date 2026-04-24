@@ -70,17 +70,8 @@ const ModelMappingTable = ({
       width: 80,
     },
     {
-      title: t('请求模型ID'),
+      title: t('模型ID'),
       dataIndex: 'request_model',
-      render: (text) => (
-        <Text copyable onClick={(e) => e.stopPropagation()}>
-          {text}
-        </Text>
-      ),
-    },
-    {
-      title: t('实际调用模型ID'),
-      dataIndex: 'actual_model',
       render: (text) => (
         <Text copyable onClick={(e) => e.stopPropagation()}>
           {text}
