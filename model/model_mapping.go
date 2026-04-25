@@ -53,6 +53,9 @@ func SearchModelMappings(keyword string, modelType int, startIdx int, num int) (
 
 	query := DB.Model(&ModelMapping{})
 
+	// 只返回启用状态的模型
+	query = query.Where("status = ?", 1)
+
 	if keyword != "" {
 		query = query.Where("request_model LIKE ? OR display_name LIKE ? OR model_series LIKE ?",
 			"%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
