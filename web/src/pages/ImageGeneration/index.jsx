@@ -80,6 +80,8 @@ const ImageGeneration = () => {
   const [selectedTask, setSelectedTask] = useState(null);
   const [taskModalVisible, setTaskModalVisible] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
+  const [deletingTasks, setDeletingTasks] = useState(false);
   const sseRef = useRef(null);
   const pollingTimerRef = useRef(null);
 
@@ -186,6 +188,61 @@ const ImageGeneration = () => {
       showError(error.message || t('加载任务列表失败'));
     } finally {
       setLoadingTasks(false);
+    }
+  };
+
+  // 处理任务选择
+  const handleTaskSelect = (taskId, checked) => {
+    setSelectedTaskIds((prev) => {
+      const newSet = new Set(prev);
+      if (checked) {
+        newSet.add(taskId);
+      } else {
+        newSet.delete(taskId);
+      }
+      return newSet;
+    });
+  };
+
+  // 全选/取消全选
+  const handleSelectAll = (checked) => {
+    if (checked) {
+      setSelectedTaskIds(new Set(tasks.map((t) => t.id)));
+    } else {
+      setSelectedTaskIds(new Set());
+    }
+  };
+
+  // 批量删除任务
+  const handleBatchDelete = async () => {
+    if (selectedTaskIds.size === 0) {
+      showError(t('请先选择要删除的任务'));
+      return;
+    }
+
+    setDeletingTasks(true);
+    try {
+      const deletePromises = Array.from(selectedTaskIds).map((taskId) =>
+        API.delete(`/api/image-generation/tasks/${taskId}`)
+      );
+
+      const results = await Promise.allSettled(deletePromises);
+      const successCount = results.filter((r) => r.status === 'fulfilled').length;
+      const failCount = results.filter((r) => r.status === 'rejected').length;
+
+      if (successCount > 0) {
+        showSuccess(t('成功删除 {{count}} 个任务', { count: successCount }));
+        setSelectedTaskIds(new Set());
+        loadTasks();
+      }
+
+      if (failCount > 0) {
+        showError(t('删除失败 {{count}} 个任务', { count: failCount }));
+      }
+    } catch (error) {
+      showError(error.message || t('批量删除失败'));
+    } finally {
+      setDeletingTasks(false);
     }
   };
 
@@ -821,22 +878,58 @@ const ImageGeneration = () => {
           <Text type='tertiary' size='small'>
             {t('共')} {taskTotal} {t('个任务')}
           </Text>
+          {selectedTaskIds.size > 0 && (
+            <Text type='tertiary' size='small'>
+              ({t('已选择')} {selectedTaskIds.size} {t('个')})
+            </Text>
+          )}
         </div>
 
-        <div style={styles.filterGroup}>
-          <span style={styles.filterLabel}>{t('状态')}</span>
-          <Select
-            size='small'
-            value={taskStatusFilter}
-            onChange={setTaskStatusFilter}
-            style={{ width: 120 }}
-          >
-            <Select.Option value=''>{t('全部')}</Select.Option>
-            <Select.Option value='pending'>{t('等待中')}</Select.Option>
-            <Select.Option value='processing'>{t('生成中')}</Select.Option>
-            <Select.Option value='completed'>{t('已完成')}</Select.Option>
-            <Select.Option value='failed'>{t('失败')}</Select.Option>
-          </Select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {selectedTaskIds.size > 0 && (
+            <>
+              <Button
+                size='small'
+                type='tertiary'
+                onClick={() => handleSelectAll(false)}
+              >
+                {t('取消选择')}
+              </Button>
+              <Button
+                size='small'
+                type='danger'
+                icon={<IconDelete />}
+                loading={deletingTasks}
+                onClick={handleBatchDelete}
+              >
+                {t('删除选中')}
+              </Button>
+            </>
+          )}
+          {selectedTaskIds.size === 0 && tasks.length > 0 && (
+            <Button
+              size='small'
+              type='tertiary'
+              onClick={() => handleSelectAll(true)}
+            >
+              {t('全选')}
+            </Button>
+          )}
+          <div style={styles.filterGroup}>
+            <span style={styles.filterLabel}>{t('状态')}</span>
+            <Select
+              size='small'
+              value={taskStatusFilter}
+              onChange={setTaskStatusFilter}
+              style={{ width: 120 }}
+            >
+              <Select.Option value=''>{t('全部')}</Select.Option>
+              <Select.Option value='pending'>{t('等待中')}</Select.Option>
+              <Select.Option value='processing'>{t('生成中')}</Select.Option>
+              <Select.Option value='completed'>{t('已完成')}</Select.Option>
+              <Select.Option value='failed'>{t('失败')}</Select.Option>
+            </Select>
+          </div>
         </div>
       </div>
 
@@ -849,6 +942,8 @@ const ImageGeneration = () => {
                   <ImageGenerationTaskCard
                     key={task.id}
                     task={task}
+                    selected={selectedTaskIds.has(task.id)}
+                    onSelectChange={handleTaskSelect}
                     onClick={() => {
                       setSelectedTask(task);
                       setTaskModalVisible(true);

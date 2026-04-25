@@ -61,6 +61,7 @@ func SetApiRouter(router *gin.Engine) {
 			imageGenRoute.GET("/tasks", controller.GetImageGenerationTasks)
 			imageGenRoute.GET("/tasks/:id", controller.GetImageGenerationTaskDetail)
 			imageGenRoute.POST("/tasks/:id/retry", controller.RetryImageGenerationTask)
+			imageGenRoute.DELETE("/tasks/:id", controller.DeleteImageGenerationTask)
 			imageGenRoute.GET("/sse", controller.ImageGenerationSSE)
 		}
 

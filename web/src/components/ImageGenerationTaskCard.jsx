@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useState, useEffect } from 'react';
-import { Card, Progress, Spin, Typography, Tag } from '@douyinfe/semi-ui';
+import { Card, Progress, Spin, Typography, Tag, Checkbox } from '@douyinfe/semi-ui';
 import { IconImage, IconAlertTriangle } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import PropTypes from 'prop-types';
@@ -33,7 +33,7 @@ const { Text } = Typography;
  * - completed: 缩略图
  * - failed: 错误图标
  */
-const ImageGenerationTaskCard = ({ task, onClick }) => {
+const ImageGenerationTaskCard = ({ task, onClick, selected, onSelectChange }) => {
   const { t } = useTranslation();
   const [waitTime, setWaitTime] = useState(0);
 
@@ -143,9 +143,15 @@ const ImageGenerationTaskCard = ({ task, onClick }) => {
       bodyStyle={{ padding: 0, height: '120px' }}
       onClick={onClick}
       hoverable
-      style={{ cursor: 'pointer' }}
+      style={{ cursor: 'pointer', position: 'relative' }}
     >
       {renderContent()}
+      <div className="absolute top-2 left-2" onClick={(e) => e.stopPropagation()}>
+        <Checkbox
+          checked={selected}
+          onChange={(e) => onSelectChange(task.id, e.target.checked)}
+        />
+      </div>
       <div className="absolute top-2 right-2">
         {getStatusTag()}
       </div>
@@ -163,10 +169,14 @@ ImageGenerationTaskCard.propTypes = {
     created_time: PropTypes.number.isRequired,
   }).isRequired,
   onClick: PropTypes.func,
+  selected: PropTypes.bool,
+  onSelectChange: PropTypes.func,
 };
 
 ImageGenerationTaskCard.defaultProps = {
   onClick: () => {},
+  selected: false,
+  onSelectChange: () => {},
 };
 
 export default ImageGenerationTaskCard;

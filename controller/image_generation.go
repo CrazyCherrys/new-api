@@ -199,6 +199,58 @@ func RetryImageGenerationTask(c *gin.Context) {
 	common.ApiSuccess(c, task)
 }
 
+// DeleteImageGenerationTask 删除任务
+func DeleteImageGenerationTask(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "未授权",
+		})
+		return
+	}
+
+	taskId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的任务ID",
+		})
+		return
+	}
+
+	task, err := model.GetImageTaskByID(taskId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	if task == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "任务不存在",
+		})
+		return
+	}
+
+	// 验证任务所有权
+	if task.UserId != userId {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "无权访问此任务",
+		})
+		return
+	}
+
+	// 删除任务
+	if err := model.DeleteImageTask(taskId); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, gin.H{"message": "删除成功"})
+}
+
 // ImageGenerationSSE SSE推送任务状态更新
 func ImageGenerationSSE(c *gin.Context) {
 	userId := c.GetInt("id")

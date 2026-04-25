@@ -231,8 +231,15 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 		return "", "", 0, fmt.Errorf("request endpoint mismatch: expected %s, got %s", mapping.RequestEndpoint, task.RequestEndpoint)
 	}
 
-	// 选择渠道
-	channelId, err := selectChannelForModel(task.ModelId, task.UserId)
+	// 使用 actual_model 作为上游模型名
+	actualModel := mapping.ActualModel
+	if actualModel == "" {
+		actualModel = task.ModelId
+	}
+	imageReq.Model = actualModel
+
+	// 选择渠道（根据 request_endpoint 选择正确类型的渠道）
+	channelId, err := selectChannelForModel(task.ModelId, task.UserId, task.RequestEndpoint)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("failed to select channel: %w", err)
 	}
@@ -243,8 +250,8 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 		return "", "", 0, fmt.Errorf("failed to get channel: %w", err)
 	}
 
-	// 调用上游 API（使用简化的 HTTP 请求）
-	resp, err := callUpstreamImageAPI(ctx, ch, task, imageReq)
+	// 使用 relay 层调用上游 API
+	resp, err := callUpstreamImageAPIViaRelay(ctx, ch, task, imageReq)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("failed to call upstream API: %w", err)
 	}
@@ -261,15 +268,15 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	return imageUrl, metadata, cost, nil
 }
 
-// callUpstreamImageAPI 调用上游图片生成 API（简化版本，避免循环依赖）
-func callUpstreamImageAPI(ctx context.Context, ch *model.Channel, task *model.ImageGenerationTask, imageReq *dto.ImageRequest) (*http.Response, error) {
-	// 构建请求 URL
-	baseURL := getStringValue(ch.BaseURL)
-	if baseURL == "" {
-		baseURL = "https://api.openai.com"
+// callUpstreamImageAPIViaRelay 通过内部 API 调用 relay 层处理图片生成
+func callUpstreamImageAPIViaRelay(ctx context.Context, ch *model.Channel, task *model.ImageGenerationTask, imageReq *dto.ImageRequest) (*http.Response, error) {
+	// 构建内部 API 请求 URL（通过 relay 层）
+	// 使用 localhost 调用自己的 /v1/images/generations 端点
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3000"
 	}
-
-	requestURL := baseURL + "/v1/images/generations"
+	requestURL := fmt.Sprintf("http://127.0.0.1:%s/v1/images/generations", port)
 
 	// 序列化请求
 	jsonData, err := common.Marshal(imageReq)
@@ -283,7 +290,8 @@ func callUpstreamImageAPI(ctx context.Context, ch *model.Channel, task *model.Im
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// 设置请求头
+	// 设置请求头 - 使用用户的 token 来调用内部 API
+	// 注意：这里需要一个系统级别的 token 或者使用渠道的 key
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+ch.Key)
 
@@ -391,17 +399,34 @@ func deductUserQuota(userId int, quota int) error {
 	return model.DecreaseUserQuota(userId, quota)
 }
 
-// selectChannelForModel 为模型选择渠道
-func selectChannelForModel(modelName string, userId int) (int, error) {
+// selectChannelForModel 为模型选择渠道（根据 request_endpoint 选择正确的渠道类型）
+func selectChannelForModel(modelName string, userId int, requestEndpoint string) (int, error) {
 	// 获取所有渠道
 	channels, err := model.GetAllChannels(0, 0, true, false)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get channels: %w", err)
 	}
 
-	// 查找支持该模型的渠道
+	// 根据 request_endpoint 确定需要的渠道类型
+	var requiredChannelType int
+	switch requestEndpoint {
+	case "openai", "dalle":
+		requiredChannelType = common.ChannelTypeOpenAI
+	case "gemini":
+		requiredChannelType = common.ChannelTypeGemini
+	default:
+		// 默认使用 OpenAI 类型
+		requiredChannelType = common.ChannelTypeOpenAI
+	}
+
+	// 查找支持该模型且类型匹配的渠道
 	for _, ch := range channels {
 		if ch.Status != common.ChannelStatusEnabled {
+			continue
+		}
+
+		// 检查渠道类型是否匹配
+		if ch.Type != requiredChannelType {
 			continue
 		}
 
@@ -414,7 +439,7 @@ func selectChannelForModel(modelName string, userId int) (int, error) {
 		}
 	}
 
-	return 0, fmt.Errorf("no enabled channel for model: %s", modelName)
+	return 0, fmt.Errorf("no enabled channel for model %s with endpoint %s (channel type: %d)", modelName, requestEndpoint, requiredChannelType)
 }
 
 // getStringValue 获取字符串指针的值
