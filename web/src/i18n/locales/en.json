@@ -3632,6 +3632,19 @@
     "创建任务失败": "Failed to create task",
     "加载任务列表失败": "Failed to load task list",
     "暂无任务": "No tasks",
-    "点击左侧生成按钮创建图片生成任务": "Click the generate button on the left to create an image generation task"
+    "点击左侧生成按钮创建图片生成任务": "Click the generate button on the left to create an image generation task",
+    "暂无生成记录": "No generation history",
+    "暂无对话": "No conversation",
+    "在左侧描述你的创意并点击生成，对话流将在这里展示。": "Describe your idea on the left and click Generate—the chat will appear here.",
+    "（无提示词）": "(No prompt)",
+    "排序：创建时间": "Sort: Create time",
+    "排序：完成时间": "Sort: Complete time",
+    "排序：状态": "Sort: Status",
+    "降序": "Desc",
+    "升序": "Asc",
+    "今天": "Today",
+    "近 7 天": "Last 7 days",
+    "近 30 天": "Last 30 days",
+    "本月": "This month"
   }
 }

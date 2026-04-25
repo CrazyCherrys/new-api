@@ -61,16 +61,17 @@ type ImageTaskQueryParams struct {
 	RequestEndpoint string
 	StartTime       int64
 	EndTime         int64
+	SortBy          string // created_time | completed_time | status
+	SortOrder       string // asc | desc
 }
 
-// GetImageTasksByUserID 根据用户ID获取任务列表（分页+筛选）
+// GetImageTasksByUserID 根据用户ID获取任务列表（分页+筛选+排序）
 func GetImageTasksByUserID(userId int, startIdx int, num int, queryParams ImageTaskQueryParams) ([]*ImageGenerationTask, int64, error) {
 	var tasks []*ImageGenerationTask
 	var total int64
 
 	query := DB.Model(&ImageGenerationTask{}).Where("user_id = ?", userId)
 
-	// 添加筛选条件
 	if queryParams.Status != "" {
 		query = query.Where("status = ?", queryParams.Status)
 	}
@@ -87,14 +88,31 @@ func GetImageTasksByUserID(userId int, startIdx int, num int, queryParams ImageT
 		query = query.Where("created_time <= ?", queryParams.EndTime)
 	}
 
-	// 获取总数
 	err := query.Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// 获取数据
-	err = query.Order("id DESC").Limit(num).Offset(startIdx).Find(&tasks).Error
+	// 仅允许白名单字段，避免 SQL 注入
+	sortField := "id"
+	switch queryParams.SortBy {
+	case "created_time":
+		sortField = "created_time"
+	case "completed_time":
+		sortField = "completed_time"
+	case "status":
+		sortField = "status"
+	}
+	sortOrder := "DESC"
+	if queryParams.SortOrder == "asc" {
+		sortOrder = "ASC"
+	}
+	orderClause := sortField + " " + sortOrder
+	if sortField != "id" {
+		orderClause += ", id " + sortOrder
+	}
+
+	err = query.Order(orderClause).Limit(num).Offset(startIdx).Find(&tasks).Error
 	return tasks, total, err
 }
 

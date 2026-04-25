@@ -62,12 +62,13 @@ func GetImageGenerationTasks(c *gin.Context) {
 
 	pageInfo := common.GetPageQuery(c)
 
-	// 解析查询参数
 	status := c.Query("status")
 	modelId := c.Query("model_id")
 	requestEndpoint := c.Query("request_endpoint")
 	startTime, _ := strconv.ParseInt(c.Query("start_time"), 10, 64)
 	endTime, _ := strconv.ParseInt(c.Query("end_time"), 10, 64)
+	sortBy := c.Query("sort_by")
+	sortOrder := c.Query("sort_order")
 
 	queryParams := model.ImageTaskQueryParams{
 		Status:          status,
@@ -75,6 +76,8 @@ func GetImageGenerationTasks(c *gin.Context) {
 		RequestEndpoint: requestEndpoint,
 		StartTime:       startTime,
 		EndTime:         endTime,
+		SortBy:          sortBy,
+		SortOrder:       sortOrder,
 	}
 
 	tasks, total, err := model.GetImageTasksByUserID(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)

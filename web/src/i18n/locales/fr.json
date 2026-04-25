@@ -3457,6 +3457,19 @@
     "（当前仅支持易支付接口，默认使用上方服务器地址作为回调地址！）": "(Actuellement, seule l'interface Epay est prise en charge, l'adresse du serveur ci-dessus est utilisée par défaut comme adresse de rappel !)",
     "，当前无生效订阅，将自动使用钱包": ", aucun abonnement actif, le portefeuille sera utilisé automatiquement.",
     "，时间：": ", time:",
-    "，点击更新": ", cliquez sur Mettre à jour"
+    "，点击更新": ", cliquez sur Mettre à jour",
+    "暂无生成记录": "Aucun historique de génération",
+    "暂无对话": "Aucune conversation",
+    "在左侧描述你的创意并点击生成，对话流将在这里展示。": "Décrivez votre idée à gauche et cliquez sur Générer — la conversation apparaîtra ici.",
+    "（无提示词）": "(Aucune invite)",
+    "排序：创建时间": "Tri : Date de création",
+    "排序：完成时间": "Tri : Date de fin",
+    "排序：状态": "Tri : Statut",
+    "降序": "Décroissant",
+    "升序": "Croissant",
+    "今天": "Aujourd'hui",
+    "近 7 天": "7 derniers jours",
+    "近 30 天": "30 derniers jours",
+    "本月": "Ce mois-ci"
   }
 }

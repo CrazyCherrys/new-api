@@ -37,7 +37,12 @@ import {
   IconClock,
   IconImage,
   IconBolt,
+  IconCheckCircleStroked,
+  IconCommentStroked,
+  IconChevronUp,
+  IconChevronDown,
 } from '@douyinfe/semi-icons';
+import { MessageSquareText } from 'lucide-react';
 import { API, showError, showSuccess } from '../../helpers';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
 import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
@@ -66,17 +71,18 @@ const ImageGeneration = () => {
   const [availableAspectRatios, setAvailableAspectRatios] = useState([]);
   const [availableResolutions, setAvailableResolutions] = useState([]);
 
-  const [activeTab, setActiveTab] = useState('history');
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [filterModel, setFilterModel] = useState('all');
-  const [filterTime, setFilterTime] = useState('all');
+  const [activeTab, setActiveTab] = useState('history'); // 'history' | 'chat'
 
   // 任务列表相关状态
   const [tasks, setTasks] = useState([]);
   const [taskTotal, setTaskTotal] = useState(0);
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState(20);
-  const [taskStatusFilter, setTaskStatusFilter] = useState(''); // '', 'pending', 'processing', 'completed', 'failed'
+  const [taskStatusFilter, setTaskStatusFilter] = useState(''); // '' | 'pending' | 'generating' | 'success' | 'failed'
+  const [taskModelFilter, setTaskModelFilter] = useState(''); // '' | model_id
+  const [taskTimeFilter, setTaskTimeFilter] = useState(''); // '' | 'today' | 'last7d' | 'last30d' | 'thisMonth'
+  const [taskSortBy, setTaskSortBy] = useState('created_time'); // 'created_time' | 'completed_time' | 'status'
+  const [taskSortOrder, setTaskSortOrder] = useState('desc'); // 'desc' | 'asc'
   const [selectedTask, setSelectedTask] = useState(null);
   const [taskModalVisible, setTaskModalVisible] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
@@ -89,40 +95,43 @@ const ImageGeneration = () => {
     if (!series) return '';
 
     const seriesMap = {
-      'openai': 'OpenAI',
-      'gemini': 'Gemini',
-      'claude': 'Claude',
-      'grok': 'Grok',
-      'deepseek': 'DeepSeek',
-      'qwen': 'Qwen',
-      'glm': 'GLM',
-      'hunyuan': 'Hunyuan',
-      'doubao': 'Doubao',
-      'spark': 'Spark',
-      'baichuan': 'Baichuan',
-      'minimax': 'Minimax',
-      'moonshot': 'Moonshot',
-      'yi': 'Yi',
-      'chatglm': 'ChatGLM',
-      'ernie': 'ERNIE',
-      'wenxin': 'Wenxin',
-      'tongyi': 'Tongyi',
-      'azure': 'Azure',
-      'aws': 'AWS',
-      'cohere': 'Cohere',
-      'anthropic': 'Anthropic',
-      'mistral': 'Mistral',
-      'llama': 'Llama',
-      'palm': 'PaLM',
-      'bard': 'Bard',
-      'midjourney': 'Midjourney',
-      'dalle': 'DALL-E',
+      openai: 'OpenAI',
+      gemini: 'Gemini',
+      claude: 'Claude',
+      grok: 'Grok',
+      deepseek: 'DeepSeek',
+      qwen: 'Qwen',
+      glm: 'GLM',
+      hunyuan: 'Hunyuan',
+      doubao: 'Doubao',
+      spark: 'Spark',
+      baichuan: 'Baichuan',
+      minimax: 'Minimax',
+      moonshot: 'Moonshot',
+      yi: 'Yi',
+      chatglm: 'ChatGLM',
+      ernie: 'ERNIE',
+      wenxin: 'Wenxin',
+      tongyi: 'Tongyi',
+      azure: 'Azure',
+      aws: 'AWS',
+      cohere: 'Cohere',
+      anthropic: 'Anthropic',
+      mistral: 'Mistral',
+      llama: 'Llama',
+      palm: 'PaLM',
+      bard: 'Bard',
+      midjourney: 'Midjourney',
+      dalle: 'DALL-E',
       'stable-diffusion': 'Stable Diffusion',
-      'flux': 'Flux',
-      'suno': 'Suno',
+      flux: 'Flux',
+      suno: 'Suno',
     };
 
-    return seriesMap[series.toLowerCase()] || series.charAt(0).toUpperCase() + series.slice(1);
+    return (
+      seriesMap[series.toLowerCase()] ||
+      series.charAt(0).toUpperCase() + series.slice(1)
+    );
   };
 
   useEffect(() => {
@@ -138,7 +147,26 @@ const ImageGeneration = () => {
 
   useEffect(() => {
     loadTasks();
-  }, [taskPage, taskPageSize, taskStatusFilter]);
+  }, [
+    taskPage,
+    taskPageSize,
+    taskStatusFilter,
+    taskModelFilter,
+    taskTimeFilter,
+    taskSortBy,
+    taskSortOrder,
+  ]);
+
+  // 切换任意筛选/排序时回到第一页
+  useEffect(() => {
+    setTaskPage(1);
+  }, [
+    taskStatusFilter,
+    taskModelFilter,
+    taskTimeFilter,
+    taskSortBy,
+    taskSortOrder,
+  ]);
 
   const loadDrawingModels = async () => {
     setLoading(true);
@@ -165,7 +193,31 @@ const ImageGeneration = () => {
     }
   };
 
-  // 加载任务列表
+  // 根据时间范围预设计算 start/end 时间戳（秒）
+  const computeTimeRange = (preset) => {
+    if (!preset) return { start: 0, end: 0 };
+    const now = new Date();
+    const end = Math.floor(now.getTime() / 1000);
+    let startDate;
+    switch (preset) {
+      case 'today':
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        break;
+      case 'last7d':
+        startDate = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+        break;
+      case 'last30d':
+        startDate = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
+        break;
+      case 'thisMonth':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        break;
+      default:
+        return { start: 0, end: 0 };
+    }
+    return { start: Math.floor(startDate.getTime() / 1000), end };
+  };
+
   const loadTasks = async () => {
     setLoadingTasks(true);
     try {
@@ -175,6 +227,20 @@ const ImageGeneration = () => {
       };
       if (taskStatusFilter) {
         params.status = taskStatusFilter;
+      }
+      if (taskModelFilter) {
+        params.model_id = taskModelFilter;
+      }
+      const { start, end } = computeTimeRange(taskTimeFilter);
+      if (start > 0) {
+        params.start_time = start;
+        params.end_time = end;
+      }
+      if (taskSortBy) {
+        params.sort_by = taskSortBy;
+      }
+      if (taskSortOrder) {
+        params.sort_order = taskSortOrder;
       }
 
       const res = await API.get('/api/image-generation/tasks', { params });
@@ -223,11 +289,13 @@ const ImageGeneration = () => {
     setDeletingTasks(true);
     try {
       const deletePromises = Array.from(selectedTaskIds).map((taskId) =>
-        API.delete(`/api/image-generation/tasks/${taskId}`)
+        API.delete(`/api/image-generation/tasks/${taskId}`),
       );
 
       const results = await Promise.allSettled(deletePromises);
-      const successCount = results.filter((r) => r.status === 'fulfilled').length;
+      const successCount = results.filter(
+        (r) => r.status === 'fulfilled',
+      ).length;
       const failCount = results.filter((r) => r.status === 'rejected').length;
 
       if (successCount > 0) {
@@ -492,10 +560,16 @@ const ImageGeneration = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '12px 16px',
+      padding: '10px 20px',
       borderBottom: '1px solid var(--semi-color-border)',
       flexWrap: 'wrap',
-      gap: 8,
+      gap: 12,
+      minHeight: 56,
+    },
+    tabsGroup: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
     },
     rightContent: {
       flex: 1,
@@ -503,6 +577,54 @@ const ImageGeneration = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    selectionBar: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '8px 20px',
+      borderBottom: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
+      gap: 12,
+      flexWrap: 'wrap',
+    },
+    chatList: {
+      flex: 1,
+      overflowY: 'auto',
+      padding: '20px 24px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 24,
+      width: '100%',
+    },
+    chatGroup: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 12,
+    },
+    chatGroupLabel: {
+      fontSize: 12,
+      color: 'var(--semi-color-text-3)',
+      letterSpacing: 1,
+      padding: '0 4px',
+    },
+    chatItem: {
+      display: 'flex',
+      gap: 12,
+      padding: 12,
+      background: 'var(--semi-color-bg-0)',
+      borderRadius: 12,
+      border: '1px solid var(--semi-color-border)',
+      cursor: 'pointer',
+      transition: 'all 0.2s',
+    },
+    chatThumb: {
+      width: 96,
+      height: 96,
+      borderRadius: 8,
+      objectFit: 'cover',
+      flexShrink: 0,
+      background: 'var(--semi-color-fill-1)',
     },
     label: {
       display: 'block',
@@ -519,18 +641,17 @@ const ImageGeneration = () => {
       alignItems: 'center',
       gap: 6,
       padding: '6px 14px',
-      borderRadius: 20,
+      borderRadius: 999,
       border: 'none',
       cursor: 'pointer',
       fontSize: 13,
       fontWeight: 500,
       transition: 'all 0.2s',
       background: active
-        ? 'var(--semi-color-primary-light-default)'
-        : 'transparent',
-      color: active
-        ? 'var(--semi-color-primary)'
-        : 'var(--semi-color-text-2)',
+        ? 'linear-gradient(135deg, #f59e3a 0%, #2faf7c 100%)'
+        : 'var(--semi-color-fill-0)',
+      color: active ? '#ffffff' : 'var(--semi-color-text-2)',
+      boxShadow: active ? '0 2px 6px rgba(47, 175, 124, 0.25)' : 'none',
     }),
     tabDot: {
       width: 8,
@@ -548,7 +669,8 @@ const ImageGeneration = () => {
       fontSize: 15,
       fontWeight: 600,
       color: '#fff',
-      background: 'linear-gradient(135deg, #e8593c 0%, #d4a843 50%, #5a9e6f 100%)',
+      background:
+        'linear-gradient(135deg, #e8593c 0%, #d4a843 50%, #5a9e6f 100%)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -749,17 +871,25 @@ const ImageGeneration = () => {
                   resize: 'none',
                 }}
               />
-              <div style={styles.charCount}>
-                {prompt.length}/5000
-              </div>
+              <div style={styles.charCount}>{prompt.length}/5000</div>
             </div>
           </div>
 
           <div style={styles.fieldGroup}>
             <span style={styles.label}>{t('参考图像')}</span>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+                alignItems: 'center',
+              }}
+            >
               {referenceImages.map((file, idx) => (
-                <div key={file.uid || idx} style={styles.referenceImageContainer}>
+                <div
+                  key={file.uid || idx}
+                  style={styles.referenceImageContainer}
+                >
                   <img
                     src={
                       file.url ||
@@ -832,7 +962,7 @@ const ImageGeneration = () => {
             </Select>
           </div>
           <div style={styles.paramItem}>
-            <span style={styles.paramLabel}>{t('生成数目')}</span>
+            <span style={styles.paramLabel}>{t('生成数量')}</span>
             <InputNumber
               min={1}
               max={4}
@@ -848,9 +978,7 @@ const ImageGeneration = () => {
             ...styles.generateBtn,
             opacity: generating || !selectedModel || !prompt.trim() ? 0.6 : 1,
             pointerEvents:
-              generating || !selectedModel || !prompt.trim()
-                ? 'none'
-                : 'auto',
+              generating || !selectedModel || !prompt.trim() ? 'none' : 'auto',
           }}
           onClick={handleGenerate}
           disabled={generating || !selectedModel || !prompt.trim()}
@@ -868,126 +996,351 @@ const ImageGeneration = () => {
     </div>
   );
 
-  const renderRightPanel = () => (
-    <div style={styles.rightPanel}>
-      <div style={styles.rightTopBar}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Text strong style={{ fontSize: 16 }}>
-            {t('任务列表')}
-          </Text>
-          <Text type='tertiary' size='small'>
-            {t('共')} {taskTotal} {t('个任务')}
-          </Text>
-          {selectedTaskIds.size > 0 && (
-            <Text type='tertiary' size='small'>
-              ({t('已选择')} {selectedTaskIds.size} {t('个')})
-            </Text>
+  // 把任务按"日期"分组，用于「对话」视图
+  const groupTasksByDate = (list) => {
+    const groups = new Map();
+    list.forEach((task) => {
+      const d = new Date((task.created_time || 0) * 1000);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(task);
+    });
+    return Array.from(groups.entries());
+  };
+
+  const renderHistoryContent = () => (
+    <Spin spinning={loadingTasks} style={{ width: '100%', height: '100%' }}>
+      {tasks.length > 0 ? (
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div style={styles.tasksGrid}>
+            {tasks.map((task) => (
+              <ImageGenerationTaskCard
+                key={task.id}
+                task={task}
+                selected={selectedTaskIds.has(task.id)}
+                onSelectChange={handleTaskSelect}
+                onClick={() => {
+                  setSelectedTask(task);
+                  setTaskModalVisible(true);
+                }}
+              />
+            ))}
+          </div>
+          {taskTotal > taskPageSize && (
+            <div
+              style={{
+                padding: '16px',
+                textAlign: 'center',
+                borderTop: '1px solid var(--semi-color-border)',
+              }}
+            >
+              <Pagination
+                total={taskTotal}
+                currentPage={taskPage}
+                pageSize={taskPageSize}
+                onPageChange={setTaskPage}
+                showSizeChanger
+                onPageSizeChange={setTaskPageSize}
+                pageSizeOpts={[10, 20, 50, 100]}
+              />
+            </div>
           )}
         </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {selectedTaskIds.size > 0 && (
-            <>
-              <Button
-                size='small'
-                type='tertiary'
-                onClick={() => handleSelectAll(false)}
-              >
-                {t('取消选择')}
-              </Button>
-              <Button
-                size='small'
-                type='danger'
-                icon={<IconDelete />}
-                loading={deletingTasks}
-                onClick={handleBatchDelete}
-              >
-                {t('删除选中')}
-              </Button>
-            </>
-          )}
-          {selectedTaskIds.size === 0 && tasks.length > 0 && (
-            <Button
-              size='small'
-              type='tertiary'
-              onClick={() => handleSelectAll(true)}
-            >
-              {t('全选')}
-            </Button>
-          )}
-          <div style={styles.filterGroup}>
-            <span style={styles.filterLabel}>{t('状态')}</span>
-            <Select
-              size='small'
-              value={taskStatusFilter}
-              onChange={setTaskStatusFilter}
-              style={{ width: 120 }}
-            >
-              <Select.Option value=''>{t('全部')}</Select.Option>
-              <Select.Option value='pending'>{t('等待中')}</Select.Option>
-              <Select.Option value='processing'>{t('生成中')}</Select.Option>
-              <Select.Option value='completed'>{t('已完成')}</Select.Option>
-              <Select.Option value='failed'>{t('失败')}</Select.Option>
-            </Select>
+      ) : (
+        <div style={styles.emptyState}>
+          <div style={styles.emptyIcon}>
+            <IconClock
+              size='extra-large'
+              style={{ color: '#e8593c', fontSize: 28 }}
+            />
           </div>
+          <Text
+            strong
+            style={{ fontSize: 16, color: 'var(--semi-color-text-0)' }}
+          >
+            {t('暂无生成记录')}
+          </Text>
+          <Text
+            type='tertiary'
+            style={{ fontSize: 13, textAlign: 'center', maxWidth: 320 }}
+          >
+            {t('完成一次生成后，这里会保留你的创作历史记录。')}
+          </Text>
+        </div>
+      )}
+    </Spin>
+  );
+
+  const renderChatContent = () => {
+    if (loadingTasks && tasks.length === 0) {
+      return (
+        <Spin spinning style={{ width: '100%', height: '100%' }}>
+          <div style={{ height: '100%' }} />
+        </Spin>
+      );
+    }
+    if (tasks.length === 0) {
+      return (
+        <div style={styles.emptyState}>
+          <div style={styles.emptyIcon}>
+            <MessageSquareText size={28} color='#e8593c' />
+          </div>
+          <Text
+            strong
+            style={{ fontSize: 16, color: 'var(--semi-color-text-0)' }}
+          >
+            {t('暂无对话')}
+          </Text>
+          <Text
+            type='tertiary'
+            style={{ fontSize: 13, textAlign: 'center', maxWidth: 320 }}
+          >
+            {t('在左侧描述你的创意并点击生成，对话流将在这里展示。')}
+          </Text>
+        </div>
+      );
+    }
+    const grouped = groupTasksByDate(tasks);
+    return (
+      <div style={styles.chatList}>
+        {grouped.map(([date, list]) => (
+          <div key={date} style={styles.chatGroup}>
+            <span style={styles.chatGroupLabel}>{date}</span>
+            {list.map((task) => (
+              <div
+                key={task.id}
+                style={styles.chatItem}
+                onClick={() => {
+                  setSelectedTask(task);
+                  setTaskModalVisible(true);
+                }}
+              >
+                <div
+                  style={{
+                    ...styles.chatThumb,
+                    backgroundImage: task.image_url
+                      ? `url(${task.image_url})`
+                      : undefined,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                  }}
+                >
+                  {!task.image_url && (
+                    <div
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--semi-color-text-3)',
+                      }}
+                    >
+                      <IconImage size='large' />
+                    </div>
+                  )}
+                </div>
+                <div
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    minWidth: 0,
+                  }}
+                >
+                  <Text
+                    strong
+                    ellipsis={{ showTooltip: true }}
+                    style={{ fontSize: 14 }}
+                  >
+                    {task.prompt || t('（无提示词）')}
+                  </Text>
+                  <Text type='tertiary' size='small'>
+                    {task.model_id}
+                  </Text>
+                  <Text type='tertiary' size='small'>
+                    {new Date((task.created_time || 0) * 1000).toLocaleString()}
+                  </Text>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+        {taskTotal > taskPageSize && (
+          <div style={{ padding: '8px 0', textAlign: 'center' }}>
+            <Pagination
+              total={taskTotal}
+              currentPage={taskPage}
+              pageSize={taskPageSize}
+              onPageChange={setTaskPage}
+              showSizeChanger
+              onPageSizeChange={setTaskPageSize}
+              pageSizeOpts={[10, 20, 50, 100]}
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderRightPanel = () => (
+    <div style={styles.rightPanel}>
+      {/* 顶部栏：左侧 Tab + 右侧筛选 */}
+      <div style={styles.rightTopBar}>
+        <div style={styles.tabsGroup}>
+          <button
+            type='button'
+            style={styles.tabBtn(activeTab === 'history')}
+            onClick={() => setActiveTab('history')}
+          >
+            <IconCheckCircleStroked size='small' />
+            {t('生成记录')}
+          </button>
+          <button
+            type='button'
+            style={styles.tabBtn(activeTab === 'chat')}
+            onClick={() => setActiveTab('chat')}
+          >
+            <IconCommentStroked size='small' />
+            {t('对话')}
+          </button>
+        </div>
+
+        <div style={styles.filterGroup}>
+          <span style={styles.filterLabel}>{t('状态')}</span>
+          <Select
+            size='small'
+            value={taskStatusFilter}
+            onChange={setTaskStatusFilter}
+            style={{ width: 110 }}
+          >
+            <Select.Option value=''>{t('全部')}</Select.Option>
+            <Select.Option value='pending'>{t('等待中')}</Select.Option>
+            <Select.Option value='generating'>{t('生成中')}</Select.Option>
+            <Select.Option value='success'>{t('已完成')}</Select.Option>
+            <Select.Option value='failed'>{t('失败')}</Select.Option>
+          </Select>
+
+          <span style={styles.filterLabel}>{t('模型')}</span>
+          <Select
+            size='small'
+            value={taskModelFilter}
+            onChange={setTaskModelFilter}
+            style={{ width: 140 }}
+            filter
+            placeholder={t('全部')}
+          >
+            <Select.Option value=''>{t('全部')}</Select.Option>
+            {models
+              .filter((m) => m.status === 1)
+              .map((m) => (
+                <Select.Option key={m.request_model} value={m.request_model}>
+                  {m.display_name || m.request_model}
+                </Select.Option>
+              ))}
+          </Select>
+
+          <span style={styles.filterLabel}>{t('时间')}</span>
+          <Select
+            size='small'
+            value={taskTimeFilter}
+            onChange={setTaskTimeFilter}
+            style={{ width: 110 }}
+          >
+            <Select.Option value=''>{t('全部')}</Select.Option>
+            <Select.Option value='today'>{t('今天')}</Select.Option>
+            <Select.Option value='last7d'>{t('近 7 天')}</Select.Option>
+            <Select.Option value='last30d'>{t('近 30 天')}</Select.Option>
+            <Select.Option value='thisMonth'>{t('本月')}</Select.Option>
+          </Select>
+
+          <Select
+            size='small'
+            value={taskSortBy}
+            onChange={setTaskSortBy}
+            style={{ width: 120 }}
+          >
+            <Select.Option value='created_time'>
+              {t('排序：创建时间')}
+            </Select.Option>
+            <Select.Option value='completed_time'>
+              {t('排序：完成时间')}
+            </Select.Option>
+            <Select.Option value='status'>{t('排序：状态')}</Select.Option>
+          </Select>
+
+          <Button
+            size='small'
+            type='tertiary'
+            icon={
+              taskSortOrder === 'desc' ? <IconChevronDown /> : <IconChevronUp />
+            }
+            onClick={() =>
+              setTaskSortOrder(taskSortOrder === 'desc' ? 'asc' : 'desc')
+            }
+          >
+            {taskSortOrder === 'desc' ? t('降序') : t('升序')}
+          </Button>
         </div>
       </div>
 
-      <div style={styles.rightContent}>
-        <Spin spinning={loadingTasks} style={{ width: '100%', height: '100%' }}>
-          {tasks.length > 0 ? (
-            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <div style={styles.tasksGrid}>
-                {tasks.map((task) => (
-                  <ImageGenerationTaskCard
-                    key={task.id}
-                    task={task}
-                    selected={selectedTaskIds.has(task.id)}
-                    onSelectChange={handleTaskSelect}
-                    onClick={() => {
-                      setSelectedTask(task);
-                      setTaskModalVisible(true);
-                    }}
-                  />
-                ))}
-              </div>
-              {taskTotal > taskPageSize && (
-                <div style={{ padding: '16px', textAlign: 'center', borderTop: '1px solid var(--semi-color-border)' }}>
-                  <Pagination
-                    total={taskTotal}
-                    currentPage={taskPage}
-                    pageSize={taskPageSize}
-                    onPageChange={setTaskPage}
-                    showSizeChanger
-                    onPageSizeChange={setTaskPageSize}
-                    pageSizeOpts={[10, 20, 50, 100]}
-                  />
-                </div>
+      {/* 选择/批量操作条（仅在「生成记录」且有选中项或非空时显示） */}
+      {activeTab === 'history' &&
+        (selectedTaskIds.size > 0 || tasks.length > 0) && (
+          <div style={styles.selectionBar}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Text type='tertiary' size='small'>
+                {t('共')} {taskTotal} {t('个任务')}
+              </Text>
+              {selectedTaskIds.size > 0 && (
+                <Text type='tertiary' size='small'>
+                  ({t('已选择')} {selectedTaskIds.size} {t('个')})
+                </Text>
               )}
             </div>
-          ) : (
-            <div style={styles.emptyState}>
-              <div style={styles.emptyIcon}>
-                <IconClock
-                  size='extra-large'
-                  style={{ color: '#e8593c', fontSize: 28 }}
-                />
-              </div>
-              <Text
-                strong
-                style={{ fontSize: 16, color: 'var(--semi-color-text-0)' }}
-              >
-                {t('暂无任务')}
-              </Text>
-              <Text
-                type='tertiary'
-                style={{ fontSize: 13, textAlign: 'center', maxWidth: 280 }}
-              >
-                {t('点击左侧生成按钮创建图片生成任务')}
-              </Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {selectedTaskIds.size > 0 ? (
+                <>
+                  <Button
+                    size='small'
+                    type='tertiary'
+                    onClick={() => handleSelectAll(false)}
+                  >
+                    {t('取消选择')}
+                  </Button>
+                  <Button
+                    size='small'
+                    type='danger'
+                    icon={<IconDelete />}
+                    loading={deletingTasks}
+                    onClick={handleBatchDelete}
+                  >
+                    {t('删除选中')}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size='small'
+                  type='tertiary'
+                  onClick={() => handleSelectAll(true)}
+                >
+                  {t('全选')}
+                </Button>
+              )}
             </div>
-          )}
-        </Spin>
+          </div>
+        )}
+
+      <div style={styles.rightContent}>
+        {activeTab === 'history' ? renderHistoryContent() : renderChatContent()}
       </div>
 
       <ImageGenerationTaskModal
