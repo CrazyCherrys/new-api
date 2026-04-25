@@ -18,26 +18,37 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useState, useEffect } from 'react';
-import { Card, Progress, Spin, Typography, Tag, Checkbox } from '@douyinfe/semi-ui';
-import { IconImage, IconAlertTriangle } from '@douyinfe/semi-icons';
+import { Spin, Typography, Checkbox, Progress } from '@douyinfe/semi-ui';
+import {
+  IconImage,
+  IconAlertTriangle,
+  IconClock,
+  IconCommentStroked,
+  IconEdit,
+  IconDownload,
+} from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import PropTypes from 'prop-types';
 
 const { Text } = Typography;
 
 /**
- * 图片生成任务卡片组件
- *
- * 显示任务状态：
- * - pending/processing: 进度条 + loading动画 + 等待时长
- * - completed: 缩略图
- * - failed: 错误图标
+ * 图片生成任务卡片
+ * - pending/generating：环形/旋转动画 + 进度 + 等待时长
+ * - success：缩略图填充
+ * - failed：居中红色错误图标
+ * 视觉风格与「生成详情」弹窗保持一致：圆角、底部柔光、悬浮动作图标。
  */
-const ImageGenerationTaskCard = ({ task, onClick, selected, onSelectChange }) => {
+const ImageGenerationTaskCard = ({
+  task,
+  onClick,
+  selected,
+  onSelectChange,
+}) => {
   const { t } = useTranslation();
   const [waitTime, setWaitTime] = useState(0);
+  const [hovered, setHovered] = useState(false);
 
-  // 计算等待时长（实时更新）
   useEffect(() => {
     if (task.status === 'pending' || task.status === 'generating') {
       const updateWaitTime = () => {
@@ -46,109 +57,229 @@ const ImageGenerationTaskCard = ({ task, onClick, selected, onSelectChange }) =>
         const diffSeconds = Math.floor((now - createdAt) / 1000);
         setWaitTime(diffSeconds);
       };
-
       updateWaitTime();
       const timer = setInterval(updateWaitTime, 1000);
-
       return () => clearInterval(timer);
     }
   }, [task.status, task.created_time]);
 
-  // 格式化等待时长
   const formatWaitTime = (seconds) => {
-    if (seconds < 60) {
-      return `${seconds}${t('秒')}`;
-    }
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}${t('分')}${remainingSeconds}${t('秒')}`;
+    if (seconds < 60) return `${seconds}${t('秒')}`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}${t('分')}${s}${t('秒')}`;
   };
 
-  // 渲染卡片内容
-  const renderContent = () => {
-    switch (task.status) {
-      case 'pending':
-      case 'generating':
-        return (
-          <div className="flex flex-col items-center justify-center h-full p-4">
-            <Spin size="large" />
-            <Text className="mt-4" type="tertiary">
-              {task.status === 'pending' ? t('等待中') : t('生成中...')}
-            </Text>
-            <Progress
-              percent={task.progress || 0}
-              showInfo
-              className="w-full mt-2"
-              stroke="var(--semi-color-primary)"
-            />
-            <Text className="mt-2" size="small" type="tertiary">
-              {t('已等待')}: {formatWaitTime(waitTime)}
-            </Text>
-          </div>
-        );
+  const isSuccess = task.status === 'success';
+  const isFailed = task.status === 'failed';
+  const isPending = task.status === 'pending';
+  const isGenerating = task.status === 'generating';
 
-      case 'success':
-        return (
-          <div
-            className="w-full h-full bg-cover bg-center bg-no-repeat cursor-pointer hover:opacity-80 transition-opacity"
-            style={{
-              backgroundImage: task.image_url ? `url(${task.image_url})` : 'none',
-              backgroundColor: task.image_url ? 'transparent' : 'var(--semi-color-fill-0)',
-            }}
-          >
-            {!task.image_url && (
-              <div className="flex items-center justify-center h-full">
-                <IconImage size="extra-large" style={{ color: 'var(--semi-color-text-2)' }} />
+  const statusMeta = (() => {
+    if (isSuccess)
+      return { color: '#3ecf8e', text: t('已完成'), glow: 'rgba(62,207,142,0.35)' };
+    if (isFailed)
+      return { color: '#ef4444', text: t('失败'), glow: 'rgba(239,68,68,0.35)' };
+    if (isGenerating)
+      return { color: '#22d3ee', text: t('生成中'), glow: 'rgba(34,211,238,0.35)' };
+    return { color: '#f59e0b', text: t('等待中'), glow: 'rgba(245,158,11,0.35)' };
+  })();
+
+  const styles = {
+    card: {
+      position: 'relative',
+      width: '100%',
+      aspectRatio: '1 / 1',
+      borderRadius: 14,
+      overflow: 'hidden',
+      cursor: 'pointer',
+      background: 'var(--semi-color-fill-0)',
+      border: '1px solid var(--semi-color-border)',
+      boxShadow: hovered
+        ? `0 14px 32px -18px ${statusMeta.glow}, 0 0 0 1px rgba(255,255,255,0.04)`
+        : `0 8px 22px -16px ${statusMeta.glow}`,
+      transition: 'box-shadow 0.2s ease, transform 0.2s ease',
+      transform: hovered ? 'translateY(-1px)' : 'none',
+    },
+    body: {
+      position: 'absolute',
+      inset: 0,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    imageBg: (url) => ({
+      position: 'absolute',
+      inset: 0,
+      backgroundImage: url ? `url(${url})` : 'none',
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundColor: 'var(--semi-color-fill-1)',
+    }),
+    statusBadge: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      zIndex: 6,
+      padding: '2px 8px',
+      borderRadius: 999,
+      fontSize: 11,
+      fontWeight: 500,
+      color: '#fff',
+      background: statusMeta.color,
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+      boxShadow: '0 2px 6px rgba(0,0,0,0.18)',
+    },
+    checkboxWrap: {
+      position: 'absolute',
+      top: 8,
+      left: 8,
+      zIndex: 6,
+      padding: 4,
+      borderRadius: 6,
+      background: hovered || selected ? 'rgba(0,0,0,0.4)' : 'transparent',
+      backdropFilter: hovered || selected ? 'blur(4px)' : 'none',
+      transition: 'background 0.15s',
+      display: 'flex',
+      alignItems: 'center',
+    },
+    actions: {
+      position: 'absolute',
+      right: 8,
+      bottom: 8,
+      display: 'flex',
+      gap: 6,
+      zIndex: 6,
+      opacity: hovered ? 1 : 0,
+      transform: hovered ? 'translateY(0)' : 'translateY(4px)',
+      transition: 'opacity 0.18s, transform 0.18s',
+      pointerEvents: hovered ? 'auto' : 'none',
+    },
+    actionBtn: {
+      width: 26,
+      height: 26,
+      borderRadius: 7,
+      border: '1px solid rgba(255,255,255,0.12)',
+      background: 'rgba(0,0,0,0.45)',
+      color: '#fff',
+      cursor: 'pointer',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backdropFilter: 'blur(6px)',
+      transition: 'background 0.15s',
+    },
+    centerIcon: (color) => ({
+      width: 56,
+      height: 56,
+      borderRadius: '50%',
+      border: `1.5px solid ${color}`,
+      color: color,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'rgba(0,0,0,0.06)',
+    }),
+    pendingWrap: {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 8,
+      padding: 12,
+      width: '100%',
+    },
+    glowOverlay: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: 60,
+      pointerEvents: 'none',
+      background: `linear-gradient(to top, ${statusMeta.glow}, transparent)`,
+      opacity: isSuccess ? 0 : 0.85,
+    },
+    overlayDarken: {
+      position: 'absolute',
+      inset: 0,
+      pointerEvents: 'none',
+      background: hovered && isSuccess
+        ? 'linear-gradient(to top, rgba(0,0,0,0.45), transparent 55%)'
+        : 'transparent',
+      transition: 'background 0.18s',
+    },
+  };
+
+  const renderCenter = () => {
+    if (isSuccess) {
+      return (
+        <>
+          <div style={styles.imageBg(task.image_url)} />
+          {!task.image_url && (
+            <div style={styles.body}>
+              <div style={{ color: 'var(--semi-color-text-3)' }}>
+                <IconImage size='extra-large' />
               </div>
-            )}
-          </div>
-        );
-
-      case 'failed':
-        return (
-          <div className="flex flex-col items-center justify-center h-full p-4 cursor-pointer hover:bg-gray-50 transition-colors">
-            <IconAlertTriangle size="extra-large" style={{ color: 'var(--semi-color-danger)' }} />
-            <Text className="mt-2" type="danger">
-              {t('图片生成失败')}
-            </Text>
-            {task.error_message && (
-              <Text className="mt-1 text-center" size="small" type="tertiary">
-                {task.error_message}
-              </Text>
-            )}
-          </div>
-        );
-
-      default:
-        return null;
+            </div>
+          )}
+        </>
+      );
     }
-  };
-
-  // 获取状态标签
-  const getStatusTag = () => {
-    const statusMap = {
-      pending: { color: 'blue', text: t('等待中') },
-      generating: { color: 'cyan', text: t('生成中...') },
-      success: { color: 'green', text: t('已完成') },
-      failed: { color: 'red', text: t('失败') },
-    };
-
-    const status = statusMap[task.status] || { color: 'grey', text: task.status };
-    return <Tag color={status.color} size="small">{status.text}</Tag>;
+    if (isFailed) {
+      return (
+        <div style={styles.body}>
+          <div style={styles.centerIcon(statusMeta.color)}>
+            <IconAlertTriangle size='large' />
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div style={styles.body}>
+        <div style={styles.pendingWrap}>
+          {isGenerating ? (
+            <Spin size='large' />
+          ) : (
+            <div style={styles.centerIcon(statusMeta.color)}>
+              <IconClock size='large' />
+            </div>
+          )}
+          <Text type='tertiary' size='small'>
+            {isGenerating ? t('生成中') : t('等待中')}
+          </Text>
+          {isGenerating && (
+            <div style={{ width: '80%' }}>
+              <Progress
+                percent={task.progress || 0}
+                showInfo={false}
+                stroke='var(--semi-color-primary)'
+                size='small'
+              />
+            </div>
+          )}
+          <Text type='tertiary' size='small' style={{ fontSize: 11 }}>
+            {formatWaitTime(waitTime)}
+          </Text>
+        </div>
+      </div>
+    );
   };
 
   return (
-    <Card
-      className="!rounded-lg overflow-hidden"
-      bodyStyle={{ padding: 0, height: '120px', position: 'relative' }}
+    <div
+      style={styles.card}
       onClick={onClick}
-      hoverable
-      style={{ cursor: 'pointer' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-      {renderContent()}
+      {renderCenter()}
+
+      <div style={styles.glowOverlay} />
+      <div style={styles.overlayDarken} />
+
       <div
-        className="absolute top-2 left-2"
-        style={{ zIndex: 10 }}
+        style={styles.checkboxWrap}
         onClick={(e) => e.stopPropagation()}
       >
         <Checkbox
@@ -156,17 +287,68 @@ const ImageGenerationTaskCard = ({ task, onClick, selected, onSelectChange }) =>
           onChange={(e) => onSelectChange(task.id, e.target.checked)}
         />
       </div>
-      <div className="absolute top-2 right-2" style={{ zIndex: 10 }}>
-        {getStatusTag()}
+
+      <span style={styles.statusBadge}>
+        <span
+          style={{
+            width: 5,
+            height: 5,
+            borderRadius: '50%',
+            background: '#fff',
+            opacity: 0.85,
+          }}
+        />
+        {statusMeta.text}
+      </span>
+
+      <div style={styles.actions} onClick={(e) => e.stopPropagation()}>
+        <button
+          type='button'
+          style={styles.actionBtn}
+          title={t('查看详情')}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onClick) onClick();
+          }}
+        >
+          <IconCommentStroked size='small' />
+        </button>
+        {isSuccess && task.image_url && (
+          <a
+            href={task.image_url}
+            download={`image-${task.id}.png`}
+            target='_blank'
+            rel='noopener noreferrer'
+            style={styles.actionBtn}
+            title={t('下载图片')}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <IconDownload size='small' />
+          </a>
+        )}
+        {isFailed && (
+          <button
+            type='button'
+            style={styles.actionBtn}
+            title={t('重试')}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onClick) onClick();
+            }}
+          >
+            <IconEdit size='small' />
+          </button>
+        )}
       </div>
-    </Card>
+    </div>
   );
 };
 
 ImageGenerationTaskCard.propTypes = {
   task: PropTypes.shape({
     id: PropTypes.number.isRequired,
-    status: PropTypes.oneOf(['pending', 'generating', 'success', 'failed']).isRequired,
+    status: PropTypes.oneOf(['pending', 'generating', 'success', 'failed'])
+      .isRequired,
     image_url: PropTypes.string,
     progress: PropTypes.number,
     error_message: PropTypes.string,

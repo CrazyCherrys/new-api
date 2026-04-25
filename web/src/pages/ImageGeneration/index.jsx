@@ -1353,6 +1353,15 @@ const ImageGeneration = () => {
         onRetrySuccess={(newTask) => {
           updateTaskInList(newTask);
         }}
+        onDeleted={(deletedId) => {
+          setTasks((prev) => prev.filter((t) => t.id !== deletedId));
+          setTaskTotal((prev) => Math.max(0, prev - 1));
+          setSelectedTaskIds((prev) => {
+            const next = new Set(prev);
+            next.delete(deletedId);
+            return next;
+          });
+        }}
       />
     </div>
   );
