@@ -32,7 +32,8 @@ func (mm *ModelMapping) Insert() error {
 
 func (mm *ModelMapping) Update() error {
 	mm.UpdatedTime = common.GetTimestamp()
-	return DB.Model(mm).Updates(mm).Error
+	// Use Select to explicitly update all fields including zero values
+	return DB.Model(mm).Select("*").Updates(mm).Error
 }
 
 func GetModelMapping(id int) (*ModelMapping, error) {
