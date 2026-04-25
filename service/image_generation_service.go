@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -411,12 +412,12 @@ func selectChannelForModel(modelName string, userId int, requestEndpoint string)
 	var requiredChannelType int
 	switch requestEndpoint {
 	case "openai", "dalle":
-		requiredChannelType = common.ChannelTypeOpenAI
+		requiredChannelType = constant.ChannelTypeOpenAI
 	case "gemini":
-		requiredChannelType = common.ChannelTypeGemini
+		requiredChannelType = constant.ChannelTypeGemini
 	default:
 		// 默认使用 OpenAI 类型
-		requiredChannelType = common.ChannelTypeOpenAI
+		requiredChannelType = constant.ChannelTypeOpenAI
 	}
 
 	// 查找支持该模型且类型匹配的渠道
