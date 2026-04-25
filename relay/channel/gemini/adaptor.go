@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
@@ -61,10 +62,28 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	// 移除 imagen 模型名称限制，允许使用任意模型 ID
 	// 用户可以在模型映射中配置自定义的模型名称
 
-	// convert size to aspect ratio but allow user to specify aspect ratio
-	aspectRatio := "1:1" // default aspect ratio
-	size := strings.TrimSpace(request.Size)
-	if size != "" {
+	// 构建 Gemini AI Studio 格式的图片生成请求（使用 contents 字段）
+	geminiRequest := dto.GeminiChatRequest{
+		Contents: []dto.GeminiChatContent{
+			{
+				Role: "user",
+				Parts: []dto.GeminiPart{
+					{
+						Text: request.Prompt,
+					},
+				},
+			},
+		},
+	}
+
+	// 构建 imageConfig
+	imageConfig := make(map[string]interface{})
+
+	// 处理 size 参数（转换为 aspectRatio）
+	if request.Size != "" {
+		size := strings.TrimSpace(request.Size)
+		aspectRatio := "1:1" // default
+
 		if strings.Contains(size, ":") {
 			aspectRatio = size
 		} else {
@@ -81,28 +100,18 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 				aspectRatio = "16:9"
 			}
 		}
+
+		imageConfig["aspectRatio"] = aspectRatio
 	}
 
-	// build gemini imagen request
-	geminiRequest := dto.GeminiImageRequest{
-		Instances: []dto.GeminiImageInstance{
-			{
-				Prompt: request.Prompt,
-			},
-		},
-		Parameters: dto.GeminiImageParameters{
-			SampleCount:      int(lo.FromPtrOr(request.N, uint(1))),
-			AspectRatio:      aspectRatio,
-			PersonGeneration: "allow_adult", // default allow adult
-		},
+	// 处理 n 参数（生成图片数量）
+	sampleCount := 1
+	if request.N != nil && *request.N > 0 {
+		sampleCount = int(*request.N)
 	}
+	imageConfig["sampleCount"] = sampleCount
 
-	// Set imageSize when quality parameter is specified
-	// Map quality parameter to imageSize (only supported by Standard and Ultra models)
-	// quality values: auto, high, medium, low (for gpt-image-1), hd, standard (for dall-e-3)
-	// imageSize values: 1K (default), 2K
-	// https://ai.google.dev/gemini-api/docs/imagen
-	// https://platform.openai.com/docs/api-reference/images/create
+	// 处理 quality 参数
 	if request.Quality != "" {
 		imageSize := "1K" // default
 		switch request.Quality {
@@ -113,10 +122,20 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		case "standard", "medium", "low", "auto", "1K":
 			imageSize = "1K"
 		default:
-			// unknown quality value, default to 1K
 			imageSize = "1K"
 		}
-		geminiRequest.Parameters.ImageSize = imageSize
+		imageConfig["imageSize"] = imageSize
+	}
+
+	// 序列化 imageConfig
+	imageConfigJSON, err := common.Marshal(imageConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal imageConfig: %w", err)
+	}
+
+	// 设置 generationConfig
+	geminiRequest.GenerationConfig = dto.GeminiChatGenerationConfig{
+		ImageConfig: imageConfigJSON,
 	}
 
 	return geminiRequest, nil
