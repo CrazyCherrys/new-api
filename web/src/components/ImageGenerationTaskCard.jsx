@@ -39,9 +39,9 @@ const ImageGenerationTaskCard = ({ task, onClick }) => {
 
   // 计算等待时长（实时更新）
   useEffect(() => {
-    if (task.status === 'pending' || task.status === 'processing') {
+    if (task.status === 'pending' || task.status === 'generating') {
       const updateWaitTime = () => {
-        const createdAt = new Date(task.created_at * 1000);
+        const createdAt = new Date(task.created_time * 1000);
         const now = new Date();
         const diffSeconds = Math.floor((now - createdAt) / 1000);
         setWaitTime(diffSeconds);
@@ -52,7 +52,7 @@ const ImageGenerationTaskCard = ({ task, onClick }) => {
 
       return () => clearInterval(timer);
     }
-  }, [task.status, task.created_at]);
+  }, [task.status, task.created_time]);
 
   // 格式化等待时长
   const formatWaitTime = (seconds) => {
@@ -68,7 +68,7 @@ const ImageGenerationTaskCard = ({ task, onClick }) => {
   const renderContent = () => {
     switch (task.status) {
       case 'pending':
-      case 'processing':
+      case 'generating':
         return (
           <div className="flex flex-col items-center justify-center h-full p-4">
             <Spin size="large" />
@@ -87,7 +87,7 @@ const ImageGenerationTaskCard = ({ task, onClick }) => {
           </div>
         );
 
-      case 'completed':
+      case 'success':
         return (
           <div
             className="w-full h-full bg-cover bg-center bg-no-repeat cursor-pointer hover:opacity-80 transition-opacity"
@@ -111,9 +111,9 @@ const ImageGenerationTaskCard = ({ task, onClick }) => {
             <Text className="mt-2" type="danger">
               {t('图片生成失败')}
             </Text>
-            {task.fail_reason && (
+            {task.error_message && (
               <Text className="mt-1 text-center" size="small" type="tertiary">
-                {task.fail_reason}
+                {task.error_message}
               </Text>
             )}
           </div>
@@ -128,8 +128,8 @@ const ImageGenerationTaskCard = ({ task, onClick }) => {
   const getStatusTag = () => {
     const statusMap = {
       pending: { color: 'blue', text: t('等待中') },
-      processing: { color: 'cyan', text: t('生成中...') },
-      completed: { color: 'green', text: t('已完成') },
+      generating: { color: 'cyan', text: t('生成中...') },
+      success: { color: 'green', text: t('已完成') },
       failed: { color: 'red', text: t('失败') },
     };
 
@@ -156,11 +156,11 @@ const ImageGenerationTaskCard = ({ task, onClick }) => {
 ImageGenerationTaskCard.propTypes = {
   task: PropTypes.shape({
     id: PropTypes.number.isRequired,
-    status: PropTypes.oneOf(['pending', 'processing', 'completed', 'failed']).isRequired,
+    status: PropTypes.oneOf(['pending', 'generating', 'success', 'failed']).isRequired,
     image_url: PropTypes.string,
     progress: PropTypes.number,
-    fail_reason: PropTypes.string,
-    created_at: PropTypes.number.isRequired,
+    error_message: PropTypes.string,
+    created_time: PropTypes.number.isRequired,
   }).isRequired,
   onClick: PropTypes.func,
 };
