@@ -62,6 +62,7 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 		Status:          model.ImageTaskStatusPending,
 		Params:          params,
 		Cost:            0, // 实际费用在完成后计算
+		CreatedTime:     common.GetTimestamp(),
 	}
 
 	if err := task.Insert(); err != nil {
