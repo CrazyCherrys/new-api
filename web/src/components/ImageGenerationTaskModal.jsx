@@ -135,7 +135,7 @@ const ImageGenerationTaskModal = ({ visible, onClose, task, onRetrySuccess }) =>
               {t('错误信息')}:
             </Text>
             <div style={{ marginTop: '8px' }}>
-              <Text style={{ color: '#f56c6c', whiteSpace: 'pre-wrap' }}>
+              <Text style={{ color: '#f56c6c', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                 {task.error_message}
               </Text>
             </div>

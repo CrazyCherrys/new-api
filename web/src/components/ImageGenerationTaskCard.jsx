@@ -140,19 +140,23 @@ const ImageGenerationTaskCard = ({ task, onClick, selected, onSelectChange }) =>
   return (
     <Card
       className="!rounded-lg overflow-hidden"
-      bodyStyle={{ padding: 0, height: '120px' }}
+      bodyStyle={{ padding: 0, height: '120px', position: 'relative' }}
       onClick={onClick}
       hoverable
-      style={{ cursor: 'pointer', position: 'relative' }}
+      style={{ cursor: 'pointer' }}
     >
       {renderContent()}
-      <div className="absolute top-2 left-2" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="absolute top-2 left-2"
+        style={{ zIndex: 10 }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <Checkbox
           checked={selected}
           onChange={(e) => onSelectChange(task.id, e.target.checked)}
         />
       </div>
-      <div className="absolute top-2 right-2">
+      <div className="absolute top-2 right-2" style={{ zIndex: 10 }}>
         {getStatusTag()}
       </div>
     </Card>
