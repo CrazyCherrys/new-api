@@ -271,6 +271,12 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 
 // callUpstreamImageAPIViaRelay 通过内部 API 调用 relay 层处理图片生成
 func callUpstreamImageAPIViaRelay(ctx context.Context, ch *model.Channel, task *model.ImageGenerationTask, imageReq *dto.ImageRequest) (*http.Response, error) {
+	// 获取用户的有效 Token
+	userToken, err := getUserValidToken(task.UserId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user token: %w", err)
+	}
+
 	// 构建内部 API 请求 URL（通过 relay 层）
 	// 使用 localhost 调用自己的 /v1/images/generations 端点
 	port := os.Getenv("PORT")
@@ -292,9 +298,8 @@ func callUpstreamImageAPIViaRelay(ctx context.Context, ch *model.Channel, task *
 	}
 
 	// 设置请求头 - 使用用户的 token 来调用内部 API
-	// 注意：这里需要一个系统级别的 token 或者使用渠道的 key
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+ch.Key)
+	req.Header.Set("Authorization", "Bearer "+userToken)
 
 	// 发送请求
 	client := &http.Client{
@@ -449,6 +454,27 @@ func getStringValue(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// getUserValidToken 获取用户的有效 Token
+func getUserValidToken(userId int) (string, error) {
+	tokens, err := model.GetAllUserTokens(userId, 0, 10)
+	if err != nil {
+		return "", fmt.Errorf("failed to get user tokens: %w", err)
+	}
+
+	// 查找第一个启用且未过期的 token
+	now := time.Now().Unix()
+	for _, token := range tokens {
+		if token.Status == common.TokenStatusEnabled {
+			// 检查是否过期（-1 表示永不过期）
+			if token.ExpiredTime == -1 || token.ExpiredTime > now {
+				return token.Key, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no valid token found for user %d", userId)
 }
 
 // CleanupExpiredImageTasks 清理过期的图片任务
