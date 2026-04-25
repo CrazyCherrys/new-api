@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,17 +39,9 @@ func CreateImageGenerationTask(c *gin.Context) {
 		return
 	}
 
-	// 创建任务
-	task := &model.ImageGenerationTask{
-		UserId:          userId,
-		ModelId:         req.ModelId,
-		Prompt:          req.Prompt,
-		RequestEndpoint: req.RequestEndpoint,
-		Params:          req.Params,
-		Status:          model.ImageTaskStatusPending,
-	}
-
-	if err := task.Insert(); err != nil {
+	// 调用服务层创建任务（会自动启动异步处理）
+	task, err := service.CreateImageGenerationTask(userId, req.ModelId, req.Prompt, req.RequestEndpoint, req.Params)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
