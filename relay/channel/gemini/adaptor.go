@@ -145,7 +145,8 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
 	version := model_setting.GetGeminiVersionSetting(info.UpstreamModelName)
 
-	if strings.HasPrefix(info.UpstreamModelName, "imagen") {
+	// 检查是否是图片生成请求（通过 RelayMode 判断，而不是模型名前缀）
+	if info.RelayMode == constant.RelayModeImagesGenerations {
 		return fmt.Sprintf("%s/%s/models/%s:predict", info.ChannelBaseUrl, version, info.UpstreamModelName), nil
 	}
 
