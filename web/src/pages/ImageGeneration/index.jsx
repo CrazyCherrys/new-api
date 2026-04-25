@@ -340,21 +340,23 @@ const ImageGeneration = () => {
       showError(t('请输入提示词'));
       return;
     }
+    if (!selectedModelData?.request_endpoint) {
+      showError(t('模型配置错误：缺少 request_endpoint'));
+      return;
+    }
 
     setGenerating(true);
     try {
-      // 准备任务参数
-      const taskParams = {
-        model: selectedModel,
-        prompt: prompt.trim(),
+      // 准备参数对象
+      const params = {
         quantity: quantity,
       };
 
       if (aspectRatio) {
-        taskParams.aspect_ratio = aspectRatio;
+        params.aspect_ratio = aspectRatio;
       }
       if (resolution) {
-        taskParams.resolution = resolution;
+        params.resolution = resolution;
       }
 
       // 处理参考图片
@@ -368,11 +370,18 @@ const ImageGeneration = () => {
           });
         });
         const base64Images = await Promise.all(imagePromises);
-        taskParams.reference_images = base64Images;
+        params.reference_images = base64Images;
       }
 
-      // 创建任务
-      const res = await API.post('/api/image-generation/tasks', taskParams);
+      // 创建任务（使用后端期望的字段名）
+      const taskPayload = {
+        model_id: selectedModel,
+        prompt: prompt.trim(),
+        request_endpoint: selectedModelData.request_endpoint,
+        params: JSON.stringify(params),
+      };
+
+      const res = await API.post('/api/image-generation/tasks', taskPayload);
       if (res.data.success) {
         showSuccess(t('任务已创建，正在生成中...'));
         // 刷新任务列表
