@@ -207,14 +207,35 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	}
 
 	// 应用参数
-	if size, ok := params["size"].(string); ok {
+	// 兼容前端字段名：aspect_ratio / resolution / quantity（来自 ImageGeneration UI）
+	// 与外部 OpenAI 兼容接口的 size / quality / n。前者优先级高于 OpenAI 的同义字段，
+	// 没有时回落到 OpenAI 字段，确保 /v1/images/generations 直连用法不受影响。
+	if size, ok := params["size"].(string); ok && size != "" {
 		imageReq.Size = size
 	}
-	if quality, ok := params["quality"].(string); ok {
+	if ar, ok := params["aspect_ratio"].(string); ok && ar != "" {
+		imageReq.Size = ar
+	}
+
+	if quality, ok := params["quality"].(string); ok && quality != "" {
 		imageReq.Quality = quality
 	}
-	if n, ok := params["n"].(float64); ok {
-		nUint := uint(n)
+	if res, ok := params["resolution"].(string); ok && res != "" {
+		imageReq.Quality = res
+	}
+
+	var nVal float64
+	hasN := false
+	if v, ok := params["n"].(float64); ok {
+		nVal = v
+		hasN = true
+	}
+	if v, ok := params["quantity"].(float64); ok {
+		nVal = v
+		hasN = true
+	}
+	if hasN && nVal > 0 {
+		nUint := uint(nVal)
 		imageReq.N = &nUint
 	}
 
@@ -337,13 +358,18 @@ func parseImageResponse(resp *http.Response) (imageUrl string, metadata string, 
 		return "", "", fmt.Errorf("no image data in response")
 	}
 
-	// 获取第一张图片的 URL
-	imageUrl = imageResp.Data[0].Url
+	// 获取第一张图片：优先使用上游提供的 url；若只有 b64_json（如 Gemini / DALL·E 的 b64_json 模式），
+	// 则拼成 data URL 直接给前端 <img> 渲染。
+	first := imageResp.Data[0]
+	imageUrl = first.Url
+	if imageUrl == "" && first.B64Json != "" {
+		imageUrl = "data:image/png;base64," + first.B64Json
+	}
 
 	// 构建 metadata
 	metadataMap := make(map[string]interface{})
-	if imageResp.Data[0].RevisedPrompt != "" {
-		metadataMap["revised_prompt"] = imageResp.Data[0].RevisedPrompt
+	if first.RevisedPrompt != "" {
+		metadataMap["revised_prompt"] = first.RevisedPrompt
 	}
 	if imageResp.Metadata != nil {
 		metadataMap["metadata"] = imageResp.Metadata

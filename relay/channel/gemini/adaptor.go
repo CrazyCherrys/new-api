@@ -24,6 +24,19 @@ import (
 type Adaptor struct {
 }
 
+// useImagenPredictAPI 判断该模型应当走 Imagen 旧版 :predict 接口
+// （body 为 instances/parameters；响应为 predictions[]），
+// 否则一律走新版 :generateContent 接口
+// （body 为 contents/generationConfig.imageConfig；响应为 candidates[].content.parts[].inlineData）。
+//
+// 判定规则：
+//  1. 模型名以 "imagen" 开头 → :predict（如 imagen-3.0-generate-001）。
+//  2. 否则 → :generateContent（覆盖 gemini-2.5-flash-image / gemini-3-pro-image 等所有
+//     "Gemini 原生图像生成" 模型）。
+func useImagenPredictAPI(model string) bool {
+	return strings.HasPrefix(strings.ToLower(model), "imagen")
+}
+
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
 	if len(request.Contents) > 0 {
 		for i, content := range request.Contents {
@@ -59,86 +72,122 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
-	// 移除 imagen 模型名称限制，允许使用任意模型 ID
-	// 用户可以在模型映射中配置自定义的模型名称
+	// 解析通用参数：把 OpenAI 风格的 size/quality/n 翻译成 Gemini 的 aspectRatio/imageSize/sampleCount。
+	aspectRatio := normalizeAspectRatio(request.Size)
+	imageSize := normalizeImageSize(request.Quality)
+	sampleCount := 1
+	if request.N != nil && *request.N > 0 {
+		sampleCount = int(*request.N)
+	}
 
-	// 构建 Gemini AI Studio 格式的图片生成请求（使用 contents 字段）
+	// 1. Imagen 系列：使用旧版 :predict 接口，body 为 instances/parameters。
+	if useImagenPredictAPI(info.UpstreamModelName) {
+		return dto.GeminiImageRequest{
+			Instances: []dto.GeminiImageInstance{
+				{Prompt: request.Prompt},
+			},
+			Parameters: dto.GeminiImageParameters{
+				SampleCount: sampleCount,
+				AspectRatio: aspectRatio,
+				ImageSize:   imageSize,
+			},
+		}, nil
+	}
+
+	// 2. Gemini 原生图像生成：使用 :generateContent，body 为 contents + generationConfig.imageConfig。
+	//    严格遵循 https://docs.newapi.ai/zh/docs/api/ai-model/images/gemini/geminirelayv1beta-383837589
+	//    所示字段（responseModalities + imageConfig.aspectRatio + imageConfig.imageSize）。
+	imageConfig := make(map[string]interface{})
+	if aspectRatio != "" {
+		imageConfig["aspectRatio"] = aspectRatio
+	}
+	if imageSize != "" {
+		imageConfig["imageSize"] = imageSize
+	}
+
 	geminiRequest := dto.GeminiChatRequest{
 		Contents: []dto.GeminiChatContent{
 			{
 				Role: "user",
 				Parts: []dto.GeminiPart{
-					{
-						Text: request.Prompt,
-					},
+					{Text: request.Prompt},
 				},
 			},
 		},
+		GenerationConfig: dto.GeminiChatGenerationConfig{
+			// 必须显式声明返回模态，否则 gemini-*-image 模型不会输出图像。
+			ResponseModalities: []string{"TEXT", "IMAGE"},
+		},
 	}
 
-	// 构建 imageConfig
-	imageConfig := make(map[string]interface{})
+	if sampleCount > 1 {
+		geminiRequest.GenerationConfig.CandidateCount = &sampleCount
+	}
 
-	// 处理 size 参数（转换为 aspectRatio）
-	if request.Size != "" {
-		size := strings.TrimSpace(request.Size)
-		aspectRatio := "1:1" // default
-
-		if strings.Contains(size, ":") {
-			aspectRatio = size
-		} else {
-			switch size {
-			case "256x256", "512x512", "1024x1024":
-				aspectRatio = "1:1"
-			case "1536x1024":
-				aspectRatio = "3:2"
-			case "1024x1536":
-				aspectRatio = "2:3"
-			case "1024x1792":
-				aspectRatio = "9:16"
-			case "1792x1024":
-				aspectRatio = "16:9"
-			}
+	if len(imageConfig) > 0 {
+		imageConfigJSON, err := common.Marshal(imageConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal imageConfig: %w", err)
 		}
-
-		imageConfig["aspectRatio"] = aspectRatio
-	}
-
-	// 处理 n 参数（生成图片数量）
-	sampleCount := 1
-	if request.N != nil && *request.N > 0 {
-		sampleCount = int(*request.N)
-	}
-	imageConfig["sampleCount"] = sampleCount
-
-	// 处理 quality 参数
-	if request.Quality != "" {
-		imageSize := "1K" // default
-		switch request.Quality {
-		case "hd", "high":
-			imageSize = "2K"
-		case "2K":
-			imageSize = "2K"
-		case "standard", "medium", "low", "auto", "1K":
-			imageSize = "1K"
-		default:
-			imageSize = "1K"
-		}
-		imageConfig["imageSize"] = imageSize
-	}
-
-	// 序列化 imageConfig
-	imageConfigJSON, err := common.Marshal(imageConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal imageConfig: %w", err)
-	}
-
-	// 设置 generationConfig
-	geminiRequest.GenerationConfig = dto.GeminiChatGenerationConfig{
-		ImageConfig: imageConfigJSON,
+		geminiRequest.GenerationConfig.ImageConfig = imageConfigJSON
 	}
 
 	return geminiRequest, nil
+}
+
+// normalizeAspectRatio 接受三种输入：
+//   - 已经是 Gemini 风格的 "16:9"/"1:1" 等，直接返回；
+//   - OpenAI 风格 "1024x1024"/"1792x1024"，按常见分辨率映射；
+//   - 空串，返回空串（让上游使用默认值，不强行注入）。
+func normalizeAspectRatio(size string) string {
+	size = strings.TrimSpace(size)
+	if size == "" {
+		return ""
+	}
+	if strings.Contains(size, ":") {
+		return size
+	}
+	switch size {
+	case "256x256", "512x512", "1024x1024":
+		return "1:1"
+	case "1536x1024":
+		return "3:2"
+	case "1024x1536":
+		return "2:3"
+	case "1024x1792":
+		return "9:16"
+	case "1792x1024":
+		return "16:9"
+	default:
+		return ""
+	}
+}
+
+// normalizeImageSize 把 OpenAI 风格的 quality 映射到 Gemini 的 imageSize（1K / 2K / 4K）。
+// 也兼容直接传 "1K"/"2K"/"4K" 的情况。空串返回空串（默认值由上游决定）。
+func normalizeImageSize(quality string) string {
+	q := strings.TrimSpace(quality)
+	if q == "" {
+		return ""
+	}
+	switch strings.ToLower(q) {
+	case "1k":
+		return "1K"
+	case "2k", "hd", "high":
+		return "2K"
+	case "4k":
+		return "4K"
+	case "standard", "medium", "low", "auto":
+		return "1K"
+	}
+	// 兜底：常见分辨率字符串
+	switch q {
+	case "1024x1024", "1024", "1k":
+		return "1K"
+	case "2048x2048", "2k":
+		return "2K"
+	}
+	return ""
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
@@ -164,9 +213,14 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
 	version := model_setting.GetGeminiVersionSetting(info.UpstreamModelName)
 
-	// 检查是否是图片生成请求（通过 RelayMode 判断，而不是模型名前缀）
+	// 检查是否是图片生成请求：
+	//   - imagen-* 系列模型走旧版 :predict；
+	//   - gemini-*-image / gemini-*-image-preview 等走新版 :generateContent。
 	if info.RelayMode == constant.RelayModeImagesGenerations {
-		return fmt.Sprintf("%s/%s/models/%s:predict", info.ChannelBaseUrl, version, info.UpstreamModelName), nil
+		if useImagenPredictAPI(info.UpstreamModelName) {
+			return fmt.Sprintf("%s/%s/models/%s:predict", info.ChannelBaseUrl, version, info.UpstreamModelName), nil
+		}
+		return fmt.Sprintf("%s/%s/models/%s:generateContent", info.ChannelBaseUrl, version, info.UpstreamModelName), nil
 	}
 
 	if strings.HasPrefix(info.UpstreamModelName, "text-embedding") ||
@@ -278,7 +332,17 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		}
 	}
 
-	if strings.HasPrefix(info.UpstreamModelName, "imagen") {
+	// 图片生成响应分两种格式：
+	//   - imagen-* (走 :predict) → predictions[].bytesBase64Encoded
+	//   - gemini-*-image (走 :generateContent) → candidates[].content.parts[].inlineData.data
+	if info.RelayMode == constant.RelayModeImagesGenerations {
+		if useImagenPredictAPI(info.UpstreamModelName) {
+			return GeminiImageHandler(c, info, resp)
+		}
+		return GeminiNativeImageHandler(c, info, resp)
+	}
+	// 兼容旧逻辑：直接通过模型前缀走 imagen 处理（例如调用方未走 RelayModeImagesGenerations）。
+	if useImagenPredictAPI(info.UpstreamModelName) {
 		return GeminiImageHandler(c, info, resp)
 	}
 
