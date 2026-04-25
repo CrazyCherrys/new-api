@@ -89,7 +89,7 @@ const ModelMappingTable = ({
   const handleStatusToggle = async (record) => {
     try {
       const newStatus = record.status === 1 ? 0 : 1;
-      const res = await API.put(`/api/model-mapping/${record.id}`, {
+      const res = await API.put(`/api/model-mapping/`, {
         ...record,
         status: newStatus,
       });
