@@ -78,13 +78,31 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 func processTaskAsync(taskId int) {
 	initWorkerPool()
 
-	// 获取 worker slot
-	workerPool <- struct{}{}
-	defer func() { <-workerPool }()
+	cfg := worker_setting.GetWorkerSetting()
+	timeout := time.Duration(cfg.ImageTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
 
-	// 处理任务
-	if err := ProcessImageGenerationTask(taskId); err != nil {
-		common.SysLog(fmt.Sprintf("Failed to process image generation task %d: %v", taskId, err))
+	// 创建超时上下文，包括等待 worker pool 的时间
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// 尝试获取 worker slot，带超时
+	select {
+	case workerPool <- struct{}{}:
+		defer func() { <-workerPool }()
+		// 处理任务
+		if err := ProcessImageGenerationTask(taskId); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to process image generation task %d: %v", taskId, err))
+		}
+	case <-ctx.Done():
+		// 超时：标记任务为失败
+		errorMsg := fmt.Sprintf("task timeout: failed to acquire worker slot within %v", timeout)
+		if err := model.UpdateImageTaskStatus(taskId, model.ImageTaskStatusFailed, errorMsg); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to update task %d status on timeout: %v", taskId, err))
+		}
+		common.SysLog(fmt.Sprintf("Task %d timed out waiting for worker slot", taskId))
 	}
 }
 
