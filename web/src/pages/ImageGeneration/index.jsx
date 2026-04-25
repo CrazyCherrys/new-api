@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Select,
@@ -28,6 +28,8 @@ import {
   Image,
   InputNumber,
   TextArea,
+  Pagination,
+  Empty,
 } from '@douyinfe/semi-ui';
 import {
   IconPlus,
@@ -37,6 +39,8 @@ import {
   IconBolt,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
+import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
+import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
 
 const { Text } = Typography;
 
@@ -66,6 +70,18 @@ const ImageGeneration = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterModel, setFilterModel] = useState('all');
   const [filterTime, setFilterTime] = useState('all');
+
+  // 任务列表相关状态
+  const [tasks, setTasks] = useState([]);
+  const [taskTotal, setTaskTotal] = useState(0);
+  const [taskPage, setTaskPage] = useState(1);
+  const [taskPageSize, setTaskPageSize] = useState(20);
+  const [taskStatusFilter, setTaskStatusFilter] = useState(''); // '', 'pending', 'processing', 'completed', 'failed'
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [taskModalVisible, setTaskModalVisible] = useState(false);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const sseRef = useRef(null);
+  const pollingTimerRef = useRef(null);
 
   const formatModelSeries = (series) => {
     if (!series) return '';
@@ -109,7 +125,18 @@ const ImageGeneration = () => {
 
   useEffect(() => {
     loadDrawingModels();
+    loadTasks();
+    connectSSE();
+
+    return () => {
+      disconnectSSE();
+      stopPolling();
+    };
   }, []);
+
+  useEffect(() => {
+    loadTasks();
+  }, [taskPage, taskPageSize, taskStatusFilter]);
 
   const loadDrawingModels = async () => {
     setLoading(true);
@@ -134,6 +161,98 @@ const ImageGeneration = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // 加载任务列表
+  const loadTasks = async () => {
+    setLoadingTasks(true);
+    try {
+      const params = {
+        page: taskPage,
+        page_size: taskPageSize,
+      };
+      if (taskStatusFilter) {
+        params.status = taskStatusFilter;
+      }
+
+      const res = await API.get('/api/image-generation/tasks', { params });
+      if (res.data.success) {
+        setTasks(res.data.data.items || []);
+        setTaskTotal(res.data.data.total || 0);
+      } else {
+        showError(res.data.message || t('加载任务列表失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('加载任务列表失败'));
+    } finally {
+      setLoadingTasks(false);
+    }
+  };
+
+  // 连接 SSE
+  const connectSSE = () => {
+    try {
+      const eventSource = new EventSource('/api/image-generation/sse');
+
+      eventSource.addEventListener('task_update', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          updateTaskInList(data);
+        } catch (err) {
+          console.error('Failed to parse SSE data:', err);
+        }
+      });
+
+      eventSource.onerror = () => {
+        console.log('SSE connection error, falling back to polling');
+        eventSource.close();
+        startPolling();
+      };
+
+      sseRef.current = eventSource;
+    } catch (error) {
+      console.error('Failed to connect SSE:', error);
+      startPolling();
+    }
+  };
+
+  // 断开 SSE
+  const disconnectSSE = () => {
+    if (sseRef.current) {
+      sseRef.current.close();
+      sseRef.current = null;
+    }
+  };
+
+  // 开始轮询
+  const startPolling = () => {
+    if (pollingTimerRef.current) return;
+
+    pollingTimerRef.current = setInterval(() => {
+      loadTasks();
+    }, 5000); // 5秒轮询
+  };
+
+  // ���止轮询
+  const stopPolling = () => {
+    if (pollingTimerRef.current) {
+      clearInterval(pollingTimerRef.current);
+      pollingTimerRef.current = null;
+    }
+  };
+
+  // 更新任务列表中的单个任务
+  const updateTaskInList = (updatedTask) => {
+    setTasks((prevTasks) => {
+      const index = prevTasks.findIndex((t) => t.id === updatedTask.id);
+      if (index !== -1) {
+        const newTasks = [...prevTasks];
+        newTasks[index] = updatedTask;
+        return newTasks;
+      }
+      // 如果是新任务，添加到列表开头
+      return [updatedTask, ...prevTasks];
+    });
   };
 
   useEffect(() => {
@@ -224,122 +343,49 @@ const ImageGeneration = () => {
 
     setGenerating(true);
     try {
-      const hasReferenceImages = referenceImages.length > 0;
-      const requestEndpoint = selectedModelData?.request_endpoint || 'openai';
-
-      let apiUrl = '/v1/images/generations';
-      const params = {
+      // 准备任务参数
+      const taskParams = {
         model: selectedModel,
-        prompt: prompt,
-        n: quantity,
+        prompt: prompt.trim(),
+        quantity: quantity,
       };
 
-      // 根据请求端点选择 API 接口
-      if (requestEndpoint.toLowerCase() === 'openai') {
-        if (hasReferenceImages) {
-          // OpenAI 有参考图使用 edits 接口
-          apiUrl = '/v1/images/edits';
-
-          // 转换参考图为 base64
-          const imagePromises = referenceImages.map((file) => {
-            return new Promise((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = (e) => resolve(e.target.result);
-              reader.onerror = reject;
-              reader.readAsDataURL(file.fileInstance);
-            });
-          });
-          const base64Images = await Promise.all(imagePromises);
-          params.image = base64Images[0]; // edits 接口只支持单张图片
-        } else {
-          // OpenAI 无参考图使用 generations 接口
-          apiUrl = '/v1/images/generations';
-        }
-      } else if (requestEndpoint.toLowerCase() === 'gemini') {
-        // Gemini 使用专用接口
-        apiUrl = '/v1beta/models/' + selectedModel + ':generateContent';
-
-        // Gemini 参数格式不同
-        params.contents = [{
-          parts: [{
-            text: prompt
-          }]
-        }];
-
-        if (hasReferenceImages) {
-          const imagePromises = referenceImages.map((file) => {
-            return new Promise((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = (e) => {
-                const base64 = e.target.result.split(',')[1];
-                resolve({
-                  inline_data: {
-                    mime_type: file.fileInstance.type,
-                    data: base64
-                  }
-                });
-              };
-              reader.onerror = reject;
-              reader.readAsDataURL(file.fileInstance);
-            });
-          });
-          const imageParts = await Promise.all(imagePromises);
-          params.contents[0].parts = [...imageParts, { text: prompt }];
-        }
-
-        delete params.model;
-        delete params.prompt;
-        delete params.n;
-      } else {
-        // 其他端点使用默认 generations 接口
-        if (hasReferenceImages) {
-          const imagePromises = referenceImages.map((file) => {
-            return new Promise((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = (e) => resolve(e.target.result);
-              reader.onerror = reject;
-              reader.readAsDataURL(file.fileInstance);
-            });
-          });
-          const base64Images = await Promise.all(imagePromises);
-          params.reference_images = base64Images;
-        }
-      }
-
-      // 添加分辨率和宽高比参数
       if (aspectRatio) {
-        params.aspect_ratio = aspectRatio;
+        taskParams.aspect_ratio = aspectRatio;
       }
       if (resolution) {
-        params.size = resolution;
+        taskParams.resolution = resolution;
       }
 
-      const res = await API.post(apiUrl, params);
-
-      // 处理不同端点的响应格式
-      let images = [];
-      if (requestEndpoint.toLowerCase() === 'gemini') {
-        // Gemini 响应格式
-        if (res.data.candidates && res.data.candidates.length > 0) {
-          images = res.data.candidates.map(candidate => ({
-            url: candidate.content?.parts?.[0]?.text || ''
-          }));
-        }
-      } else {
-        // OpenAI 格式
-        if (res.data.data && res.data.data.length > 0) {
-          images = res.data.data;
-        }
+      // 处理参考图片
+      if (referenceImages.length > 0) {
+        const imagePromises = referenceImages.map((file) => {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file.fileInstance);
+          });
+        });
+        const base64Images = await Promise.all(imagePromises);
+        taskParams.reference_images = base64Images;
       }
 
-      if (images.length > 0) {
-        setGeneratedImages(images);
-        showSuccess(t('图片生成成功'));
+      // 创建任务
+      const res = await API.post('/api/image-generation/tasks', taskParams);
+      if (res.data.success) {
+        showSuccess(t('任务已创建，正在生成中...'));
+        // 刷新任务列表
+        loadTasks();
       } else {
-        showError(t('图片生成失败'));
+        showError(res.data.message || t('创建任务失败'));
       }
     } catch (error) {
-      showError(error.message || t('图片生成失败'));
+      if (error.response?.data?.message) {
+        showError(error.response.data.message);
+      } else {
+        showError(error.message || t('创建任务失败'));
+      }
     } finally {
       setGenerating(false);
     }
@@ -545,6 +591,16 @@ const ImageGeneration = () => {
       width: '100%',
       alignContent: 'start',
     },
+    tasksGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+      gap: 16,
+      padding: 16,
+      width: '100%',
+      flex: 1,
+      alignContent: 'start',
+      overflowY: 'auto',
+    },
   };
 
   const renderLeftPanel = () => (
@@ -749,141 +805,98 @@ const ImageGeneration = () => {
   const renderRightPanel = () => (
     <div style={styles.rightPanel}>
       <div style={styles.rightTopBar}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button
-            style={styles.tabBtn(activeTab === 'history')}
-            onClick={() => setActiveTab('history')}
-          >
-            <span style={styles.tabDot} />
-            {t('生成记录')}
-          </button>
-          <button
-            style={styles.tabBtn(activeTab === 'creative')}
-            onClick={() => setActiveTab('creative')}
-          >
-            <IconImage size='small' />
-            {t('创意')}
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Text strong style={{ fontSize: 16 }}>
+            {t('任务列表')}
+          </Text>
+          <Text type='tertiary' size='small'>
+            {t('共')} {taskTotal} {t('个任务')}
+          </Text>
         </div>
 
         <div style={styles.filterGroup}>
           <span style={styles.filterLabel}>{t('状态')}</span>
           <Select
             size='small'
-            value={filterStatus}
-            onChange={setFilterStatus}
-            style={{ width: 80 }}
+            value={taskStatusFilter}
+            onChange={setTaskStatusFilter}
+            style={{ width: 120 }}
           >
-            <Select.Option value='all'>{t('全部')}</Select.Option>
-            <Select.Option value='success'>{t('成功')}</Select.Option>
+            <Select.Option value=''>{t('全部')}</Select.Option>
+            <Select.Option value='pending'>{t('等待中')}</Select.Option>
+            <Select.Option value='processing'>{t('生成中')}</Select.Option>
+            <Select.Option value='completed'>{t('已完成')}</Select.Option>
             <Select.Option value='failed'>{t('失败')}</Select.Option>
           </Select>
-
-          <span style={styles.filterLabel}>{t('模型')}</span>
-          <Select
-            size='small'
-            value={filterModel}
-            onChange={setFilterModel}
-            style={{ width: 80 }}
-          >
-            <Select.Option value='all'>{t('全部')}</Select.Option>
-          </Select>
-
-          <span style={styles.filterLabel}>{t('时间')}</span>
-          <Select
-            size='small'
-            value={filterTime}
-            onChange={setFilterTime}
-            style={{ width: 80 }}
-          >
-            <Select.Option value='all'>{t('全部')}</Select.Option>
-          </Select>
-
-          <Button
-            size='small'
-            type='danger'
-            theme='solid'
-            style={{ fontSize: 12 }}
-          >
-            {t('批量勾选')}
-          </Button>
-          <Button
-            size='small'
-            type='warning'
-            theme='borderless'
-            style={{ fontSize: 12 }}
-          >
-            {t('批量多选')}
-          </Button>
-          <Button size='small' theme='borderless' style={{ fontSize: 12 }}>
-            {t('一键清除')}
-          </Button>
-          <Button
-            size='small'
-            type='danger'
-            theme='borderless'
-            style={{ fontSize: 12 }}
-          >
-            {t('删除所选')}
-          </Button>
-          <Text type='tertiary' size='small'>
-            {t('已选 0 张')}
-          </Text>
         </div>
       </div>
 
-      <div
-        style={{
-          ...styles.rightContent,
-          ...(generatedImages.length > 0
-            ? { alignItems: 'flex-start', justifyContent: 'flex-start' }
-            : {}),
-        }}
-      >
-        {generatedImages.length > 0 ? (
-          <div style={styles.imagesGrid}>
-            {generatedImages.map((img, index) => (
-              <div
-                key={index}
-                style={{
-                  borderRadius: 8,
-                  overflow: 'hidden',
-                  border: '1px solid var(--semi-color-border)',
-                }}
-              >
-                <Image
-                  src={img.url}
-                  alt={`Generated ${index + 1}`}
-                  width='100%'
-                  preview
-                  style={{ display: 'block' }}
+      <div style={styles.rightContent}>
+        <Spin spinning={loadingTasks} style={{ width: '100%', height: '100%' }}>
+          {tasks.length > 0 ? (
+            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div style={styles.tasksGrid}>
+                {tasks.map((task) => (
+                  <ImageGenerationTaskCard
+                    key={task.id}
+                    task={task}
+                    onClick={() => {
+                      setSelectedTask(task);
+                      setTaskModalVisible(true);
+                    }}
+                  />
+                ))}
+              </div>
+              {taskTotal > taskPageSize && (
+                <div style={{ padding: '16px', textAlign: 'center', borderTop: '1px solid var(--semi-color-border)' }}>
+                  <Pagination
+                    total={taskTotal}
+                    currentPage={taskPage}
+                    pageSize={taskPageSize}
+                    onPageChange={setTaskPage}
+                    showSizeChanger
+                    onPageSizeChange={setTaskPageSize}
+                    pageSizeOpts={[10, 20, 50, 100]}
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={styles.emptyState}>
+              <div style={styles.emptyIcon}>
+                <IconClock
+                  size='extra-large'
+                  style={{ color: '#e8593c', fontSize: 28 }}
                 />
               </div>
-            ))}
-          </div>
-        ) : (
-          <div style={styles.emptyState}>
-            <div style={styles.emptyIcon}>
-              <IconClock
-                size='extra-large'
-                style={{ color: '#e8593c', fontSize: 28 }}
-              />
+              <Text
+                strong
+                style={{ fontSize: 16, color: 'var(--semi-color-text-0)' }}
+              >
+                {t('暂无任务')}
+              </Text>
+              <Text
+                type='tertiary'
+                style={{ fontSize: 13, textAlign: 'center', maxWidth: 280 }}
+              >
+                {t('点击左侧生成按钮创建图片生成任务')}
+              </Text>
             </div>
-            <Text
-              strong
-              style={{ fontSize: 16, color: 'var(--semi-color-text-0)' }}
-            >
-              {t('暂无生成录')}
-            </Text>
-            <Text
-              type='tertiary'
-              style={{ fontSize: 13, textAlign: 'center', maxWidth: 280 }}
-            >
-              {t('完成一次生成后，这里会保留你的创作历史记录。')}
-            </Text>
-          </div>
-        )}
+          )}
+        </Spin>
       </div>
+
+      <ImageGenerationTaskModal
+        visible={taskModalVisible}
+        onClose={() => {
+          setTaskModalVisible(false);
+          setSelectedTask(null);
+        }}
+        task={selectedTask}
+        onRetrySuccess={(newTask) => {
+          updateTaskInList(newTask);
+        }}
+      />
     </div>
   );
 

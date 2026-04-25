@@ -45,6 +45,9 @@ export default function SettingsWorker(props) {
     'worker_setting.video_timeout': 600,
     'worker_setting.retry_delay': 5,
     'worker_setting.max_retries': 3,
+    'worker_setting.polling_interval': 5,
+    'worker_setting.auto_cleanup_enabled': false,
+    'worker_setting.retention_days': 30,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -309,6 +312,42 @@ export default function SettingsWorker(props) {
                   min={0}
                   max={10}
                   onChange={handleFieldChange('worker_setting.max_retries')}
+                />
+              </Col>
+            </Row>
+          </Form.Section>
+
+          {/* 任务管理设置 */}
+          <Form.Section text={t('任务管理设置')}>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'worker_setting.polling_interval'}
+                  label={t('轮询间隔（秒）')}
+                  extraText={t('Worker 检查新任务的时间间隔')}
+                  min={1}
+                  max={60}
+                  onChange={handleFieldChange('worker_setting.polling_interval')}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'worker_setting.auto_cleanup_enabled'}
+                  label={t('自动清理开关')}
+                  extraText={t('是否自动清理过期的任务和文件')}
+                  onChange={handleFieldChange(
+                    'worker_setting.auto_cleanup_enabled',
+                  )}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'worker_setting.retention_days'}
+                  label={t('保留天数')}
+                  extraText={t('任务和文件的保留天数，超过后自动清理')}
+                  min={1}
+                  max={365}
+                  onChange={handleFieldChange('worker_setting.retention_days')}
                 />
               </Col>
             </Row>

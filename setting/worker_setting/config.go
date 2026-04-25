@@ -31,23 +31,33 @@ type WorkerSetting struct {
 	RetryDelay int `json:"retry_delay"`
 	// MaxRetries 图片生成最大重试次数
 	MaxRetries int `json:"max_retries"`
+
+	// PollingInterval 轮询间隔（秒）
+	PollingInterval int `json:"polling_interval"`
+	// AutoCleanupEnabled 自动清理开关
+	AutoCleanupEnabled bool `json:"auto_cleanup_enabled"`
+	// RetentionDays 保留天数
+	RetentionDays int `json:"retention_days"`
 }
 
 // 默认配置
 var workerSetting = WorkerSetting{
-	MaxWorkers:       4,
-	StorageType:      "local",
-	LocalStoragePath: "",
-	S3Endpoint:       "",
-	S3Bucket:         "",
-	S3Region:         "",
-	S3AccessKey:      "",
-	S3SecretKey:      "",
-	S3PathPrefix:     "",
-	ImageTimeout:     120,
-	VideoTimeout:     600,
-	RetryDelay:       5,
-	MaxRetries:       3,
+	MaxWorkers:         4,
+	StorageType:        "local",
+	LocalStoragePath:   "",
+	S3Endpoint:         "",
+	S3Bucket:           "",
+	S3Region:           "",
+	S3AccessKey:        "",
+	S3SecretKey:        "",
+	S3PathPrefix:       "",
+	ImageTimeout:       120,
+	VideoTimeout:       600,
+	RetryDelay:         5,
+	MaxRetries:         3,
+	PollingInterval:    5,
+	AutoCleanupEnabled: false,
+	RetentionDays:      30,
 }
 
 func init() {

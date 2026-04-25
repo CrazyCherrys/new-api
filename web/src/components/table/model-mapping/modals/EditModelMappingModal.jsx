@@ -241,6 +241,7 @@ const EditModelMappingModal = ({
           label={t('请求端点')}
           placeholder={t('选择请求端点类型')}
           optionList={requestEndpointOptions}
+          rules={[{ required: true, message: t('请选择请求端点') }]}
         />
         <div>
           <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

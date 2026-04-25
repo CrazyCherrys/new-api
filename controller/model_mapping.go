@@ -82,6 +82,11 @@ func CreateModelMapping(c *gin.Context) {
 		return
 	}
 
+	if mm.RequestEndpoint == "" {
+		common.ApiErrorMsg(c, "请求端点不能为空")
+		return
+	}
+
 	// 如果 ActualModel 为空，使用 RequestModel 作为默认值
 	if mm.ActualModel == "" {
 		mm.ActualModel = mm.RequestModel
@@ -122,6 +127,11 @@ func UpdateModelMapping(c *gin.Context) {
 
 	if mm.DisplayName == "" {
 		common.ApiErrorMsg(c, "模型显示名称不能为空")
+		return
+	}
+
+	if mm.RequestEndpoint == "" {
+		common.ApiErrorMsg(c, "请求端点不能为空")
 		return
 	}
 

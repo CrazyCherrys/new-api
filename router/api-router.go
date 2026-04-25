@@ -53,6 +53,17 @@ func SetApiRouter(router *gin.Engine) {
 		// Universal secure verification routes
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.UniversalVerify)
 
+		// Image generation task routes
+		imageGenRoute := apiRouter.Group("/image-generation")
+		imageGenRoute.Use(middleware.UserAuth())
+		{
+			imageGenRoute.POST("/tasks", controller.CreateImageGenerationTask)
+			imageGenRoute.GET("/tasks", controller.GetImageGenerationTasks)
+			imageGenRoute.GET("/tasks/:id", controller.GetImageGenerationTaskDetail)
+			imageGenRoute.POST("/tasks/:id/retry", controller.RetryImageGenerationTask)
+			imageGenRoute.GET("/sse", controller.ImageGenerationSSE)
+		}
+
 		userRoute := apiRouter.Group("/user")
 		{
 			userRoute.POST("/register", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.Register)
