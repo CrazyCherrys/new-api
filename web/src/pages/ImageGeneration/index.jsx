@@ -52,19 +52,51 @@ const { Text } = Typography;
 const ImageGeneration = () => {
   const { t } = useTranslation();
 
+  // LocalStorage keys
+  const STORAGE_KEYS = {
+    SERIES: 'imageGen_selectedSeries',
+    MODEL: 'imageGen_selectedModel',
+    ASPECT_RATIO: 'imageGen_aspectRatio',
+    RESOLUTION: 'imageGen_resolution',
+    QUANTITY: 'imageGen_quantity',
+  };
+
+  // 从 localStorage 读取初始值的辅助函数
+  const getStoredValue = (key, defaultValue) => {
+    try {
+      const stored = localStorage.getItem(key);
+      return stored !== null ? stored : defaultValue;
+    } catch (e) {
+      return defaultValue;
+    }
+  };
+
+  const getStoredNumber = (key, defaultValue) => {
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored !== null) {
+        const num = parseInt(stored, 10);
+        return isNaN(num) ? defaultValue : num;
+      }
+      return defaultValue;
+    } catch (e) {
+      return defaultValue;
+    }
+  };
+
   const [loading, setLoading] = useState(false);
   const [modelSeries, setModelSeries] = useState([]);
   const [models, setModels] = useState([]);
   const [filteredModels, setFilteredModels] = useState([]);
 
-  const [selectedSeries, setSelectedSeries] = useState('');
-  const [selectedModel, setSelectedModel] = useState('');
+  const [selectedSeries, setSelectedSeries] = useState(() => getStoredValue(STORAGE_KEYS.SERIES, ''));
+  const [selectedModel, setSelectedModel] = useState(() => getStoredValue(STORAGE_KEYS.MODEL, ''));
   const [selectedModelData, setSelectedModelData] = useState(null);
   const [prompt, setPrompt] = useState('');
   const [referenceImages, setReferenceImages] = useState([]);
-  const [aspectRatio, setAspectRatio] = useState('');
-  const [resolution, setResolution] = useState('');
-  const [quantity, setQuantity] = useState(1);
+  const [aspectRatio, setAspectRatio] = useState(() => getStoredValue(STORAGE_KEYS.ASPECT_RATIO, ''));
+  const [resolution, setResolution] = useState(() => getStoredValue(STORAGE_KEYS.RESOLUTION, ''));
+  const [quantity, setQuantity] = useState(() => getStoredNumber(STORAGE_KEYS.QUANTITY, 1));
   const [generatedImages, setGeneratedImages] = useState([]);
   const [generating, setGenerating] = useState(false);
 
@@ -429,6 +461,55 @@ const ImageGeneration = () => {
       setAvailableResolutions([]);
     }
   }, [selectedSeries, models]);
+
+  // 保存用户选择到 localStorage
+  useEffect(() => {
+    if (selectedSeries) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.SERIES, selectedSeries);
+      } catch (e) {
+        console.error('Failed to save selectedSeries to localStorage:', e);
+      }
+    }
+  }, [selectedSeries]);
+
+  useEffect(() => {
+    if (selectedModel) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.MODEL, selectedModel);
+      } catch (e) {
+        console.error('Failed to save selectedModel to localStorage:', e);
+      }
+    }
+  }, [selectedModel]);
+
+  useEffect(() => {
+    if (aspectRatio) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.ASPECT_RATIO, aspectRatio);
+      } catch (e) {
+        console.error('Failed to save aspectRatio to localStorage:', e);
+      }
+    }
+  }, [aspectRatio]);
+
+  useEffect(() => {
+    if (resolution) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.RESOLUTION, resolution);
+      } catch (e) {
+        console.error('Failed to save resolution to localStorage:', e);
+      }
+    }
+  }, [resolution]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.QUANTITY, quantity.toString());
+    } catch (e) {
+      console.error('Failed to save quantity to localStorage:', e);
+    }
+  }, [quantity]);
 
   useEffect(() => {
     if (selectedModel) {
