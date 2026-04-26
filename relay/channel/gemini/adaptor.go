@@ -188,24 +188,15 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		})
 	}
 
-	// 根据是否有参考图片决定 responseModalities：
-	// - 无参考图：可能需要文本描述 + 图像，使用 ["TEXT", "IMAGE"]
-	// - 有参考图：纯图生图场景，只需要 ["IMAGE"]
-	responseModalities := []string{"TEXT", "IMAGE"}
-	if len(imageReq.ReferenceImages) > 0 {
-		responseModalities = []string{"IMAGE"}
-	}
-
 	geminiRequest := dto.GeminiChatRequest{
 		Contents: []dto.GeminiChatContent{
 			{
-				Role:  "user",
 				Parts: userParts,
 			},
 		},
 		GenerationConfig: dto.GeminiChatGenerationConfig{
-			// 必须显式声明返回模态，否则 gemini-*-image 模型不会输出图像。
-			ResponseModalities: responseModalities,
+			// 图像生成模型必须显式声明返回模态为 IMAGE，否则不会输出图像。
+			ResponseModalities: []string{"IMAGE"},
 		},
 	}
 
