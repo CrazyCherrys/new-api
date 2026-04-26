@@ -30,7 +30,6 @@ import {
   TextArea,
   Pagination,
   Empty,
-  Badge,
 } from '@douyinfe/semi-ui';
 import {
   IconPlus,
@@ -132,62 +131,6 @@ const ImageGeneration = () => {
     return (
       seriesMap[series.toLowerCase()] ||
       series.charAt(0).toUpperCase() + series.slice(1)
-    );
-  };
-
-  const getEndpointBadge = (endpoint) => {
-    if (!endpoint) return null;
-
-    const endpointLower = endpoint.toLowerCase();
-    if (endpointLower === 'openai' || endpointLower === 'dalle') {
-      return { text: 'OpenAI', color: 'blue' };
-    }
-    if (endpointLower === 'gemini') {
-      return { text: 'Gemini', color: 'green' };
-    }
-    if (endpointLower === 'openai_mod') {
-      return { text: 'OpenAI魔改', color: 'orange' };
-    }
-    return null;
-  };
-
-  const renderEndpointBadge = (badge, isMobile = false) => {
-    if (!badge) return null;
-
-    const backgroundColor =
-      badge.color === 'blue'
-        ? '#3b82f6'
-        : badge.color === 'orange'
-          ? '#f97316'
-          : '#10b981';
-
-    if (isMobile) {
-      return (
-        <div
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            backgroundColor,
-            flexShrink: 0,
-          }}
-          title={badge.text}
-        />
-      );
-    }
-
-    return (
-      <Badge
-        count={badge.text}
-        type="solid"
-        style={{
-          backgroundColor,
-          fontSize: 11,
-          padding: '0 6px',
-          height: 18,
-          lineHeight: '18px',
-        }}
-      />
     );
   };
 
@@ -892,32 +835,6 @@ const ImageGeneration = () => {
               disabled={filteredModels.length === 0}
               filter
               placeholder={t('请选择模型')}
-              renderOptionItem={(option) => {
-                const model = filteredModels.find(
-                  (m) => m.request_model === option.value,
-                );
-                const badge = model ? getEndpointBadge(model.request_endpoint) : null;
-                const isMobile = window.innerWidth < 768;
-                return (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ flex: 1, minWidth: 0 }}>{option.label}</span>
-                    {renderEndpointBadge(badge, isMobile)}
-                  </div>
-                );
-              }}
-              renderSelectedItem={(option) => {
-                const model = filteredModels.find(
-                  (m) => m.request_model === option.value,
-                );
-                const badge = model ? getEndpointBadge(model.request_endpoint) : null;
-                const isMobile = window.innerWidth < 768;
-                return (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{option.label}</span>
-                    {renderEndpointBadge(badge, isMobile)}
-                  </div>
-                );
-              }}
             >
               {filteredModels.map((model) => (
                 <Select.Option
