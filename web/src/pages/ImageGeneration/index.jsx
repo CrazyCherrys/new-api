@@ -217,7 +217,7 @@ const ImageGeneration = () => {
         const seriesList = Array.from(seriesSet);
         setModelSeries(seriesList);
         setSelectedSeries((prev) => {
-          if (prev && prev !== 'all' && seriesList.includes(prev)) {
+          if (prev === 'all' || (prev && seriesList.includes(prev))) {
             return prev;
           }
           return seriesList[0] || 'all';
@@ -439,6 +439,8 @@ const ImageGeneration = () => {
   };
 
   useEffect(() => {
+    // 模型列表尚未加载时跳过，避免以空列表覆盖从 localStorage 恢复的选择
+    if (models.length === 0) return;
     const isModelEnabled = (model) =>
       model.status === undefined || model.status === null || model.status === 1;
     let filtered = [];
