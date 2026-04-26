@@ -231,6 +231,14 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 		imageReq.Quality = quality
 	}
 
+	// Gemini 专用参数：通过正式 JSON 字段传递，确保经 HTTP 序列化后不丢失
+	if ar, ok := params["aspect_ratio"].(string); ok && ar != "" {
+		imageReq.AspectRatio = ar
+	}
+	if res, ok := params["resolution"].(string); ok && res != "" {
+		imageReq.Resolution = res
+	}
+
 	var nVal float64
 	hasN := false
 	if v, ok := params["n"].(float64); ok {

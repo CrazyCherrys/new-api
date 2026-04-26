@@ -73,14 +73,26 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
 	// 解析通用参数：把 OpenAI 风格的 size/quality/n 翻译成 Gemini 的 aspectRatio/imageSize/sampleCount。
-	// 优先从 RawParams 读取 aspect_ratio 和 resolution
+	// 优先级：
+	//   1. ImageRequest.AspectRatio / .Resolution（JSON 字段，序列化安全，覆盖所有调用路径）
+	//   2. RawParams["aspect_ratio"] / ["resolution"]（进程内直调路径的遗留兼容）
+	//   3. Size / Quality（OpenAI 兼容回退）
 	aspectRatio := ""
 	imageSize := ""
 
-	if request.RawParams != nil {
+	if request.AspectRatio != "" {
+		aspectRatio = normalizeAspectRatio(request.AspectRatio)
+	}
+	if request.Resolution != "" {
+		imageSize = normalizeImageSize(request.Resolution)
+	}
+
+	if aspectRatio == "" && request.RawParams != nil {
 		if ar, ok := request.RawParams["aspect_ratio"].(string); ok && ar != "" {
 			aspectRatio = normalizeAspectRatio(ar)
 		}
+	}
+	if imageSize == "" && request.RawParams != nil {
 		if res, ok := request.RawParams["resolution"].(string); ok && res != "" {
 			imageSize = normalizeImageSize(res)
 		}
@@ -182,14 +194,16 @@ func normalizeAspectRatio(size string) string {
 	}
 }
 
-// normalizeImageSize 把 OpenAI 风格的 quality 映射到 Gemini 的 imageSize（1K / 2K / 4K）。
-// 也兼容直接传 "1K"/"2K"/"4K" 的情况。空串返回空串（默认值由上游决定）。
+// normalizeImageSize 把 OpenAI 风格的 quality 映射到 Gemini 的 imageSize（512 / 1K / 2K / 4K）。
+// 也兼容直接传 "512"/"1K"/"2K"/"4K" 的情况。空串返回空串（默认值由上游决定）。
 func normalizeImageSize(quality string) string {
 	q := strings.TrimSpace(quality)
 	if q == "" {
 		return ""
 	}
 	switch strings.ToLower(q) {
+	case "512", "512x512":
+		return "512"
 	case "1k":
 		return "1K"
 	case "2k", "hd", "high":
@@ -201,9 +215,9 @@ func normalizeImageSize(quality string) string {
 	}
 	// 兜底：常见分辨率字符串
 	switch q {
-	case "1024x1024", "1024", "1k":
+	case "1024x1024", "1024":
 		return "1K"
-	case "2048x2048", "2k":
+	case "2048x2048", "2048":
 		return "2K"
 	}
 	return ""

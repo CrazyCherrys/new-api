@@ -33,6 +33,9 @@ type ImageRequest struct {
 	UserId           json.RawMessage `json:"user_id,omitempty"`
 	Image            json.RawMessage `json:"image,omitempty"`
 	RequestEndpoint  string          `json:"request_endpoint,omitempty"`
+	// Gemini/Imagen 专用参数：宽高比（如 "16:9"、"1:1"）和分辨率档位（如 "1K"、"2K"、"4K"）
+	AspectRatio string `json:"aspect_ratio,omitempty"`
+	Resolution  string `json:"resolution,omitempty"`
 	// 用匿名参数接收额外参数
 	Extra map[string]json.RawMessage `json:"-"`
 	// RawParams 保留原始参数用于传递给relay层
