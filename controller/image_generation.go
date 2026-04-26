@@ -254,6 +254,42 @@ func DeleteImageGenerationTask(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"message": "删除成功"})
 }
 
+// GetImageGenerationModels 获取可用的图片生成模型列表
+func GetImageGenerationModels(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "未授权",
+		})
+		return
+	}
+
+	// 获取所有绘画模型（model_type=2）
+	mappings, _, err := model.SearchModelMappings("", 2, 0, 1000)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// 过滤出 status=1 且 request_endpoint 不为空的记录
+	var models []gin.H
+	for _, mapping := range mappings {
+		if mapping.Status == 1 && mapping.RequestEndpoint != "" {
+			models = append(models, gin.H{
+				"request_model":    mapping.RequestModel,
+				"display_name":     mapping.DisplayName,
+				"model_series":     mapping.ModelSeries,
+				"request_endpoint": mapping.RequestEndpoint,
+				"resolutions":      mapping.Resolutions,
+				"aspect_ratios":    mapping.AspectRatios,
+			})
+		}
+	}
+
+	common.ApiSuccess(c, models)
+}
+
 // ImageGenerationSSE SSE推送任务状态更新
 func ImageGenerationSSE(c *gin.Context) {
 	userId := c.GetInt("id")

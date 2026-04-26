@@ -17,6 +17,7 @@ type RetryParam struct {
 	ModelName    string
 	Retry        *int
 	resetNextTry bool
+	ChannelTypes []int
 }
 
 func (p *RetryParam) GetRetry() int {

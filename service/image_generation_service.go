@@ -260,8 +260,14 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	}
 	imageReq.Model = actualModel
 
-	// 选择渠道（根据 request_endpoint 选择正确类型的渠道）
-	channelId, err := selectChannelForModel(task.ModelId, task.UserId, task.RequestEndpoint)
+	// 根据 request_endpoint 获取渠道类型列表
+	channelTypes, err := channelTypesForImageEndpoint(task.RequestEndpoint)
+	if err != nil {
+		return "", "", 0, err
+	}
+
+	// 选择渠道（根据 channelTypes 过滤）
+	channelId, err := selectChannelForModel(actualModel, task.UserId, channelTypes)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("failed to select channel: %w", err)
 	}
@@ -431,47 +437,37 @@ func deductUserQuota(userId int, quota int) error {
 	return model.DecreaseUserQuota(userId, quota)
 }
 
-// selectChannelForModel 为模型选择渠道（根据 request_endpoint 选择正确的渠道类型）
-func selectChannelForModel(modelName string, userId int, requestEndpoint string) (int, error) {
-	// 获取所有渠道
-	channels, err := model.GetAllChannels(0, 0, true, false)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get channels: %w", err)
-	}
-
-	// 根据 request_endpoint 确定需要的渠道类型
-	var requiredChannelType int
-	switch requestEndpoint {
+// channelTypesForImageEndpoint 根据 endpoint 返回对应的渠道类型列表
+func channelTypesForImageEndpoint(endpoint string) ([]int, error) {
+	switch endpoint {
 	case "openai", "dalle":
-		requiredChannelType = constant.ChannelTypeOpenAI
+		return []int{constant.ChannelTypeOpenAI}, nil
 	case "gemini":
-		requiredChannelType = constant.ChannelTypeGemini
+		return []int{constant.ChannelTypeGemini}, nil
 	default:
-		// 默认使用 OpenAI 类型
-		requiredChannelType = constant.ChannelTypeOpenAI
+		return nil, fmt.Errorf("unsupported request_endpoint: %s", endpoint)
+	}
+}
+
+// selectChannelForModel 为模型选择渠道（根据 request_endpoint 选择正确的渠道类型）
+func selectChannelForModel(modelName string, userId int, channelTypes []int) (int, error) {
+	// 获取用户组
+	user, err := model.GetUserById(userId, false)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get user: %w", err)
+	}
+	group := user.Group
+
+	// 使用 Task 1 实现的函数，传入 channelTypes 过滤
+	channel, err := model.GetRandomSatisfiedChannelByTypes(group, modelName, 0, channelTypes)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get channel: %w", err)
+	}
+	if channel == nil {
+		return 0, fmt.Errorf("no enabled channel for model %s with channel types %v", modelName, channelTypes)
 	}
 
-	// 查找支持该模型且类型匹配的渠道
-	for _, ch := range channels {
-		if ch.Status != common.ChannelStatusEnabled {
-			continue
-		}
-
-		// 检查渠道类型是否匹配
-		if ch.Type != requiredChannelType {
-			continue
-		}
-
-		// 检查渠道是否支持该模型
-		models := ch.GetModels()
-		for _, m := range models {
-			if m == modelName {
-				return ch.Id, nil
-			}
-		}
-	}
-
-	return 0, fmt.Errorf("no enabled channel for model %s with endpoint %s (channel type: %d)", modelName, requestEndpoint, requiredChannelType)
+	return channel.Id, nil
 }
 
 // getStringValue 获取字符串指针的值

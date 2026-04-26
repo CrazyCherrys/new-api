@@ -143,6 +143,54 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 	return &channel, err
 }
 
+func GetChannelByTypes(group string, model string, retry int, channelTypes []int) (*Channel, error) {
+	if len(channelTypes) == 0 {
+		return GetChannel(group, model, retry)
+	}
+
+	var abilities []Ability
+	var err error = nil
+
+	// Get base channel query with priority handling
+	channelQuery, err := getChannelQuery(group, model, retry)
+	if err != nil {
+		return nil, err
+	}
+
+	// Join with channels table to filter by type
+	channelQuery = channelQuery.
+		Joins("JOIN channels ON abilities.channel_id = channels.id").
+		Where("channels.type IN ? AND channels.status = ?", channelTypes, common.ChannelStatusEnabled)
+
+	err = channelQuery.Order("abilities.weight DESC").Find(&abilities).Error
+	if err != nil {
+		return nil, err
+	}
+
+	channel := Channel{}
+	if len(abilities) > 0 {
+		// Randomly choose one based on weight
+		weightSum := uint(0)
+		for _, ability_ := range abilities {
+			weightSum += ability_.Weight + 10
+		}
+		// Randomly choose one
+		weight := common.GetRandomInt(int(weightSum))
+		for _, ability_ := range abilities {
+			weight -= int(ability_.Weight) + 10
+			if weight <= 0 {
+				channel.Id = ability_.ChannelId
+				break
+			}
+		}
+	} else {
+		return nil, nil
+	}
+
+	err = DB.First(&channel, "id = ?", channel.Id).Error
+	return &channel, err
+}
+
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {
 	models_ := strings.Split(channel.Models, ",")
 	groups_ := strings.Split(channel.Group, ",")
