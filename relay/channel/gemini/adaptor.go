@@ -325,7 +325,8 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	// 检查是否是图片生成请求：
 	//   - imagen-* 系列模型走旧版 :predict；
 	//   - gemini-*-image / gemini-*-image-preview 等走新版 :generateContent。
-	if info.RelayMode == constant.RelayModeImagesGenerations {
+	// 注意：RelayModeImagesEdits 是带参考图片的图片生成，也需要走图片生成路径。
+	if info.RelayMode == constant.RelayModeImagesGenerations || info.RelayMode == constant.RelayModeImagesEdits {
 		if useImagenPredictAPI(info.UpstreamModelName) {
 			return fmt.Sprintf("%s/%s/models/%s:predict", info.ChannelBaseUrl, version, info.UpstreamModelName), nil
 		}
@@ -444,7 +445,8 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	// 图片生成响应分两种格式：
 	//   - imagen-* (走 :predict) → predictions[].bytesBase64Encoded
 	//   - gemini-*-image (走 :generateContent) → candidates[].content.parts[].inlineData.data
-	if info.RelayMode == constant.RelayModeImagesGenerations {
+	// 注意：RelayModeImagesEdits 是带参考图片的图片生成，也需要走图片响应解析。
+	if info.RelayMode == constant.RelayModeImagesGenerations || info.RelayMode == constant.RelayModeImagesEdits {
 		if useImagenPredictAPI(info.UpstreamModelName) {
 			return GeminiImageHandler(c, info, resp)
 		}
