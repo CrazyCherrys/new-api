@@ -25,6 +25,15 @@ var (
 	workerPoolOnce sync.Once
 )
 
+func normalizeImageEndpoint(endpoint string) string {
+	switch strings.ToLower(strings.TrimSpace(endpoint)) {
+	case "dalle":
+		return "openai"
+	default:
+		return strings.ToLower(strings.TrimSpace(endpoint))
+	}
+}
+
 // initWorkerPool 初始化 worker pool
 func initWorkerPool() {
 	workerPoolOnce.Do(func() {
@@ -40,6 +49,8 @@ func initWorkerPool() {
 
 // CreateImageGenerationTask 创建图片生成任务
 func CreateImageGenerationTask(userId int, modelId string, prompt string, requestEndpoint string, params string) (*model.ImageGenerationTask, error) {
+	requestEndpoint = normalizeImageEndpoint(requestEndpoint)
+
 	// 检查用户余额
 	userQuota, err := model.GetUserQuota(userId, false)
 	if err != nil {
@@ -201,10 +212,11 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	}
 
 	// 构建图片请求
+	taskEndpoint := normalizeImageEndpoint(task.RequestEndpoint)
 	imageReq := &dto.ImageRequest{
 		Model:           task.ModelId,
 		Prompt:          task.Prompt,
-		RequestEndpoint: task.RequestEndpoint,
+		RequestEndpoint: taskEndpoint,
 	}
 
 	// 保留原始参数传递给relay层
@@ -240,8 +252,9 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	}
 
 	// 验证 request_endpoint
-	if mapping.RequestEndpoint != task.RequestEndpoint {
-		return "", "", 0, fmt.Errorf("request endpoint mismatch: expected %s, got %s", mapping.RequestEndpoint, task.RequestEndpoint)
+	mappingEndpoint := normalizeImageEndpoint(mapping.RequestEndpoint)
+	if mappingEndpoint != taskEndpoint {
+		return "", "", 0, fmt.Errorf("request endpoint mismatch: expected %s, got %s", mappingEndpoint, taskEndpoint)
 	}
 
 	// 使用 actual_model 作为上游模型名
@@ -252,7 +265,7 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	imageReq.Model = actualModel
 
 	// 根据 request_endpoint 获取渠道类型列表
-	channelTypes, err := channelTypesForImageEndpoint(task.RequestEndpoint)
+	channelTypes, err := channelTypesForImageEndpoint(taskEndpoint)
 	if err != nil {
 		return "", "", 0, err
 	}
@@ -355,7 +368,7 @@ func parseImageResponse(resp *http.Response) (imageUrl string, metadata string, 
 		return "", "", fmt.Errorf("no image data in response")
 	}
 
-	// 获取第一张图片：优先使用上游提供的 url；若只有 b64_json（如 Gemini / DALL·E 的 b64_json 模式），
+	// 获取第一张图片：优先使用上游提供的 url；若只有 b64_json（如 Gemini / OpenAI 的 b64_json 模式），
 	// 则拼成 data URL 直接给前端 <img> 渲染。
 	first := imageResp.Data[0]
 	imageUrl = first.Url
@@ -391,7 +404,7 @@ func estimateImageGenerationCost(modelId string) int {
 		modelRatio = 1.0
 	}
 
-	// 默认预估 1584 tokens（DALL-E 标准）
+	// 默认预估 1584 tokens（OpenAI 图片生成标准）
 	return int(1584 * modelRatio)
 }
 
@@ -430,8 +443,8 @@ func deductUserQuota(userId int, quota int) error {
 
 // channelTypesForImageEndpoint 根据 endpoint 返回对应的渠道类型列表
 func channelTypesForImageEndpoint(endpoint string) ([]int, error) {
-	switch endpoint {
-	case "openai", "dalle":
+	switch normalizeImageEndpoint(endpoint) {
+	case "openai", "openai_mod":
 		return []int{constant.ChannelTypeOpenAI}, nil
 	case "gemini":
 		return []int{constant.ChannelTypeGemini}, nil

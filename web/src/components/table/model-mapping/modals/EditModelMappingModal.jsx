@@ -71,7 +71,7 @@ const EditModelMappingModal = ({
   const requestEndpointOptions = [
     { value: 'openai', label: 'OpenAI' },
     { value: 'gemini', label: 'Gemini' },
-    { value: 'dalle', label: 'DALL·E' },
+    { value: 'openai_mod', label: 'OpenAI魔改' },
   ];
 
   const resolutionOptions = [

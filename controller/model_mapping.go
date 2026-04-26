@@ -3,25 +3,35 @@ package controller
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
 
+func normalizeImageModelEndpoint(endpoint string) string {
+	switch strings.ToLower(strings.TrimSpace(endpoint)) {
+	case "dalle":
+		return "openai"
+	default:
+		return strings.ToLower(strings.TrimSpace(endpoint))
+	}
+}
+
 // validateImageModelEndpoint 校验绘画模型的请求端点
 func validateImageModelEndpoint(modelType int, endpoint string) error {
 	if modelType == 2 {
 		if endpoint == "" {
-			return errors.New("绘画模���必须指定请求端点")
+			return errors.New("绘画模型必须指定请求端点")
 		}
-		validEndpoints := []string{"openai", "gemini", "dalle", "openai_mod"}
+		validEndpoints := []string{"openai", "gemini", "openai_mod"}
 		for _, valid := range validEndpoints {
 			if endpoint == valid {
 				return nil
 			}
 		}
-		return errors.New("请求端点必须是 openai、gemini、dalle 或 openai_mod 之一")
+		return errors.New("请求端点必须是 openai、gemini 或 openai_mod 之一")
 	}
 	return nil
 }
@@ -104,6 +114,7 @@ func CreateModelMapping(c *gin.Context) {
 		common.ApiErrorMsg(c, "请求端点不能为空")
 		return
 	}
+	mm.RequestEndpoint = normalizeImageModelEndpoint(mm.RequestEndpoint)
 
 	// 校验绘画模型的请求端点
 	if err := validateImageModelEndpoint(mm.ModelType, mm.RequestEndpoint); err != nil {
@@ -158,6 +169,7 @@ func UpdateModelMapping(c *gin.Context) {
 		common.ApiErrorMsg(c, "请求端点不能为空")
 		return
 	}
+	mm.RequestEndpoint = normalizeImageModelEndpoint(mm.RequestEndpoint)
 
 	// 校验绘画模型的请求端点
 	if err := validateImageModelEndpoint(mm.ModelType, mm.RequestEndpoint); err != nil {

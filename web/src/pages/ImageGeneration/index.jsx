@@ -58,7 +58,7 @@ const ImageGeneration = () => {
   const [models, setModels] = useState([]);
   const [filteredModels, setFilteredModels] = useState([]);
 
-  const [selectedSeries, setSelectedSeries] = useState('all');
+  const [selectedSeries, setSelectedSeries] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedModelData, setSelectedModelData] = useState(null);
   const [prompt, setPrompt] = useState('');
@@ -123,7 +123,7 @@ const ImageGeneration = () => {
       palm: 'PaLM',
       bard: 'Bard',
       midjourney: 'Midjourney',
-      dalle: 'DALL-E',
+      dalle: 'OpenAI',
       'stable-diffusion': 'Stable Diffusion',
       flux: 'Flux',
       suno: 'Suno',
@@ -145,13 +145,21 @@ const ImageGeneration = () => {
     if (endpointLower === 'gemini') {
       return { text: 'Gemini', color: 'green' };
     }
+    if (endpointLower === 'openai_mod') {
+      return { text: 'OpenAI魔改', color: 'orange' };
+    }
     return null;
   };
 
   const renderEndpointBadge = (badge, isMobile = false) => {
     if (!badge) return null;
 
-    const backgroundColor = badge.color === 'blue' ? '#3b82f6' : '#10b981';
+    const backgroundColor =
+      badge.color === 'blue'
+        ? '#3b82f6'
+        : badge.color === 'orange'
+          ? '#f97316'
+          : '#10b981';
 
     if (isMobile) {
       return (
@@ -231,7 +239,14 @@ const ImageGeneration = () => {
             seriesSet.add(model.model_series);
           }
         });
-        setModelSeries(Array.from(seriesSet));
+        const seriesList = Array.from(seriesSet);
+        setModelSeries(seriesList);
+        setSelectedSeries((prev) => {
+          if (prev && prev !== 'all' && seriesList.includes(prev)) {
+            return prev;
+          }
+          return seriesList[0] || 'all';
+        });
       } else {
         showError(res.data.message || t('加载模型失败'));
       }
@@ -430,20 +445,27 @@ const ImageGeneration = () => {
   };
 
   useEffect(() => {
+    const isModelEnabled = (model) =>
+      model.status === undefined || model.status === null || model.status === 1;
+    let filtered = [];
     if (selectedSeries === 'all') {
-      const filtered = models.filter((model) => model.status === 1);
-      setFilteredModels(filtered);
+      filtered = models.filter(isModelEnabled);
     } else if (selectedSeries) {
-      const filtered = models.filter(
-        (model) => model.model_series === selectedSeries && model.status === 1,
+      filtered = models.filter(
+        (model) => model.model_series === selectedSeries && isModelEnabled(model),
       );
-      setFilteredModels(filtered);
-    } else {
-      setFilteredModels([]);
     }
-    setSelectedModel('');
-    setAvailableAspectRatios([]);
-    setAvailableResolutions([]);
+    setFilteredModels(filtered);
+    setSelectedModel((current) => {
+      if (filtered.some((model) => model.request_model === current)) {
+        return current;
+      }
+      return filtered[0]?.request_model || '';
+    });
+    if (filtered.length === 0) {
+      setAvailableAspectRatios([]);
+      setAvailableResolutions([]);
+    }
   }, [selectedSeries, models]);
 
   useEffect(() => {
@@ -830,9 +852,9 @@ const ImageGeneration = () => {
     },
     tasksGrid: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-      gap: 16,
-      padding: 16,
+      gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+      gap: 20,
+      padding: 20,
       width: '100%',
       flex: 1,
       alignContent: 'start',

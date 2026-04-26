@@ -16,9 +16,9 @@ type ModelMapping struct {
 	Description     string `json:"description" gorm:"type:text"`
 	Status          int    `json:"status" gorm:"default:1;index"`
 	Priority        int    `json:"priority" gorm:"default:0"`
-	RequestEndpoint string `json:"request_endpoint" gorm:"size:32;default:''"` // openai, gemini, dalle
-	Resolutions     string `json:"resolutions" gorm:"type:text"`                // JSON array: ["1K","2K","4K"]
-	AspectRatios    string `json:"aspect_ratios" gorm:"type:text"`              // JSON array: ["1:1","16:9",...]
+	RequestEndpoint string `json:"request_endpoint" gorm:"size:32;default:''"` // openai, gemini, openai_mod
+	Resolutions     string `json:"resolutions" gorm:"type:text"`               // JSON array: ["1K","2K","4K"]
+	AspectRatios    string `json:"aspect_ratios" gorm:"type:text"`             // JSON array: ["1:1","16:9",...]
 	CreatedTime     int64  `json:"created_time" gorm:"bigint"`
 	UpdatedTime     int64  `json:"updated_time" gorm:"bigint"`
 }

@@ -77,7 +77,6 @@ const ModelMappingTable = ({
       'palm': 'PaLM',
       'bard': 'Bard',
       'midjourney': 'Midjourney',
-      'dalle': 'DALL-E',
       'stable-diffusion': 'Stable Diffusion',
       'flux': 'Flux',
       'suno': 'Suno',
@@ -124,6 +123,17 @@ const ModelMappingTable = ({
     );
   };
 
+  const formatRequestEndpoint = (endpoint) => {
+    const endpointMap = {
+      openai: 'OpenAI',
+      dalle: 'OpenAI',
+      gemini: 'Gemini',
+      openai_mod: 'OpenAI魔改',
+    };
+
+    return endpointMap[endpoint] || endpoint || '-';
+  };
+
   const columns = [
     {
       title: 'ID',
@@ -167,7 +177,7 @@ const ModelMappingTable = ({
     {
       title: t('请求端点'),
       dataIndex: 'request_endpoint',
-      render: (text) => text || '-',
+      render: (text) => formatRequestEndpoint(text),
     },
     {
       title: t('分辨率'),

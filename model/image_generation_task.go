@@ -11,7 +11,7 @@ type ImageGenerationTask struct {
 	UserId          int    `json:"user_id" gorm:"index;not null"`
 	ModelId         string `json:"model_id" gorm:"size:128;not null;index"`
 	Prompt          string `json:"prompt" gorm:"type:text;not null"`
-	RequestEndpoint string `json:"request_endpoint" gorm:"size:32;not null;index"` // openai, gemini, dalle
+	RequestEndpoint string `json:"request_endpoint" gorm:"size:32;not null;index"` // openai, gemini, openai_mod
 	Status          string `json:"status" gorm:"size:20;not null;index;default:'pending'"`
 	Params          string `json:"params" gorm:"type:text"`          // JSON: size, quality, style, n, etc.
 	ImageUrl        string `json:"image_url" gorm:"type:text"`       // 生成的图片URL
