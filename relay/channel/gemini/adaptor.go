@@ -139,6 +139,8 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	}
 
 	// 1. Imagen 系列：使用旧版 :predict 接口，body 为 instances/parameters。
+	// Imagen 支持的 imageSize：仅 "1K" / "2K"（normalizeImageSize 已做降级处理）
+	// Imagen 支持的 aspectRatio：仅 "1:1" / "3:4" / "4:3" / "9:16" / "16:9"（normalizeAspectRatioForImagen 映射）
 	if useImagenPredictAPI(info.UpstreamModelName) {
 		return dto.GeminiImageRequest{
 			Instances: []dto.GeminiImageInstance{
@@ -146,22 +148,23 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 			},
 			Parameters: dto.GeminiImageParameters{
 				SampleCount: sampleCount,
-				AspectRatio: aspectRatio,
+				AspectRatio: normalizeAspectRatioForImagen(aspectRatio),
 				ImageSize:   imageSize,
 			},
 		}, nil
 	}
 
 	// 2. Gemini 原生图像生成：使用 :generateContent，body 为 contents + generationConfig.imageConfig。
-	//    严格遵循 https://docs.newapi.ai/zh/docs/api/ai-model/images/gemini/geminirelayv1beta-383837589
-	//    所示字段（responseModalities + imageConfig.aspectRatio + imageConfig.imageSize）。
+	//
+	// ⚠️  Gemini 原生模型（gemini-2.5-flash-image 等）仅支持 imageConfig.aspectRatio，
+	//     不支持 imageSize 参数（传了会被忽略或导致报错）。
+	//     支持的比例（10 种）：21:9 / 16:9 / 4:3 / 3:2 / 1:1 / 9:16 / 3:4 / 2:3 / 5:4 / 4:5
+	//     参考：https://developers.googleblog.com/en/gemini-2-5-flash-image-now-ready-for-production-with-new-aspect-ratios
 	imageConfig := make(map[string]interface{})
 	if aspectRatio != "" {
 		imageConfig["aspectRatio"] = aspectRatio
 	}
-	if imageSize != "" {
-		imageConfig["imageSize"] = imageSize
-	}
+	// 不发送 imageSize：Gemini generateContent 路径不支持该字段
 
 	// 构建用户 parts：先放文本 prompt，再依次追加参考图片（inlineData）
 	userParts := []dto.GeminiPart{
@@ -239,33 +242,56 @@ func normalizeAspectRatio(size string) string {
 	}
 }
 
-// normalizeImageSize 把 OpenAI 风格的 quality 映射到 Gemini 的 imageSize（512 / 1K / 2K / 4K）。
-// 也兼容直接传 "512"/"1K"/"2K"/"4K" 的情况。空串返回空串（默认值由上游决定）。
+// normalizeImageSize 把 resolution/quality 字符串映射到 Imagen imageSize 参数。
+//
+// Imagen API 有效值：仅 "1K"（默认）和 "2K"。
+// "4K" 不被 Imagen 支持，降级为 "2K"。
+// 此函数不用于 Gemini 原生模型（generateContent），那条路径不发送 imageSize。
 func normalizeImageSize(quality string) string {
 	q := strings.TrimSpace(quality)
 	if q == "" {
 		return ""
 	}
 	switch strings.ToLower(q) {
-	case "512", "512x512":
-		return "512"
-	case "1k":
+	case "1k", "standard", "medium", "low", "auto":
 		return "1K"
 	case "2k", "hd", "high":
 		return "2K"
 	case "4k":
-		return "4K"
-	case "standard", "medium", "low", "auto":
-		return "1K"
+		return "2K" // Imagen 最高仅支持 2K，4K 降级为 2K
 	}
 	// 兜底：常见分辨率字符串
 	switch q {
-	case "1024x1024", "1024":
+	case "512", "512x512", "1024x1024", "1024":
 		return "1K"
 	case "2048x2048", "2048":
 		return "2K"
 	}
 	return ""
+}
+
+// normalizeAspectRatioForImagen 将长宽比映射到 Imagen API 支持的 5 种有效值之一。
+//
+// Imagen 支持（https://ai.google.dev/gemini-api/docs/imagen）：
+//
+//	"1:1"（默认）、"3:4"、"4:3"、"9:16"、"16:9"
+//
+// 不在支持列表中的值映射到最接近的有效比例；空串返回空串（使用 Imagen 默认值 "1:1"）。
+func normalizeAspectRatioForImagen(aspectRatio string) string {
+	switch aspectRatio {
+	case "1:1", "16:9", "9:16", "4:3", "3:4":
+		return aspectRatio // 直接有效
+	case "21:9":
+		return "16:9" // 超宽屏 → 宽屏
+	case "3:2":
+		return "4:3" // 3:2 接近 4:3（均为横向）
+	case "2:3":
+		return "3:4" // 竖向
+	case "5:4", "4:5":
+		return "1:1" // 接近正方形
+	default:
+		return "" // 未知比例，让 Imagen 使用默认值
+	}
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
