@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -432,7 +433,167 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 	}
 }
 
+// calculateOpenAISize 根据 resolution 和 aspect_ratio 计算 OpenAI 格式的像素尺寸
+// resolution: "1K" (1024), "2K" (2048), "4K" (4096)
+// aspect_ratio: "1:1", "16:9", "9:16", "21:9", "9:21"
+// 返回格式如 "1024x1024", "1792x1024" 等
+func calculateOpenAISize(resolution, aspectRatio string) string {
+	if resolution == "" || aspectRatio == "" {
+		return ""
+	}
+
+	// 解析分辨率到基础像素值
+	var basePixels int
+	switch strings.ToUpper(strings.TrimSpace(resolution)) {
+	case "1K":
+		basePixels = 1024
+	case "2K":
+		basePixels = 2048
+	case "4K":
+		basePixels = 4096
+	default:
+		return ""
+	}
+
+	// 解析宽高比
+	aspectRatio = strings.TrimSpace(aspectRatio)
+	parts := strings.Split(aspectRatio, ":")
+	if len(parts) != 2 {
+		return ""
+	}
+
+	widthRatio := 0.0
+	heightRatio := 0.0
+	if _, err := fmt.Sscanf(parts[0], "%f", &widthRatio); err != nil || widthRatio <= 0 {
+		return ""
+	}
+	if _, err := fmt.Sscanf(parts[1], "%f", &heightRatio); err != nil || heightRatio <= 0 {
+		return ""
+	}
+
+	// 计算实际像素尺寸
+	// 对于正方形 (1:1)，直接使用 basePixels
+	if widthRatio == heightRatio {
+		return fmt.Sprintf("%dx%d", basePixels, basePixels)
+	}
+
+	// 对于非正方形，保持总像素数接近 basePixels^2
+	// 计算宽度和高度，使得 width * height ≈ basePixels^2 且 width/height = widthRatio/heightRatio
+	totalPixels := float64(basePixels * basePixels)
+	height := int(math.Sqrt(totalPixels * heightRatio / widthRatio))
+	width := int(float64(height) * widthRatio / heightRatio)
+
+	// 对���到常见的 OpenAI 尺寸
+	// 1K 常见尺寸: 1024x1024, 1792x1024, 1024x1792
+	// 根据宽高比调整到最接近的标准尺寸
+	if basePixels == 1024 {
+		switch aspectRatio {
+		case "1:1":
+			return "1024x1024"
+		case "16:9":
+			return "1792x1024"
+		case "9:16":
+			return "1024x1792"
+		case "21:9":
+			return "2048x896"
+		case "9:21":
+			return "896x2048"
+		case "3:2":
+			return "1536x1024"
+		case "2:3":
+			return "1024x1536"
+		case "4:3":
+			return "1408x1024"
+		case "3:4":
+			return "1024x1408"
+		}
+	}
+
+	// 对于其他分辨率或非标准宽高比，��用计算值
+	return fmt.Sprintf("%dx%d", width, height)
+}
+
+// OpenAIModImageRequest represents the request format for OpenAI modified endpoints
+type OpenAIModImageRequest struct {
+	Model       string                 `json:"model"`
+	Prompt      string                 `json:"prompt"`
+	N           *uint                  `json:"n,omitempty"`
+	ImageConfig *OpenAIModImageConfig  `json:"image_config,omitempty"`
+	Image       string                 `json:"image,omitempty"`
+	Extra       map[string]interface{} `json:"-"`
+}
+
+// OpenAIModImageConfig represents the image_config object for OpenAI modified endpoints
+type OpenAIModImageConfig struct {
+	ImageSize   string `json:"image_size,omitempty"`
+	AspectRatio string `json:"aspect_ratio,omitempty"`
+}
+
+// convertOpenAIModImageRequest converts the standard ImageRequest to OpenAI modified endpoint format
+func (a *Adaptor) convertOpenAIModImageRequest(request dto.ImageRequest) (any, error) {
+	modRequest := OpenAIModImageRequest{
+		Model:  request.Model,
+		Prompt: request.Prompt,
+		N:      request.N,
+	}
+
+	// Build image_config from RawParams
+	if request.RawParams != nil {
+		var imageConfig OpenAIModImageConfig
+		hasConfig := false
+
+		if resolution, ok := request.RawParams["resolution"].(string); ok && resolution != "" {
+			imageConfig.ImageSize = resolution
+			hasConfig = true
+		}
+
+		if aspectRatio, ok := request.RawParams["aspect_ratio"].(string); ok && aspectRatio != "" {
+			imageConfig.AspectRatio = aspectRatio
+			hasConfig = true
+		}
+
+		if hasConfig {
+			modRequest.ImageConfig = &imageConfig
+		}
+	}
+
+	// Handle reference image - convert to data URL format if present
+	if len(request.Image) > 0 {
+		var imageStr string
+		if err := common.Unmarshal(request.Image, &imageStr); err == nil && imageStr != "" {
+			// If it's already a data URL, use it directly
+			if strings.HasPrefix(imageStr, "data:image/") {
+				modRequest.Image = imageStr
+			} else {
+				// Otherwise, assume it's base64 and add the data URL prefix
+				// Default to PNG if no MIME type is specified
+				modRequest.Image = "data:image/png;base64," + imageStr
+			}
+		}
+	}
+
+	return modRequest, nil
+}
+
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	// Check if this is an OpenAI modified endpoint
+	if request.RequestEndpoint == "openai_mod" {
+		return a.convertOpenAIModImageRequest(request)
+	}
+
+	// 如果 Size 未设置，尝试从 RawParams 中的 aspect_ratio 和 resolution 计算
+	if request.Size == "" && request.RawParams != nil {
+		aspectRatio, hasAspectRatio := request.RawParams["aspect_ratio"].(string)
+		resolution, hasResolution := request.RawParams["resolution"].(string)
+
+		if hasAspectRatio && hasResolution {
+			calculatedSize := calculateOpenAISize(resolution, aspectRatio)
+			if calculatedSize != "" {
+				request.Size = calculatedSize
+			}
+		}
+	}
+
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
 

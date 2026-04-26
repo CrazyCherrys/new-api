@@ -73,8 +73,27 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
 	// 解析通用参数：把 OpenAI 风格的 size/quality/n 翻译成 Gemini 的 aspectRatio/imageSize/sampleCount。
-	aspectRatio := normalizeAspectRatio(request.Size)
-	imageSize := normalizeImageSize(request.Quality)
+	// 优先从 RawParams 读取 aspect_ratio 和 resolution
+	aspectRatio := ""
+	imageSize := ""
+
+	if request.RawParams != nil {
+		if ar, ok := request.RawParams["aspect_ratio"].(string); ok && ar != "" {
+			aspectRatio = normalizeAspectRatio(ar)
+		}
+		if res, ok := request.RawParams["resolution"].(string); ok && res != "" {
+			imageSize = normalizeImageSize(res)
+		}
+	}
+
+	// 回退到 Size/Quality（向后兼容）
+	if aspectRatio == "" && request.Size != "" {
+		aspectRatio = normalizeAspectRatio(request.Size)
+	}
+	if imageSize == "" && request.Quality != "" {
+		imageSize = normalizeImageSize(request.Quality)
+	}
+
 	sampleCount := 1
 	if request.N != nil && *request.N > 0 {
 		sampleCount = int(*request.N)

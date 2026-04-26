@@ -32,8 +32,11 @@ type ImageRequest struct {
 	WatermarkEnabled json.RawMessage `json:"watermark_enabled,omitempty"`
 	UserId           json.RawMessage `json:"user_id,omitempty"`
 	Image            json.RawMessage `json:"image,omitempty"`
+	RequestEndpoint  string          `json:"request_endpoint,omitempty"`
 	// 用匿名参数接收额外参数
 	Extra map[string]json.RawMessage `json:"-"`
+	// RawParams 保留原始参数用于传递给relay层
+	RawParams map[string]interface{} `json:"-"`
 }
 
 func (i *ImageRequest) UnmarshalJSON(data []byte) error {

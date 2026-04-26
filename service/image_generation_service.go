@@ -202,35 +202,26 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 
 	// 构建图片请求
 	imageReq := &dto.ImageRequest{
-		Model:  task.ModelId,
-		Prompt: task.Prompt,
+		Model:           task.ModelId,
+		Prompt:          task.Prompt,
+		RequestEndpoint: task.RequestEndpoint,
 	}
 
-	// 应用参数
-	// 兼容前端字段名：aspect_ratio / resolution / quantity（来自 ImageGeneration UI）
-	// 与外部 OpenAI 兼容接口的 size / quality / n。前者优先级高于 OpenAI 的同义字段，
-	// 没有时回落到 OpenAI 字段，确保 /v1/images/generations 直连用法不受影响。
+	// 保留原始参数传递给relay层
+	imageReq.RawParams = params
+
+	// 应用参数（仅用于标准OpenAI API兼容）
 	if size, ok := params["size"].(string); ok && size != "" {
 		imageReq.Size = size
-	}
-	if ar, ok := params["aspect_ratio"].(string); ok && ar != "" {
-		imageReq.Size = ar
 	}
 
 	if quality, ok := params["quality"].(string); ok && quality != "" {
 		imageReq.Quality = quality
 	}
-	if res, ok := params["resolution"].(string); ok && res != "" {
-		imageReq.Quality = res
-	}
 
 	var nVal float64
 	hasN := false
 	if v, ok := params["n"].(float64); ok {
-		nVal = v
-		hasN = true
-	}
-	if v, ok := params["quantity"].(float64); ok {
 		nVal = v
 		hasN = true
 	}
