@@ -156,15 +156,17 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 
 	// 2. Gemini 原生图像生成：使用 :generateContent，body 为 contents + generationConfig.imageConfig。
 	//
-	// ⚠️  Gemini 原生模型（gemini-2.5-flash-image 等）仅支持 imageConfig.aspectRatio，
-	//     不支持 imageSize 参数（传了会被忽略或导致报错）。
-	//     支持的比例（10 种）：21:9 / 16:9 / 4:3 / 3:2 / 1:1 / 9:16 / 3:4 / 2:3 / 5:4 / 4:5
+	// Gemini 原生模型（gemini-2.5-flash-image / gemini-3-pro-image 等）支持：
+	//   - imageConfig.aspectRatio：支持的比例（10 种）：21:9 / 16:9 / 4:3 / 3:2 / 1:1 / 9:16 / 3:4 / 2:3 / 5:4 / 4:5
+	//   - imageConfig.imageSize：支持的档位："1K" / "2K" / "4K"（部分模型支持）
 	//     参考：https://developers.googleblog.com/en/gemini-2-5-flash-image-now-ready-for-production-with-new-aspect-ratios
 	imageConfig := make(map[string]interface{})
 	if aspectRatio != "" {
 		imageConfig["aspectRatio"] = aspectRatio
 	}
-	// 不发送 imageSize：Gemini generateContent 路径不支持该字段
+	if imageSize != "" {
+		imageConfig["imageSize"] = imageSize
+	}
 
 	// 构建用户 parts：先放文本 prompt，再依次追加参考图片（inlineData）
 	userParts := []dto.GeminiPart{
@@ -242,11 +244,10 @@ func normalizeAspectRatio(size string) string {
 	}
 }
 
-// normalizeImageSize 把 resolution/quality 字符串映射到 Imagen imageSize 参数。
+// normalizeImageSize 把 resolution/quality 字符串映射到 Gemini/Imagen imageSize 参数。
 //
-// Imagen API 有效值：仅 "1K"（默认）和 "2K"。
-// "4K" 不被 Imagen 支持，降级为 "2K"。
-// 此函数不用于 Gemini 原生模型（generateContent），那条路径不发送 imageSize。
+// Gemini 原生模型（generateContent）支持："1K" / "2K" / "4K"（部分模型）
+// Imagen API（:predict）支持：仅 "1K"（默认）和 "2K"，"4K" 会降级为 "2K"
 func normalizeImageSize(quality string) string {
 	q := strings.TrimSpace(quality)
 	if q == "" {
@@ -258,7 +259,9 @@ func normalizeImageSize(quality string) string {
 	case "2k", "hd", "high":
 		return "2K"
 	case "4k":
-		return "2K" // Imagen 最高仅支持 2K，4K 降级为 2K
+		// Gemini 原生模型部分支持 4K，Imagen 不支持会降级为 2K
+		// 这里统一返回 "4K"，让上游 API 自行处理（支持则用，不支持则降级）
+		return "4K"
 	}
 	// 兜底：常见分辨率字符串
 	switch q {
@@ -266,6 +269,8 @@ func normalizeImageSize(quality string) string {
 		return "1K"
 	case "2048x2048", "2048":
 		return "2K"
+	case "4096x4096", "4096":
+		return "4K"
 	}
 	return ""
 }
