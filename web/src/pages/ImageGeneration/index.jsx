@@ -627,7 +627,13 @@ const ImageGeneration = () => {
       const res = await API.post('/api/image-generation/tasks', taskPayload);
       if (res.data.success) {
         showSuccess(t('任务已创建，正在生成中...'));
-        // 刷新任务列表
+        // 立即将新任务添加到列表开头，避免等待 loadTasks() 的延迟
+        const newTask = res.data.data;
+        if (newTask) {
+          setTasks((prevTasks) => [newTask, ...prevTasks]);
+          setTaskTotal((prev) => prev + 1);
+        }
+        // 同时刷新任务列表以确保数据一致性
         loadTasks();
       } else {
         showError(res.data.message || t('创建任务失败'));
