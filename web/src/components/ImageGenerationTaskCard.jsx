@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import { Spin, Typography, Checkbox, Progress } from '@douyinfe/semi-ui';
 import {
   IconImage,
@@ -365,4 +365,15 @@ ImageGenerationTaskCard.defaultProps = {
   onSelectChange: () => {},
 };
 
-export default ImageGenerationTaskCard;
+// 仅当影响视觉的 task 字段或 selected 发生变化时才重新渲染，
+// 忽略 onClick/onSelectChange 等每次父渲染都会生成新引用的回调函数。
+export default memo(ImageGenerationTaskCard, (prev, next) => {
+  return (
+    prev.selected === next.selected &&
+    prev.task.id === next.task.id &&
+    prev.task.status === next.task.status &&
+    prev.task.image_url === next.task.image_url &&
+    prev.task.progress === next.task.progress &&
+    prev.task.error_message === next.task.error_message
+  );
+});

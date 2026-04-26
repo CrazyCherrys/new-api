@@ -21,6 +21,33 @@ import (
 	"github.com/samber/lo"
 )
 
+// parseDataURL 解析 Data URL 字符串，返回 mimeType 和纯 base64 数据。
+// 同时兼容 "data:image/png;base64,xxx" 和裸 base64 字符串。
+func parseDataURL(s string) (mimeType string, base64Data string) {
+	if strings.HasPrefix(s, "data:") {
+		// 格式: data:<mimeType>;base64,<data>
+		s = strings.TrimPrefix(s, "data:")
+		if idx := strings.Index(s, ","); idx >= 0 {
+			header := s[:idx]
+			base64Data = s[idx+1:]
+			// header 形如 "image/png;base64"
+			if semi := strings.Index(header, ";"); semi >= 0 {
+				mimeType = header[:semi]
+			} else {
+				mimeType = header
+			}
+		}
+	} else {
+		// 裸 base64，默认 MIME 类型为 image/png
+		mimeType = "image/png"
+		base64Data = s
+	}
+	if mimeType == "" {
+		mimeType = "image/png"
+	}
+	return
+}
+
 type Adaptor struct {
 }
 
@@ -136,13 +163,31 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		imageConfig["imageSize"] = imageSize
 	}
 
+	// 构建用户 parts：先放文本 prompt，再依次追加参考图片（inlineData）
+	userParts := []dto.GeminiPart{
+		{Text: request.Prompt},
+	}
+	for _, imgStr := range request.ReferenceImages {
+		if imgStr == "" {
+			continue
+		}
+		mimeType, base64Data := parseDataURL(imgStr)
+		if base64Data == "" {
+			continue
+		}
+		userParts = append(userParts, dto.GeminiPart{
+			InlineData: &dto.GeminiInlineData{
+				MimeType: mimeType,
+				Data:     base64Data,
+			},
+		})
+	}
+
 	geminiRequest := dto.GeminiChatRequest{
 		Contents: []dto.GeminiChatContent{
 			{
-				Role: "user",
-				Parts: []dto.GeminiPart{
-					{Text: request.Prompt},
-				},
+				Role:  "user",
+				Parts: userParts,
 			},
 		},
 		GenerationConfig: dto.GeminiChatGenerationConfig{

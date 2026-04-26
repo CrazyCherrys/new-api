@@ -36,6 +36,8 @@ type ImageRequest struct {
 	// Gemini/Imagen 专用参数：宽高比（如 "16:9"、"1:1"）和分辨率档位（如 "1K"、"2K"、"4K"）
 	AspectRatio string `json:"aspect_ratio,omitempty"`
 	Resolution  string `json:"resolution,omitempty"`
+	// 参考图片列表，Data URL 格式（"data:image/png;base64,..."）或纯 base64 字符串
+	ReferenceImages []string `json:"reference_images,omitempty"`
 	// 用匿名参数接收额外参数
 	Extra map[string]json.RawMessage `json:"-"`
 	// RawParams 保留原始参数用于传递给relay层

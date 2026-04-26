@@ -239,6 +239,15 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 		imageReq.Resolution = res
 	}
 
+	// 参考图片：从 params 提取并写入可序列化字段
+	if refImages, ok := params["reference_images"].([]interface{}); ok && len(refImages) > 0 {
+		for _, img := range refImages {
+			if s, ok := img.(string); ok && s != "" {
+				imageReq.ReferenceImages = append(imageReq.ReferenceImages, s)
+			}
+		}
+	}
+
 	var nVal float64
 	hasN := false
 	if v, ok := params["n"].(float64); ok {

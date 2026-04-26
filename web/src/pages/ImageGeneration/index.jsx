@@ -225,8 +225,9 @@ const ImageGeneration = () => {
     return { start: Math.floor(startDate.getTime() / 1000), end };
   };
 
-  const loadTasks = async () => {
-    setLoadingTasks(true);
+  // silent=true 时静默刷新（轮询），不触发 loadingTasks，不显示 Spin 遮罩
+  const loadTasks = async (silent = false) => {
+    if (!silent) setLoadingTasks(true);
     try {
       const params = {
         page: taskPage,
@@ -252,15 +253,33 @@ const ImageGeneration = () => {
 
       const res = await API.get('/api/image-generation/tasks', { params });
       if (res.data.success) {
-        setTasks(res.data.data.items || []);
-        setTaskTotal(res.data.data.total || 0);
-      } else {
+        const newItems = res.data.data.items || [];
+        const newTotal = res.data.data.total || 0;
+        // 智能合并：仅当内容实际变化时才更新，避免全量替换导致卡片无效重渲染
+        setTasks((prev) => {
+          if (prev.length === newItems.length) {
+            const unchanged = newItems.every((newTask, i) => {
+              const old = prev[i];
+              return (
+                old &&
+                old.id === newTask.id &&
+                old.status === newTask.status &&
+                old.image_url === newTask.image_url &&
+                old.error_message === newTask.error_message
+              );
+            });
+            if (unchanged) return prev;
+          }
+          return newItems;
+        });
+        setTaskTotal(newTotal);
+      } else if (!silent) {
         showError(res.data.message || t('加载任务列表失败'));
       }
     } catch (error) {
-      showError(error.message || t('加载任务列表失败'));
+      if (!silent) showError(error.message || t('加载任务列表失败'));
     } finally {
-      setLoadingTasks(false);
+      if (!silent) setLoadingTasks(false);
     }
   };
 
@@ -361,7 +380,7 @@ const ImageGeneration = () => {
     if (pollingTimerRef.current) return;
 
     pollingTimerRef.current = setInterval(() => {
-      loadTasks();
+      loadTasks(true); // 静默刷新，不触发 Spin 遮罩
     }, 5000); // 5秒轮询
   };
 

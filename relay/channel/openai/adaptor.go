@@ -537,23 +537,25 @@ func (a *Adaptor) convertOpenAIModImageRequest(request dto.ImageRequest) (any, e
 		N:      request.N,
 	}
 
-	// Build image_config from RawParams
-	if request.RawParams != nil {
-		var imageConfig OpenAIModImageConfig
-		hasConfig := false
+	// 优先读取正式 JSON 字段（序列化安全），回退到 RawParams（兼容进程内直调路径）
+	resolution := request.Resolution
+	aspectRatio := request.AspectRatio
 
-		if resolution, ok := request.RawParams["resolution"].(string); ok && resolution != "" {
-			imageConfig.ImageSize = resolution
-			hasConfig = true
+	if resolution == "" && request.RawParams != nil {
+		if r, ok := request.RawParams["resolution"].(string); ok {
+			resolution = r
 		}
-
-		if aspectRatio, ok := request.RawParams["aspect_ratio"].(string); ok && aspectRatio != "" {
-			imageConfig.AspectRatio = aspectRatio
-			hasConfig = true
+	}
+	if aspectRatio == "" && request.RawParams != nil {
+		if a, ok := request.RawParams["aspect_ratio"].(string); ok {
+			aspectRatio = a
 		}
+	}
 
-		if hasConfig {
-			modRequest.ImageConfig = &imageConfig
+	if resolution != "" || aspectRatio != "" {
+		modRequest.ImageConfig = &OpenAIModImageConfig{
+			ImageSize:   resolution,
+			AspectRatio: aspectRatio,
 		}
 	}
 
@@ -581,14 +583,21 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		return a.convertOpenAIModImageRequest(request)
 	}
 
-	// 如果 Size 未设置，尝试从 RawParams 中的 aspect_ratio 和 resolution 计算
-	if request.Size == "" && request.RawParams != nil {
-		aspectRatio, hasAspectRatio := request.RawParams["aspect_ratio"].(string)
-		resolution, hasResolution := request.RawParams["resolution"].(string)
+	// 如果 Size 未设置，尝试从 aspect_ratio 和 resolution 计算
+	// 优先读取正式 JSON 字段，回退到 RawParams
+	if request.Size == "" {
+		aspectRatio := request.AspectRatio
+		resolution := request.Resolution
 
-		if hasAspectRatio && hasResolution {
-			calculatedSize := calculateOpenAISize(resolution, aspectRatio)
-			if calculatedSize != "" {
+		if aspectRatio == "" && request.RawParams != nil {
+			aspectRatio, _ = request.RawParams["aspect_ratio"].(string)
+		}
+		if resolution == "" && request.RawParams != nil {
+			resolution, _ = request.RawParams["resolution"].(string)
+		}
+
+		if aspectRatio != "" && resolution != "" {
+			if calculatedSize := calculateOpenAISize(resolution, aspectRatio); calculatedSize != "" {
 				request.Size = calculatedSize
 			}
 		}
