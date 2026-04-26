@@ -485,6 +485,175 @@ func calculateOpenAIPixelSize(resolution, aspectRatio string) string {
 	return ""
 }
 
+// StandardOpenAIImageRequest 是「openai」标准端点（经 /console/model-mapping 配置）
+// 发往上游的精简 JSON 结构，仅包含 4 个字段：
+//
+//	{ prompt, model, size, image[] }
+//
+// - size：从合法预设中选取（1024x1024 / 1536x1024 / 1024x1536 / 2048x2048 /
+//   2048x1152 / 3840x2160 / 2160x3840 / auto），由 calculateOpenAIPixelSize 映射。
+// - image：参考图数组（URL 或 base64 data URL）。无参考图时省略整个字段。
+//
+// 该结构与 openai_mod / gemini 端点的请求体完全独立，互不影响。
+type StandardOpenAIImageRequest struct {
+	Prompt string   `json:"prompt"`
+	Model  string   `json:"model"`
+	Size   string   `json:"size,omitempty"`
+	Image  []string `json:"image,omitempty"`
+}
+
+// convertOpenAIStandardJSONImageRequest 处理 request_endpoint == "openai" 的图片请求。
+//
+// 行为：
+//  1. 始终输出 application/json，不使用 multipart/form-data。
+//  2. body 仅包含 prompt/model/size/image 四个字段，其它（n、quality、response_format、
+//     extra_fields、watermark 等）一律剔除。
+//  3. size 解析顺序：客户端显式 Size > (resolution, aspect_ratio) 映射 > "auto"。
+//  4. image 来源：
+//     - 优先 ReferenceImages（service 层组装的 base64 data URL / http URL）；
+//     - 兼容直接以 multipart 上传的 file → 转为 base64 data URL；
+//     - 兼容 ImageRequest.Image（json 字段）为字符串 / 字符串数组的写法。
+//     无任何参考图时 image 字段省略。
+func (a *Adaptor) convertOpenAIStandardJSONImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	out := StandardOpenAIImageRequest{
+		Prompt: request.Prompt,
+		Model:  request.Model,
+	}
+
+	out.Size = resolveStandardOpenAIImageSize(request)
+
+	images, err := collectStandardOpenAIImageInputs(c, request)
+	if err != nil {
+		return nil, err
+	}
+	if len(images) > 0 {
+		out.Image = images
+	}
+
+	if c != nil && c.Request != nil {
+		c.Request.Header.Set("Content-Type", "application/json")
+	}
+
+	return out, nil
+}
+
+// resolveStandardOpenAIImageSize 解析最终发往上游的 size 字符串：
+//   - 客户端显式 size 优先（已是合法预设由调用方负责）；
+//   - 否则用 (resolution, aspect_ratio) 通过 calculateOpenAIPixelSize 映射；
+//   - aspect_ratio 显式为 "auto" 时返回 "auto"；
+//   - 都没有命中合法预设则返回 "auto"（满足上游 schema 中 size 的 default = auto）。
+func resolveStandardOpenAIImageSize(request dto.ImageRequest) string {
+	if size := strings.TrimSpace(request.Size); size != "" {
+		return size
+	}
+
+	aspectRatio := strings.TrimSpace(request.AspectRatio)
+	resolution := strings.TrimSpace(request.Resolution)
+	if request.RawParams != nil {
+		if aspectRatio == "" {
+			if v, ok := request.RawParams["aspect_ratio"].(string); ok {
+				aspectRatio = strings.TrimSpace(v)
+			}
+		}
+		if resolution == "" {
+			if v, ok := request.RawParams["resolution"].(string); ok {
+				resolution = strings.TrimSpace(v)
+			}
+		}
+	}
+
+	if strings.EqualFold(aspectRatio, "auto") {
+		return "auto"
+	}
+	if aspectRatio != "" && resolution != "" {
+		if mapped := calculateOpenAIPixelSize(resolution, aspectRatio); mapped != "" {
+			return mapped
+		}
+	}
+
+	return "auto"
+}
+
+// collectStandardOpenAIImageInputs 汇总参考图数组，输出顺序：
+//  1. ReferenceImages（service 层主路径）
+//  2. multipart/form-data 中的 image / image[] / image[N] file → base64 data URL
+//  3. ImageRequest.Image（兼容 string / []string 两种写法）
+//
+// 所有数据 URL / URL 字符串原样保留，不做尺寸或格式校验（上游负责）。
+func collectStandardOpenAIImageInputs(c *gin.Context, request dto.ImageRequest) ([]string, error) {
+	images := append([]string(nil), request.ReferenceImages...)
+
+	if c != nil && c.Request != nil {
+		mf := c.Request.MultipartForm
+		if mf == nil {
+			contentType := c.Request.Header.Get("Content-Type")
+			if strings.Contains(contentType, "multipart/form-data") {
+				if err := c.Request.ParseMultipartForm(32 << 20); err == nil {
+					mf = c.Request.MultipartForm
+				}
+			}
+		}
+		if mf != nil && mf.File != nil {
+			collected, err := collectMultipartImagesAsDataURL(mf)
+			if err != nil {
+				return nil, err
+			}
+			images = append(images, collected...)
+		}
+	}
+
+	if len(request.Image) > 0 {
+		var single string
+		if err := common.Unmarshal(request.Image, &single); err == nil && single != "" {
+			images = append(images, single)
+		} else {
+			var multi []string
+			if err := common.Unmarshal(request.Image, &multi); err == nil {
+				for _, s := range multi {
+					if s = strings.TrimSpace(s); s != "" {
+						images = append(images, s)
+					}
+				}
+			}
+		}
+	}
+
+	return images, nil
+}
+
+// collectMultipartImagesAsDataURL 将 multipart 中的 image / image[] / image[N] 文件
+// 全部读取为 base64 data URL，便于以 JSON 数组形式发往上游。
+func collectMultipartImagesAsDataURL(mf *multipart.Form) ([]string, error) {
+	var headers []*multipart.FileHeader
+	if files, ok := mf.File["image"]; ok {
+		headers = append(headers, files...)
+	}
+	if files, ok := mf.File["image[]"]; ok {
+		headers = append(headers, files...)
+	}
+	for name, files := range mf.File {
+		if strings.HasPrefix(name, "image[") && name != "image[]" {
+			headers = append(headers, files...)
+		}
+	}
+
+	out := make([]string, 0, len(headers))
+	for i, fh := range headers {
+		f, err := fh.Open()
+		if err != nil {
+			return nil, fmt.Errorf("failed to open image file %d: %w", i, err)
+		}
+		buf, err := io.ReadAll(f)
+		_ = f.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read image file %d: %w", i, err)
+		}
+		mimeType := detectImageMimeType(fh.Filename)
+		out = append(out, "data:"+mimeType+";base64,"+base64.StdEncoding.EncodeToString(buf))
+	}
+	return out, nil
+}
+
 // OpenAIModImageRequest represents the text-to-image request for OpenAI modified endpoints.
 // Only model, prompt and image_config (aspect_ratio / image_size) are sent upstream.
 type OpenAIModImageRequest struct {
@@ -601,9 +770,13 @@ func (a *Adaptor) convertOpenAIModImageEditRequest(request dto.ImageRequest) (an
 //   - "openai_mod" + RelayModeImagesGenerations → convertOpenAIModImageRequest
 //     resolution/aspect_ratio 原样写入 image_config（上游自行解释 "1K"/"2K"/"4K"）
 //
-//   - "openai" / "" → convertStandardOpenAIImageRequest
-//     resolution + aspect_ratio → calculateOpenAIPixelSize → WxH 像素字符串（如 "2048x1152"）
-//     像素表以 gpt-image-2 规格为准：最大边≤3840，均为 16 的倍数，总像素 0.65–8.3MP
+//   - "openai" → convertOpenAIStandardJSONImageRequest（精简 JSON 协议）
+//     仅发送 {prompt, model, size, image[]} 四个字段，全部走 /v1/images/generations。
+//     resolution + aspect_ratio → calculateOpenAIPixelSize → WxH 像素字符串（如 "2048x1152"）；
+//     映射不到合法预设时回退 size="auto"。无参考图时省略 image 字段。
+//
+//   - ""（空）→ convertStandardOpenAIImageRequest（兼容标准 OpenAI SDK 直调）
+//     保留 multipart/form-data + 全字段 JSON 的原行为，避免破坏外部 SDK 调用。
 //
 //   - "gemini" 端点不经过此适配器，由 relay/channel/gemini 独立处理：
 //     resolution 原样映射为 Gemini imageSize（"1K"/"2K"/"4K"），上游自行解释像素含义
@@ -618,13 +791,27 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		}
 		// 文生图：resolution/aspect_ratio 原样透传至 image_config，上游负责解释
 		return a.convertOpenAIModImageRequest(request)
+	case "openai":
+		// 标准 OpenAI 端点（由 /console/model-mapping 配置触发）：
+		// 始终以精简 JSON 发送到 /v1/images/generations。
+		return a.convertOpenAIStandardJSONImageRequest(c, info, request)
 	default:
-		// openai（标准）端点：将 resolution + aspect_ratio 换算为 WxH 像素字符串后写入 Size
+		// 兼容外部 OpenAI SDK 直调：默认行为不变，使用 multipart 或全字段 JSON
 		return a.convertStandardOpenAIImageRequest(c, info, request)
 	}
 }
 
-// convertStandardOpenAIImageRequest 处理标准 OpenAI 兼容端点的图像请求。
+// convertStandardOpenAIImageRequest 处理「未指定 request_endpoint」的标准 OpenAI 兼容请求。
+//
+// 该函数现在仅服务于直接调用 /v1/images/{generations,edits} 的外部 OpenAI SDK 路径，
+// 不再用于 /image-generation 内部图床流程（后者通过 request_endpoint == "openai" 走
+// convertOpenAIStandardJSONImageRequest 的精简 JSON 协议）。
+//
+// 行为保持不变：
+//   - RelayModeImagesEdits：将 multipart/form-data（含 image/image[] 文件 + 文本字段）
+//     重新打包为新的 multipart 请求体；
+//   - RelayModeImagesGenerations：原样透传 ImageRequest 结构体（含 n / quality 等全字段）。
+//
 // 若 Size 未设置，则通过 calculateOpenAIPixelSize 将 resolution + aspect_ratio 换算为像素字符串。
 // 像素映射表以 gpt-image-2 规格为准，与 openai_mod / gemini 端点的换算表完全独立。
 func (a *Adaptor) convertStandardOpenAIImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
