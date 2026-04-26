@@ -433,16 +433,20 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 	}
 }
 
-// calculateOpenAISize 根据 resolution 和 aspect_ratio 计算 OpenAI 格式的像素尺寸
-// resolution: "1K" (1024), "2K" (2048), "4K" (4096)
-// aspect_ratio: "1:1", "16:9", "9:16", "21:9", "9:21"
-// 返回格式如 "1024x1024", "1792x1024" 等
-func calculateOpenAISize(resolution, aspectRatio string) string {
+// calculateOpenAIPixelSize 将 resolution + aspect_ratio 换算为标准 OpenAI 兼容端点的像素尺寸字符串。
+//
+// 此函数仅用于 "openai"（标准）端点路径，不适用于 openai_mod 或 gemini 端点：
+//   - openai_mod：resolution 原样写入 image_config.image_size，上游自行解释
+//   - gemini：由 relay/channel/gemini 的 normalizeImageSize 独立处理
+//
+// 像素映射以 gpt-image-2 规格为准（https://docs.apiyi.com/api-capabilities/gpt-image-2/text-to-image）：
+//   - 最大边 ≤ 3840px，两边均为 16 的倍数，长短边比例 ≤ 3:1，总像素 0.65MP–8.3MP
+//   - 预设尺寸：1024x1024 / 1536x1024 / 1024x1536 / 2048x2048 / 2048x1152 / 3840x2160 / 2160x3840
+func calculateOpenAIPixelSize(resolution, aspectRatio string) string {
 	if resolution == "" || aspectRatio == "" {
 		return ""
 	}
 
-	// 解析分辨率到基础像素值
 	var basePixels int
 	switch strings.ToUpper(strings.TrimSpace(resolution)) {
 	case "1K":
@@ -455,13 +459,11 @@ func calculateOpenAISize(resolution, aspectRatio string) string {
 		return ""
 	}
 
-	// 解析宽高比
 	aspectRatio = strings.TrimSpace(aspectRatio)
 	parts := strings.Split(aspectRatio, ":")
 	if len(parts) != 2 {
 		return ""
 	}
-
 	widthRatio := 0.0
 	heightRatio := 0.0
 	if _, err := fmt.Sscanf(parts[0], "%f", &widthRatio); err != nil || widthRatio <= 0 {
@@ -471,46 +473,92 @@ func calculateOpenAISize(resolution, aspectRatio string) string {
 		return ""
 	}
 
-	// 计算实际像素尺寸
-	// 对于正方形 (1:1)，直接使用 basePixels
-	if widthRatio == heightRatio {
-		return fmt.Sprintf("%dx%d", basePixels, basePixels)
-	}
-
-	// 对于非正方形，保持总像素数接近 basePixels^2
-	// 计算宽度和高度，使得 width * height ≈ basePixels^2 且 width/height = widthRatio/heightRatio
-	totalPixels := float64(basePixels * basePixels)
-	height := int(math.Sqrt(totalPixels * heightRatio / widthRatio))
-	width := int(float64(height) * widthRatio / heightRatio)
-
-	// 对���到常见的 OpenAI 尺寸
-	// 1K 常见尺寸: 1024x1024, 1792x1024, 1024x1792
-	// 根据宽高比调整到最接近的标准尺寸
-	if basePixels == 1024 {
+	// 硬编码常用比例到合规尺寸，优先使用官方预设（标注 preset）。
+	// 1K: ~1MP；2K: ~2–4MP（以 gpt-image-2 preset 为准）；4K: ~6–8MP，最大边不超过 3840。
+	switch basePixels {
+	case 1024: // 1K ≈ 1MP
 		switch aspectRatio {
 		case "1:1":
-			return "1024x1024"
+			return "1024x1024" // preset, 1.05MP
 		case "16:9":
-			return "1792x1024"
+			return "1792x1024" // 1.84MP, 兼容标准 OpenAI dall-e-3
 		case "9:16":
-			return "1024x1792"
+			return "1024x1792" // 1.84MP
 		case "21:9":
-			return "2048x896"
+			return "2048x896" // 1.84MP, ratio≈2.29
 		case "9:21":
 			return "896x2048"
 		case "3:2":
-			return "1536x1024"
+			return "1536x1024" // preset, 1.57MP
 		case "2:3":
-			return "1024x1536"
+			return "1024x1536" // preset
 		case "4:3":
-			return "1408x1024"
+			return "1408x1024" // 1.44MP
 		case "3:4":
 			return "1024x1408"
 		}
+	case 2048: // 2K ≈ 2–4MP，以 gpt-image-2 preset 为准
+		switch aspectRatio {
+		case "1:1":
+			return "2048x2048" // preset, 4.19MP
+		case "16:9":
+			return "2048x1152" // preset, 2.36MP，精确 16:9
+		case "9:16":
+			return "1152x2048" // 2.36MP
+		case "21:9":
+			return "3072x1312" // 4.03MP, ratio≈2.34, 均为 16 的倍数
+		case "9:21":
+			return "1312x3072"
+		case "3:2":
+			return "2048x1360" // 2.79MP, 1360=85×16
+		case "2:3":
+			return "1360x2048"
+		case "4:3":
+			return "2048x1536" // 3.15MP
+		case "3:4":
+			return "1536x2048"
+		}
+	case 4096: // 4K，最大边钳制到 3840，总像素 ≤ 8.3MP
+		switch aspectRatio {
+		case "1:1":
+			return "2880x2880" // 8.29MP，恰好在 8.3MP 限制内，2880=180×16
+		case "16:9":
+			return "3840x2160" // preset, 8.29MP
+		case "9:16":
+			return "2160x3840" // preset
+		case "21:9":
+			return "3840x1648" // 6.33MP, ratio≈2.33, 1648=103×16
+		case "9:21":
+			return "1648x3840"
+		case "3:2":
+			return "3072x2048" // 6.29MP
+		case "2:3":
+			return "2048x3072"
+		case "4:3":
+			return "2880x2160" // 6.22MP, 2880=180×16, 2160=135×16
+		case "3:4":
+			return "2160x2880"
+		}
 	}
 
-	// 对于其他分辨率或非标准宽高比，��用计算值
-	return fmt.Sprintf("%dx%d", width, height)
+	// 非标准宽高比：动态计算，确保符合 gpt-image-2 约束
+	totalPixels := float64(basePixels * basePixels)
+	h := int(math.Sqrt(totalPixels*heightRatio/widthRatio)+0.5) / 16 * 16
+	w := int(float64(h)*widthRatio/heightRatio+0.5) / 16 * 16
+
+	const maxSide = 3840
+	if w > maxSide {
+		w = maxSide
+		h = int(float64(w)*heightRatio/widthRatio+0.5) / 16 * 16
+	}
+	if h > maxSide {
+		h = maxSide
+		w = int(float64(h)*widthRatio/heightRatio+0.5) / 16 * 16
+	}
+	if w <= 0 || h <= 0 || w*h < 650000 {
+		return ""
+	}
+	return fmt.Sprintf("%dx%d", w, h)
 }
 
 // OpenAIModImageRequest represents the request format for OpenAI modified endpoints
@@ -577,14 +625,35 @@ func (a *Adaptor) convertOpenAIModImageRequest(request dto.ImageRequest) (any, e
 	return modRequest, nil
 }
 
+// ConvertImageRequest 按 request_endpoint 分发到独立的转换逻辑：
+//
+//   - "openai_mod" → convertOpenAIModImageRequest
+//     resolution/aspect_ratio 原样写入 image_config（上游自行解释 "1K"/"2K"/"4K"）
+//
+//   - "openai" / "" → convertStandardOpenAIImageRequest
+//     resolution + aspect_ratio → calculateOpenAIPixelSize → WxH 像素字符串（如 "2048x1152"）
+//     像素表以 gpt-image-2 规格为准：最大边≤3840，均为 16 的倍数，总像素 0.65–8.3MP
+//
+//   - "gemini" 端点不经过此适配器，由 relay/channel/gemini 独立处理：
+//     resolution 原样映射为 Gemini imageSize（"1K"/"2K"/"4K"），上游自行解释像素含义
+//
+// 三条路径的 resolution 含义相互独立，切勿共用像素换算表。
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
-	// Check if this is an OpenAI modified endpoint
-	if request.RequestEndpoint == "openai_mod" {
+	switch request.RequestEndpoint {
+	case "openai_mod":
+		// openai_mod 端点：resolution/aspect_ratio 原样透传至 image_config，上游负责解释
 		return a.convertOpenAIModImageRequest(request)
+	default:
+		// openai（标准）端点：将 resolution + aspect_ratio 换算为 WxH 像素字符串后写入 Size
+		return a.convertStandardOpenAIImageRequest(c, info, request)
 	}
+}
 
-	// 如果 Size 未设置，尝试从 aspect_ratio 和 resolution 计算
-	// 优先读取正式 JSON 字段，回退到 RawParams
+// convertStandardOpenAIImageRequest 处理标准 OpenAI 兼容端点的图像请求。
+// 若 Size 未设置，则通过 calculateOpenAIPixelSize 将 resolution + aspect_ratio 换算为像素字符串。
+// 像素映射表以 gpt-image-2 规格为准，与 openai_mod / gemini 端点的换算表完全独立。
+func (a *Adaptor) convertStandardOpenAIImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	// 若 Size 未设置，尝试从 aspect_ratio + resolution 换算（openai 端点专用逻辑）
 	if request.Size == "" {
 		aspectRatio := request.AspectRatio
 		resolution := request.Resolution
@@ -597,7 +666,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		}
 
 		if aspectRatio != "" && resolution != "" {
-			if calculatedSize := calculateOpenAISize(resolution, aspectRatio); calculatedSize != "" {
+			if calculatedSize := calculateOpenAIPixelSize(resolution, aspectRatio); calculatedSize != "" {
 				request.Size = calculatedSize
 			}
 		}
