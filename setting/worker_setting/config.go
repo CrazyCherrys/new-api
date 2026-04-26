@@ -38,6 +38,9 @@ type WorkerSetting struct {
 	AutoCleanupEnabled bool `json:"auto_cleanup_enabled"`
 	// RetentionDays 保留天数
 	RetentionDays int `json:"retention_days"`
+
+	// MaxImageSize 单张参考图片最大大小（MB）
+	MaxImageSize int `json:"max_image_size"`
 }
 
 // 默认配置
@@ -58,6 +61,7 @@ var workerSetting = WorkerSetting{
 	PollingInterval:    5,
 	AutoCleanupEnabled: false,
 	RetentionDays:      30,
+	MaxImageSize:       10,
 }
 
 func init() {

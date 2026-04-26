@@ -2,11 +2,11 @@ package openai
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -433,132 +433,56 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 	}
 }
 
-// calculateOpenAIPixelSize 将 resolution + aspect_ratio 换算为标准 OpenAI 兼容端点的像素尺寸字符串。
+// calculateOpenAIPixelSize 将 resolution + aspect_ratio 映射到 gpt-image-2 / gpt-image-1
+// 的合法预设尺寸。
 //
-// 此函数仅用于 "openai"（标准）端点路径，不适用于 openai_mod 或 gemini 端点：
-//   - openai_mod：resolution 原样写入 image_config.image_size，上游自行解释
-//   - gemini：由 relay/channel/gemini 的 normalizeImageSize 独立处理
+// 合法预设（ref: https://docs.newapi.ai/zh/docs/api/ai-model/images/openai/post-v1-images-generations）：
 //
-// 像素映射以 gpt-image-2 规格为准（https://docs.apiyi.com/api-capabilities/gpt-image-2/text-to-image）：
-//   - 最大边 ≤ 3840px，两边均为 16 的倍数，长短边比例 ≤ 3:1，总像素 0.65MP–8.3MP
-//   - 预设尺寸：1024x1024 / 1536x1024 / 1024x1536 / 2048x2048 / 2048x1152 / 3840x2160 / 2160x3840
+//	1024x1024 · 1536x1024 · 1024x1536 · 2048x2048 · 2048x1152 · 3840x2160 · 2160x3840
+//
+// 此函数仅用于标准 "openai" 端点，不适用于 openai_mod（原样透传）或 gemini（独立处理）。
 func calculateOpenAIPixelSize(resolution, aspectRatio string) string {
 	if resolution == "" || aspectRatio == "" {
 		return ""
 	}
 
-	var basePixels int
-	switch strings.ToUpper(strings.TrimSpace(resolution)) {
+	res := strings.ToUpper(strings.TrimSpace(resolution))
+	ar := strings.TrimSpace(aspectRatio)
+
+	// 直查表：只输出官方预设尺寸，拒绝一切非预设值。
+	// 横向优先比例（landscape）→ 横版预设；纵向优先比例 → 竖版预设；方形 → 正方预设。
+	switch res {
 	case "1K":
-		basePixels = 1024
+		switch ar {
+		case "1:1", "4:3", "3:4":
+			return "1024x1024"
+		case "3:2", "16:9", "21:9":
+			return "1536x1024"
+		case "2:3", "9:16", "9:21":
+			return "1024x1536"
+		}
 	case "2K":
-		basePixels = 2048
+		switch ar {
+		case "1:1", "4:3":
+			return "2048x2048"
+		case "3:2", "16:9", "21:9":
+			return "2048x1152"
+		case "2:3", "9:16", "3:4", "9:21":
+			return "2160x3840"
+		}
 	case "4K":
-		basePixels = 4096
-	default:
-		return ""
-	}
-
-	aspectRatio = strings.TrimSpace(aspectRatio)
-	parts := strings.Split(aspectRatio, ":")
-	if len(parts) != 2 {
-		return ""
-	}
-	widthRatio := 0.0
-	heightRatio := 0.0
-	if _, err := fmt.Sscanf(parts[0], "%f", &widthRatio); err != nil || widthRatio <= 0 {
-		return ""
-	}
-	if _, err := fmt.Sscanf(parts[1], "%f", &heightRatio); err != nil || heightRatio <= 0 {
-		return ""
-	}
-
-	// 硬编码常用比例到合规尺寸，优先使用官方预设（标注 preset）。
-	// 1K: ~1MP；2K: ~2–4MP（以 gpt-image-2 preset 为准）；4K: ~6–8MP，最大边不超过 3840。
-	switch basePixels {
-	case 1024: // 1K ≈ 1MP
-		switch aspectRatio {
-		case "1:1":
-			return "1024x1024" // preset, 1.05MP
-		case "16:9":
-			return "1792x1024" // 1.84MP, 兼容标准 OpenAI dall-e-3
-		case "9:16":
-			return "1024x1792" // 1.84MP
-		case "21:9":
-			return "2048x896" // 1.84MP, ratio≈2.29
-		case "9:21":
-			return "896x2048"
-		case "3:2":
-			return "1536x1024" // preset, 1.57MP
-		case "2:3":
-			return "1024x1536" // preset
-		case "4:3":
-			return "1408x1024" // 1.44MP
-		case "3:4":
-			return "1024x1408"
-		}
-	case 2048: // 2K ≈ 2–4MP，以 gpt-image-2 preset 为准
-		switch aspectRatio {
-		case "1:1":
-			return "2048x2048" // preset, 4.19MP
-		case "16:9":
-			return "2048x1152" // preset, 2.36MP，精确 16:9
-		case "9:16":
-			return "1152x2048" // 2.36MP
-		case "21:9":
-			return "3072x1312" // 4.03MP, ratio≈2.34, 均为 16 的倍数
-		case "9:21":
-			return "1312x3072"
-		case "3:2":
-			return "2048x1360" // 2.79MP, 1360=85×16
-		case "2:3":
-			return "1360x2048"
-		case "4:3":
-			return "2048x1536" // 3.15MP
-		case "3:4":
-			return "1536x2048"
-		}
-	case 4096: // 4K，最大边钳制到 3840，总像素 ≤ 8.3MP
-		switch aspectRatio {
-		case "1:1":
-			return "2880x2880" // 8.29MP，恰好在 8.3MP 限制内，2880=180×16
-		case "16:9":
-			return "3840x2160" // preset, 8.29MP
-		case "9:16":
-			return "2160x3840" // preset
-		case "21:9":
-			return "3840x1648" // 6.33MP, ratio≈2.33, 1648=103×16
-		case "9:21":
-			return "1648x3840"
-		case "3:2":
-			return "3072x2048" // 6.29MP
-		case "2:3":
-			return "2048x3072"
-		case "4:3":
-			return "2880x2160" // 6.22MP, 2880=180×16, 2160=135×16
-		case "3:4":
-			return "2160x2880"
+		switch ar {
+		case "1:1", "4:3", "3:4":
+			return "2048x2048" // 无 4K 正方预设，回退到最大正方预设
+		case "3:2", "16:9", "21:9":
+			return "3840x2160"
+		case "2:3", "9:16", "9:21":
+			return "2160x3840"
 		}
 	}
 
-	// 非标准宽高比：动态计算，确保符合 gpt-image-2 约束
-	totalPixels := float64(basePixels * basePixels)
-	h := int(math.Sqrt(totalPixels*heightRatio/widthRatio)+0.5) / 16 * 16
-	w := int(float64(h)*widthRatio/heightRatio+0.5) / 16 * 16
-
-	const maxSide = 3840
-	if w > maxSide {
-		w = maxSide
-		h = int(float64(w)*heightRatio/widthRatio+0.5) / 16 * 16
-	}
-	if h > maxSide {
-		h = maxSide
-		w = int(float64(h)*widthRatio/heightRatio+0.5) / 16 * 16
-	}
-	if w <= 0 || h <= 0 || w*h < 650000 {
-		return ""
-	}
-	return fmt.Sprintf("%dx%d", w, h)
+	// 不支持的组合返回空字符串，上游将使用默认 auto 尺寸
+	return ""
 }
 
 // OpenAIModImageRequest represents the text-to-image request for OpenAI modified endpoints.
@@ -733,14 +657,14 @@ func (a *Adaptor) convertStandardOpenAIImageRequest(c *gin.Context, info *relayc
 		// 使用已解析的 multipart 表单，避免重复解析
 		mf := c.Request.MultipartForm
 		if mf == nil {
-			if _, err := c.MultipartForm(); err != nil {
+			if _, err := c.MultipartForm(); err != nil && len(request.ReferenceImages) == 0 {
 				return nil, errors.New("failed to parse multipart form")
 			}
 			mf = c.Request.MultipartForm
 		}
 
-		// 写入所有非文件字段
 		if mf != nil {
+			// 写入所有非文件字段
 			for key, values := range mf.Value {
 				if key == "model" {
 					continue
@@ -749,92 +673,138 @@ func (a *Adaptor) convertStandardOpenAIImageRequest(c *gin.Context, info *relayc
 					writer.WriteField(key, value)
 				}
 			}
-		}
 
-		if mf != nil && mf.File != nil {
-			// Check if "image" field exists in any form, including array notation
-			var imageFiles []*multipart.FileHeader
-			var exists bool
+			if mf.File != nil {
+				// Check if "image" field exists in any form, including array notation
+				var imageFiles []*multipart.FileHeader
+				var exists bool
 
-			// First check for standard "image" field
-			if imageFiles, exists = mf.File["image"]; !exists || len(imageFiles) == 0 {
-				// If not found, check for "image[]" field
-				if imageFiles, exists = mf.File["image[]"]; !exists || len(imageFiles) == 0 {
-					// If still not found, iterate through all fields to find any that start with "image["
-					foundArrayImages := false
-					for fieldName, files := range mf.File {
-						if strings.HasPrefix(fieldName, "image[") && len(files) > 0 {
-							foundArrayImages = true
-							imageFiles = append(imageFiles, files...)
+				// First check for standard "image" field
+				if imageFiles, exists = mf.File["image"]; !exists || len(imageFiles) == 0 {
+					// If not found, check for "image[]" field
+					if imageFiles, exists = mf.File["image[]"]; !exists || len(imageFiles) == 0 {
+						// If still not found, iterate through all fields to find any that start with "image["
+						foundArrayImages := false
+						for fieldName, files := range mf.File {
+							if strings.HasPrefix(fieldName, "image[") && len(files) > 0 {
+								foundArrayImages = true
+								imageFiles = append(imageFiles, files...)
+							}
+						}
+
+						// If no image fields found at all
+						if !foundArrayImages && (len(imageFiles) == 0) {
+							return nil, errors.New("image is required")
 						}
 					}
-
-					// If no image fields found at all
-					if !foundArrayImages && (len(imageFiles) == 0) {
-						return nil, errors.New("image is required")
-					}
 				}
+
+				// Process all image files
+				for i, fileHeader := range imageFiles {
+					file, err := fileHeader.Open()
+					if err != nil {
+						return nil, fmt.Errorf("failed to open image file %d: %w", i, err)
+					}
+
+					// If multiple images, use image[] as the field name
+					fieldName := "image"
+					if len(imageFiles) > 1 {
+						fieldName = "image[]"
+					}
+
+					// Determine MIME type based on file extension
+					mimeType := detectImageMimeType(fileHeader.Filename)
+
+					// Create a form file with the appropriate content type
+					h := make(textproto.MIMEHeader)
+					h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, fieldName, fileHeader.Filename))
+					h.Set("Content-Type", mimeType)
+
+					part, err := writer.CreatePart(h)
+					if err != nil {
+						return nil, fmt.Errorf("create form part failed for image %d: %w", i, err)
+					}
+
+					if _, err := io.Copy(part, file); err != nil {
+						return nil, fmt.Errorf("copy file failed for image %d: %w", i, err)
+					}
+
+					// 复制完立即关闭，避免在循环内使用 defer 占用资源
+					_ = file.Close()
+				}
+
+				// Handle mask file if present
+				if maskFiles, exists := mf.File["mask"]; exists && len(maskFiles) > 0 {
+					maskFile, err := maskFiles[0].Open()
+					if err != nil {
+						return nil, errors.New("failed to open mask file")
+					}
+					// 复制完立即关闭，避免在循环内使用 defer 占用资源
+
+					// Determine MIME type for mask file
+					mimeType := detectImageMimeType(maskFiles[0].Filename)
+
+					// Create a form file with the appropriate content type
+					h := make(textproto.MIMEHeader)
+					h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="mask"; filename="%s"`, maskFiles[0].Filename))
+					h.Set("Content-Type", mimeType)
+
+					maskPart, err := writer.CreatePart(h)
+					if err != nil {
+						return nil, errors.New("create form file failed for mask")
+					}
+
+					if _, err := io.Copy(maskPart, maskFile); err != nil {
+						return nil, errors.New("copy mask file failed")
+					}
+					_ = maskFile.Close()
+				}
+			} else {
+				return nil, errors.New("no multipart form data found")
+			}
+		} else if len(request.ReferenceImages) > 0 {
+			// JSON 内部调用路径：service 层以 JSON body 发送，参考图为 base64 data URL。
+			// 将其转换为 multipart/form-data 以满足 gpt-image-2 /v1/images/edits 规范。
+			if request.Prompt != "" {
+				writer.WriteField("prompt", request.Prompt)
+			}
+			if request.Size != "" {
+				writer.WriteField("size", request.Size)
+			}
+			if request.Quality != "" {
+				writer.WriteField("quality", request.Quality)
+			}
+			// 将 json.RawMessage 字段（output_format / output_compression / background）写为文本字段
+			if s := rawMessageToString(request.OutputFormat); s != "" {
+				writer.WriteField("output_format", s)
+			}
+			if s := rawMessageToString(request.OutputCompression); s != "" {
+				writer.WriteField("output_compression", s)
+			}
+			if s := rawMessageToString(request.Background); s != "" {
+				writer.WriteField("background", s)
 			}
 
-			// Process all image files
-			for i, fileHeader := range imageFiles {
-				file, err := fileHeader.Open()
+			fieldName := "image"
+			if len(request.ReferenceImages) > 1 {
+				fieldName = "image[]"
+			}
+			for i, dataURL := range request.ReferenceImages {
+				imgBytes, mimeType, err := parseDataURLToBytes(dataURL)
 				if err != nil {
-					return nil, fmt.Errorf("failed to open image file %d: %w", i, err)
+					return nil, fmt.Errorf("invalid reference image %d: %w", i, err)
 				}
-
-				// If multiple images, use image[] as the field name
-				fieldName := "image"
-				if len(imageFiles) > 1 {
-					fieldName = "image[]"
-				}
-
-				// Determine MIME type based on file extension
-				mimeType := detectImageMimeType(fileHeader.Filename)
-
-				// Create a form file with the appropriate content type
+				ext := mimeTypeToExt(mimeType)
 				h := make(textproto.MIMEHeader)
-				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, fieldName, fileHeader.Filename))
+				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="image%d.%s"`, fieldName, i, ext))
 				h.Set("Content-Type", mimeType)
-
 				part, err := writer.CreatePart(h)
 				if err != nil {
 					return nil, fmt.Errorf("create form part failed for image %d: %w", i, err)
 				}
-
-				if _, err := io.Copy(part, file); err != nil {
-					return nil, fmt.Errorf("copy file failed for image %d: %w", i, err)
+				if _, err := part.Write(imgBytes); err != nil {
+					return nil, fmt.Errorf("write image data failed for image %d: %w", i, err)
 				}
-
-				// 复制完立即关闭，避免在循环内使用 defer 占用资源
-				_ = file.Close()
-			}
-
-			// Handle mask file if present
-			if maskFiles, exists := mf.File["mask"]; exists && len(maskFiles) > 0 {
-				maskFile, err := maskFiles[0].Open()
-				if err != nil {
-					return nil, errors.New("failed to open mask file")
-				}
-				// 复制完立即关闭，避免在循环内使用 defer 占用资源
-
-				// Determine MIME type for mask file
-				mimeType := detectImageMimeType(maskFiles[0].Filename)
-
-				// Create a form file with the appropriate content type
-				h := make(textproto.MIMEHeader)
-				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="mask"; filename="%s"`, maskFiles[0].Filename))
-				h.Set("Content-Type", mimeType)
-
-				maskPart, err := writer.CreatePart(h)
-				if err != nil {
-					return nil, errors.New("create form file failed for mask")
-				}
-
-				if _, err := io.Copy(maskPart, maskFile); err != nil {
-					return nil, errors.New("copy mask file failed")
-				}
-				_ = maskFile.Close()
 			}
 		} else {
 			return nil, errors.New("no multipart form data found")
@@ -868,6 +838,65 @@ func detectImageMimeType(filename string) string {
 		// Default to png as a fallback
 		return "image/png"
 	}
+}
+
+// parseDataURLToBytes 解析 "data:image/png;base64,..." 格式的 data URL，
+// 返回原始字节和 MIME type。若传入的是纯 base64 字符串则默认视为 image/png。
+func parseDataURLToBytes(dataURL string) ([]byte, string, error) {
+	if !strings.HasPrefix(dataURL, "data:") {
+		decoded, err := base64.StdEncoding.DecodeString(dataURL)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid base64 string: %w", err)
+		}
+		return decoded, "image/png", nil
+	}
+	rest := strings.TrimPrefix(dataURL, "data:")
+	semicolon := strings.Index(rest, ";")
+	if semicolon == -1 {
+		return nil, "", fmt.Errorf("invalid data URL: missing semicolon")
+	}
+	mimeType := rest[:semicolon]
+	rest = rest[semicolon+1:]
+	comma := strings.Index(rest, ",")
+	if comma == -1 {
+		return nil, "", fmt.Errorf("invalid data URL: missing comma")
+	}
+	if rest[:comma] != "base64" {
+		return nil, "", fmt.Errorf("unsupported data URL encoding: %s", rest[:comma])
+	}
+	b64 := rest[comma+1:]
+	decoded, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, "", fmt.Errorf("base64 decode failed: %w", err)
+	}
+	return decoded, mimeType, nil
+}
+
+// mimeTypeToExt 将常见图片 MIME type 转为文件扩展名。
+func mimeTypeToExt(mimeType string) string {
+	switch strings.ToLower(mimeType) {
+	case "image/jpeg", "image/jpg":
+		return "jpg"
+	case "image/webp":
+		return "webp"
+	default:
+		return "png"
+	}
+}
+
+// rawMessageToString 将 json.RawMessage 字段（如 `"jpeg"` 或 `85`）转为无引号字符串，
+// 用于把 dto.ImageRequest 的 RawMessage 字段写入 multipart form 文本字段。
+func rawMessageToString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	s := string(raw)
+	// 去除 JSON 字符串两端的引号
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {

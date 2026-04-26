@@ -122,6 +122,7 @@ const ImageGeneration = () => {
   const [deletingTasks, setDeletingTasks] = useState(false);
   const sseRef = useRef(null);
   const pollingTimerRef = useRef(null);
+  const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
 
   const formatModelSeries = (series) => {
     if (!series) return '';
@@ -169,6 +170,7 @@ const ImageGeneration = () => {
   useEffect(() => {
     loadDrawingModels();
     loadTasks();
+    loadWorkerSettings();
     connectSSE();
 
     return () => {
@@ -229,6 +231,21 @@ const ImageGeneration = () => {
       showError(error.message || t('加载模型失败'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadWorkerSettings = async () => {
+    try {
+      const res = await API.get('/api/option/?key=worker_setting.max_image_size');
+      if (res.data.success && res.data.data) {
+        const size = parseInt(res.data.data, 10);
+        if (!isNaN(size) && size > 0) {
+          setMaxImageSize(size);
+        }
+      }
+    } catch (error) {
+      // 静默失败，使用默认值
+      console.error('Failed to load worker settings:', error);
     }
   };
 
@@ -570,6 +587,20 @@ const ImageGeneration = () => {
 
   const handleImageUpload = ({ fileList }) => {
     setReferenceImages(fileList);
+  };
+
+  const validateImageSize = (file) => {
+    const fileSizeMB = file.size / 1024 / 1024;
+    if (fileSizeMB > maxImageSize) {
+      showError(
+        t('图片文件过大：{{size}}MB，最大允许 {{max}}MB', {
+          size: fileSizeMB.toFixed(2),
+          max: maxImageSize,
+        })
+      );
+      return false;
+    }
+    return true;
   };
 
   const handleImageRemove = (file) => {
@@ -1040,7 +1071,7 @@ const ImageGeneration = () => {
                 fileList={referenceImages}
                 onChange={handleImageUpload}
                 showUploadList={false}
-                beforeUpload={() => false}
+                beforeUpload={validateImageSize}
               >
                 <div style={styles.addImageBtn}>
                   <IconPlus size='large' />

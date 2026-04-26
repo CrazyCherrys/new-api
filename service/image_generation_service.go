@@ -330,9 +330,11 @@ func callUpstreamImageAPIViaRelay(ctx context.Context, ch *model.Channel, task *
 	if port == "" {
 		port = "3000"
 	}
-	// openai_mod 有参考图时路由到图生图端点，否则路由到文生图端点
+	// 有参考图时统一路由到图生图端点（/v1/images/edits），无论 endpoint 类型。
+	// openai 标准端点：由 convertStandardOpenAIImageRequest 将 base64 data URL 转为 multipart form。
+	// openai_mod 端点：由 convertOpenAIModImageEditRequest 保持 JSON 格式发送。
 	requestURL := fmt.Sprintf("http://127.0.0.1:%s/v1/images/generations", port)
-	if imageReq.RequestEndpoint == "openai_mod" && len(imageReq.ReferenceImages) > 0 {
+	if len(imageReq.ReferenceImages) > 0 {
 		requestURL = fmt.Sprintf("http://127.0.0.1:%s/v1/images/edits", port)
 	}
 

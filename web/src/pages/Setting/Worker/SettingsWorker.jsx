@@ -48,6 +48,7 @@ export default function SettingsWorker(props) {
     'worker_setting.polling_interval': 5,
     'worker_setting.auto_cleanup_enabled': false,
     'worker_setting.retention_days': 30,
+    'worker_setting.max_image_size': 10,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -348,6 +349,16 @@ export default function SettingsWorker(props) {
                   min={1}
                   max={365}
                   onChange={handleFieldChange('worker_setting.retention_days')}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'worker_setting.max_image_size'}
+                  label={t('参考图片大小限制（MB）')}
+                  extraText={t('单张参考图片的最大文件大小')}
+                  min={1}
+                  max={100}
+                  onChange={handleFieldChange('worker_setting.max_image_size')}
                 />
               </Col>
             </Row>
