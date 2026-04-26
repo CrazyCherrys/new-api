@@ -389,12 +389,26 @@ const ImageGenerationTaskModal = ({
   const displayName =
     task.display_name || metadata.display_name || task.model_id || '-';
 
-  const sizeText =
-    params.size ||
-    params.resolution ||
-    (metadata.width && metadata.height
-      ? `${metadata.width}x${metadata.height}`
-      : '');
+  // 构建尺寸文本：优先显示 aspect_ratio + resolution，回退到 size 或 width x height
+  const sizeText = (() => {
+    const parts = [];
+    if (params.aspect_ratio) {
+      parts.push(params.aspect_ratio);
+    }
+    if (params.resolution) {
+      parts.push(params.resolution);
+    }
+    if (parts.length > 0) {
+      return parts.join(' · ');
+    }
+    if (params.size) {
+      return params.size;
+    }
+    if (metadata.width && metadata.height) {
+      return `${metadata.width}x${metadata.height}`;
+    }
+    return '';
+  })();
 
   return (
     <Modal
@@ -463,11 +477,6 @@ const ImageGenerationTaskModal = ({
 
           <div style={styles.infoBlock}>
             <span style={styles.infoLabel}>{t('模型')}</span>
-            <span style={styles.infoValue}>{task.model_id || '-'}</span>
-          </div>
-
-          <div style={styles.infoBlock}>
-            <span style={styles.infoLabel}>{t('显示名称')}</span>
             <span style={styles.infoValue}>{displayName}</span>
           </div>
 

@@ -421,11 +421,13 @@ const ImageGeneration = () => {
           try {
             const ratios = JSON.parse(model.aspect_ratios);
             setAvailableAspectRatios(ratios);
-            if (ratios.length > 0) {
-              setAspectRatio(ratios[0]);
-            } else {
-              setAspectRatio('');
-            }
+            // 只在当前 aspectRatio 为空或不在新���表中时才重置
+            setAspectRatio((current) => {
+              if (!current || !ratios.includes(current)) {
+                return ratios.length > 0 ? ratios[0] : '';
+              }
+              return current;
+            });
           } catch (e) {
             setAvailableAspectRatios([]);
             setAspectRatio('');
@@ -439,11 +441,13 @@ const ImageGeneration = () => {
           try {
             const resolutions = JSON.parse(model.resolutions);
             setAvailableResolutions(resolutions);
-            if (resolutions.length > 0) {
-              setResolution(resolutions[0]);
-            } else {
-              setResolution('');
-            }
+            // 只在当前 resolution 为空或不在新列表中时才重置
+            setResolution((current) => {
+              if (!current || !resolutions.includes(current)) {
+                return resolutions.length > 0 ? resolutions[0] : '';
+              }
+              return current;
+            });
           } catch (e) {
             setAvailableResolutions([]);
             setResolution('');
