@@ -326,12 +326,15 @@ func callUpstreamImageAPIViaRelay(ctx context.Context, ch *model.Channel, task *
 	}
 
 	// 构建内部 API 请求 URL（通过 relay 层）
-	// 使用 localhost 调用自己的 /v1/images/generations 端点
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "3000"
 	}
+	// openai_mod 有参考图时路由到图生图端点，否则路由到文生图端点
 	requestURL := fmt.Sprintf("http://127.0.0.1:%s/v1/images/generations", port)
+	if imageReq.RequestEndpoint == "openai_mod" && len(imageReq.ReferenceImages) > 0 {
+		requestURL = fmt.Sprintf("http://127.0.0.1:%s/v1/images/edits", port)
+	}
 
 	// 序列化请求
 	jsonData, err := common.Marshal(imageReq)
