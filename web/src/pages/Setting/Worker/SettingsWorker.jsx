@@ -28,11 +28,16 @@ import {
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 
-const MASKED_SECRET_VALUE = '***';
+const MASKED_SECRET_VALUE = '****';
+const LEGACY_MASKED_SECRET_VALUE = '***';
 const S3_SECRET_FIELDS = new Set([
   'worker_setting.s3_access_key',
   'worker_setting.s3_secret_key',
 ]);
+
+function isMaskedSecretValue(value) {
+  return value === MASKED_SECRET_VALUE || value === LEGACY_MASKED_SECRET_VALUE;
+}
 
 export default function SettingsWorker(props) {
   const { t } = useTranslation();
@@ -70,7 +75,7 @@ export default function SettingsWorker(props) {
       (item) =>
         !(
           S3_SECRET_FIELDS.has(item.key) &&
-          inputs[item.key] === MASKED_SECRET_VALUE
+          isMaskedSecretValue(inputs[item.key])
         ),
     );
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
@@ -261,7 +266,13 @@ export default function SettingsWorker(props) {
                       field={'worker_setting.s3_secret_key'}
                       label={t('S3 Secret Key')}
                       extraText={t('S3 访问密钥')}
-                      mode='password'
+                      mode={
+                        isMaskedSecretValue(
+                          inputs['worker_setting.s3_secret_key'],
+                        )
+                          ? undefined
+                          : 'password'
+                      }
                       onChange={handleFieldChange(
                         'worker_setting.s3_secret_key',
                       )}

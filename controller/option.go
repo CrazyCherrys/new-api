@@ -27,9 +27,15 @@ var completionRatioMetaOptionKeys = []string{
 	"AudioCompletionRatio",
 }
 
+const maskedWorkerS3OptionValue = "****"
+
 var maskedWorkerS3OptionKeys = map[string]struct{}{
 	"worker_setting.s3_access_key": {},
 	"worker_setting.s3_secret_key": {},
+}
+
+func isMaskedWorkerS3OptionValue(value string) bool {
+	return value == maskedWorkerS3OptionValue || value == "***"
 }
 
 func collectModelNamesFromOptionValue(raw string, modelNames map[string]struct{}) {
@@ -71,8 +77,15 @@ func GetOptions(c *gin.Context) {
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
 		value := common.Interface2String(v)
-		if _, ok := maskedWorkerS3OptionKeys[k]; ok && value != "" {
-			value = "***"
+		if _, ok := maskedWorkerS3OptionKeys[k]; ok {
+			if value != "" {
+				value = maskedWorkerS3OptionValue
+			}
+			options = append(options, &model.Option{
+				Key:   k,
+				Value: value,
+			})
+			continue
 		}
 		if strings.HasSuffix(k, "Token") ||
 			strings.HasSuffix(k, "Secret") ||
@@ -130,7 +143,7 @@ func UpdateOption(c *gin.Context) {
 	default:
 		option.Value = fmt.Sprintf("%v", option.Value)
 	}
-	if _, ok := maskedWorkerS3OptionKeys[option.Key]; ok && option.Value == "***" {
+	if _, ok := maskedWorkerS3OptionKeys[option.Key]; ok && isMaskedWorkerS3OptionValue(option.Value.(string)) {
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",
