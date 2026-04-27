@@ -310,6 +310,7 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	if err != nil {
 		return "", "", 0, fmt.Errorf("failed to parse response: %w", err)
 	}
+	imageUrl = storeImageGenerationResult(ctx, task.Id, imageUrl)
 
 	// 计算费用
 	cost = calculateImageCost(task.ModelId, imageReq)

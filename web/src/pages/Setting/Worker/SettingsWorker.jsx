@@ -28,6 +28,12 @@ import {
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 
+const MASKED_SECRET_VALUE = '***';
+const S3_SECRET_FIELDS = new Set([
+  'worker_setting.s3_access_key',
+  'worker_setting.s3_secret_key',
+]);
+
 export default function SettingsWorker(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
@@ -60,7 +66,13 @@ export default function SettingsWorker(props) {
   }
 
   function onSubmit() {
-    const updateArray = compareObjects(inputs, inputsRow);
+    const updateArray = compareObjects(inputs, inputsRow).filter(
+      (item) =>
+        !(
+          S3_SECRET_FIELDS.has(item.key) &&
+          inputs[item.key] === MASKED_SECRET_VALUE
+        ),
+    );
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
     const requestQueue = updateArray.map((item) => {
       let value = '';
@@ -77,11 +89,17 @@ export default function SettingsWorker(props) {
     setLoading(true);
     Promise.all(requestQueue)
       .then((res) => {
-        if (requestQueue.length === 1) {
-          if (res.includes(undefined)) return;
-        } else if (requestQueue.length > 1) {
-          if (res.includes(undefined))
-            return showError(t('部分保存失败，请重试'));
+        const failedResponses = res.filter((item) => !item?.data?.success);
+        if (failedResponses.length > 0) {
+          failedResponses.forEach((item) => {
+            if (item?.data?.message) {
+              showError(item.data.message);
+            }
+          });
+          if (!failedResponses.some((item) => item?.data?.message)) {
+            showError(t('部分保存失败，请重试'));
+          }
+          return;
         }
         showSuccess(t('保存成功'));
         props.refresh();
@@ -95,23 +113,24 @@ export default function SettingsWorker(props) {
   }
 
   useEffect(() => {
+    const nextInputs = { ...inputs };
     const currentInputs = {};
     for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
-        if (typeof inputs[key] === 'boolean') {
+      if (Object.keys(nextInputs).includes(key)) {
+        if (typeof nextInputs[key] === 'boolean') {
           currentInputs[key] =
             props.options[key] === 'true' || props.options[key] === true;
-        } else if (typeof inputs[key] === 'number') {
-          currentInputs[key] = parseInt(props.options[key]) || inputs[key];
+        } else if (typeof nextInputs[key] === 'number') {
+          currentInputs[key] = parseInt(props.options[key]) || nextInputs[key];
         } else {
           currentInputs[key] = props.options[key];
         }
       }
     }
-    setInputs({ ...inputs, ...currentInputs });
-    setInputsRow({ ...inputs, ...currentInputs });
+    setInputs({ ...nextInputs, ...currentInputs });
+    setInputsRow({ ...nextInputs, ...currentInputs });
     if (refForm.current) {
-      refForm.current.setValues({ ...inputs, ...currentInputs });
+      refForm.current.setValues({ ...nextInputs, ...currentInputs });
     }
   }, [props.options]);
 
@@ -328,7 +347,9 @@ export default function SettingsWorker(props) {
                   extraText={t('Worker 检查新任务的时间间隔')}
                   min={1}
                   max={60}
-                  onChange={handleFieldChange('worker_setting.polling_interval')}
+                  onChange={handleFieldChange(
+                    'worker_setting.polling_interval',
+                  )}
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>

@@ -27,6 +27,11 @@ var completionRatioMetaOptionKeys = []string{
 	"AudioCompletionRatio",
 }
 
+var maskedWorkerS3OptionKeys = map[string]struct{}{
+	"worker_setting.s3_access_key": {},
+	"worker_setting.s3_secret_key": {},
+}
+
 func collectModelNamesFromOptionValue(raw string, modelNames map[string]struct{}) {
 	if strings.TrimSpace(raw) == "" {
 		return
@@ -66,6 +71,9 @@ func GetOptions(c *gin.Context) {
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
 		value := common.Interface2String(v)
+		if _, ok := maskedWorkerS3OptionKeys[k]; ok && value != "" {
+			value = "***"
+		}
 		if strings.HasSuffix(k, "Token") ||
 			strings.HasSuffix(k, "Secret") ||
 			strings.HasSuffix(k, "Key") ||
@@ -121,6 +129,13 @@ func UpdateOption(c *gin.Context) {
 		option.Value = common.Interface2String(option.Value.(int))
 	default:
 		option.Value = fmt.Sprintf("%v", option.Value)
+	}
+	if _, ok := maskedWorkerS3OptionKeys[option.Key]; ok && option.Value == "***" {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+		})
+		return
 	}
 	switch option.Key {
 	case "GitHubOAuthEnabled":
