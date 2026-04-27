@@ -21,8 +21,11 @@ import (
 )
 
 var (
-	workerPool     chan struct{}
-	workerPoolOnce sync.Once
+	workerPool                 chan struct{}
+	workerPoolOnce             sync.Once
+	enqueueImageGenerationTask = func(taskId int) {
+		go processTaskAsync(taskId)
+	}
 )
 
 func normalizeImageEndpoint(endpoint string) string {
@@ -82,7 +85,7 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 	}
 
 	// 启动异步处理
-	go processTaskAsync(task.Id)
+	enqueueImageGenerationTask(task.Id)
 
 	return task, nil
 }
@@ -117,6 +120,31 @@ func processTaskAsync(taskId int) {
 		}
 		common.SysLog(fmt.Sprintf("Task %d timed out waiting for worker slot", taskId))
 	}
+}
+
+// RetryImageGenerationTask 重新排队失败任务并立即执行
+func RetryImageGenerationTask(taskId int) error {
+	task, err := model.GetImageTaskByID(taskId)
+	if err != nil {
+		return fmt.Errorf("failed to get task: %w", err)
+	}
+	if task == nil {
+		return fmt.Errorf("task not found: %d", taskId)
+	}
+	if task.Status != model.ImageTaskStatusFailed {
+		return fmt.Errorf("task %d is not failed (status: %s)", taskId, task.Status)
+	}
+
+	updated, err := model.ResetImageTaskForRetry(taskId)
+	if err != nil {
+		return fmt.Errorf("failed to reset task for retry: %w", err)
+	}
+	if !updated {
+		return fmt.Errorf("task %d is not failed", taskId)
+	}
+
+	enqueueImageGenerationTask(taskId)
+	return nil
 }
 
 // ProcessImageGenerationTask 处理图片生成任务

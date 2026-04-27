@@ -189,17 +189,18 @@ func RetryImageGenerationTask(c *gin.Context) {
 		return
 	}
 
-	// 重置任务状态
-	task.Status = model.ImageTaskStatusPending
-	task.ErrorMessage = ""
-	task.CompletedTime = 0
-
-	if err := task.Update(); err != nil {
+	if err := service.RetryImageGenerationTask(taskId); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	common.ApiSuccess(c, task)
+	reloadedTask, err := model.GetImageTaskByID(taskId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, reloadedTask)
 }
 
 // DeleteImageGenerationTask 删除任务

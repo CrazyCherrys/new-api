@@ -44,6 +44,19 @@ func (task *ImageGenerationTask) Update() error {
 	return DB.Model(task).Updates(task).Error
 }
 
+// ResetImageTaskForRetry 将失败任务重置为待处理状态，返回是否实际更新。
+func ResetImageTaskForRetry(id int) (bool, error) {
+	updates := map[string]interface{}{
+		"status":         ImageTaskStatusPending,
+		"error_message":  "",
+		"completed_time": 0,
+	}
+	result := DB.Model(&ImageGenerationTask{}).
+		Where("id = ? AND status = ?", id, ImageTaskStatusFailed).
+		Updates(updates)
+	return result.RowsAffected > 0, result.Error
+}
+
 // GetImageTaskByID 根据ID获取任务
 func GetImageTaskByID(id int) (*ImageGenerationTask, error) {
 	var task ImageGenerationTask
