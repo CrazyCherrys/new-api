@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Select,
@@ -39,6 +40,7 @@ import {
   IconBolt,
   IconChevronUp,
   IconChevronDown,
+  IconExternalOpen,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
@@ -48,6 +50,8 @@ const { Text } = Typography;
 
 const ImageGeneration = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   // LocalStorage keys
   const STORAGE_KEYS = {
@@ -183,6 +187,27 @@ const ImageGeneration = () => {
       stopPolling();
     };
   }, []);
+
+  useEffect(() => {
+    const taskId = new URLSearchParams(location.search).get('task_id');
+    if (!taskId) return;
+
+    const loadTaskDetail = async () => {
+      try {
+        const res = await API.get(`/api/image-generation/tasks/${taskId}`);
+        if (res.data.success) {
+          setSelectedTask(res.data.data);
+          setTaskModalVisible(true);
+        } else {
+          showError(res.data.message || t('加载任务详情失败'));
+        }
+      } catch (error) {
+        showError(error.message || t('加载任务详情失败'));
+      }
+    };
+
+    loadTaskDetail();
+  }, [location.search, t]);
 
   useEffect(() => {
     loadTasks();
@@ -1176,6 +1201,15 @@ const ImageGeneration = () => {
         </Text>
 
         <div style={styles.filterGroup}>
+          <Button
+            size='small'
+            type='tertiary'
+            icon={<IconExternalOpen />}
+            onClick={() => navigate('/console/assets')}
+          >
+            {t('查看资产仓库')}
+          </Button>
+
           <span style={styles.filterLabel}>{t('状态')}</span>
           <Select
             size='small'

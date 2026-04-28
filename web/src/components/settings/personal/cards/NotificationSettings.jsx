@@ -79,6 +79,7 @@ const NotificationSettings = ({
     },
     personal: {
       enabled: true,
+      assets: true,
       topup: true,
       personal: true,
     },
@@ -165,7 +166,7 @@ const NotificationSettings = ({
         midjourney: true,
         task: true,
       },
-      personal: { enabled: true, topup: true, personal: true },
+      personal: { enabled: true, assets: true, topup: true, personal: true },
       admin: {
         enabled: true,
         channel: true,
@@ -278,6 +279,11 @@ const NotificationSettings = ({
       title: t('个人中心区域'),
       description: t('用户个人功能'),
       modules: [
+        {
+          key: 'assets',
+          title: t('资产仓库'),
+          description: t('图片资产管理'),
+        },
         { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
         {
           key: 'personal',
@@ -478,7 +484,10 @@ const NotificationSettings = ({
                     checkedText={t('开')}
                     uncheckedText={t('关')}
                     onChange={(value) =>
-                      handleFormChange('upstreamModelUpdateNotifyEnabled', value)
+                      handleFormChange(
+                        'upstreamModelUpdateNotifyEnabled',
+                        value,
+                      )
                     }
                     extraText={t(
                       '仅管理员可用。开启后，当系统定时检测全部渠道发现上游模型变更或检测异常时，将按你选择的通知方式发送汇总通知；渠道或模型过多时会自动省略部分明细。',

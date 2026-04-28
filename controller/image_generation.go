@@ -137,6 +137,89 @@ func GetImageGenerationTaskDetail(c *gin.Context) {
 	common.ApiSuccess(c, task)
 }
 
+// GetImageGenerationAssets 获取当前用户的图片资产仓库列表。
+func GetImageGenerationAssets(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "未授权",
+		})
+		return
+	}
+
+	pageInfo := common.GetPageQuery(c)
+
+	startTime, _ := strconv.ParseInt(c.Query("start_time"), 10, 64)
+	endTime, _ := strconv.ParseInt(c.Query("end_time"), 10, 64)
+	queryParams := model.ImageAssetQueryParams{
+		Keyword:     c.Query("keyword"),
+		ModelId:     c.Query("model_id"),
+		ModelSeries: c.Query("model_series"),
+		StartTime:   startTime,
+		EndTime:     endTime,
+		SortBy:      c.Query("sort_by"),
+		SortOrder:   c.Query("sort_order"),
+	}
+
+	assets, total, stats, err := model.GetImageAssetsByUserID(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	filterOptions, err := model.GetImageAssetFilterOptions(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, gin.H{
+		"page":      pageInfo.GetPage(),
+		"page_size": pageInfo.GetPageSize(),
+		"total":     int(total),
+		"items":     assets,
+		"stats":     stats,
+		"filters":   filterOptions,
+	})
+}
+
+// GetImageGenerationAssetDetail 获取当前用户的单个图片资产详情。
+func GetImageGenerationAssetDetail(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "未授权",
+		})
+		return
+	}
+
+	taskId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的资产ID",
+		})
+		return
+	}
+
+	asset, err := model.GetImageAssetByID(userId, taskId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if asset == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "资产不存在",
+		})
+		return
+	}
+
+	common.ApiSuccess(c, asset)
+}
+
 // RetryImageGenerationTask 重试失败任务
 func RetryImageGenerationTask(c *gin.Context) {
 	userId := c.GetInt("id")
