@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/worker_setting"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -98,5 +100,23 @@ func TestRetryImageGenerationTaskResetsAndEnqueuesFailedTask(t *testing.T) {
 	}
 	if len(enqueuedTaskIds) != 1 || enqueuedTaskIds[0] != task.Id {
 		t.Fatalf("expected task %d to be enqueued once, got %v", task.Id, enqueuedTaskIds)
+	}
+}
+
+func TestImageGenerationTimeoutUsesWorkerSetting(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousTimeout := cfg.ImageTimeout
+	t.Cleanup(func() {
+		cfg.ImageTimeout = previousTimeout
+	})
+
+	cfg.ImageTimeout = 600
+	if got := imageGenerationTimeout(); got != 600*time.Second {
+		t.Fatalf("expected configured timeout 600s, got %v", got)
+	}
+
+	cfg.ImageTimeout = 0
+	if got := imageGenerationTimeout(); got != 120*time.Second {
+		t.Fatalf("expected default timeout 120s, got %v", got)
 	}
 }

@@ -37,6 +37,15 @@ func normalizeImageEndpoint(endpoint string) string {
 	}
 }
 
+func imageGenerationTimeout() time.Duration {
+	cfg := worker_setting.GetWorkerSetting()
+	timeout := time.Duration(cfg.ImageTimeout) * time.Second
+	if timeout <= 0 {
+		return 120 * time.Second
+	}
+	return timeout
+}
+
 // initWorkerPool 初始化 worker pool
 func initWorkerPool() {
 	workerPoolOnce.Do(func() {
@@ -94,11 +103,7 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 func processTaskAsync(taskId int) {
 	initWorkerPool()
 
-	cfg := worker_setting.GetWorkerSetting()
-	timeout := time.Duration(cfg.ImageTimeout) * time.Second
-	if timeout <= 0 {
-		timeout = 120 * time.Second
-	}
+	timeout := imageGenerationTimeout()
 
 	// 创建超时上下文，包括等待 worker pool 的时间
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -168,16 +173,13 @@ func ProcessImageGenerationTask(taskId int) error {
 		return fmt.Errorf("failed to update task status: %w", err)
 	}
 
-	cfg := worker_setting.GetWorkerSetting()
-	timeout := time.Duration(cfg.ImageTimeout) * time.Second
-	if timeout <= 0 {
-		timeout = 120 * time.Second
-	}
+	timeout := imageGenerationTimeout()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	// 重试逻辑
+	cfg := worker_setting.GetWorkerSetting()
 	maxRetries := cfg.MaxRetries
 	if maxRetries <= 0 {
 		maxRetries = 3
@@ -389,7 +391,7 @@ func callUpstreamImageAPIViaRelay(ctx context.Context, ch *model.Channel, task *
 
 	// 发送请求
 	client := &http.Client{
-		Timeout: 120 * time.Second,
+		Timeout: imageGenerationTimeout(),
 	}
 	resp, err := client.Do(req)
 	if err != nil {
