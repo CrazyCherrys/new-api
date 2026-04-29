@@ -54,7 +54,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.UniversalVerify)
 
 		// Image generation task routes
-		apiRouter.GET("/image-generation/files/*path", controller.GetImageGenerationFile)
+		apiRouter.GET("/image-generation/files/*path", middleware.TryUserAuth(), controller.GetImageGenerationFile)
 		imageGenRoute := apiRouter.Group("/image-generation")
 		imageGenRoute.Use(middleware.UserAuth())
 		{

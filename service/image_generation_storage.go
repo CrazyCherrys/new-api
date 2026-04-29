@@ -21,6 +21,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/worker_setting"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -335,10 +336,27 @@ func imageGenerationLocalAssetPath(cfg *worker_setting.WorkerSetting, assetPath 
 }
 
 func imageGenerationLocalAssetKeyFromURL(imageUrl string) (string, bool) {
-	if idx := strings.Index(imageUrl, imageGenerationAssetURLPrefix); idx >= 0 {
-		return strings.TrimPrefix(imageUrl[idx+len(imageGenerationAssetURLPrefix):], "/"), true
+	trimmed := strings.TrimSpace(imageUrl)
+	if strings.HasPrefix(trimmed, imageGenerationAssetURLPrefix) {
+		return strings.TrimPrefix(trimmed[len(imageGenerationAssetURLPrefix):], "/"), true
 	}
 	return "", false
+}
+
+func CanAccessImageGenerationLocalAsset(userId int, assetPath string) (bool, error) {
+	clean, err := sanitizeImageGenerationLocalAssetPath(assetPath)
+	if err != nil {
+		return false, nil
+	}
+
+	assetURL := buildImageGenerationLocalObjectURL(clean)
+	var count int64
+	if err := model.DB.Model(&model.ImageGenerationTask{}).
+		Where("user_id = ? AND image_url = ?", userId, assetURL).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func OpenImageGenerationLocalAsset(assetPath string) (*os.File, string, error) {

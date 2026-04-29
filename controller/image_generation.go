@@ -236,7 +236,29 @@ func GetImageGenerationAssetDetail(c *gin.Context) {
 
 // GetImageGenerationFile 读取本地存储的图片生成结果文件。
 func GetImageGenerationFile(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "未授权",
+		})
+		return
+	}
+
 	assetPath := c.Param("path")
+	allowed, err := service.CanAccessImageGenerationLocalAsset(userId, assetPath)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !allowed {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "资源不存在",
+		})
+		return
+	}
+
 	file, contentType, err := service.OpenImageGenerationLocalAsset(assetPath)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{

@@ -196,10 +196,6 @@ const Assets = () => {
     sortValue,
   ]);
 
-  useEffect(() => {
-    setPage(1);
-  }, [submittedKeyword, modelId, modelSeries, timeRange, sortValue]);
-
   const openDetail = async (asset) => {
     setSelectedAsset(asset);
     setDetailVisible(true);
@@ -248,17 +244,38 @@ const Assets = () => {
   };
 
   const submitSearch = () => {
-    setSubmittedKeyword(keyword);
+    setPage(1);
+    setSubmittedKeyword(keyword.trim());
+  };
+
+  const handleModelSeriesChange = (value) => {
+    setPage(1);
+    setModelSeries(value || '');
+  };
+
+  const handleModelIdChange = (value) => {
+    setPage(1);
+    setModelId(value || '');
+  };
+
+  const handleTimeRangeChange = (value) => {
+    setPage(1);
+    setTimeRange(value || '');
+  };
+
+  const handleSortChange = (value) => {
+    setPage(1);
+    setSortValue(value || 'created_time_desc');
   };
 
   const resetFilters = () => {
+    setPage(1);
     setKeyword('');
     setSubmittedKeyword('');
     setModelId('');
     setModelSeries('');
     setTimeRange('');
     setSortValue('created_time_desc');
-    setPage(1);
   };
 
   const renderAssetCard = (asset) => (
@@ -303,106 +320,117 @@ const Assets = () => {
         </div>
       </div>
       <div className='asset-card-body'>
-        <div className='asset-card-title'>
-          {asset.display_name || asset.model_id || t('未知模型')}
+        <div className='asset-card-title-row'>
+          <div className='asset-card-title'>
+            {asset.display_name || asset.model_id || t('未知模型')}
+          </div>
+          {asset.model_series && (
+            <Tag size='small' className='asset-series-tag'>
+              {formatSeries(asset.model_series)}
+            </Tag>
+          )}
         </div>
         <div className='asset-card-prompt'>{asset.prompt}</div>
         <div className='asset-card-meta'>
           <span>{formatTime(asset.created_time)}</span>
-          {asset.model_series && (
-            <Tag size='small'>{formatSeries(asset.model_series)}</Tag>
-          )}
         </div>
       </div>
     </div>
   );
 
   return (
-    <div className='assets-page mt-[60px]'>
+    <div className='assets-page'>
       <style>{`
         .assets-page {
           width: 100%;
-          min-height: calc(100vh - 108px);
+          min-height: calc(100vh - 112px);
           color: var(--semi-color-text-0);
         }
         .assets-shell {
           width: 100%;
-          max-width: 1680px;
-          margin: 0 auto;
+          margin: 0;
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          gap: 14px;
         }
-        .assets-header {
+        .assets-topbar {
           display: flex;
-          align-items: flex-start;
+          align-items: center;
           justify-content: space-between;
           gap: 16px;
-          padding: 16px;
-          border: 1px solid var(--semi-color-border);
-          border-radius: 8px;
-          background: var(--semi-color-bg-0);
+          min-height: 42px;
         }
-        .assets-title {
+        .assets-left-tools {
           display: flex;
-          flex-direction: column;
-          gap: 4px;
-          min-width: 180px;
+          align-items: center;
+          gap: 22px;
+          min-width: 0;
         }
-        .assets-title h1 {
-          margin: 0;
-          font-size: 22px;
-          line-height: 1.25;
-          font-weight: 650;
-          letter-spacing: 0;
-        }
-        .assets-title span {
-          color: var(--semi-color-text-2);
+        .assets-title-chip {
+          display: inline-flex;
+          align-items: center;
+          min-height: 30px;
+          padding: 0 14px;
+          border-radius: 7px;
+          background: var(--semi-color-fill-1);
+          color: var(--semi-color-text-0);
           font-size: 13px;
+          font-weight: 650;
+          white-space: nowrap;
         }
-        .assets-stats {
+        .assets-right-tools {
           display: flex;
-          gap: 10px;
+          align-items: center;
+          gap: 8px;
           flex-wrap: wrap;
           justify-content: flex-end;
         }
+        .assets-search {
+          width: 260px;
+        }
+        .assets-stats-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-top: -6px;
+        }
         .assets-stat {
-          min-width: 150px;
-          padding: 10px 12px;
+          display: inline-flex;
+          align-items: baseline;
+          gap: 6px;
+          min-height: 30px;
+          padding: 0 10px;
           border: 1px solid var(--semi-color-border);
-          border-radius: 8px;
+          border-radius: 7px;
           background: var(--semi-color-fill-0);
         }
         .assets-stat-label {
-          font-size: 12px;
-          color: var(--semi-color-text-2);
-          margin-bottom: 4px;
+          color: var(--semi-color-text-3);
         }
         .assets-stat-value {
-          font-size: 18px;
-          line-height: 1.3;
+          color: var(--semi-color-text-0);
           font-weight: 650;
+          font-size: 13px;
           overflow-wrap: anywhere;
         }
         .assets-toolbar {
           display: grid;
-          grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(150px, 1fr)) auto;
-          gap: 10px;
+          grid-template-columns: repeat(4, minmax(156px, 220px)) auto;
+          gap: 8px;
           align-items: center;
-          padding: 12px;
-          border: 1px solid var(--semi-color-border);
-          border-radius: 8px;
-          background: var(--semi-color-bg-0);
+          justify-content: start;
         }
         .assets-masonry {
-          column-count: 5;
-          column-gap: 16px;
+          column-count: 6;
+          column-gap: 14px;
+          width: 100%;
         }
         .asset-card {
           display: inline-block;
           width: 100%;
           break-inside: avoid;
-          margin: 0 0 16px;
+          margin: 0 0 14px;
           overflow: hidden;
           border: 1px solid var(--semi-color-border);
           border-radius: 8px;
@@ -413,7 +441,7 @@ const Assets = () => {
         .asset-card:hover {
           transform: translateY(-1px);
           border-color: var(--semi-color-primary-light-default);
-          box-shadow: 0 14px 34px -24px rgba(15, 23, 42, 0.38);
+          box-shadow: 0 18px 42px -30px rgba(15, 23, 42, 0.5);
         }
         .asset-image-wrap {
           position: relative;
@@ -457,16 +485,28 @@ const Assets = () => {
           backdrop-filter: blur(8px);
         }
         .asset-card-body {
-          padding: 10px 12px 12px;
+          padding: 9px 10px 11px;
+        }
+        .asset-card-title-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          margin-bottom: 5px;
+          min-width: 0;
         }
         .asset-card-title {
           font-size: 13px;
           line-height: 1.35;
           font-weight: 600;
-          margin-bottom: 6px;
+          min-width: 0;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+        }
+        .asset-series-tag {
+          flex-shrink: 0;
+          max-width: 84px;
         }
         .asset-card-prompt {
           font-size: 12px;
@@ -480,7 +520,7 @@ const Assets = () => {
           overflow-wrap: anywhere;
         }
         .asset-card-meta {
-          margin-top: 10px;
+          margin-top: 11px;
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -542,6 +582,11 @@ const Assets = () => {
           flex-direction: column;
           gap: 8px;
         }
+        @media (max-width: 1480px) {
+          .assets-masonry {
+            column-count: 5;
+          }
+        }
         @media (max-width: 1280px) {
           .assets-masonry {
             column-count: 4;
@@ -549,17 +594,22 @@ const Assets = () => {
           .assets-toolbar {
             grid-template-columns: repeat(3, minmax(0, 1fr));
           }
+          .assets-search {
+            width: 220px;
+          }
         }
         @media (max-width: 960px) {
-          .assets-header {
+          .assets-topbar {
             flex-direction: column;
+            align-items: stretch;
           }
-          .assets-stats {
+          .assets-left-tools,
+          .assets-right-tools {
             width: 100%;
-            justify-content: stretch;
+            justify-content: space-between;
           }
-          .assets-stat {
-            flex: 1;
+          .assets-search {
+            width: min(100%, 320px);
           }
           .assets-masonry {
             column-count: 3;
@@ -571,6 +621,18 @@ const Assets = () => {
         @media (max-width: 720px) {
           .assets-page {
             min-height: calc(100vh - 70px);
+          }
+          .assets-left-tools {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 10px;
+          }
+          .assets-right-tools {
+            align-items: stretch;
+            flex-direction: column;
+          }
+          .assets-search {
+            width: 100%;
           }
           .assets-toolbar {
             grid-template-columns: 1fr;
@@ -591,39 +653,48 @@ const Assets = () => {
       `}</style>
 
       <div className='assets-shell'>
-        <div className='assets-header'>
-          <div className='assets-title'>
-            <h1>{t('资产仓库')}</h1>
-            <span>{t('管理你在 AI 绘画中生成的图片资产')}</span>
+        <div className='assets-topbar'>
+          <div className='assets-left-tools'>
+            <span className='assets-title-chip'>{t('资产仓库')}</span>
           </div>
-          <div className='assets-stats'>
-            <div className='assets-stat'>
-              <div className='assets-stat-label'>{t('资产总数')}</div>
-              <div className='assets-stat-value'>
-                {stats.total_assets || total}
-              </div>
-            </div>
-            <div className='assets-stat'>
-              <div className='assets-stat-label'>{t('最近生成')}</div>
-              <div className='assets-stat-value'>
-                {formatTime(stats.latest_created_time)}
-              </div>
-            </div>
+          <div className='assets-right-tools'>
+            <Input
+              className='assets-search'
+              value={keyword}
+              prefix={<IconSearch />}
+              placeholder={t('搜索提示词、模型')}
+              showClear
+              onChange={setKeyword}
+              onEnterPress={submitSearch}
+            />
+            <Button
+              type='tertiary'
+              onClick={() => navigate('/image-generation')}
+            >
+              {t('去生成图片')}
+            </Button>
           </div>
         </div>
 
+        <div className='assets-stats-row'>
+          <span className='assets-stat'>
+            <span className='assets-stat-label'>{t('资产总数')}</span>
+            <span className='assets-stat-value'>
+              {stats.total_assets || total}
+            </span>
+          </span>
+          <span className='assets-stat'>
+            <span className='assets-stat-label'>{t('最近生成')}</span>
+            <span className='assets-stat-value'>
+              {formatTime(stats.latest_created_time)}
+            </span>
+          </span>
+        </div>
+
         <div className='assets-toolbar'>
-          <Input
-            value={keyword}
-            prefix={<IconSearch />}
-            placeholder={t('搜索提示词、模型')}
-            showClear
-            onChange={setKeyword}
-            onEnterPress={submitSearch}
-          />
           <Select
             value={modelSeries}
-            onChange={(value) => setModelSeries(value || '')}
+            onChange={handleModelSeriesChange}
             placeholder={t('全部系列')}
             showClear
           >
@@ -635,7 +706,7 @@ const Assets = () => {
           </Select>
           <Select
             value={modelId}
-            onChange={(value) => setModelId(value || '')}
+            onChange={handleModelIdChange}
             placeholder={t('全部模型')}
             showClear
             filter
@@ -648,7 +719,7 @@ const Assets = () => {
           </Select>
           <Select
             value={timeRange}
-            onChange={(value) => setTimeRange(value || '')}
+            onChange={handleTimeRangeChange}
             placeholder={t('全部时间')}
             showClear
           >
@@ -657,7 +728,7 @@ const Assets = () => {
             <Select.Option value='last30d'>{t('近 30 天')}</Select.Option>
             <Select.Option value='thisMonth'>{t('本月')}</Select.Option>
           </Select>
-          <Select value={sortValue} onChange={setSortValue}>
+          <Select value={sortValue} onChange={handleSortChange}>
             <Select.Option value='created_time_desc'>
               {t('创建时间倒序')}
             </Select.Option>

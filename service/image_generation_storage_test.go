@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/worker_setting"
 )
 
@@ -58,5 +59,46 @@ func TestStoreImageGenerationResultLocally(t *testing.T) {
 	_ = file.Close()
 	if contentType != "image/png" {
 		t.Fatalf("expected image/png content type, got %q", contentType)
+	}
+}
+
+func TestCanAccessImageGenerationLocalAssetRequiresOwner(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+	objectKey := "image-generation/20260428/123-test.png"
+	assetURL := buildImageGenerationLocalObjectURL(objectKey)
+	task := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "test prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusSuccess,
+		ImageUrl:        assetURL,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	allowed, err := CanAccessImageGenerationLocalAsset(1, objectKey)
+	if err != nil {
+		t.Fatalf("failed to check access: %v", err)
+	}
+	if !allowed {
+		t.Fatal("expected owner to access local asset")
+	}
+
+	allowed, err = CanAccessImageGenerationLocalAsset(2, objectKey)
+	if err != nil {
+		t.Fatalf("failed to check access: %v", err)
+	}
+	if allowed {
+		t.Fatal("expected non-owner to be denied")
+	}
+
+	allowed, err = CanAccessImageGenerationLocalAsset(1, "other/20260428/123-test.png")
+	if err != nil {
+		t.Fatalf("failed to check access: %v", err)
+	}
+	if allowed {
+		t.Fatal("expected invalid path to be denied")
 	}
 }
