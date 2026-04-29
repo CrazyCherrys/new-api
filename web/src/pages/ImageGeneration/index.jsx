@@ -266,11 +266,9 @@ const ImageGeneration = () => {
 
   const loadWorkerSettings = async () => {
     try {
-      const res = await API.get(
-        '/api/option/?key=worker_setting.max_image_size',
-      );
+      const res = await API.get('/api/image-generation/settings');
       if (res.data.success && res.data.data) {
-        const size = parseInt(res.data.data, 10);
+        const size = parseInt(res.data.data.max_image_size, 10);
         if (!isNaN(size) && size > 0) {
           setMaxImageSize(size);
         }

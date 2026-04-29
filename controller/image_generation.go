@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/worker_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -47,6 +49,18 @@ func CreateImageGenerationTask(c *gin.Context) {
 	}
 
 	common.ApiSuccess(c, task)
+}
+
+// GetImageGenerationSettings 获取用户侧图片生成设置
+func GetImageGenerationSettings(c *gin.Context) {
+	cfg := worker_setting.GetWorkerSetting()
+	maxImageSize := cfg.MaxImageSize
+	if maxImageSize <= 0 {
+		maxImageSize = 10
+	}
+	common.ApiSuccess(c, gin.H{
+		"max_image_size": maxImageSize,
+	})
 }
 
 // GetImageGenerationTasks 获取任务列表（分页+筛选）
@@ -218,6 +232,24 @@ func GetImageGenerationAssetDetail(c *gin.Context) {
 	}
 
 	common.ApiSuccess(c, asset)
+}
+
+// GetImageGenerationFile 读取本地存储的图片生成结果文件。
+func GetImageGenerationFile(c *gin.Context) {
+	assetPath := c.Param("path")
+	file, contentType, err := service.OpenImageGenerationLocalAsset(assetPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "资源不存在",
+		})
+		return
+	}
+	defer file.Close()
+
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	_, _ = io.Copy(c.Writer, file)
 }
 
 // RetryImageGenerationTask 重试失败任务

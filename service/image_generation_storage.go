@@ -13,7 +13,9 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,6 +29,8 @@ import (
 	"golang.org/x/image/webp"
 )
 
+const imageGenerationAssetURLPrefix = "/api/image-generation/files/"
+
 type imageGenerationAsset struct {
 	data        []byte
 	contentType string
@@ -35,16 +39,28 @@ type imageGenerationAsset struct {
 
 func storeImageGenerationResult(ctx context.Context, taskId int, imageUrl string) string {
 	cfg := worker_setting.GetWorkerSetting()
-	if cfg == nil || cfg.StorageType != "s3" || strings.TrimSpace(imageUrl) == "" {
+	if cfg == nil || strings.TrimSpace(imageUrl) == "" {
 		return imageUrl
 	}
 
-	storedURL, err := uploadImageGenerationResultToS3(ctx, taskId, imageUrl, cfg)
-	if err != nil {
-		common.SysLog(fmt.Sprintf("Failed to upload image generation task %d result to S3, fallback to original result: %v", taskId, err))
+	switch strings.ToLower(strings.TrimSpace(cfg.StorageType)) {
+	case "s3":
+		storedURL, err := uploadImageGenerationResultToS3(ctx, taskId, imageUrl, cfg)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("Failed to upload image generation task %d result to S3, fallback to original result: %v", taskId, err))
+			return imageUrl
+		}
+		return storedURL
+	case "local":
+		storedURL, err := saveImageGenerationResultLocally(ctx, taskId, imageUrl, cfg)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("Failed to save image generation task %d result locally, fallback to original result: %v", taskId, err))
+			return imageUrl
+		}
+		return storedURL
+	default:
 		return imageUrl
 	}
-	return storedURL
 }
 
 func uploadImageGenerationResultToS3(ctx context.Context, taskId int, imageUrl string, cfg *worker_setting.WorkerSetting) (string, error) {
@@ -83,6 +99,27 @@ func validateImageS3Config(cfg *worker_setting.WorkerSetting) error {
 		return fmt.Errorf("s3 credentials are empty")
 	}
 	return nil
+}
+
+func saveImageGenerationResultLocally(ctx context.Context, taskId int, imageUrl string, cfg *worker_setting.WorkerSetting) (string, error) {
+	asset, err := loadImageGenerationAsset(ctx, imageUrl)
+	if err != nil {
+		return "", err
+	}
+
+	objectKey := buildImageGenerationObjectKey(taskId, "", asset.extension)
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		return "", fmt.Errorf("create local image directory: %w", err)
+	}
+	if err := os.WriteFile(fullPath, asset.data, 0o644); err != nil {
+		return "", fmt.Errorf("write local image file: %w", err)
+	}
+
+	return buildImageGenerationLocalObjectURL(objectKey), nil
 }
 
 func loadImageGenerationAsset(ctx context.Context, imageUrl string) (*imageGenerationAsset, error) {
@@ -250,6 +287,75 @@ func buildImageGenerationObjectURL(cfg *worker_setting.WorkerSetting, objectKey 
 	bucket := strings.Trim(strings.TrimSpace(cfg.S3Bucket), "/")
 	escapedKey := pathEscapeObjectKey(objectKey)
 	return endpoint + "/" + bucket + "/" + escapedKey
+}
+
+func buildImageGenerationLocalObjectURL(objectKey string) string {
+	return imageGenerationAssetURLPrefix + pathEscapeObjectKey(objectKey)
+}
+
+func imageGenerationLocalStorageBasePath(cfg *worker_setting.WorkerSetting) string {
+	if cfg != nil && strings.TrimSpace(cfg.LocalStoragePath) != "" {
+		return strings.TrimSpace(cfg.LocalStoragePath)
+	}
+	return filepath.Join(os.TempDir(), "new-api-image-generation")
+}
+
+func sanitizeImageGenerationLocalAssetPath(raw string) (string, error) {
+	clean := path.Clean("/" + strings.TrimPrefix(raw, "/"))
+	clean = strings.TrimPrefix(clean, "/")
+	if clean == "" || clean == "." || strings.HasPrefix(clean, "../") || clean == ".." {
+		return "", fmt.Errorf("invalid asset path")
+	}
+	if !strings.HasPrefix(clean, "image-generation/") {
+		return "", fmt.Errorf("invalid asset path")
+	}
+	return clean, nil
+}
+
+func imageGenerationLocalAssetPath(cfg *worker_setting.WorkerSetting, assetPath string) (string, error) {
+	clean, err := sanitizeImageGenerationLocalAssetPath(assetPath)
+	if err != nil {
+		return "", err
+	}
+	basePath := imageGenerationLocalStorageBasePath(cfg)
+	fullPath := filepath.Join(basePath, filepath.FromSlash(clean))
+	baseAbs, err := filepath.Abs(basePath)
+	if err != nil {
+		return "", err
+	}
+	fullAbs, err := filepath.Abs(fullPath)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(baseAbs, fullAbs)
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return "", fmt.Errorf("invalid asset path")
+	}
+	return fullAbs, nil
+}
+
+func imageGenerationLocalAssetKeyFromURL(imageUrl string) (string, bool) {
+	if idx := strings.Index(imageUrl, imageGenerationAssetURLPrefix); idx >= 0 {
+		return strings.TrimPrefix(imageUrl[idx+len(imageGenerationAssetURLPrefix):], "/"), true
+	}
+	return "", false
+}
+
+func OpenImageGenerationLocalAsset(assetPath string) (*os.File, string, error) {
+	cfg := worker_setting.GetWorkerSetting()
+	fullPath, err := imageGenerationLocalAssetPath(cfg, assetPath)
+	if err != nil {
+		return nil, "", err
+	}
+	file, err := os.Open(fullPath)
+	if err != nil {
+		return nil, "", err
+	}
+	contentType := mime.TypeByExtension(filepath.Ext(fullPath))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return file, contentType, nil
 }
 
 func pathEscapeObjectKey(objectKey string) string {

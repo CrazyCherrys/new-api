@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -119,4 +120,73 @@ func TestImageGenerationTimeoutUsesWorkerSetting(t *testing.T) {
 	if got := imageGenerationTimeout(); got != 120*time.Second {
 		t.Fatalf("expected default timeout 120s, got %v", got)
 	}
+}
+
+func TestImageGenerationMaxRetriesPreservesZero(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousMaxRetries := cfg.MaxRetries
+	t.Cleanup(func() {
+		cfg.MaxRetries = previousMaxRetries
+	})
+
+	cfg.MaxRetries = 0
+	if got := imageGenerationMaxRetries(); got != 0 {
+		t.Fatalf("expected max retries 0, got %d", got)
+	}
+
+	cfg.MaxRetries = -1
+	if got := imageGenerationMaxRetries(); got != 0 {
+		t.Fatalf("expected negative max retries to clamp to 0, got %d", got)
+	}
+
+	cfg.MaxRetries = 4
+	if got := imageGenerationMaxRetries(); got != 4 {
+		t.Fatalf("expected max retries 4, got %d", got)
+	}
+}
+
+func TestValidateImageGenerationReferenceImagesUsesWorkerSetting(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousMaxImageSize := cfg.MaxImageSize
+	t.Cleanup(func() {
+		cfg.MaxImageSize = previousMaxImageSize
+	})
+
+	cfg.MaxImageSize = 1
+	if err := validateImageGenerationReferenceImages(`{"reference_images":["data:image/png;base64,` + strings.Repeat("A", 1024) + `"]}`); err != nil {
+		t.Fatalf("expected small reference image to pass, got %v", err)
+	}
+
+	if err := validateImageGenerationReferenceImages(`{"reference_images":["data:image/png;base64,` + strings.Repeat("A", 2*1024*1024) + `"]}`); err == nil {
+		t.Fatal("expected oversized reference image to fail")
+	}
+}
+
+func TestImageGenerationWorkerLimiterReadsCurrentMaxWorkers(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousMaxWorkers := cfg.MaxWorkers
+	t.Cleanup(func() {
+		cfg.MaxWorkers = previousMaxWorkers
+	})
+
+	limiter := &imageGenerationWorkerLimiter{}
+	cfg.MaxWorkers = 1
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := limiter.acquire(ctx); err != nil {
+		t.Fatalf("expected first worker slot, got %v", err)
+	}
+
+	blockedCtx, blockedCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer blockedCancel()
+	if err := limiter.acquire(blockedCtx); err == nil {
+		t.Fatal("expected second worker slot to block when max workers is 1")
+	}
+
+	cfg.MaxWorkers = 2
+	if err := limiter.acquire(ctx); err != nil {
+		t.Fatalf("expected updated max workers to allow second slot, got %v", err)
+	}
+	limiter.release()
+	limiter.release()
 }

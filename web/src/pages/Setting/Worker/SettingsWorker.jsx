@@ -126,7 +126,10 @@ export default function SettingsWorker(props) {
           currentInputs[key] =
             props.options[key] === 'true' || props.options[key] === true;
         } else if (typeof nextInputs[key] === 'number') {
-          currentInputs[key] = parseInt(props.options[key]) || nextInputs[key];
+          const parsedValue = parseInt(props.options[key], 10);
+          currentInputs[key] = Number.isNaN(parsedValue)
+            ? nextInputs[key]
+            : parsedValue;
         } else {
           currentInputs[key] = props.options[key];
         }
@@ -163,7 +166,7 @@ export default function SettingsWorker(props) {
                 <Form.InputNumber
                   field={'worker_setting.max_workers'}
                   label={t('最大 Worker 数量')}
-                  extraText={t('同时运行的最大任务数')}
+                  extraText={t('保存后立即影响新创建的图片生成任务')}
                   min={1}
                   max={64}
                   onChange={handleFieldChange('worker_setting.max_workers')}
@@ -313,7 +316,7 @@ export default function SettingsWorker(props) {
                 <Form.InputNumber
                   field={'worker_setting.video_timeout'}
                   label={t('视频任务超时（秒）')}
-                  extraText={t('视频生成任务的最大等待时间')}
+                  extraText={t('当前不影响 /image-generation 图片生成请求')}
                   min={10}
                   max={7200}
                   onChange={handleFieldChange('worker_setting.video_timeout')}
@@ -355,7 +358,7 @@ export default function SettingsWorker(props) {
                 <Form.InputNumber
                   field={'worker_setting.polling_interval'}
                   label={t('轮询间隔（秒）')}
-                  extraText={t('Worker 检查新任务的时间间隔')}
+                  extraText={t('当前 /image-generation 使用实时任务推送，不读取此项')}
                   min={1}
                   max={60}
                   onChange={handleFieldChange(

@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,12 +22,16 @@ import (
 )
 
 var (
-	workerPool                 chan struct{}
-	workerPoolOnce             sync.Once
+	imageWorkerLimiter         imageGenerationWorkerLimiter
 	enqueueImageGenerationTask = func(taskId int) {
 		go processTaskAsync(taskId)
 	}
 )
+
+type imageGenerationWorkerLimiter struct {
+	mutex  sync.Mutex
+	active int
+}
 
 func normalizeImageEndpoint(endpoint string) string {
 	switch strings.ToLower(strings.TrimSpace(endpoint)) {
@@ -46,22 +51,67 @@ func imageGenerationTimeout() time.Duration {
 	return timeout
 }
 
-// initWorkerPool 初始化 worker pool
-func initWorkerPool() {
-	workerPoolOnce.Do(func() {
-		cfg := worker_setting.GetWorkerSetting()
-		maxWorkers := cfg.MaxWorkers
-		if maxWorkers <= 0 {
-			maxWorkers = 4
+func imageGenerationMaxWorkers() int {
+	cfg := worker_setting.GetWorkerSetting()
+	maxWorkers := cfg.MaxWorkers
+	if maxWorkers <= 0 {
+		return 4
+	}
+	return maxWorkers
+}
+
+func imageGenerationMaxRetries() int {
+	cfg := worker_setting.GetWorkerSetting()
+	if cfg.MaxRetries < 0 {
+		return 0
+	}
+	return cfg.MaxRetries
+}
+
+func imageGenerationRetryDelay() time.Duration {
+	cfg := worker_setting.GetWorkerSetting()
+	retryDelay := time.Duration(cfg.RetryDelay) * time.Second
+	if retryDelay <= 0 {
+		return 5 * time.Second
+	}
+	return retryDelay
+}
+
+func (l *imageGenerationWorkerLimiter) acquire(ctx context.Context) error {
+	wait := time.NewTicker(200 * time.Millisecond)
+	defer wait.Stop()
+
+	for {
+		l.mutex.Lock()
+		if l.active < imageGenerationMaxWorkers() {
+			l.active++
+			l.mutex.Unlock()
+			return nil
 		}
-		workerPool = make(chan struct{}, maxWorkers)
-		common.SysLog(fmt.Sprintf("Image generation worker pool initialized with %d workers", maxWorkers))
-	})
+		l.mutex.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-wait.C:
+		}
+	}
+}
+
+func (l *imageGenerationWorkerLimiter) release() {
+	l.mutex.Lock()
+	if l.active > 0 {
+		l.active--
+	}
+	l.mutex.Unlock()
 }
 
 // CreateImageGenerationTask 创建图片生成任务
 func CreateImageGenerationTask(userId int, modelId string, prompt string, requestEndpoint string, params string) (*model.ImageGenerationTask, error) {
 	requestEndpoint = normalizeImageEndpoint(requestEndpoint)
+	if err := validateImageGenerationReferenceImages(params); err != nil {
+		return nil, err
+	}
 
 	// 检查用户余额
 	userQuota, err := model.GetUserQuota(userId, false)
@@ -101,8 +151,6 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 
 // processTaskAsync 异步处理任务
 func processTaskAsync(taskId int) {
-	initWorkerPool()
-
 	timeout := imageGenerationTimeout()
 
 	// 创建超时上下文，包括等待 worker pool 的时间
@@ -110,20 +158,20 @@ func processTaskAsync(taskId int) {
 	defer cancel()
 
 	// 尝试获取 worker slot，带超时
-	select {
-	case workerPool <- struct{}{}:
-		defer func() { <-workerPool }()
-		// 处理任务
-		if err := ProcessImageGenerationTask(taskId); err != nil {
-			common.SysLog(fmt.Sprintf("Failed to process image generation task %d: %v", taskId, err))
-		}
-	case <-ctx.Done():
+	if err := imageWorkerLimiter.acquire(ctx); err != nil {
 		// 超时：标记任务为失败
 		errorMsg := fmt.Sprintf("task timeout: failed to acquire worker slot within %v", timeout)
 		if err := model.UpdateImageTaskStatus(taskId, model.ImageTaskStatusFailed, errorMsg); err != nil {
 			common.SysLog(fmt.Sprintf("Failed to update task %d status on timeout: %v", taskId, err))
 		}
 		common.SysLog(fmt.Sprintf("Task %d timed out waiting for worker slot", taskId))
+		return
+	}
+	defer imageWorkerLimiter.release()
+
+	// 处理任务
+	if err := ProcessImageGenerationTask(taskId); err != nil {
+		common.SysLog(fmt.Sprintf("Failed to process image generation task %d: %v", taskId, err))
 	}
 }
 
@@ -179,15 +227,8 @@ func ProcessImageGenerationTask(taskId int) error {
 	defer cancel()
 
 	// 重试逻辑
-	cfg := worker_setting.GetWorkerSetting()
-	maxRetries := cfg.MaxRetries
-	if maxRetries <= 0 {
-		maxRetries = 3
-	}
-	retryDelay := time.Duration(cfg.RetryDelay) * time.Second
-	if retryDelay <= 0 {
-		retryDelay = 5 * time.Second
-	}
+	maxRetries := imageGenerationMaxRetries()
+	retryDelay := imageGenerationRetryDelay()
 
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -229,6 +270,79 @@ func ProcessImageGenerationTask(taskId int) error {
 	}
 
 	return fmt.Errorf("task %d failed: %s", taskId, errorMsg)
+}
+
+func validateImageGenerationReferenceImages(params string) error {
+	if strings.TrimSpace(params) == "" {
+		return nil
+	}
+
+	var parsed struct {
+		ReferenceImages []string `json:"reference_images"`
+	}
+	if err := common.UnmarshalJsonStr(params, &parsed); err != nil {
+		return fmt.Errorf("failed to parse params: %w", err)
+	}
+	if len(parsed.ReferenceImages) == 0 {
+		return nil
+	}
+
+	cfg := worker_setting.GetWorkerSetting()
+	maxImageSizeMB := cfg.MaxImageSize
+	if maxImageSizeMB <= 0 {
+		maxImageSizeMB = 10
+	}
+	maxBytes := int64(maxImageSizeMB) * 1024 * 1024
+	for idx, imageData := range parsed.ReferenceImages {
+		size, ok, err := referenceImageDecodedSize(imageData)
+		if err != nil {
+			return fmt.Errorf("reference image %d is invalid: %w", idx+1, err)
+		}
+		if !ok {
+			continue
+		}
+		if size > maxBytes {
+			return fmt.Errorf("reference image %d exceeds maximum size: %.2fMB > %dMB", idx+1, float64(size)/1024/1024, maxImageSizeMB)
+		}
+	}
+	return nil
+}
+
+func referenceImageDecodedSize(raw string) (int64, bool, error) {
+	payload := strings.TrimSpace(raw)
+	if payload == "" {
+		return 0, false, nil
+	}
+	if strings.HasPrefix(payload, "http://") || strings.HasPrefix(payload, "https://") {
+		return 0, false, nil
+	}
+	if strings.HasPrefix(payload, "data:") {
+		commaIndex := strings.Index(payload, ",")
+		if commaIndex < 0 {
+			return 0, true, fmt.Errorf("invalid data URL")
+		}
+		payload = payload[commaIndex+1:]
+	}
+	payload = strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\n', '\r', '\t':
+			return -1
+		default:
+			return r
+		}
+	}, payload)
+	if payload == "" {
+		return 0, true, fmt.Errorf("empty image payload")
+	}
+
+	if decoded, err := base64.StdEncoding.DecodeString(payload); err == nil {
+		return int64(len(decoded)), true, nil
+	}
+	decoded, err := base64.RawStdEncoding.DecodeString(payload)
+	if err != nil {
+		return 0, true, err
+	}
+	return int64(len(decoded)), true, nil
 }
 
 // generateImage 调用上游 API 生成图片
@@ -628,6 +742,10 @@ func cleanupSingleTask(task *model.ImageGenerationTask, cfg *worker_setting.Work
 
 // deleteImageFile 删除图片文件（本地或S3）
 func deleteImageFile(imageUrl string, cfg *worker_setting.WorkerSetting) error {
+	if objectKey, ok := imageGenerationLocalAssetKeyFromURL(imageUrl); ok {
+		return deleteLocalFile(objectKey, cfg)
+	}
+
 	// 如果是外部URL（http/https），不需要删除
 	if strings.HasPrefix(imageUrl, "http://") || strings.HasPrefix(imageUrl, "https://") {
 		// 检查是否是S3 URL
@@ -648,13 +766,9 @@ func deleteImageFile(imageUrl string, cfg *worker_setting.WorkerSetting) error {
 
 // deleteLocalFile 删除本地文件
 func deleteLocalFile(filePath string, cfg *worker_setting.WorkerSetting) error {
-	// 构建完整路径
-	var fullPath string
-	if cfg.LocalStoragePath != "" {
-		fullPath = cfg.LocalStoragePath + "/" + filePath
-	} else {
-		// 使用系统临时目录
-		fullPath = os.TempDir() + "/" + filePath
+	fullPath, err := imageGenerationLocalAssetPath(cfg, filePath)
+	if err != nil {
+		return err
 	}
 
 	// 删除文件
