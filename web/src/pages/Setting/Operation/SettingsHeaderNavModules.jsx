@@ -38,17 +38,23 @@ export default function SettingsHeaderNavModules(props) {
   const [loading, setLoading] = useState(false);
   const [statusState, statusDispatch] = useContext(StatusContext);
 
-  // 顶栏模块管理状态
-  const [headerNavModules, setHeaderNavModules] = useState({
+  const defaultHeaderNavModules = {
     home: true,
     console: true,
+    imageGeneration: true,
+    creativeSpace: true,
     pricing: {
       enabled: true,
       requireAuth: false, // 默认不需要登录鉴权
     },
     docs: true,
     about: true,
-  });
+  };
+
+  // 顶栏模块管理状态
+  const [headerNavModules, setHeaderNavModules] = useState(
+    defaultHeaderNavModules,
+  );
 
   // 处理顶栏模块配置变更
   function handleHeaderNavModuleChange(moduleKey) {
@@ -79,17 +85,7 @@ export default function SettingsHeaderNavModules(props) {
 
   // 重置顶栏模块为默认配置
   function resetHeaderNavModules() {
-    const defaultModules = {
-      home: true,
-      console: true,
-      pricing: {
-        enabled: true,
-        requireAuth: false,
-      },
-      docs: true,
-      about: true,
-    };
-    setHeaderNavModules(defaultModules);
+    setHeaderNavModules(defaultHeaderNavModules);
     showSuccess(t('已重置为默认配置'));
   }
 
@@ -142,20 +138,13 @@ export default function SettingsHeaderNavModules(props) {
           };
         }
 
-        setHeaderNavModules(modules);
+        setHeaderNavModules({
+          ...defaultHeaderNavModules,
+          ...modules,
+        });
       } catch (error) {
         // 使用默认配置
-        const defaultModules = {
-          home: true,
-          console: true,
-          pricing: {
-            enabled: true,
-            requireAuth: false,
-          },
-          docs: true,
-          about: true,
-        };
-        setHeaderNavModules(defaultModules);
+        setHeaderNavModules(defaultHeaderNavModules);
       }
     }
   }, [props.options]);
@@ -171,6 +160,16 @@ export default function SettingsHeaderNavModules(props) {
       key: 'console',
       title: t('控制台'),
       description: t('用户控制面板，管理账户'),
+    },
+    {
+      key: 'imageGeneration',
+      title: t('AI绘画'),
+      description: t('图片生成入口，需要登录访问'),
+    },
+    {
+      key: 'creativeSpace',
+      title: t('创意空间'),
+      description: t('公开展示审核通过的创意作品'),
     },
     {
       key: 'pricing',

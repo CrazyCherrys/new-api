@@ -93,20 +93,23 @@ type ImageAssetQueryParams struct {
 
 // ImageGenerationAsset 图片生成资产视图，数据源仍为成功的图片生成任务。
 type ImageGenerationAsset struct {
-	Id              int    `json:"id"`
-	TaskId          int    `json:"task_id"`
-	UserId          int    `json:"user_id"`
-	ModelId         string `json:"model_id"`
-	DisplayName     string `json:"display_name"`
-	ModelSeries     string `json:"model_series"`
-	Prompt          string `json:"prompt"`
-	RequestEndpoint string `json:"request_endpoint"`
-	Params          string `json:"params"`
-	ImageUrl        string `json:"image_url"`
-	ImageMetadata   string `json:"image_metadata"`
-	Cost            int    `json:"cost"`
-	CreatedTime     int64  `json:"created_time"`
-	CompletedTime   int64  `json:"completed_time"`
+	Id                       int    `json:"id"`
+	TaskId                   int    `json:"task_id"`
+	UserId                   int    `json:"user_id"`
+	ModelId                  string `json:"model_id"`
+	DisplayName              string `json:"display_name"`
+	ModelSeries              string `json:"model_series"`
+	Prompt                   string `json:"prompt"`
+	RequestEndpoint          string `json:"request_endpoint"`
+	Params                   string `json:"params"`
+	ImageUrl                 string `json:"image_url"`
+	ImageMetadata            string `json:"image_metadata"`
+	Cost                     int    `json:"cost"`
+	CreatedTime              int64  `json:"created_time"`
+	CompletedTime            int64  `json:"completed_time"`
+	CreativeSubmissionId     int    `json:"creative_submission_id"`
+	CreativeSubmissionStatus string `json:"creative_submission_status"`
+	CreativeRejectReason     string `json:"creative_reject_reason"`
 }
 
 type ImageAssetStats struct {
@@ -182,8 +185,9 @@ func GetImageTasksByUserID(userId int, startIdx int, num int, queryParams ImageT
 
 func imageAssetsBaseQuery(userId int) *gorm.DB {
 	return DB.Table("image_generation_tasks AS t").
-		Select("t.id, t.id AS task_id, t.user_id, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.request_endpoint, t.params, t.image_url, t.image_metadata, t.cost, t.created_time, t.completed_time").
+		Select("t.id, t.id AS task_id, t.user_id, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.request_endpoint, t.params, t.image_url, t.image_metadata, t.cost, t.created_time, t.completed_time, COALESCE(s.id, 0) AS creative_submission_id, COALESCE(s.status, '') AS creative_submission_status, COALESCE(s.reject_reason, '') AS creative_reject_reason").
 		Joins("LEFT JOIN model_mappings AS m ON m.request_model = t.model_id").
+		Joins("LEFT JOIN image_creative_submissions AS s ON s.task_id = t.id").
 		Where("t.user_id = ? AND t.status = ? AND t.image_url <> ?", userId, ImageTaskStatusSuccess, "")
 }
 

@@ -26,13 +26,14 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
       home: true,
       console: true,
       imageGeneration: true,
+      creativeSpace: true,
       pricing: true,
       docs: true,
       about: true,
     };
 
-    // 使用传入的配置或默认配置
-    const modules = headerNavModules || defaultModules;
+    // 使用传入的配置并补齐新增模块的默认值
+    const modules = { ...defaultModules, ...(headerNavModules || {}) };
 
     const allLinks = [
       {
@@ -49,6 +50,11 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
         text: t('AI绘画'),
         itemKey: 'imageGeneration',
         to: '/image-generation',
+      },
+      {
+        text: t('创意空间'),
+        itemKey: 'creativeSpace',
+        to: '/creative-space',
       },
       {
         text: t('模型广场'),

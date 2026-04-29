@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -234,8 +235,8 @@ func GetImageGenerationAssetDetail(c *gin.Context) {
 	common.ApiSuccess(c, asset)
 }
 
-// GetImageGenerationFile 读取本地存储的图片生成结果文件。
-func GetImageGenerationFile(c *gin.Context) {
+// SubmitImageGenerationAssetToCreativeSpace 将当前用户的图片资产提交到创意空间审核。
+func SubmitImageGenerationAssetToCreativeSpace(c *gin.Context) {
 	userId := c.GetInt("id")
 	if userId == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
@@ -245,11 +246,138 @@ func GetImageGenerationFile(c *gin.Context) {
 		return
 	}
 
-	assetPath := c.Param("path")
-	allowed, err := service.CanAccessImageGenerationLocalAsset(userId, assetPath)
+	taskId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的资产ID",
+		})
+		return
+	}
+
+	submission, err := model.SubmitImageAssetToCreativeSpace(userId, taskId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+
+	common.ApiSuccess(c, submission)
+}
+
+// GetCreativeSpaceAssets 获取公开创意空间作品列表。
+func GetCreativeSpaceAssets(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	assets, total, err := model.GetApprovedCreativeAssets(pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(assets)
+	common.ApiSuccess(c, pageInfo)
+}
+
+// GetCreativeSpaceAssetDetail 获取公开创意空间作品详情。
+func GetCreativeSpaceAssetDetail(c *gin.Context) {
+	assetId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的作品ID",
+		})
+		return
+	}
+
+	asset, err := model.GetApprovedCreativeAssetByID(assetId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if asset == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "作品不存在",
+		})
+		return
+	}
+
+	common.ApiSuccess(c, asset)
+}
+
+// GetImageCreativeSubmissions 获取创意空间审核列表。
+func GetImageCreativeSubmissions(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	submissions, total, err := model.GetImageCreativeSubmissions(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), c.Query("status"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(submissions)
+	common.ApiSuccess(c, pageInfo)
+}
+
+// ReviewImageCreativeSubmission 审核创意空间投稿。
+func ReviewImageCreativeSubmission(c *gin.Context) {
+	reviewerId := c.GetInt("id")
+	if reviewerId == 0 {
+		common.ApiError(c, errors.New("未授权"))
+		return
+	}
+
+	submissionId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的投稿ID",
+		})
+		return
+	}
+
+	var req struct {
+		Status       string `json:"status" binding:"required"`
+		RejectReason string `json:"reject_reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请求参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	submission, err := model.ReviewImageCreativeSubmission(submissionId, reviewerId, req.Status, req.RejectReason)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, submission)
+}
+
+// GetImageGenerationFile 读取本地存储的图片生成结果文件。
+func GetImageGenerationFile(c *gin.Context) {
+	userId := c.GetInt("id")
+
+	assetPath := c.Param("path")
+	allowed := false
+	if userId != 0 {
+		userAllowed, err := service.CanAccessImageGenerationLocalAsset(userId, assetPath)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		allowed = userAllowed
+	}
+	if !allowed {
+		publicAllowed, err := service.CanAccessApprovedCreativeSpaceLocalAsset(assetPath)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		allowed = publicAllowed
 	}
 	if !allowed {
 		c.JSON(http.StatusNotFound, gin.H{

@@ -52,6 +52,7 @@ import Setup from './pages/Setup';
 import SetupCheck from './components/layout/SetupCheck';
 import ImageGeneration from './pages/ImageGeneration';
 import Assets from './pages/Assets';
+import CreativeSpace from './pages/CreativeSpace';
 
 const Home = lazy(() => import('./pages/Home'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -174,6 +175,7 @@ function App() {
             </PrivateRoute>
           }
         />
+        <Route path='/creative-space' element={<CreativeSpace />} />
         <Route
           path='/console/redemption'
           element={

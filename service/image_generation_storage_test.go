@@ -102,3 +102,60 @@ func TestCanAccessImageGenerationLocalAssetRequiresOwner(t *testing.T) {
 		t.Fatal("expected invalid path to be denied")
 	}
 }
+
+func TestCanAccessApprovedCreativeSpaceLocalAssetRequiresApprovedSubmission(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+	objectKey := "image-generation/20260428/123-approved.png"
+	assetURL := buildImageGenerationLocalObjectURL(objectKey)
+	approvedTask := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "approved prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusSuccess,
+		ImageUrl:        assetURL,
+	}
+	pendingTask := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "pending prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusSuccess,
+		ImageUrl:        buildImageGenerationLocalObjectURL("image-generation/20260428/456-pending.png"),
+	}
+	for _, task := range []*model.ImageGenerationTask{approvedTask, pendingTask} {
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+	}
+	if err := db.Create(&model.ImageCreativeSubmission{
+		TaskId: approvedTask.Id,
+		UserId: approvedTask.UserId,
+		Status: model.CreativeSubmissionStatusApproved,
+	}).Error; err != nil {
+		t.Fatalf("failed to create approved submission: %v", err)
+	}
+	if err := db.Create(&model.ImageCreativeSubmission{
+		TaskId: pendingTask.Id,
+		UserId: pendingTask.UserId,
+		Status: model.CreativeSubmissionStatusPending,
+	}).Error; err != nil {
+		t.Fatalf("failed to create pending submission: %v", err)
+	}
+
+	allowed, err := CanAccessApprovedCreativeSpaceLocalAsset(objectKey)
+	if err != nil {
+		t.Fatalf("failed to check approved public access: %v", err)
+	}
+	if !allowed {
+		t.Fatal("expected approved creative asset to be public")
+	}
+
+	allowed, err = CanAccessApprovedCreativeSpaceLocalAsset("image-generation/20260428/456-pending.png")
+	if err != nil {
+		t.Fatalf("failed to check pending public access: %v", err)
+	}
+	if allowed {
+		t.Fatal("expected pending creative asset to stay private")
+	}
+}

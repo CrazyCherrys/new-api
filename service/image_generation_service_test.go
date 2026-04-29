@@ -37,7 +37,7 @@ func setupImageGenerationServiceTestDB(t *testing.T) *gorm.DB {
 	model.DB = db
 	model.LOG_DB = db
 
-	if err := db.AutoMigrate(&model.ImageGenerationTask{}); err != nil {
+	if err := db.AutoMigrate(&model.ImageGenerationTask{}, &model.ImageCreativeSubmission{}); err != nil {
 		t.Fatalf("failed to migrate image generation task table: %v", err)
 	}
 

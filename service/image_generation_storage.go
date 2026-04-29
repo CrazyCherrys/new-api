@@ -359,6 +359,23 @@ func CanAccessImageGenerationLocalAsset(userId int, assetPath string) (bool, err
 	return count > 0, nil
 }
 
+func CanAccessApprovedCreativeSpaceLocalAsset(assetPath string) (bool, error) {
+	clean, err := sanitizeImageGenerationLocalAssetPath(assetPath)
+	if err != nil {
+		return false, nil
+	}
+
+	assetURL := buildImageGenerationLocalObjectURL(clean)
+	var count int64
+	if err := model.DB.Table("image_generation_tasks AS t").
+		Joins("JOIN image_creative_submissions AS s ON s.task_id = t.id").
+		Where("s.status = ? AND t.status = ? AND t.image_url = ?", model.CreativeSubmissionStatusApproved, model.ImageTaskStatusSuccess, assetURL).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func OpenImageGenerationLocalAsset(assetPath string) (*os.File, string, error) {
 	cfg := worker_setting.GetWorkerSetting()
 	fullPath, err := imageGenerationLocalAssetPath(cfg, assetPath)

@@ -33,7 +33,7 @@ func setupImageAssetTestDB(t *testing.T) *gorm.DB {
 	DB = db
 	LOG_DB = db
 
-	if err := db.AutoMigrate(&ImageGenerationTask{}, &ModelMapping{}); err != nil {
+	if err := db.AutoMigrate(&ImageGenerationTask{}, &ModelMapping{}, &ImageCreativeSubmission{}); err != nil {
 		t.Fatalf("failed to migrate image asset tables: %v", err)
 	}
 
@@ -52,6 +52,181 @@ func setupImageAssetTestDB(t *testing.T) *gorm.DB {
 	})
 
 	return db
+}
+
+func TestSubmitImageAssetToCreativeSpaceValidatesOwnershipAndDuplicates(t *testing.T) {
+	db := setupImageAssetTestDB(t)
+
+	ownedSuccess := &ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "public gallery candidate",
+		RequestEndpoint: "openai",
+		Status:          ImageTaskStatusSuccess,
+		ImageUrl:        "https://example.com/public.png",
+		CreatedTime:     1000,
+		CompletedTime:   1100,
+	}
+	failedTask := &ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "failed candidate",
+		RequestEndpoint: "openai",
+		Status:          ImageTaskStatusFailed,
+		ImageUrl:        "https://example.com/failed.png",
+		CreatedTime:     1200,
+	}
+	otherUserTask := &ImageGenerationTask{
+		UserId:          2,
+		ModelId:         "gpt-image-1",
+		Prompt:          "other candidate",
+		RequestEndpoint: "openai",
+		Status:          ImageTaskStatusSuccess,
+		ImageUrl:        "https://example.com/other.png",
+		CreatedTime:     1300,
+	}
+	for _, task := range []*ImageGenerationTask{ownedSuccess, failedTask, otherUserTask} {
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create image task: %v", err)
+		}
+	}
+
+	submission, err := SubmitImageAssetToCreativeSpace(1, ownedSuccess.Id)
+	if err != nil {
+		t.Fatalf("expected owned success asset to be submitted: %v", err)
+	}
+	if submission.Status != CreativeSubmissionStatusPending || submission.UserId != 1 || submission.TaskId != ownedSuccess.Id {
+		t.Fatalf("unexpected submission: %#v", submission)
+	}
+
+	duplicate, err := SubmitImageAssetToCreativeSpace(1, ownedSuccess.Id)
+	if err != nil {
+		t.Fatalf("expected duplicate submit to return existing submission: %v", err)
+	}
+	if duplicate.Id != submission.Id {
+		t.Fatalf("expected duplicate submission id %d, got %d", submission.Id, duplicate.Id)
+	}
+
+	if _, err := SubmitImageAssetToCreativeSpace(1, failedTask.Id); err == nil {
+		t.Fatalf("expected failed task submission to be rejected")
+	}
+	if _, err := SubmitImageAssetToCreativeSpace(1, otherUserTask.Id); err == nil {
+		t.Fatalf("expected other user's task submission to be rejected")
+	}
+}
+
+func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
+	db := setupImageAssetTestDB(t)
+
+	mapping := &ModelMapping{
+		RequestModel:    "gpt-image-1",
+		ActualModel:     "gpt-image-1",
+		DisplayName:     "GPT Image",
+		ModelSeries:     "openai",
+		ModelType:       2,
+		Status:          1,
+		RequestEndpoint: "openai",
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create model mapping: %v", err)
+	}
+
+	approvedTask := &ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "approved prompt",
+		RequestEndpoint: "openai",
+		Status:          ImageTaskStatusSuccess,
+		ImageUrl:        "https://example.com/approved.png",
+		Params:          `{"size":"1024x1024"}`,
+		CreatedTime:     1000,
+		CompletedTime:   1100,
+	}
+	pendingTask := &ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "pending prompt",
+		RequestEndpoint: "openai",
+		Status:          ImageTaskStatusSuccess,
+		ImageUrl:        "https://example.com/pending.png",
+		CreatedTime:     1200,
+	}
+	rejectedTask := &ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "rejected prompt",
+		RequestEndpoint: "openai",
+		Status:          ImageTaskStatusSuccess,
+		ImageUrl:        "https://example.com/rejected.png",
+		CreatedTime:     1300,
+	}
+	for _, task := range []*ImageGenerationTask{approvedTask, pendingTask, rejectedTask} {
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create image task: %v", err)
+		}
+	}
+
+	approvedSubmission := &ImageCreativeSubmission{
+		TaskId:        approvedTask.Id,
+		UserId:        1,
+		Status:        CreativeSubmissionStatusApproved,
+		SubmittedTime: 2000,
+		ReviewedTime:  2100,
+		ReviewerId:    10,
+	}
+	submissions := []*ImageCreativeSubmission{
+		approvedSubmission,
+		{
+			TaskId:        pendingTask.Id,
+			UserId:        1,
+			Status:        CreativeSubmissionStatusPending,
+			SubmittedTime: 2200,
+		},
+		{
+			TaskId:        rejectedTask.Id,
+			UserId:        1,
+			Status:        CreativeSubmissionStatusRejected,
+			SubmittedTime: 2300,
+			ReviewedTime:  2400,
+			ReviewerId:    10,
+			RejectReason:  "not suitable",
+		},
+	}
+	for _, submission := range submissions {
+		if err := db.Create(submission).Error; err != nil {
+			t.Fatalf("failed to create creative submission: %v", err)
+		}
+	}
+
+	assets, total, err := GetApprovedCreativeAssets(0, 10)
+	if err != nil {
+		t.Fatalf("failed to get creative assets: %v", err)
+	}
+	if total != 1 || len(assets) != 1 {
+		t.Fatalf("expected one approved asset, total=%d len=%d", total, len(assets))
+	}
+	if assets[0].Id != approvedSubmission.Id || assets[0].Prompt != approvedTask.Prompt {
+		t.Fatalf("unexpected approved asset: %#v", assets[0])
+	}
+	if assets[0].DisplayName != "GPT Image" || assets[0].ModelSeries != "openai" {
+		t.Fatalf("expected model mapping metadata, got display=%q series=%q", assets[0].DisplayName, assets[0].ModelSeries)
+	}
+
+	detail, err := GetApprovedCreativeAssetByID(approvedSubmission.Id)
+	if err != nil {
+		t.Fatalf("failed to get creative asset detail: %v", err)
+	}
+	if detail == nil || detail.Params != approvedTask.Params {
+		t.Fatalf("expected approved asset detail, got %#v", detail)
+	}
+
+	pendingDetail, err := GetApprovedCreativeAssetByID(submissions[1].Id)
+	if err != nil {
+		t.Fatalf("failed to get pending creative asset detail: %v", err)
+	}
+	if pendingDetail != nil {
+		t.Fatalf("expected pending submission to be hidden, got %#v", pendingDetail)
+	}
 }
 
 func TestGetImageAssetsByUserIDFiltersSuccessfulOwnedImages(t *testing.T) {

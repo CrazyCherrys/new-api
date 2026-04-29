@@ -62,6 +62,7 @@ const PageLayout = () => {
     '/console/assets',
     '/pricing',
     '/image-generation',
+    '/creative-space',
   ];
 
   const shouldHideFooter = cardProPages.includes(location.pathname);

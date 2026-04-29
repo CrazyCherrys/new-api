@@ -56,6 +56,7 @@ const Assets = () => {
   });
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [creativeSubmitting, setCreativeSubmitting] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [page, setPage] = useState(1);
@@ -107,6 +108,15 @@ const Assets = () => {
     () => parseJsonObject(selectedAsset?.image_metadata),
     [selectedAsset?.image_metadata],
   );
+  const creativeStatusMeta = useMemo(() => {
+    const status = selectedAsset?.creative_submission_status || '';
+    const statusMap = {
+      pending: { label: t('审核中'), color: 'orange' },
+      approved: { label: t('已展示'), color: 'green' },
+      rejected: { label: t('已驳回'), color: 'red' },
+    };
+    return statusMap[status] || { label: t('未提交'), color: 'grey' };
+  }, [selectedAsset?.creative_submission_status, t]);
 
   const getTimeRangeParams = () => {
     const now = dayjs();
@@ -241,6 +251,38 @@ const Assets = () => {
 
   const openSourceTask = (asset) => {
     navigate(`/image-generation?task_id=${asset.task_id || asset.id}`);
+  };
+
+  const submitToCreativeSpace = async () => {
+    if (!selectedAsset?.task_id) return;
+    setCreativeSubmitting(true);
+    try {
+      const res = await API.post(
+        `/api/image-generation/assets/${selectedAsset.task_id}/creative-submission`,
+      );
+      if (res.data.success) {
+        const submission = res.data.data || {};
+        const nextAsset = {
+          ...selectedAsset,
+          creative_submission_id: submission.id,
+          creative_submission_status: submission.status,
+          creative_reject_reason: submission.reject_reason || '',
+        };
+        setSelectedAsset(nextAsset);
+        setAssets((prev) =>
+          prev.map((asset) =>
+            asset.task_id === selectedAsset.task_id ? nextAsset : asset,
+          ),
+        );
+        showSuccess(t('已提交到创意空间审核'));
+      } else {
+        showError(res.data.message || t('提交失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('提交失败'));
+    } finally {
+      setCreativeSubmitting(false);
+    }
   };
 
   const submitSearch = () => {
@@ -896,7 +938,29 @@ const Assets = () => {
                     #{selectedAsset.task_id}
                   </span>
                 </div>
+                <div className='asset-info-block'>
+                  <span className='asset-info-label'>{t('创意空间')}</span>
+                  <span className='asset-info-value'>
+                    <Tag color={creativeStatusMeta.color}>
+                      {creativeStatusMeta.label}
+                    </Tag>
+                  </span>
+                  {selectedAsset.creative_reject_reason && (
+                    <span className='asset-info-label'>
+                      {selectedAsset.creative_reject_reason}
+                    </span>
+                  )}
+                </div>
                 <div className='asset-detail-actions'>
+                  <Button
+                    type='primary'
+                    icon={<IconImage />}
+                    loading={creativeSubmitting}
+                    disabled={Boolean(selectedAsset.creative_submission_status)}
+                    onClick={submitToCreativeSpace}
+                  >
+                    {t('提交到创意空间')}
+                  </Button>
                   <Button
                     theme='outline'
                     type='tertiary'
