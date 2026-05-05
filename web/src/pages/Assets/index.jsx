@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
@@ -25,28 +31,32 @@ import {
   Button,
   Empty,
   Input,
-  Modal,
-  Pagination,
   Select,
+  SideSheet,
   Spin,
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
 import {
+  IconChevronUp,
   IconCopy,
   IconDownload,
   IconExternalOpen,
+  IconFilter,
   IconImage,
   IconRefresh,
   IconSearch,
 } from '@douyinfe/semi-icons';
 import { API, copy, renderQuota, showError, showSuccess } from '../../helpers';
+import { useIsMobile } from '../../hooks/common/useIsMobile';
 
 const { Paragraph } = Typography;
+const PAGE_SIZE = 24;
 
 const Assets = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
 
   const [assets, setAssets] = useState([]);
   const [filters, setFilters] = useState({ models: [], series: [] });
@@ -55,12 +65,12 @@ const Assets = () => {
     latest_created_time: 0,
   });
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [creativeSubmitting, setCreativeSubmitting] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(24);
   const [total, setTotal] = useState(0);
   const [keyword, setKeyword] = useState('');
   const [submittedKeyword, setSubmittedKeyword] = useState('');
@@ -68,6 +78,19 @@ const Assets = () => {
   const [modelSeries, setModelSeries] = useState('');
   const [timeRange, setTimeRange] = useState('');
   const [sortValue, setSortValue] = useState('created_time_desc');
+
+  const sentinelRef = useRef(null);
+  const loadingPagesRef = useRef(new Set());
+  const loadSeqRef = useRef(0);
+  const detailSeqRef = useRef(0);
+
+  const hasMore = assets.length < total;
+  const activeFilterCount = [
+    submittedKeyword,
+    modelId,
+    modelSeries,
+    timeRange,
+  ].filter(Boolean).length;
 
   const formatTime = (timestamp) => {
     if (!timestamp) return '-';
@@ -100,6 +123,15 @@ const Assets = () => {
     }
   };
 
+  const parseSortValue = (value) => {
+    const parts = (value || 'created_time_desc').split('_');
+    const sortOrder = parts.pop() || 'desc';
+    return {
+      sort_by: parts.join('_') || 'created_time',
+      sort_order: sortOrder,
+    };
+  };
+
   const selectedParams = useMemo(
     () => parseJsonObject(selectedAsset?.params),
     [selectedAsset?.params],
@@ -108,17 +140,25 @@ const Assets = () => {
     () => parseJsonObject(selectedAsset?.image_metadata),
     [selectedAsset?.image_metadata],
   );
-  const creativeStatusMeta = useMemo(() => {
-    const status = selectedAsset?.creative_submission_status || '';
-    const statusMap = {
-      pending: { label: t('审核中'), color: 'orange' },
-      approved: { label: t('已展示'), color: 'green' },
-      rejected: { label: t('已驳回'), color: 'red' },
-    };
-    return statusMap[status] || { label: t('未提交'), color: 'grey' };
-  }, [selectedAsset?.creative_submission_status, t]);
 
-  const getTimeRangeParams = () => {
+  const getCreativeStatusMeta = useCallback(
+    (status) => {
+      const statusMap = {
+        pending: { label: t('审核中'), color: 'orange' },
+        approved: { label: t('已展示'), color: 'green' },
+        rejected: { label: t('已驳回'), color: 'red' },
+      };
+      return statusMap[status || ''] || { label: t('未提交'), color: 'grey' };
+    },
+    [t],
+  );
+
+  const selectedCreativeStatusMeta = useMemo(
+    () => getCreativeStatusMeta(selectedAsset?.creative_submission_status),
+    [getCreativeStatusMeta, selectedAsset?.creative_submission_status],
+  );
+
+  const getTimeRangeParams = useCallback(() => {
     const now = dayjs();
     switch (timeRange) {
       case 'today':
@@ -144,27 +184,14 @@ const Assets = () => {
       default:
         return {};
     }
-  };
+  }, [timeRange]);
 
-  const loadAssets = async () => {
-    setLoading(true);
-    try {
-      const [sortBy, sortOrder] = sortValue.split('_').reduce(
-        (acc, part, index, parts) => {
-          if (index === parts.length - 1) {
-            acc[1] = part;
-          } else {
-            acc[0] = acc[0] ? `${acc[0]}_${part}` : part;
-          }
-          return acc;
-        },
-        ['', 'desc'],
-      );
+  const buildQueryParams = useCallback(
+    (nextPage) => {
       const params = {
-        p: page,
-        page_size: pageSize,
-        sort_by: sortBy || 'created_time',
-        sort_order: sortOrder || 'desc',
+        p: nextPage,
+        page_size: PAGE_SIZE,
+        ...parseSortValue(sortValue),
         ...getTimeRangeParams(),
       };
       if (submittedKeyword.trim()) {
@@ -176,52 +203,125 @@ const Assets = () => {
       if (modelSeries) {
         params.model_series = modelSeries;
       }
+      return params;
+    },
+    [getTimeRangeParams, modelId, modelSeries, sortValue, submittedKeyword],
+  );
 
-      const res = await API.get('/api/image-generation/assets', { params });
-      if (res.data.success) {
-        const data = res.data.data || {};
-        setAssets(data.items || []);
-        setTotal(data.total || 0);
-        setStats(data.stats || { total_assets: 0, latest_created_time: 0 });
-        setFilters(data.filters || { models: [], series: [] });
+  const loadAssets = useCallback(
+    async (nextPage = 1, append = false) => {
+      const requestSeq = ++loadSeqRef.current;
+      if (append) {
+        setLoadingMore(true);
       } else {
-        showError(res.data.message || t('加载资产失败'));
+        setLoading(true);
       }
-    } catch (error) {
-      showError(error.message || t('加载资产失败'));
-    } finally {
-      setLoading(false);
-    }
-  };
+
+      try {
+        const res = await API.get('/api/image-generation/assets', {
+          params: buildQueryParams(nextPage),
+        });
+        if (requestSeq !== loadSeqRef.current) return;
+
+        if (res.data.success) {
+          const data = res.data.data || {};
+          const items = data.items || [];
+          setAssets((prev) => {
+            if (!append) return items;
+            const seen = new Set(
+              prev.map((asset) => asset.task_id || asset.id),
+            );
+            const nextItems = items.filter(
+              (asset) => !seen.has(asset.task_id || asset.id),
+            );
+            return [...prev, ...nextItems];
+          });
+          setTotal(data.total || 0);
+          setPage(data.page || nextPage);
+          setStats(data.stats || { total_assets: 0, latest_created_time: 0 });
+          setFilters(data.filters || { models: [], series: [] });
+        } else {
+          showError(res.data.message || t('加载资产失败'));
+        }
+      } catch (error) {
+        if (requestSeq !== loadSeqRef.current) return;
+        showError(error.message || t('加载资产失败'));
+      } finally {
+        if (requestSeq !== loadSeqRef.current) return;
+        loadingPagesRef.current.delete(nextPage);
+        if (append) {
+          setLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
+      }
+    },
+    [buildQueryParams, t],
+  );
 
   useEffect(() => {
-    loadAssets();
-  }, [
-    page,
-    pageSize,
-    submittedKeyword,
-    modelId,
-    modelSeries,
-    timeRange,
-    sortValue,
-  ]);
+    loadingPagesRef.current.clear();
+    setLoadingMore(false);
+    setPage(1);
+    loadAssets(1, false);
+  }, [loadAssets]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !hasMore || loading || loadingMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const nextPage = page + 1;
+        if (
+          entries[0]?.isIntersecting &&
+          !loadingPagesRef.current.has(nextPage)
+        ) {
+          loadingPagesRef.current.add(nextPage);
+          loadAssets(nextPage, true);
+        }
+      },
+      { rootMargin: '420px 0px' },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadAssets, loading, loadingMore, page]);
+
+  const queueListReload = useCallback(() => {
+    loadSeqRef.current += 1;
+    loadingPagesRef.current.clear();
+    setLoadingMore(false);
+    setPage(1);
+    setAssets([]);
+    setTotal(0);
+  }, []);
+
+  const refreshAssets = () => {
+    queueListReload();
+    loadAssets(1, false);
+  };
 
   const openDetail = async (asset) => {
+    const requestSeq = ++detailSeqRef.current;
     setSelectedAsset(asset);
     setDetailVisible(true);
     setDetailLoading(true);
     try {
       const res = await API.get(
-        `/api/image-generation/assets/${asset.task_id}`,
+        `/api/image-generation/assets/${asset.task_id || asset.id}`,
       );
+      if (requestSeq !== detailSeqRef.current) return;
       if (res.data.success) {
         setSelectedAsset(res.data.data);
       } else {
         showError(res.data.message || t('加载资产详情失败'));
       }
     } catch (error) {
+      if (requestSeq !== detailSeqRef.current) return;
       showError(error.message || t('加载资产详情失败'));
     } finally {
+      if (requestSeq !== detailSeqRef.current) return;
       setDetailLoading(false);
     }
   };
@@ -254,24 +354,28 @@ const Assets = () => {
   };
 
   const submitToCreativeSpace = async () => {
-    if (!selectedAsset?.task_id) return;
+    if (!selectedAsset?.task_id || selectedAsset.creative_submission_status) {
+      return;
+    }
+    const taskId = selectedAsset.task_id;
     setCreativeSubmitting(true);
     try {
       const res = await API.post(
-        `/api/image-generation/assets/${selectedAsset.task_id}/creative-submission`,
+        `/api/image-generation/assets/${taskId}/creative-submission`,
       );
       if (res.data.success) {
         const submission = res.data.data || {};
-        const nextAsset = {
-          ...selectedAsset,
+        const patch = {
           creative_submission_id: submission.id,
           creative_submission_status: submission.status,
           creative_reject_reason: submission.reject_reason || '',
         };
-        setSelectedAsset(nextAsset);
+        setSelectedAsset((prev) =>
+          prev?.task_id === taskId ? { ...prev, ...patch } : prev,
+        );
         setAssets((prev) =>
           prev.map((asset) =>
-            asset.task_id === selectedAsset.task_id ? nextAsset : asset,
+            asset.task_id === taskId ? { ...asset, ...patch } : asset,
           ),
         );
         showSuccess(t('已提交到创意空间审核'));
@@ -286,45 +390,96 @@ const Assets = () => {
   };
 
   const submitSearch = () => {
-    setPage(1);
-    setSubmittedKeyword(keyword.trim());
+    const nextKeyword = keyword.trim();
+    queueListReload();
+    if (nextKeyword === submittedKeyword) {
+      loadAssets(1, false);
+    } else {
+      setSubmittedKeyword(nextKeyword);
+    }
   };
 
   const handleModelSeriesChange = (value) => {
-    setPage(1);
-    setModelSeries(value || '');
+    const nextValue = value || '';
+    if (nextValue === modelSeries) return;
+    queueListReload();
+    setModelSeries(nextValue);
   };
 
   const handleModelIdChange = (value) => {
-    setPage(1);
-    setModelId(value || '');
+    const nextValue = value || '';
+    if (nextValue === modelId) return;
+    queueListReload();
+    setModelId(nextValue);
   };
 
   const handleTimeRangeChange = (value) => {
-    setPage(1);
-    setTimeRange(value || '');
+    const nextValue = value || '';
+    if (nextValue === timeRange) return;
+    queueListReload();
+    setTimeRange(nextValue);
   };
 
   const handleSortChange = (value) => {
-    setPage(1);
-    setSortValue(value || 'created_time_desc');
+    const nextValue = value || 'created_time_desc';
+    if (nextValue === sortValue) return;
+    queueListReload();
+    setSortValue(nextValue);
   };
 
   const resetFilters = () => {
-    setPage(1);
+    const alreadyDefault =
+      !keyword &&
+      !submittedKeyword &&
+      !modelId &&
+      !modelSeries &&
+      !timeRange &&
+      sortValue === 'created_time_desc';
+
+    queueListReload();
     setKeyword('');
     setSubmittedKeyword('');
     setModelId('');
     setModelSeries('');
     setTimeRange('');
     setSortValue('created_time_desc');
+
+    if (
+      alreadyDefault ||
+      (!submittedKeyword && !modelId && !modelSeries && !timeRange)
+    ) {
+      loadAssets(1, false);
+    }
+  };
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCardKeyDown = (event, asset) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openDetail(asset);
+    }
+  };
+
+  const renderCreativeStatusTag = (status) => {
+    const meta = getCreativeStatusMeta(status);
+    return (
+      <Tag size='small' color={meta.color}>
+        {meta.label}
+      </Tag>
+    );
   };
 
   const renderAssetCard = (asset) => (
     <div
-      key={asset.id}
+      key={asset.task_id || asset.id}
       className='asset-card'
+      role='button'
+      tabIndex={0}
       onClick={() => openDetail(asset)}
+      onKeyDown={(event) => handleCardKeyDown(event, asset)}
     >
       <div className='asset-image-wrap'>
         <img src={asset.image_url} alt={asset.prompt || 'Generated'} />
@@ -333,6 +488,7 @@ const Assets = () => {
             <button
               type='button'
               title={t('查看详情')}
+              aria-label={t('查看详情')}
               onClick={() => openDetail(asset)}
             >
               <IconImage size='small' />
@@ -340,6 +496,7 @@ const Assets = () => {
             <button
               type='button'
               title={t('复制提示词')}
+              aria-label={t('复制提示词')}
               onClick={() => copyPrompt(asset)}
             >
               <IconCopy size='small' />
@@ -347,6 +504,7 @@ const Assets = () => {
             <button
               type='button'
               title={t('下载图片')}
+              aria-label={t('下载图片')}
               onClick={() => downloadAsset(asset)}
             >
               <IconDownload size='small' />
@@ -354,6 +512,7 @@ const Assets = () => {
             <button
               type='button'
               title={t('打开源任务')}
+              aria-label={t('打开源任务')}
               onClick={() => openSourceTask(asset)}
             >
               <IconExternalOpen size='small' />
@@ -366,15 +525,16 @@ const Assets = () => {
           <div className='asset-card-title'>
             {asset.display_name || asset.model_id || t('未知模型')}
           </div>
-          {asset.model_series && (
-            <Tag size='small' className='asset-series-tag'>
-              {formatSeries(asset.model_series)}
-            </Tag>
-          )}
+          {renderCreativeStatusTag(asset.creative_submission_status)}
         </div>
-        <div className='asset-card-prompt'>{asset.prompt}</div>
+        <div className='asset-card-prompt'>{asset.prompt || '-'}</div>
         <div className='asset-card-meta'>
           <span>{formatTime(asset.created_time)}</span>
+          {asset.model_series && (
+            <span className='asset-card-series'>
+              {formatSeries(asset.model_series)}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -397,71 +557,87 @@ const Assets = () => {
         }
         .assets-topbar {
           display: flex;
-          align-items: center;
+          align-items: flex-start;
           justify-content: space-between;
           gap: 16px;
-          min-height: 42px;
         }
-        .assets-left-tools {
+        .assets-title-wrap {
           display: flex;
-          align-items: center;
-          gap: 22px;
+          flex-direction: column;
+          gap: 6px;
           min-width: 0;
         }
-        .assets-title-chip {
-          display: inline-flex;
+        .assets-title-line {
+          display: flex;
           align-items: center;
-          min-height: 30px;
-          padding: 0 14px;
-          border-radius: 7px;
-          background: var(--semi-color-fill-1);
+          gap: 10px;
+          min-width: 0;
+        }
+        .assets-title {
+          margin: 0;
           color: var(--semi-color-text-0);
-          font-size: 13px;
-          font-weight: 650;
+          font-size: 20px;
+          line-height: 1.3;
+          font-weight: 700;
+          letter-spacing: 0;
+        }
+        .assets-filter-count {
           white-space: nowrap;
         }
-        .assets-right-tools {
+        .assets-subtitle {
           display: flex;
           align-items: center;
-          gap: 8px;
           flex-wrap: wrap;
-          justify-content: flex-end;
-        }
-        .assets-search {
-          width: 260px;
-        }
-        .assets-stats-row {
-          display: flex;
-          align-items: center;
           gap: 8px;
-          flex-wrap: wrap;
-          margin-top: -6px;
+          color: var(--semi-color-text-2);
+          font-size: 13px;
+          line-height: 1.4;
         }
-        .assets-stat {
-          display: inline-flex;
-          align-items: baseline;
-          gap: 6px;
-          min-height: 30px;
-          padding: 0 10px;
-          border: 1px solid var(--semi-color-border);
-          border-radius: 7px;
-          background: var(--semi-color-fill-0);
-        }
-        .assets-stat-label {
-          color: var(--semi-color-text-3);
-        }
-        .assets-stat-value {
+        .assets-subtitle strong {
           color: var(--semi-color-text-0);
           font-weight: 650;
-          font-size: 13px;
-          overflow-wrap: anywhere;
         }
-        .assets-toolbar {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(156px, 220px)) auto;
-          gap: 8px;
+        .assets-top-actions {
+          display: flex;
           align-items: center;
-          justify-content: start;
+          justify-content: flex-end;
+          gap: 8px;
+          flex-wrap: wrap;
+          flex-shrink: 0;
+        }
+        .assets-controls {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          padding-bottom: 2px;
+        }
+        .assets-filter-label {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          min-height: 32px;
+          color: var(--semi-color-text-2);
+          font-size: 13px;
+          white-space: nowrap;
+        }
+        .assets-search {
+          width: min(320px, 100%);
+          flex: 1 1 260px;
+        }
+        .assets-select {
+          width: 176px;
+          flex: 0 1 176px;
+        }
+        .assets-sort {
+          width: 184px;
+          flex: 0 1 184px;
+        }
+        .assets-filter-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
         }
         .assets-masonry {
           column-count: 6;
@@ -477,10 +653,14 @@ const Assets = () => {
           border: 1px solid var(--semi-color-border);
           border-radius: 8px;
           background: var(--semi-color-bg-0);
+          color: inherit;
+          text-align: left;
           cursor: pointer;
+          outline: none;
           transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
         }
-        .asset-card:hover {
+        .asset-card:hover,
+        .asset-card:focus-visible {
           transform: translateY(-1px);
           border-color: var(--semi-color-primary-light-default);
           box-shadow: 0 18px 42px -30px rgba(15, 23, 42, 0.5);
@@ -488,6 +668,7 @@ const Assets = () => {
         .asset-image-wrap {
           position: relative;
           width: 100%;
+          min-height: 120px;
           background: var(--semi-color-fill-0);
         }
         .asset-image-wrap img {
@@ -504,9 +685,10 @@ const Assets = () => {
           padding: 10px;
           opacity: 0;
           transition: opacity 0.18s;
-          background: linear-gradient(to top, rgba(0,0,0,0.45), transparent 55%);
+          background: linear-gradient(to top, rgba(0,0,0,0.42), transparent 58%);
         }
-        .asset-card:hover .asset-overlay {
+        .asset-card:hover .asset-overlay,
+        .asset-card:focus-visible .asset-overlay {
           opacity: 1;
         }
         .asset-actions {
@@ -518,7 +700,7 @@ const Assets = () => {
           height: 30px;
           border-radius: 7px;
           border: 1px solid rgba(255,255,255,0.16);
-          background: rgba(0,0,0,0.52);
+          background: rgba(0,0,0,0.56);
           color: #fff;
           cursor: pointer;
           display: inline-flex;
@@ -526,7 +708,13 @@ const Assets = () => {
           justify-content: center;
           backdrop-filter: blur(8px);
         }
+        .asset-actions button:hover {
+          background: rgba(0,0,0,0.72);
+        }
         .asset-card-body {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
           padding: 9px 10px 11px;
         }
         .asset-card-title-row {
@@ -534,7 +722,6 @@ const Assets = () => {
           align-items: center;
           justify-content: space-between;
           gap: 8px;
-          margin-bottom: 5px;
           min-width: 0;
         }
         .asset-card-title {
@@ -545,10 +732,6 @@ const Assets = () => {
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-        }
-        .asset-series-tag {
-          flex-shrink: 0;
-          max-width: 84px;
         }
         .asset-card-prompt {
           font-size: 12px;
@@ -562,7 +745,6 @@ const Assets = () => {
           overflow-wrap: anywhere;
         }
         .asset-card-meta {
-          margin-top: 11px;
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -570,19 +752,32 @@ const Assets = () => {
           color: var(--semi-color-text-3);
           font-size: 12px;
         }
-        .assets-pagination {
+        .asset-card-series {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .assets-load-more {
           display: flex;
           justify-content: center;
-          padding: 4px 0 12px;
+          align-items: center;
+          gap: 8px;
+          min-height: 48px;
+          padding: 4px 0 18px;
+          color: var(--semi-color-text-2);
+          font-size: 13px;
         }
-        .asset-detail-body {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) 300px;
-          gap: 18px;
-          padding: 18px;
+        .assets-empty-wrap {
+          padding: 48px 0;
+        }
+        .asset-detail {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          padding: 16px;
         }
         .asset-detail-preview {
-          min-height: 460px;
           border: 1px solid var(--semi-color-border);
           border-radius: 8px;
           background: var(--semi-color-fill-0);
@@ -592,21 +787,32 @@ const Assets = () => {
           overflow: hidden;
         }
         .asset-detail-preview img {
-          max-width: 100%;
-          max-height: 72vh;
-          object-fit: contain;
           display: block;
+          max-width: 100%;
+          max-height: 62vh;
+          object-fit: contain;
         }
-        .asset-detail-side {
-          display: flex;
-          flex-direction: column;
-          gap: 14px;
-          min-width: 0;
+        .asset-detail-actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+        }
+        .asset-detail-actions .asset-submit-action {
+          grid-column: 1 / -1;
+        }
+        .asset-info-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
         }
         .asset-info-block {
           display: flex;
           flex-direction: column;
-          gap: 4px;
+          gap: 5px;
+          min-width: 0;
+        }
+        .asset-info-wide {
+          grid-column: 1 / -1;
         }
         .asset-info-label {
           color: var(--semi-color-text-2);
@@ -618,26 +824,33 @@ const Assets = () => {
           font-weight: 500;
           overflow-wrap: anywhere;
         }
-        .asset-detail-actions {
-          margin-top: auto;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
+        .asset-code-block {
+          margin: 0;
+          max-height: 180px;
+          overflow: auto;
+          padding: 10px;
+          border-radius: 8px;
+          background: var(--semi-color-fill-0);
+          font-size: 12px;
+          line-height: 1.5;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+        }
+        .asset-reject-reason {
+          color: var(--semi-color-danger);
+          font-size: 12px;
+          line-height: 1.45;
+          overflow-wrap: anywhere;
         }
         @media (max-width: 1480px) {
-          .assets-masonry {
-            column-count: 5;
-          }
+          .assets-masonry { column-count: 5; }
         }
         @media (max-width: 1280px) {
-          .assets-masonry {
-            column-count: 4;
-          }
-          .assets-toolbar {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-          }
-          .assets-search {
-            width: 220px;
+          .assets-masonry { column-count: 4; }
+          .assets-select,
+          .assets-sort {
+            width: 160px;
+            flex-basis: 160px;
           }
         }
         @media (max-width: 960px) {
@@ -645,39 +858,30 @@ const Assets = () => {
             flex-direction: column;
             align-items: stretch;
           }
-          .assets-left-tools,
-          .assets-right-tools {
-            width: 100%;
-            justify-content: space-between;
+          .assets-top-actions {
+            justify-content: flex-start;
           }
-          .assets-search {
-            width: min(100%, 320px);
-          }
-          .assets-masonry {
-            column-count: 3;
-          }
-          .asset-detail-body {
-            grid-template-columns: 1fr;
-          }
+          .assets-masonry { column-count: 3; }
         }
         @media (max-width: 720px) {
           .assets-page {
             min-height: calc(100vh - 70px);
           }
-          .assets-left-tools {
-            align-items: flex-start;
-            flex-direction: column;
-            gap: 10px;
-          }
-          .assets-right-tools {
+          .assets-controls {
             align-items: stretch;
-            flex-direction: column;
           }
-          .assets-search {
+          .assets-filter-label {
             width: 100%;
           }
-          .assets-toolbar {
-            grid-template-columns: 1fr;
+          .assets-search,
+          .assets-select,
+          .assets-sort {
+            width: 100%;
+            flex: 1 1 100%;
+          }
+          .assets-filter-actions,
+          .assets-filter-actions .semi-button {
+            width: 100%;
           }
           .assets-masonry {
             column-count: 2;
@@ -686,31 +890,53 @@ const Assets = () => {
           .asset-card {
             margin-bottom: 10px;
           }
+          .asset-overlay {
+            opacity: 1;
+            background: linear-gradient(to top, rgba(0,0,0,0.38), transparent 62%);
+          }
+          .asset-info-grid {
+            grid-template-columns: 1fr;
+          }
+          .asset-detail-actions {
+            grid-template-columns: 1fr;
+          }
         }
         @media (max-width: 420px) {
-          .assets-masonry {
-            column-count: 1;
-          }
+          .assets-masonry { column-count: 1; }
         }
       `}</style>
 
       <div className='assets-shell'>
         <div className='assets-topbar'>
-          <div className='assets-left-tools'>
-            <span className='assets-title-chip'>{t('资产仓库')}</span>
+          <div className='assets-title-wrap'>
+            <div className='assets-title-line'>
+              <h1 className='assets-title'>{t('资产仓库')}</h1>
+              {activeFilterCount > 0 && (
+                <Tag color='blue' className='assets-filter-count'>
+                  {t('筛选')} {activeFilterCount}
+                </Tag>
+              )}
+            </div>
+            <div className='assets-subtitle'>
+              <span>
+                {t('资产总数')} <strong>{stats.total_assets || total}</strong>
+              </span>
+              <span>
+                {t('最近生成')}{' '}
+                <strong>{formatTime(stats.latest_created_time)}</strong>
+              </span>
+            </div>
           </div>
-          <div className='assets-right-tools'>
-            <Input
-              className='assets-search'
-              value={keyword}
-              prefix={<IconSearch />}
-              placeholder={t('搜索提示词、模型')}
-              showClear
-              onChange={setKeyword}
-              onEnterPress={submitSearch}
-            />
+          <div className='assets-top-actions'>
+            <Button icon={<IconRefresh />} onClick={refreshAssets}>
+              {t('刷新')}
+            </Button>
+            <Button icon={<IconChevronUp />} onClick={scrollToTop}>
+              {t('回到顶部')}
+            </Button>
             <Button
-              type='tertiary'
+              type='primary'
+              icon={<IconImage />}
               onClick={() => navigate('/image-generation')}
             >
               {t('去生成图片')}
@@ -718,23 +944,22 @@ const Assets = () => {
           </div>
         </div>
 
-        <div className='assets-stats-row'>
-          <span className='assets-stat'>
-            <span className='assets-stat-label'>{t('资产总数')}</span>
-            <span className='assets-stat-value'>
-              {stats.total_assets || total}
-            </span>
+        <div className='assets-controls'>
+          <span className='assets-filter-label'>
+            <IconFilter size='small' />
+            {t('筛选')}
           </span>
-          <span className='assets-stat'>
-            <span className='assets-stat-label'>{t('最近生成')}</span>
-            <span className='assets-stat-value'>
-              {formatTime(stats.latest_created_time)}
-            </span>
-          </span>
-        </div>
-
-        <div className='assets-toolbar'>
+          <Input
+            className='assets-search'
+            value={keyword}
+            prefix={<IconSearch />}
+            placeholder={t('搜索提示词、模型')}
+            showClear
+            onChange={setKeyword}
+            onEnterPress={submitSearch}
+          />
           <Select
+            className='assets-select'
             value={modelSeries}
             onChange={handleModelSeriesChange}
             placeholder={t('全部系列')}
@@ -747,6 +972,7 @@ const Assets = () => {
             ))}
           </Select>
           <Select
+            className='assets-select'
             value={modelId}
             onChange={handleModelIdChange}
             placeholder={t('全部模型')}
@@ -760,6 +986,7 @@ const Assets = () => {
             ))}
           </Select>
           <Select
+            className='assets-select'
             value={timeRange}
             onChange={handleTimeRangeChange}
             placeholder={t('全部时间')}
@@ -770,7 +997,11 @@ const Assets = () => {
             <Select.Option value='last30d'>{t('近 30 天')}</Select.Option>
             <Select.Option value='thisMonth'>{t('本月')}</Select.Option>
           </Select>
-          <Select value={sortValue} onChange={handleSortChange}>
+          <Select
+            className='assets-sort'
+            value={sortValue}
+            onChange={handleSortChange}
+          >
             <Select.Option value='created_time_desc'>
               {t('创建时间倒序')}
             </Select.Option>
@@ -782,7 +1013,7 @@ const Assets = () => {
             </Select.Option>
             <Select.Option value='cost_desc'>{t('消耗额度倒序')}</Select.Option>
           </Select>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className='assets-filter-actions'>
             <Button type='primary' icon={<IconSearch />} onClick={submitSearch}>
               {t('查询')}
             </Button>
@@ -792,64 +1023,97 @@ const Assets = () => {
           </div>
         </div>
 
-        <Spin spinning={loading}>
+        <Spin spinning={loading && assets.length === 0}>
           {assets.length > 0 ? (
             <>
               <div className='assets-masonry'>
                 {assets.map(renderAssetCard)}
               </div>
-              {total > pageSize && (
-                <div className='assets-pagination'>
-                  <Pagination
-                    total={total}
-                    currentPage={page}
-                    pageSize={pageSize}
-                    onPageChange={setPage}
-                    showSizeChanger
-                    onPageSizeChange={(size) => {
-                      setPageSize(size);
-                      setPage(1);
-                    }}
-                    pageSizeOpts={[12, 24, 48, 96]}
-                  />
-                </div>
-              )}
+              <div ref={sentinelRef} className='assets-load-more'>
+                {loadingMore && (
+                  <>
+                    <Spin size='small' />
+                  </>
+                )}
+                {!hasMore && total > 0 && <span>{t('已加载全部作品')}</span>}
+              </div>
             </>
           ) : (
-            <Empty
-              image={<IconImage size='extra-large' />}
-              title={t('暂无图片资产')}
-              description={t('完成一次图片生成后，成功的图片会出现在这里。')}
-            >
-              <Button
-                type='primary'
-                onClick={() => navigate('/image-generation')}
+            <div className='assets-empty-wrap'>
+              <Empty
+                image={<IconImage size='extra-large' />}
+                title={t('暂无图片资产')}
+                description={t('完成一次图片生成后，成功的图片会出现在这里。')}
               >
-                {t('去生成图片')}
-              </Button>
-            </Empty>
+                <Button
+                  type='primary'
+                  icon={<IconImage />}
+                  onClick={() => navigate('/image-generation')}
+                >
+                  {t('去生成图片')}
+                </Button>
+              </Empty>
+            </div>
           )}
         </Spin>
       </div>
 
-      <Modal
+      <SideSheet
+        placement='right'
         visible={detailVisible}
+        width={isMobile ? '100%' : 560}
         title={t('资产详情')}
-        footer={null}
-        width={1080}
         onCancel={() => setDetailVisible(false)}
         bodyStyle={{ padding: 0 }}
       >
         <Spin spinning={detailLoading}>
           {selectedAsset && (
-            <div className='asset-detail-body'>
+            <div className='asset-detail'>
               <div className='asset-detail-preview'>
                 <img
                   src={selectedAsset.image_url}
                   alt={selectedAsset.prompt || 'Generated'}
                 />
               </div>
-              <div className='asset-detail-side'>
+
+              <div className='asset-detail-actions'>
+                <Button
+                  className='asset-submit-action'
+                  type='primary'
+                  icon={<IconImage />}
+                  loading={creativeSubmitting}
+                  disabled={Boolean(selectedAsset.creative_submission_status)}
+                  onClick={submitToCreativeSpace}
+                >
+                  {t('提交到创意空间')}
+                </Button>
+                <Button
+                  theme='outline'
+                  type='tertiary'
+                  icon={<IconCopy />}
+                  onClick={() => copyPrompt(selectedAsset)}
+                >
+                  {t('复制提示词')}
+                </Button>
+                <Button
+                  theme='outline'
+                  type='tertiary'
+                  icon={<IconDownload />}
+                  onClick={() => downloadAsset(selectedAsset)}
+                >
+                  {t('下载图片')}
+                </Button>
+                <Button
+                  theme='outline'
+                  type='tertiary'
+                  icon={<IconExternalOpen />}
+                  onClick={() => openSourceTask(selectedAsset)}
+                >
+                  {t('打开源任务')}
+                </Button>
+              </div>
+
+              <div className='asset-info-grid'>
                 <div className='asset-info-block'>
                   <span className='asset-info-label'>{t('模型')}</span>
                   <span className='asset-info-value'>
@@ -881,12 +1145,31 @@ const Assets = () => {
                   </span>
                 </div>
                 <div className='asset-info-block'>
+                  <span className='asset-info-label'>{t('来源任务')}</span>
+                  <span className='asset-info-value'>
+                    #{selectedAsset.task_id}
+                  </span>
+                </div>
+                <div className='asset-info-block asset-info-wide'>
+                  <span className='asset-info-label'>{t('创意空间')}</span>
+                  <span className='asset-info-value'>
+                    <Tag color={selectedCreativeStatusMeta.color}>
+                      {selectedCreativeStatusMeta.label}
+                    </Tag>
+                  </span>
+                  {selectedAsset.creative_reject_reason && (
+                    <span className='asset-reject-reason'>
+                      {selectedAsset.creative_reject_reason}
+                    </span>
+                  )}
+                </div>
+                <div className='asset-info-block asset-info-wide'>
                   <span className='asset-info-label'>{t('提示词')}</span>
                   <Paragraph
                     copyable={{ content: selectedAsset.prompt || '' }}
                     style={{
                       margin: 0,
-                      maxHeight: 120,
+                      maxHeight: 160,
                       overflow: 'auto',
                       whiteSpace: 'pre-wrap',
                     }}
@@ -895,102 +1178,26 @@ const Assets = () => {
                   </Paragraph>
                 </div>
                 {Object.keys(selectedParams).length > 0 && (
-                  <div className='asset-info-block'>
+                  <div className='asset-info-block asset-info-wide'>
                     <span className='asset-info-label'>{t('生成参数')}</span>
-                    <pre
-                      style={{
-                        margin: 0,
-                        maxHeight: 120,
-                        overflow: 'auto',
-                        padding: 10,
-                        borderRadius: 8,
-                        background: 'var(--semi-color-fill-0)',
-                        fontSize: 12,
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
+                    <pre className='asset-code-block'>
                       {JSON.stringify(selectedParams, null, 2)}
                     </pre>
                   </div>
                 )}
                 {Object.keys(selectedMetadata).length > 0 && (
-                  <div className='asset-info-block'>
+                  <div className='asset-info-block asset-info-wide'>
                     <span className='asset-info-label'>{t('图片元数据')}</span>
-                    <pre
-                      style={{
-                        margin: 0,
-                        maxHeight: 120,
-                        overflow: 'auto',
-                        padding: 10,
-                        borderRadius: 8,
-                        background: 'var(--semi-color-fill-0)',
-                        fontSize: 12,
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
+                    <pre className='asset-code-block'>
                       {JSON.stringify(selectedMetadata, null, 2)}
                     </pre>
                   </div>
                 )}
-                <div className='asset-info-block'>
-                  <span className='asset-info-label'>{t('来源任务')}</span>
-                  <span className='asset-info-value'>
-                    #{selectedAsset.task_id}
-                  </span>
-                </div>
-                <div className='asset-info-block'>
-                  <span className='asset-info-label'>{t('创意空间')}</span>
-                  <span className='asset-info-value'>
-                    <Tag color={creativeStatusMeta.color}>
-                      {creativeStatusMeta.label}
-                    </Tag>
-                  </span>
-                  {selectedAsset.creative_reject_reason && (
-                    <span className='asset-info-label'>
-                      {selectedAsset.creative_reject_reason}
-                    </span>
-                  )}
-                </div>
-                <div className='asset-detail-actions'>
-                  <Button
-                    type='primary'
-                    icon={<IconImage />}
-                    loading={creativeSubmitting}
-                    disabled={Boolean(selectedAsset.creative_submission_status)}
-                    onClick={submitToCreativeSpace}
-                  >
-                    {t('提交到创意空间')}
-                  </Button>
-                  <Button
-                    theme='outline'
-                    type='tertiary'
-                    icon={<IconCopy />}
-                    onClick={() => copyPrompt(selectedAsset)}
-                  >
-                    {t('复制提示词')}
-                  </Button>
-                  <Button
-                    theme='outline'
-                    type='tertiary'
-                    icon={<IconDownload />}
-                    onClick={() => downloadAsset(selectedAsset)}
-                  >
-                    {t('下载图片')}
-                  </Button>
-                  <Button
-                    theme='outline'
-                    type='tertiary'
-                    icon={<IconExternalOpen />}
-                    onClick={() => openSourceTask(selectedAsset)}
-                  >
-                    {t('打开源任务')}
-                  </Button>
-                </div>
               </div>
             </div>
           )}
         </Spin>
-      </Modal>
+      </SideSheet>
     </div>
   );
 };
