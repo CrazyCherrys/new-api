@@ -463,15 +463,6 @@ const Assets = () => {
     }
   };
 
-  const renderCreativeStatusTag = (status) => {
-    const meta = getCreativeStatusMeta(status);
-    return (
-      <Tag size='small' color={meta.color}>
-        {meta.label}
-      </Tag>
-    );
-  };
-
   const renderAssetCard = (asset) => (
     <div
       key={asset.task_id || asset.id}
@@ -483,9 +474,6 @@ const Assets = () => {
     >
       <div className='asset-image-wrap'>
         <img src={asset.image_url} alt={asset.prompt || 'Generated'} />
-        <div className='asset-card-status'>
-          {renderCreativeStatusTag(asset.creative_submission_status)}
-        </div>
       </div>
     </div>
   );
@@ -591,14 +579,14 @@ const Assets = () => {
         }
         .assets-masonry {
           column-count: 6;
-          column-gap: 14px;
+          column-gap: 8px;
           width: 100%;
         }
         .asset-card {
           display: inline-block;
           width: 100%;
           break-inside: avoid;
-          margin: 0 0 14px;
+          margin: 0 0 8px;
           overflow: hidden;
           border: 1px solid var(--semi-color-border);
           border-radius: 8px;
@@ -625,13 +613,6 @@ const Assets = () => {
           display: block;
           width: 100%;
           height: auto;
-        }
-        .asset-card-status {
-          position: absolute;
-          top: 8px;
-          right: 8px;
-          z-index: 1;
-          pointer-events: none;
         }
         .assets-load-more {
           display: flex;
@@ -760,14 +741,10 @@ const Assets = () => {
           }
           .assets-masonry {
             column-count: 2;
-            column-gap: 10px;
+            column-gap: 6px;
           }
           .asset-card {
-            margin-bottom: 10px;
-          }
-          .asset-card-status {
-            top: 6px;
-            right: 6px;
+            margin-bottom: 6px;
           }
           .asset-info-grid {
             grid-template-columns: 1fr;
