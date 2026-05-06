@@ -42,6 +42,7 @@ import {
 import {
   IconChevronUp,
   IconCopy,
+  IconDelete,
   IconDownload,
   IconExternalOpen,
   IconFilter,
