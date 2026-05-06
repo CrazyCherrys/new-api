@@ -81,6 +81,56 @@ const ImageGenerationTaskModal = ({
     console.error('Failed to parse params:', e);
   }
 
+  const parseAspectRatio = (value) => {
+    if (!value) return null;
+    const match = String(value)
+      .trim()
+      .match(/^(\d+(?:\.\d+)?)\s*(?::|x|X|\/)\s*(\d+(?:\.\d+)?)$/);
+    if (!match) return null;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || height <= 0) {
+      return null;
+    }
+    return width / height;
+  };
+
+  const metadataWidth = Number(metadata.width);
+  const metadataHeight = Number(metadata.height);
+  const imageAspectRatio = (() => {
+    if (
+      Number.isFinite(metadataWidth) &&
+      metadataWidth > 0 &&
+      Number.isFinite(metadataHeight) &&
+      metadataHeight > 0
+    ) {
+      return metadataWidth / metadataHeight;
+    }
+    return parseAspectRatio(params.aspect_ratio) || parseAspectRatio(params.size);
+  })();
+
+  const normalizedPreviewRatio = imageAspectRatio
+    ? Math.min(Math.max(imageAspectRatio, 0.56), 1.91)
+    : 1;
+  const isTallImage = Boolean(imageAspectRatio && imageAspectRatio < 0.8);
+  const isUltraTallImage = Boolean(imageAspectRatio && imageAspectRatio < 0.65);
+  const previewMaxWidth = isMobile
+    ? '100%'
+    : isUltraTallImage
+      ? 300
+      : isTallImage
+        ? 360
+        : imageAspectRatio && imageAspectRatio > 1.35
+          ? '100%'
+          : 520;
+  const previewMaxHeight = isMobile
+    ? '44vh'
+    : isUltraTallImage
+      ? 360
+      : isTallImage
+        ? 420
+        : '52vh';
+
   const formatTime = (timestamp) => {
     if (!timestamp) return '-';
     const d = new Date(timestamp * 1000);
@@ -169,7 +219,7 @@ const ImageGenerationTaskModal = ({
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '14px 20px',
+      padding: isMobile ? '12px 14px' : '14px 20px',
       borderBottom: '1px solid var(--semi-color-border)',
     },
     headerTitle: {
@@ -195,33 +245,41 @@ const ImageGenerationTaskModal = ({
       flexDirection: isMobile ? 'column' : 'row',
       gap: isMobile ? 12 : 16,
       padding: isMobile ? 12 : 20,
-      alignItems: 'stretch',
-      flex: 1,
-      minHeight: 0,
-      overflow: 'hidden',
+      alignItems: isMobile ? 'stretch' : 'flex-start',
     },
     previewCol: {
-      flex: 1,
+      flex: isMobile ? 'none' : isTallImage ? '0 1 380px' : '1 1 0',
       minWidth: 0,
-      minHeight: 0,
       display: 'flex',
       flexDirection: 'column',
-      gap: 12,
+      alignItems: 'center',
     },
     previewCard: {
-      position: 'relative',
-      flex: 1,
-      minHeight: isMobile ? 240 : 320,
-      maxHeight: isMobile ? '50vh' : 'none',
+      width: '100%',
+      padding: isMobile ? 12 : 16,
       borderRadius: 16,
       border: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-fill-0)',
-      overflow: 'hidden',
       boxShadow:
         '0 18px 40px -22px rgba(34, 211, 238, 0.45), inset 0 0 0 1px rgba(255,255,255,0.02)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    previewFrame: {
+      position: 'relative',
+      width: '100%',
+      maxWidth: previewMaxWidth,
+      maxHeight: previewMaxHeight,
+      minHeight: isMobile ? 220 : 280,
+      aspectRatio: isSuccess && task.image_url ? normalizedPreviewRatio : undefined,
+      borderRadius: 14,
+      background: 'rgba(255,255,255,0.02)',
+      overflow: 'hidden',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      margin: '0 auto',
     },
     previewActions: {
       position: 'absolute',
@@ -246,33 +304,50 @@ const ImageGenerationTaskModal = ({
       backdropFilter: 'blur(6px)',
     },
     sideCol: {
-      width: isMobile ? '100%' : 240,
-      minWidth: isMobile ? 0 : 240,
-      maxHeight: isMobile ? 'none' : '100%',
+      width: isMobile ? '100%' : 280,
+      minWidth: isMobile ? 0 : 280,
       display: 'flex',
       flexDirection: 'column',
-      gap: isMobile ? 12 : 16,
-      minHeight: 0,
-      overflowY: 'auto',
-      paddingRight: isMobile ? 0 : 4,
+      gap: 12,
+    },
+    statusCard: {
+      padding: '12px 14px',
+      borderRadius: 12,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+    },
+    metaGrid: {
+      display: 'grid',
+      gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
+      gap: 10,
+    },
+    metaCard: {
+      padding: '10px 12px',
+      borderRadius: 12,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
     },
     infoBlock: {
       display: 'flex',
       flexDirection: 'column',
-      gap: 4,
+      gap: 3,
     },
     infoLabel: {
       fontSize: 12,
       color: 'var(--semi-color-text-2)',
     },
     infoValue: {
-      fontSize: 14,
+      fontSize: 13,
       fontWeight: 500,
       color: 'var(--semi-color-text-0)',
       wordBreak: 'break-all',
+      lineHeight: 1.5,
     },
     errorBox: {
-      marginTop: 8,
+      marginTop: 2,
       padding: '10px 12px',
       borderRadius: 8,
       border: '1px solid rgba(239, 68, 68, 0.35)',
@@ -286,10 +361,9 @@ const ImageGenerationTaskModal = ({
       overflowY: 'auto',
     },
     sideActions: {
-      display: 'flex',
-      flexDirection: 'column',
+      display: 'grid',
+      gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
       gap: 8,
-      marginTop: 'auto',
     },
     sideActionBtn: {
       width: '100%',
@@ -313,8 +387,8 @@ const ImageGenerationTaskModal = ({
           src={task.image_url}
           alt='Generated'
           style={{
-            maxWidth: '100%',
-            maxHeight: '100%',
+            width: '100%',
+            height: '100%',
             objectFit: 'contain',
             display: 'block',
           }}
@@ -434,11 +508,8 @@ const ImageGenerationTaskModal = ({
       }
       bodyStyle={{
         padding: 0,
-        height: isMobile
-          ? 'calc(100vh - 24px)'
-          : 'min(720px, calc(100vh - 48px))',
         maxHeight: isMobile ? 'calc(100vh - 24px)' : 'calc(100vh - 48px)',
-        overflow: 'hidden',
+        overflowY: 'auto',
         display: 'flex',
         flexDirection: 'column',
       }}
@@ -450,86 +521,89 @@ const ImageGenerationTaskModal = ({
       <div style={styles.body}>
         <div style={styles.previewCol}>
           <div style={styles.previewCard}>
-            {renderPreview()}
+            <div style={styles.previewFrame}>
+              {renderPreview()}
 
-            <div style={styles.previewActions}>
-              <button
-                type='button'
-                style={styles.actionIconBtn}
-                title={t('复制提示词')}
-                onClick={handleCopyPrompt}
-              >
-                <IconCommentStroked size='small' />
-              </button>
-              {isFailed && (
+              <div style={styles.previewActions}>
                 <button
                   type='button'
                   style={styles.actionIconBtn}
-                  title={t('重试')}
-                  onClick={handleRetry}
-                  disabled={retrying}
+                  title={t('复制提示词')}
+                  onClick={handleCopyPrompt}
                 >
-                  <IconEdit size='small' />
+                  <IconCommentStroked size='small' />
                 </button>
-              )}
-              {isSuccess && task.image_url && (
-                <button
-                  type='button'
-                  style={styles.actionIconBtn}
-                  title={t('下载图片')}
-                  onClick={handleDownload}
-                >
-                  <IconDownload size='small' />
-                </button>
-              )}
+                {isFailed && (
+                  <button
+                    type='button'
+                    style={styles.actionIconBtn}
+                    title={t('重试')}
+                    onClick={handleRetry}
+                    disabled={retrying}
+                  >
+                    <IconEdit size='small' />
+                  </button>
+                )}
+                {isSuccess && task.image_url && (
+                  <button
+                    type='button'
+                    style={styles.actionIconBtn}
+                    title={t('下载图片')}
+                    onClick={handleDownload}
+                  >
+                    <IconDownload size='small' />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
         <div style={styles.sideCol}>
-          <div style={styles.infoBlock}>
-            <span style={styles.infoLabel}>{t('状态')}</span>
-            <span style={{ ...styles.infoValue, color: statusMeta.color }}>
-              <span style={styles.statusDot(statusMeta.color)} />
-              {statusMeta.text}
-            </span>
+          <div style={styles.statusCard}>
+            <div style={styles.infoBlock}>
+              <span style={styles.infoLabel}>{t('状态')}</span>
+              <span style={{ ...styles.infoValue, color: statusMeta.color }}>
+                <span style={styles.statusDot(statusMeta.color)} />
+                {statusMeta.text}
+              </span>
+            </div>
             {isFailed && task.error_message && (
               <div style={styles.errorBox}>{task.error_message}</div>
             )}
           </div>
 
-          <div style={styles.infoBlock}>
-            <span style={styles.infoLabel}>{t('模型')}</span>
-            <span style={styles.infoValue}>{displayName}</span>
-          </div>
-
-          <div style={styles.infoBlock}>
-            <span style={styles.infoLabel}>{t('创建时间')}</span>
-            <span style={styles.infoValue}>{formatTime(task.created_time)}</span>
-          </div>
-
-          <div style={styles.infoBlock}>
-            <span style={styles.infoLabel}>{t('完成时间')}</span>
-            <span style={styles.infoValue}>
-              {formatTime(task.completed_time)}
-            </span>
-          </div>
-
-          {sizeText && (
-            <div style={styles.infoBlock}>
-              <span style={styles.infoLabel}>{t('尺寸')}</span>
-              <span style={styles.infoValue}>{sizeText}</span>
+          <div style={styles.metaGrid}>
+            <div style={styles.metaCard}>
+              <div style={styles.infoBlock}>
+                <span style={styles.infoLabel}>{t('模型')}</span>
+                <span style={styles.infoValue}>{displayName}</span>
+              </div>
             </div>
-          )}
-
-          <div style={styles.infoBlock}>
-            <span style={styles.infoLabel}>{t('投稿状态')}</span>
-            <span style={styles.infoValue}>{t('未投稿')}</span>
-          </div>
-
-          <div style={styles.infoBlock}>
-            <span style={styles.infoLabel}>{t('是否公开')}</span>
-            <span style={styles.infoValue}>{t('否')}</span>
+            {sizeText && (
+              <div style={styles.metaCard}>
+                <div style={styles.infoBlock}>
+                  <span style={styles.infoLabel}>{t('尺寸')}</span>
+                  <span style={styles.infoValue}>{sizeText}</span>
+                </div>
+              </div>
+            )}
+            <div style={styles.metaCard}>
+              <div style={styles.infoBlock}>
+                <span style={styles.infoLabel}>{t('创建时间')}</span>
+                <span style={styles.infoValue}>
+                  {formatTime(task.created_time)}
+                </span>
+              </div>
+            </div>
+            <div style={styles.metaCard}>
+              <div style={styles.infoBlock}>
+                <span style={styles.infoLabel}>{t('完成时间')}</span>
+                <span style={styles.infoValue}>
+                  {formatTime(task.completed_time)}
+                </span>
+              </div>
+            </div>
           </div>
 
           <div style={styles.sideActions}>
