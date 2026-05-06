@@ -29,6 +29,7 @@ import { Button, SideSheet, Spin, Typography } from '@douyinfe/semi-ui';
 import { IconCopy, IconDownload } from '@douyinfe/semi-icons';
 import { API, copy, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
+import { useContainerWidth } from '../../hooks/common/useContainerWidth';
 
 const { Paragraph } = Typography;
 const PAGE_SIZE = 24;
@@ -36,6 +37,7 @@ const PAGE_SIZE = 24;
 const Inspiration = () => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+  const [shellRef, shellWidth] = useContainerWidth();
   const [assets, setAssets] = useState([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -64,6 +66,12 @@ const Inspiration = () => {
     () => parseJsonObject(selectedAsset?.params),
     [selectedAsset?.params],
   );
+
+  const masonryColumnCount = useMemo(() => {
+    if (!shellWidth) return 1;
+    const maxColumns = Math.max(1, Math.min(6, Math.floor(shellWidth / 320)));
+    return Math.max(1, Math.min(assets.length || 1, maxColumns));
+  }, [assets.length, shellWidth]);
 
   const formatSeries = useCallback(
     (series) => {
@@ -212,19 +220,18 @@ const Inspiration = () => {
         .inspiration-page {
           min-height: calc(100vh - 60px);
           margin-top: 60px;
-          padding: 18px 18px 28px;
+          padding: 16px 16px 28px;
           color: var(--semi-color-text-0);
           background: var(--semi-color-bg-0);
         }
         .inspiration-shell {
-          width: min(1680px, 100%);
-          margin: 0 auto;
+          width: 100%;
+          margin: 0;
           display: flex;
           flex-direction: column;
           gap: 14px;
         }
         .inspiration-masonry {
-          column-count: 6;
           column-gap: 14px;
           width: 100%;
         }
@@ -310,23 +317,11 @@ const Inspiration = () => {
           white-space: pre-wrap;
           overflow-wrap: anywhere;
         }
-        @media (max-width: 1480px) {
-          .inspiration-masonry { column-count: 5; }
-        }
-        @media (max-width: 1280px) {
-          .inspiration-masonry { column-count: 4; }
-        }
-        @media (max-width: 960px) {
-          .inspiration-masonry { column-count: 3; }
-        }
         @media (max-width: 720px) {
           .inspiration-page {
             padding: 12px 10px 22px;
           }
-          .inspiration-masonry {
-            column-count: 2;
-            column-gap: 10px;
-          }
+          .inspiration-masonry { column-gap: 10px; }
           .inspiration-card {
             margin-bottom: 10px;
           }
@@ -334,14 +329,14 @@ const Inspiration = () => {
             grid-template-columns: 1fr;
           }
         }
-        @media (max-width: 420px) {
-          .inspiration-masonry { column-count: 1; }
-        }
       `}</style>
 
-      <div className='inspiration-shell'>
+      <div className='inspiration-shell' ref={shellRef}>
         <Spin spinning={loading}>
-          <div className='inspiration-masonry'>
+          <div
+            className='inspiration-masonry'
+            style={{ columnCount: masonryColumnCount }}
+          >
             {assets.map(renderAssetCard)}
           </div>
           <div ref={sentinelRef} className='inspiration-load-more'>
