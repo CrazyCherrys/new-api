@@ -42,13 +42,13 @@ import {
 import {
   IconChevronUp,
   IconCopy,
-  IconCheck,
   IconDownload,
   IconExternalOpen,
   IconFilter,
   IconImage,
   IconRefresh,
   IconSearch,
+  IconTick,
 } from '@douyinfe/semi-icons';
 import { API, copy, renderQuota, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
@@ -986,7 +986,7 @@ const Assets = () => {
           <div className='assets-top-actions'>
             <Button
               type={hasSelectedAssets ? 'primary' : 'tertiary'}
-              icon={<IconCheck />}
+              icon={<IconTick />}
               onClick={() => {
                 if (allVisibleSelected) {
                   clearSelectedAssets();
