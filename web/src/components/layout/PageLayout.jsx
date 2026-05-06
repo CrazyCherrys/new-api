@@ -60,9 +60,11 @@ const PageLayout = () => {
     '/console/task',
     '/console/models',
     '/console/assets',
+    '/console/creative-space-review',
     '/pricing',
     '/ai-generation',
     '/creative-space',
+    '/inspiration',
   ];
 
   const shouldHideFooter = cardProPages.includes(location.pathname);

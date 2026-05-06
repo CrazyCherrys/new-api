@@ -235,8 +235,8 @@ func GetImageGenerationAssetDetail(c *gin.Context) {
 	common.ApiSuccess(c, asset)
 }
 
-// SubmitImageGenerationAssetToCreativeSpace 将当前用户的图片资产提交到创意空间审核。
-func SubmitImageGenerationAssetToCreativeSpace(c *gin.Context) {
+// SubmitImageGenerationAssetToInspiration 将当前用户的图片资产提交到灵感审核。
+func SubmitImageGenerationAssetToInspiration(c *gin.Context) {
 	userId := c.GetInt("id")
 	if userId == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
@@ -255,7 +255,7 @@ func SubmitImageGenerationAssetToCreativeSpace(c *gin.Context) {
 		return
 	}
 
-	submission, err := model.SubmitImageAssetToCreativeSpace(userId, taskId)
+	submission, err := model.SubmitImageAssetToInspiration(userId, taskId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -264,10 +264,10 @@ func SubmitImageGenerationAssetToCreativeSpace(c *gin.Context) {
 	common.ApiSuccess(c, submission)
 }
 
-// GetCreativeSpaceAssets 获取公开创意空间作品列表。
-func GetCreativeSpaceAssets(c *gin.Context) {
+// GetInspirationAssets 获取公开灵感作品列表。
+func GetInspirationAssets(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	assets, total, err := model.GetApprovedCreativeAssets(pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	assets, total, err := model.GetApprovedInspirationAssets(pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -278,8 +278,8 @@ func GetCreativeSpaceAssets(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
-// GetCreativeSpaceAssetDetail 获取公开创意空间作品详情。
-func GetCreativeSpaceAssetDetail(c *gin.Context) {
+// GetInspirationAssetDetail 获取公开灵感作品详情。
+func GetInspirationAssetDetail(c *gin.Context) {
 	assetId, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -289,7 +289,7 @@ func GetCreativeSpaceAssetDetail(c *gin.Context) {
 		return
 	}
 
-	asset, err := model.GetApprovedCreativeAssetByID(assetId)
+	asset, err := model.GetApprovedInspirationAssetByID(assetId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -305,10 +305,10 @@ func GetCreativeSpaceAssetDetail(c *gin.Context) {
 	common.ApiSuccess(c, asset)
 }
 
-// GetImageCreativeSubmissions 获取创意空间审核列表。
-func GetImageCreativeSubmissions(c *gin.Context) {
+// GetImageInspirationSubmissions 获取灵感审核列表。
+func GetImageInspirationSubmissions(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	submissions, total, err := model.GetImageCreativeSubmissions(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), c.Query("status"))
+	submissions, total, err := model.GetImageInspirationSubmissions(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), c.Query("status"))
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -319,8 +319,8 @@ func GetImageCreativeSubmissions(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
-// ReviewImageCreativeSubmission 审核创意空间投稿。
-func ReviewImageCreativeSubmission(c *gin.Context) {
+// ReviewImageInspirationSubmission 审核灵感投稿。
+func ReviewImageInspirationSubmission(c *gin.Context) {
 	reviewerId := c.GetInt("id")
 	if reviewerId == 0 {
 		common.ApiError(c, errors.New("未授权"))
@@ -348,13 +348,38 @@ func ReviewImageCreativeSubmission(c *gin.Context) {
 		return
 	}
 
-	submission, err := model.ReviewImageCreativeSubmission(submissionId, reviewerId, req.Status, req.RejectReason)
+	submission, err := model.ReviewImageInspirationSubmission(submissionId, reviewerId, req.Status, req.RejectReason)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	common.ApiSuccess(c, submission)
+}
+
+// DeleteImageInspirationSubmission 删除灵感投稿。
+func DeleteImageInspirationSubmission(c *gin.Context) {
+	adminId := c.GetInt("id")
+	if adminId == 0 {
+		common.ApiError(c, errors.New("未授权"))
+		return
+	}
+
+	submissionId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的投稿ID",
+		})
+		return
+	}
+
+	if err := model.DeleteImageInspirationSubmission(submissionId); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, gin.H{"message": "删除成功"})
 }
 
 // GetImageGenerationFile 读取本地存储的图片生成结果文件。
@@ -372,7 +397,7 @@ func GetImageGenerationFile(c *gin.Context) {
 		allowed = userAllowed
 	}
 	if !allowed {
-		publicAllowed, err := service.CanAccessApprovedCreativeSpaceLocalAsset(assetPath)
+		publicAllowed, err := service.CanAccessApprovedInspirationLocalAsset(assetPath)
 		if err != nil {
 			common.ApiError(c, err)
 			return

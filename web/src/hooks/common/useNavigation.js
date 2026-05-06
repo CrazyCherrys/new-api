@@ -19,6 +19,16 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useMemo } from 'react';
 
+const normalizeHeaderNavModules = (modules) => {
+  if (!modules || typeof modules !== 'object') return modules;
+  const nextModules = { ...modules };
+  if (nextModules.inspiration === undefined && nextModules.creativeSpace !== undefined) {
+    nextModules.inspiration = nextModules.creativeSpace;
+  }
+  delete nextModules.creativeSpace;
+  return nextModules;
+};
+
 export const useNavigation = (t, docsLink, headerNavModules) => {
   const mainNavLinks = useMemo(() => {
     // 默认配置，如果没有传入配置则显示所有模块
@@ -26,14 +36,17 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
       home: true,
       console: true,
       imageGeneration: true,
-      creativeSpace: true,
+      inspiration: true,
       pricing: true,
       docs: true,
       about: true,
     };
 
     // 使用传入的配置并补齐新增模块的默认值
-    const modules = { ...defaultModules, ...(headerNavModules || {}) };
+    const modules = {
+      ...defaultModules,
+      ...normalizeHeaderNavModules(headerNavModules),
+    };
 
     const allLinks = [
       {
@@ -52,9 +65,9 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
         to: '/ai-generation',
       },
       {
-        text: t('创意空间'),
-        itemKey: 'creativeSpace',
-        to: '/creative-space',
+        text: t('灵感'),
+        itemKey: 'inspiration',
+        to: '/inspiration',
       },
       {
         text: t('模型广场'),

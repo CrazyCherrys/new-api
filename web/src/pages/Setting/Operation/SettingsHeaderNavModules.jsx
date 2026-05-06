@@ -42,7 +42,7 @@ export default function SettingsHeaderNavModules(props) {
     home: true,
     console: true,
     imageGeneration: true,
-    creativeSpace: true,
+    inspiration: true,
     pricing: {
       enabled: true,
       requireAuth: false, // 默认不需要登录鉴权
@@ -55,6 +55,19 @@ export default function SettingsHeaderNavModules(props) {
   const [headerNavModules, setHeaderNavModules] = useState(
     defaultHeaderNavModules,
   );
+
+  const normalizeHeaderNavModules = (modules) => {
+    if (!modules || typeof modules !== 'object') return modules;
+    const nextModules = { ...modules };
+    if (
+      nextModules.inspiration === undefined &&
+      nextModules.creativeSpace !== undefined
+    ) {
+      nextModules.inspiration = nextModules.creativeSpace;
+    }
+    delete nextModules.creativeSpace;
+    return nextModules;
+  };
 
   // 处理顶栏模块配置变更
   function handleHeaderNavModuleChange(moduleKey) {
@@ -140,7 +153,7 @@ export default function SettingsHeaderNavModules(props) {
 
         setHeaderNavModules({
           ...defaultHeaderNavModules,
-          ...modules,
+          ...normalizeHeaderNavModules(modules),
         });
       } catch (error) {
         // 使用默认配置
@@ -167,8 +180,8 @@ export default function SettingsHeaderNavModules(props) {
       description: t('图片生成入口，需要登录访问'),
     },
     {
-      key: 'creativeSpace',
-      title: t('创意空间'),
+      key: 'inspiration',
+      title: t('灵感'),
       description: t('公开展示审核通过的创意作品'),
     },
     {

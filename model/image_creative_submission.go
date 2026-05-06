@@ -79,7 +79,7 @@ func isValidCreativeReviewStatus(status string) bool {
 	}
 }
 
-func GetImageCreativeSubmissionByTaskID(taskId int) (*ImageCreativeSubmission, error) {
+func GetImageInspirationSubmissionByTaskID(taskId int) (*ImageCreativeSubmission, error) {
 	var submission ImageCreativeSubmission
 	err := DB.Where("task_id = ?", taskId).First(&submission).Error
 	if err == gorm.ErrRecordNotFound {
@@ -88,7 +88,11 @@ func GetImageCreativeSubmissionByTaskID(taskId int) (*ImageCreativeSubmission, e
 	return &submission, err
 }
 
-func SubmitImageAssetToCreativeSpace(userId int, taskId int) (*ImageCreativeSubmission, error) {
+func GetImageCreativeSubmissionByTaskID(taskId int) (*ImageCreativeSubmission, error) {
+	return GetImageInspirationSubmissionByTaskID(taskId)
+}
+
+func SubmitImageAssetToInspiration(userId int, taskId int) (*ImageCreativeSubmission, error) {
 	asset, err := GetImageAssetByID(userId, taskId)
 	if err != nil {
 		return nil, err
@@ -111,7 +115,7 @@ func SubmitImageAssetToCreativeSpace(userId int, taskId int) (*ImageCreativeSubm
 		return nil, result.Error
 	}
 	if result.RowsAffected == 0 {
-		existing, err := GetImageCreativeSubmissionByTaskID(taskId)
+		existing, err := GetImageInspirationSubmissionByTaskID(taskId)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +125,7 @@ func SubmitImageAssetToCreativeSpace(userId int, taskId int) (*ImageCreativeSubm
 		return nil, errors.New("投稿已存在")
 	}
 	if submission.Id == 0 {
-		existing, err := GetImageCreativeSubmissionByTaskID(taskId)
+		existing, err := GetImageInspirationSubmissionByTaskID(taskId)
 		if err != nil {
 			return nil, err
 		}
@@ -133,7 +137,11 @@ func SubmitImageAssetToCreativeSpace(userId int, taskId int) (*ImageCreativeSubm
 	return submission, nil
 }
 
-func publicCreativeAssetsBaseQuery() *gorm.DB {
+func SubmitImageAssetToCreativeSpace(userId int, taskId int) (*ImageCreativeSubmission, error) {
+	return SubmitImageAssetToInspiration(userId, taskId)
+}
+
+func publicInspirationAssetsBaseQuery() *gorm.DB {
 	return DB.Table("image_creative_submissions AS s").
 		Select("s.id, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.params, t.image_url").
 		Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
@@ -141,15 +149,15 @@ func publicCreativeAssetsBaseQuery() *gorm.DB {
 		Where("s.status = ? AND t.status = ? AND t.image_url <> ?", CreativeSubmissionStatusApproved, ImageTaskStatusSuccess, "")
 }
 
-func GetApprovedCreativeAssets(startIdx int, num int) ([]*ImageCreativeAsset, int64, error) {
+func GetApprovedInspirationAssets(startIdx int, num int) ([]*ImageCreativeAsset, int64, error) {
 	var assets []*ImageCreativeAsset
 	var total int64
 
-	if err := publicCreativeAssetsBaseQuery().Count(&total).Error; err != nil {
+	if err := publicInspirationAssetsBaseQuery().Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := publicCreativeAssetsBaseQuery().
+	if err := publicInspirationAssetsBaseQuery().
 		Order("s.reviewed_time DESC, s.submitted_time DESC, s.id DESC").
 		Limit(num).
 		Offset(startIdx).
@@ -160,9 +168,13 @@ func GetApprovedCreativeAssets(startIdx int, num int) ([]*ImageCreativeAsset, in
 	return assets, total, nil
 }
 
-func GetApprovedCreativeAssetByID(id int) (*ImageCreativeAsset, error) {
+func GetApprovedCreativeAssets(startIdx int, num int) ([]*ImageCreativeAsset, int64, error) {
+	return GetApprovedInspirationAssets(startIdx, num)
+}
+
+func GetApprovedInspirationAssetByID(id int) (*ImageCreativeAsset, error) {
 	var asset ImageCreativeAsset
-	err := publicCreativeAssetsBaseQuery().Where("s.id = ?", id).Scan(&asset).Error
+	err := publicInspirationAssetsBaseQuery().Where("s.id = ?", id).Scan(&asset).Error
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +184,11 @@ func GetApprovedCreativeAssetByID(id int) (*ImageCreativeAsset, error) {
 	return &asset, nil
 }
 
-func adminCreativeSubmissionsBaseQuery() *gorm.DB {
+func GetApprovedCreativeAssetByID(id int) (*ImageCreativeAsset, error) {
+	return GetApprovedInspirationAssetByID(id)
+}
+
+func adminInspirationSubmissionsBaseQuery() *gorm.DB {
 	return DB.Table("image_creative_submissions AS s").
 		Select("s.id, s.id AS submission_id, s.task_id, s.user_id, COALESCE(u.username, '') AS username, COALESCE(u.username, '') AS user_name, COALESCE(u.display_name, '') AS user_display_name, s.status, s.reject_reason, s.reviewer_id, s.submitted_time, s.reviewed_time, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.params, t.image_url, t.image_metadata, t.created_time, t.completed_time").
 		Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
@@ -180,7 +196,7 @@ func adminCreativeSubmissionsBaseQuery() *gorm.DB {
 		Joins("LEFT JOIN users AS u ON u.id = s.user_id")
 }
 
-func GetImageCreativeSubmissions(startIdx int, num int, status string) ([]*ImageCreativeAdminSubmission, int64, error) {
+func GetImageInspirationSubmissions(startIdx int, num int, status string) ([]*ImageCreativeAdminSubmission, int64, error) {
 	status = strings.TrimSpace(status)
 	if status == "" {
 		status = CreativeSubmissionStatusPending
@@ -189,7 +205,7 @@ func GetImageCreativeSubmissions(startIdx int, num int, status string) ([]*Image
 		return nil, 0, errors.New("无效的审核状态")
 	}
 
-	query := adminCreativeSubmissionsBaseQuery().Where("s.status = ?", status)
+	query := adminInspirationSubmissionsBaseQuery().Where("s.status = ?", status)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -207,9 +223,13 @@ func GetImageCreativeSubmissions(startIdx int, num int, status string) ([]*Image
 	return submissions, total, nil
 }
 
-func GetImageCreativeAdminSubmissionByID(id int) (*ImageCreativeAdminSubmission, error) {
+func GetImageCreativeSubmissions(startIdx int, num int, status string) ([]*ImageCreativeAdminSubmission, int64, error) {
+	return GetImageInspirationSubmissions(startIdx, num, status)
+}
+
+func GetImageInspirationAdminSubmissionByID(id int) (*ImageCreativeAdminSubmission, error) {
 	var submission ImageCreativeAdminSubmission
-	err := adminCreativeSubmissionsBaseQuery().Where("s.id = ?", id).Scan(&submission).Error
+	err := adminInspirationSubmissionsBaseQuery().Where("s.id = ?", id).Scan(&submission).Error
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +239,11 @@ func GetImageCreativeAdminSubmissionByID(id int) (*ImageCreativeAdminSubmission,
 	return &submission, nil
 }
 
-func ReviewImageCreativeSubmission(id int, reviewerId int, status string, rejectReason string) (*ImageCreativeAdminSubmission, error) {
+func GetImageCreativeAdminSubmissionByID(id int) (*ImageCreativeAdminSubmission, error) {
+	return GetImageInspirationAdminSubmissionByID(id)
+}
+
+func ReviewImageInspirationSubmission(id int, reviewerId int, status string, rejectReason string) (*ImageCreativeAdminSubmission, error) {
 	status = strings.TrimSpace(status)
 	if !isValidCreativeReviewStatus(status) {
 		return nil, errors.New("审核状态必须为 approved 或 rejected")
@@ -244,5 +268,24 @@ func ReviewImageCreativeSubmission(id int, reviewerId int, status string, reject
 		return nil, errors.New("投稿不存在")
 	}
 
-	return GetImageCreativeAdminSubmissionByID(id)
+	return GetImageInspirationAdminSubmissionByID(id)
+}
+
+func ReviewImageCreativeSubmission(id int, reviewerId int, status string, rejectReason string) (*ImageCreativeAdminSubmission, error) {
+	return ReviewImageInspirationSubmission(id, reviewerId, status, rejectReason)
+}
+
+func DeleteImageInspirationSubmission(id int) error {
+	result := DB.Delete(&ImageCreativeSubmission{}, id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("投稿不存在")
+	}
+	return nil
+}
+
+func DeleteImageCreativeSubmission(id int) error {
+	return DeleteImageInspirationSubmission(id)
 }

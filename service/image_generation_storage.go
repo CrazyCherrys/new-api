@@ -359,7 +359,7 @@ func CanAccessImageGenerationLocalAsset(userId int, assetPath string) (bool, err
 	return count > 0, nil
 }
 
-func CanAccessApprovedCreativeSpaceLocalAsset(assetPath string) (bool, error) {
+func CanAccessApprovedInspirationLocalAsset(assetPath string) (bool, error) {
 	clean, err := sanitizeImageGenerationLocalAssetPath(assetPath)
 	if err != nil {
 		return false, nil
@@ -374,6 +374,10 @@ func CanAccessApprovedCreativeSpaceLocalAsset(assetPath string) (bool, error) {
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func CanAccessApprovedCreativeSpaceLocalAsset(assetPath string) (bool, error) {
+	return CanAccessApprovedInspirationLocalAsset(assetPath)
 }
 
 func OpenImageGenerationLocalAsset(assetPath string) (*os.File, string, error) {

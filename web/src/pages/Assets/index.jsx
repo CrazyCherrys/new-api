@@ -495,7 +495,7 @@ const Assets = () => {
         });
       }
       if (successCount > 0) {
-        showSuccess(t('已提交到创意空间审核'));
+        showSuccess(t('已提交到灵感审核'));
       }
       if (results.some((result) => result.status === 'rejected')) {
         showError(t('部分提交失败'));
@@ -536,7 +536,7 @@ const Assets = () => {
             asset.task_id === taskId ? { ...asset, ...patch } : asset,
           ),
         );
-        showSuccess(t('已提交到创意空间审核'));
+        showSuccess(t('已提交到灵感审核'));
       } else {
         showError(res.data.message || t('提交失败'));
       }
@@ -1210,7 +1210,7 @@ const Assets = () => {
                   disabled={Boolean(selectedAsset.creative_submission_status)}
                   onClick={submitToCreativeSpace}
                 >
-                  {t('提交到创意空间')}
+                  {t('提交到灵感')}
                 </Button>
                 <Button
                   theme='outline'
@@ -1276,7 +1276,7 @@ const Assets = () => {
                   </span>
                 </div>
                 <div className='asset-info-block asset-info-wide'>
-                  <span className='asset-info-label'>{t('创意空间')}</span>
+                  <span className='asset-info-label'>{t('灵感')}</span>
                   <span className='asset-info-value'>
                     <Tag color={selectedCreativeStatusMeta.color}>
                       {selectedCreativeStatusMeta.label}

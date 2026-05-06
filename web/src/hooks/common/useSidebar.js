@@ -49,6 +49,7 @@ export const DEFAULT_ADMIN_CONFIG = {
   admin: {
     enabled: true,
     channel: true,
+    'creative-space-review': true,
     'model-mapping': true,
     models: true,
     deployment: true,
@@ -64,6 +65,9 @@ const deepClone = (value) => JSON.parse(JSON.stringify(value));
 const SIDEBAR_MODULE_ALIASES = {
   chat: {
     'image-generation': 'ai-generation',
+  },
+  admin: {
+    'inspiration-review': 'creative-space-review',
   },
 };
 

@@ -115,6 +115,32 @@ func TestSubmitImageAssetToCreativeSpaceValidatesOwnershipAndDuplicates(t *testi
 	}
 }
 
+func TestDeleteImageCreativeSubmission(t *testing.T) {
+	db := setupImageAssetTestDB(t)
+
+	submission := &ImageCreativeSubmission{
+		TaskId:        1,
+		UserId:        1,
+		Status:        CreativeSubmissionStatusPending,
+		SubmittedTime: 1000,
+	}
+	if err := db.Create(submission).Error; err != nil {
+		t.Fatalf("failed to create submission: %v", err)
+	}
+
+	if err := DeleteImageCreativeSubmission(submission.Id); err != nil {
+		t.Fatalf("expected delete to succeed: %v", err)
+	}
+
+	deleted, err := GetImageCreativeSubmissionByTaskID(submission.TaskId)
+	if err != nil {
+		t.Fatalf("failed to reload deleted submission: %v", err)
+	}
+	if deleted != nil {
+		t.Fatalf("expected submission to be deleted, got %#v", deleted)
+	}
+}
+
 func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	db := setupImageAssetTestDB(t)
 

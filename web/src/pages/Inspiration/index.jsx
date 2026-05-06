@@ -17,36 +17,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, {
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { Button, Empty, SideSheet, Spin, Typography } from '@douyinfe/semi-ui';
 import {
-  IconChevronUp,
   IconCopy,
   IconDownload,
   IconImage,
-  IconRefresh,
 } from '@douyinfe/semi-icons';
 import { API, copy, showError, showSuccess } from '../../helpers';
-import { UserContext } from '../../context/User';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 
 const { Paragraph } = Typography;
 const PAGE_SIZE = 24;
 
-const CreativeSpace = () => {
+const Inspiration = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const [userState] = useContext(UserContext);
   const [assets, setAssets] = useState([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -101,7 +90,7 @@ const CreativeSpace = () => {
         setLoading(true);
       }
       try {
-        const res = await API.get('/api/creative-space/assets', {
+        const res = await API.get('/api/inspiration/assets', {
           params: { p: nextPage, page_size: PAGE_SIZE },
         });
         if (requestSeq !== loadSeqRef.current) return;
@@ -117,11 +106,11 @@ const CreativeSpace = () => {
           setTotal(data.total || 0);
           setPage(data.page || nextPage);
         } else {
-          showError(res.data.message || t('加载创意空间失败'));
+          showError(res.data.message || t('加载灵感失败'));
         }
       } catch (error) {
         if (requestSeq !== loadSeqRef.current) return;
-        showError(error.message || t('加载创意空间失败'));
+        showError(error.message || t('加载灵感失败'));
       } finally {
         if (requestSeq !== loadSeqRef.current) return;
         loadingPagesRef.current.delete(nextPage);
@@ -160,20 +149,12 @@ const CreativeSpace = () => {
     return () => observer.disconnect();
   }, [hasMore, loadAssets, loading, loadingMore, page]);
 
-  const refreshAssets = () => {
-    loadSeqRef.current += 1;
-    loadingPagesRef.current.clear();
-    setLoadingMore(false);
-    setPage(1);
-    loadAssets(1, false);
-  };
-
   const openDetail = async (asset) => {
     setSelectedAsset(asset);
     setDetailVisible(true);
     setDetailLoading(true);
     try {
-      const res = await API.get(`/api/creative-space/assets/${asset.id}`);
+      const res = await API.get(`/api/inspiration/assets/${asset.id}`);
       if (res.data.success) {
         setSelectedAsset(res.data.data);
       } else {
@@ -202,7 +183,7 @@ const CreativeSpace = () => {
     if (!selectedAsset?.image_url) return;
     const link = document.createElement('a');
     link.href = selectedAsset.image_url;
-    link.download = `creative-${selectedAsset.id}.png`;
+    link.download = `inspiration-${selectedAsset.id}.png`;
     link.target = '_blank';
     document.body.appendChild(link);
     link.click();
@@ -217,32 +198,32 @@ const CreativeSpace = () => {
     <button
       type='button'
       key={asset.id}
-      className='creative-card'
+      className='inspiration-card'
       onClick={() => openDetail(asset)}
     >
-      <span className='creative-image-wrap'>
+      <span className='inspiration-image-wrap'>
         <img src={asset.image_url} alt={asset.prompt || 'Generated'} />
       </span>
-      <span className='creative-card-body'>
-        <span className='creative-card-model'>
+      <span className='inspiration-card-body'>
+        <span className='inspiration-card-model'>
           {asset.display_name || asset.model_id || t('未知模型')}
         </span>
-        <span className='creative-card-prompt'>{asset.prompt || '-'}</span>
+        <span className='inspiration-card-prompt'>{asset.prompt || '-'}</span>
       </span>
     </button>
   );
 
   return (
-    <div className='creative-space-page'>
+    <div className='inspiration-page'>
       <style>{`
-        .creative-space-page {
+        .inspiration-page {
           min-height: calc(100vh - 60px);
           margin-top: 60px;
           padding: 18px 18px 28px;
           color: var(--semi-color-text-0);
           background: var(--semi-color-bg-0);
         }
-        .creative-space-shell {
+        .inspiration-shell {
           width: min(1680px, 100%);
           margin: 0 auto;
           display: flex;
@@ -280,12 +261,12 @@ const CreativeSpace = () => {
           gap: 8px;
           flex-shrink: 0;
         }
-        .creative-masonry {
+        .inspiration-masonry {
           column-count: 6;
           column-gap: 14px;
           width: 100%;
         }
-        .creative-card {
+        .inspiration-card {
           display: inline-block;
           width: 100%;
           break-inside: avoid;
@@ -300,28 +281,28 @@ const CreativeSpace = () => {
           cursor: pointer;
           transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
         }
-        .creative-card:hover {
+        .inspiration-card:hover {
           transform: translateY(-1px);
           border-color: var(--semi-color-primary-light-default);
           box-shadow: 0 18px 42px -30px rgba(15, 23, 42, 0.5);
         }
-        .creative-image-wrap {
+        .inspiration-image-wrap {
           display: block;
           width: 100%;
           background: var(--semi-color-fill-0);
         }
-        .creative-image-wrap img {
+        .inspiration-image-wrap img {
           display: block;
           width: 100%;
           height: auto;
         }
-        .creative-card-body {
+        .inspiration-card-body {
           display: flex;
           flex-direction: column;
           gap: 5px;
           padding: 9px 10px 11px;
         }
-        .creative-card-model {
+        .inspiration-card-model {
           font-size: 13px;
           line-height: 1.35;
           font-weight: 600;
@@ -329,7 +310,7 @@ const CreativeSpace = () => {
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-        .creative-card-prompt {
+        .inspiration-card-prompt {
           color: var(--semi-color-text-2);
           font-size: 12px;
           line-height: 1.45;
@@ -339,19 +320,19 @@ const CreativeSpace = () => {
           overflow: hidden;
           overflow-wrap: anywhere;
         }
-        .creative-load-more {
+        .inspiration-load-more {
           display: flex;
           justify-content: center;
-          padding: 8px 0 24px;
+          padding: 8px 0 0;
           min-height: 46px;
         }
-        .creative-detail {
+        .inspiration-detail {
           display: flex;
           flex-direction: column;
           gap: 16px;
           padding: 16px;
         }
-        .creative-detail-preview {
+        .inspiration-detail-preview {
           border: 1px solid var(--semi-color-border);
           border-radius: 8px;
           background: var(--semi-color-fill-0);
@@ -359,28 +340,28 @@ const CreativeSpace = () => {
           display: flex;
           justify-content: center;
         }
-        .creative-detail-preview img {
+        .inspiration-detail-preview img {
           display: block;
           max-width: 100%;
           max-height: 62vh;
           object-fit: contain;
         }
-        .creative-info-block {
+        .inspiration-info-block {
           display: flex;
           flex-direction: column;
           gap: 5px;
         }
-        .creative-info-label {
+        .inspiration-info-label {
           color: var(--semi-color-text-2);
           font-size: 12px;
         }
-        .creative-info-value {
+        .inspiration-info-value {
           color: var(--semi-color-text-0);
           font-size: 14px;
           font-weight: 500;
           overflow-wrap: anywhere;
         }
-        .creative-param-pre {
+        .inspiration-param-pre {
           margin: 0;
           max-height: 180px;
           overflow: auto;
@@ -391,23 +372,23 @@ const CreativeSpace = () => {
           white-space: pre-wrap;
           overflow-wrap: anywhere;
         }
-        .creative-detail-actions {
+        .inspiration-detail-actions {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 8px;
         }
         @media (max-width: 1480px) {
-          .creative-masonry { column-count: 5; }
+          .inspiration-masonry { column-count: 5; }
         }
         @media (max-width: 1280px) {
-          .creative-masonry { column-count: 4; }
+          .inspiration-masonry { column-count: 4; }
         }
         @media (max-width: 960px) {
-          .creative-masonry { column-count: 3; }
+          .inspiration-masonry { column-count: 3; }
         }
         @media (max-width: 720px) {
-          .creative-space-page {
-            padding: 12px 10px 22px;
+          .inspiration-page {
+            padding: 8px 8px 20px;
           }
           .creative-topbar {
             align-items: flex-start;
@@ -416,47 +397,38 @@ const CreativeSpace = () => {
           .creative-actions {
             width: 100%;
           }
-          .creative-actions .semi-button {
-            flex: 1;
-          }
-          .creative-masonry {
+          .inspiration-masonry {
             column-count: 2;
             column-gap: 10px;
           }
-          .creative-card {
+          .inspiration-card {
             margin-bottom: 10px;
           }
         }
         @media (max-width: 420px) {
-          .creative-masonry { column-count: 1; }
+          .inspiration-masonry { column-count: 1; }
         }
       `}</style>
 
-      <div className='creative-space-shell'>
+      <div className='inspiration-shell'>
         <div className='creative-topbar'>
           <div className='creative-title-wrap'>
-            <h1 className='creative-title'>{t('创意空间')}</h1>
+            <h1 className='creative-title'>{t('灵感')}</h1>
             <span className='creative-count'>
               {t('公开作品')} {total}
             </span>
           </div>
           <div className='creative-actions'>
-            <Button icon={<IconRefresh />} onClick={refreshAssets}>
-              {t('刷新')}
-            </Button>
-            <Button icon={<IconChevronUp />} onClick={scrollToTop}>
-              {t('回到顶部')}
-            </Button>
+            <Button onClick={scrollToTop}>{t('回到顶部')}</Button>
           </div>
         </div>
-
         <Spin spinning={loading}>
           {assets.length > 0 ? (
             <>
-              <div className='creative-masonry'>
+              <div className='inspiration-masonry'>
                 {assets.map(renderAssetCard)}
               </div>
-              <div ref={sentinelRef} className='creative-load-more'>
+              <div ref={sentinelRef} className='inspiration-load-more'>
                 {loadingMore && <Spin size='small' />}
                 {!hasMore && total > 0 && (
                   <span className='creative-count'>{t('已加载全部作品')}</span>
@@ -468,14 +440,13 @@ const CreativeSpace = () => {
               image={<IconImage size='extra-large' />}
               title={t('暂无公开作品')}
             >
-              {userState.user && (
-                <Button
-                  type='primary'
-                  onClick={() => navigate('/ai-generation')}
-                >
-                  {t('去生成图片')}
-                </Button>
-              )}
+              <Button
+                theme='solid'
+                type='primary'
+                onClick={() => navigate('/ai-generation')}
+              >
+                {t('去生成图片')}
+              </Button>
             </Empty>
           )}
         </Spin>
@@ -485,20 +456,20 @@ const CreativeSpace = () => {
         placement='right'
         visible={detailVisible}
         width={isMobile ? '100%' : 520}
-        title={t('作品详情')}
+        title={t('灵感详情')}
         onCancel={() => setDetailVisible(false)}
         bodyStyle={{ padding: 0 }}
       >
         <Spin spinning={detailLoading}>
           {selectedAsset && (
-            <div className='creative-detail'>
-              <div className='creative-detail-preview'>
+            <div className='inspiration-detail'>
+              <div className='inspiration-detail-preview'>
                 <img
                   src={selectedAsset.image_url}
                   alt={selectedAsset.prompt || 'Generated'}
                 />
               </div>
-              <div className='creative-detail-actions'>
+              <div className='inspiration-detail-actions'>
                 <Button
                   theme='outline'
                   type='tertiary'
@@ -516,20 +487,20 @@ const CreativeSpace = () => {
                   {t('下载图片')}
                 </Button>
               </div>
-              <div className='creative-info-block'>
-                <span className='creative-info-label'>{t('模型')}</span>
-                <span className='creative-info-value'>
+              <div className='inspiration-info-block'>
+                <span className='inspiration-info-label'>{t('模型')}</span>
+                <span className='inspiration-info-value'>
                   {selectedAsset.display_name || selectedAsset.model_id}
                 </span>
               </div>
-              <div className='creative-info-block'>
-                <span className='creative-info-label'>{t('模型系列')}</span>
-                <span className='creative-info-value'>
+              <div className='inspiration-info-block'>
+                <span className='inspiration-info-label'>{t('模型系列')}</span>
+                <span className='inspiration-info-value'>
                   {formatSeries(selectedAsset.model_series)}
                 </span>
               </div>
-              <div className='creative-info-block'>
-                <span className='creative-info-label'>{t('提示词')}</span>
+              <div className='inspiration-info-block'>
+                <span className='inspiration-info-label'>{t('提示词')}</span>
                 <Paragraph
                   copyable={{ content: selectedAsset.prompt || '' }}
                   style={{ margin: 0, whiteSpace: 'pre-wrap' }}
@@ -538,9 +509,9 @@ const CreativeSpace = () => {
                 </Paragraph>
               </div>
               {Object.keys(selectedParams).length > 0 && (
-                <div className='creative-info-block'>
-                  <span className='creative-info-label'>{t('生成参数')}</span>
-                  <pre className='creative-param-pre'>
+                <div className='inspiration-info-block'>
+                  <span className='inspiration-info-label'>{t('生成参数')}</span>
+                  <pre className='inspiration-param-pre'>
                     {JSON.stringify(selectedParams, null, 2)}
                   </pre>
                 </div>
@@ -553,4 +524,4 @@ const CreativeSpace = () => {
   );
 };
 
-export default CreativeSpace;
+export default Inspiration;

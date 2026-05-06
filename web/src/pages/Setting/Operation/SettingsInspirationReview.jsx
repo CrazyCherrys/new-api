@@ -22,6 +22,7 @@ import {
   Button,
   Empty,
   Form,
+  Checkbox,
   Modal,
   Pagination,
   Spin,
@@ -34,6 +35,7 @@ import {
 import {
   IconCheckCircleStroked,
   IconClose,
+  IconDelete,
   IconImage,
   IconRefresh,
 } from '@douyinfe/semi-icons';
@@ -45,7 +47,7 @@ const { Paragraph } = Typography;
 
 const PAGE_SIZE = 10;
 
-const SettingsCreativeSpaceReview = () => {
+const SettingsInspirationReview = () => {
   const { t } = useTranslation();
   const [status, setStatus] = useState('pending');
   const [page, setPage] = useState(1);
@@ -53,8 +55,14 @@ const SettingsCreativeSpaceReview = () => {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [reviewingId, setReviewingId] = useState(null);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [rejectTarget, setRejectTarget] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
+  const [bulkRejectReason, setBulkRejectReason] = useState('');
   const currentListRef = useRef({ status: 'pending', page: 1 });
   const loadSeqRef = useRef(0);
 
@@ -71,13 +79,17 @@ const SettingsCreativeSpaceReview = () => {
     currentListRef.current = { status, page };
   }, [status, page]);
 
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [status, page]);
+
   const loadSubmissions = useCallback(
     async (nextStatus = status, nextPage = page) => {
       const requestSeq = loadSeqRef.current + 1;
       loadSeqRef.current = requestSeq;
       setLoading(true);
       try {
-        const res = await API.get('/api/image-generation/creative-submissions', {
+        const res = await API.get('/api/image-generation/inspiration-submissions', {
           params: { status: nextStatus, p: nextPage, page_size: PAGE_SIZE },
         });
         if (requestSeq !== loadSeqRef.current) return;
@@ -85,6 +97,9 @@ const SettingsCreativeSpaceReview = () => {
           const data = res.data.data || {};
           setSubmissions(data.items || []);
           setTotal(data.total || 0);
+          setSelectedIds((prev) =>
+            prev.filter((id) => (data.items || []).some((item) => item.id === id)),
+          );
         } else {
           showError(res.data.message || t('加载创意空间审核列表失败'));
         }
@@ -100,6 +115,117 @@ const SettingsCreativeSpaceReview = () => {
     [page, status, t],
   );
 
+  const selectedSubmissions = useMemo(
+    () => submissions.filter((item) => selectedIds.includes(item.id)),
+    [selectedIds, submissions],
+  );
+
+  const hasSelection = selectedSubmissions.length > 0;
+  const allCurrentSelected =
+    submissions.length > 0 &&
+    selectedSubmissions.length === submissions.length &&
+    submissions.every((item) => selectedIds.includes(item.id));
+
+  const toggleSelection = (itemId, checked) => {
+    setSelectedIds((prev) => {
+      if (checked) {
+        return prev.includes(itemId) ? prev : [...prev, itemId];
+      }
+      return prev.filter((id) => id !== itemId);
+    });
+  };
+
+  const toggleCurrentPageSelection = () => {
+    if (allCurrentSelected) {
+      setSelectedIds((prev) =>
+        prev.filter((id) => !submissions.some((item) => item.id === id)),
+      );
+      return;
+    }
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      submissions.forEach((item) => next.add(item.id));
+      return Array.from(next);
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedIds([]);
+  };
+
+  const runBulkReview = async (targetItems, nextStatus, reason = '') => {
+    if (!targetItems.length) return;
+    setBulkProcessing(true);
+    try {
+      const results = await Promise.allSettled(
+        targetItems.map((item) =>
+          API.patch(
+            `/api/image-generation/inspiration-submissions/${item.id}/review`,
+            {
+              status: nextStatus,
+              reject_reason: reason,
+            },
+          ),
+        ),
+      );
+      const failedCount = results.filter((res) => {
+        if (res.status === 'rejected') return true;
+        return !res.value?.data?.success;
+      }).length;
+      if (failedCount > 0) {
+        showError(
+          nextStatus === 'approved'
+            ? t('批量通过失败')
+            : t('批量驳回失败'),
+        );
+      } else {
+        showSuccess(
+          nextStatus === 'approved' ? t('批量通过成功') : t('批量驳回成功'),
+        );
+      }
+      clearSelection();
+      setBulkRejectOpen(false);
+      setBulkRejectReason('');
+      const currentList = currentListRef.current;
+      await loadSubmissions(currentList.status, currentList.page);
+    } catch (error) {
+      showError(
+        error.message ||
+          (nextStatus === 'approved' ? t('批量通过失败') : t('批量驳回失败')),
+      );
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
+  const runBulkDelete = async (targetItems) => {
+    if (!targetItems.length) return;
+    setBulkProcessing(true);
+    try {
+      const results = await Promise.allSettled(
+        targetItems.map((item) =>
+          API.delete(`/api/image-generation/inspiration-submissions/${item.id}`),
+        ),
+      );
+      const failedCount = results.filter((res) => {
+        if (res.status === 'rejected') return true;
+        return !res.value?.data?.success;
+      }).length;
+      if (failedCount > 0) {
+        showError(t('批量删除失败'));
+      } else {
+        showSuccess(t('批量删除成功'));
+      }
+      clearSelection();
+      const currentList = currentListRef.current;
+      await loadSubmissions(currentList.status, currentList.page);
+    } catch (error) {
+      showError(error.message || t('批量删除失败'));
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
   useEffect(() => {
     loadSubmissions(status, page);
   }, [loadSubmissions, status, page]);
@@ -108,7 +234,7 @@ const SettingsCreativeSpaceReview = () => {
     setReviewingId(item.id);
     try {
       const res = await API.patch(
-        `/api/image-generation/creative-submissions/${item.id}/review`,
+        `/api/image-generation/inspiration-submissions/${item.id}/review`,
         {
           status: nextStatus,
           reject_reason: reason,
@@ -130,6 +256,30 @@ const SettingsCreativeSpaceReview = () => {
     }
   };
 
+  const deleteSubmission = useCallback(
+    async (item) => {
+      setDeleteLoading(true);
+      try {
+        const res = await API.delete(
+          `/api/image-generation/inspiration-submissions/${item.id}`,
+        );
+        if (res.data.success) {
+          showSuccess(t('删除成功'));
+          const currentList = currentListRef.current;
+          await loadSubmissions(currentList.status, currentList.page);
+        } else {
+          showError(res.data.message || t('删除操作失败'));
+        }
+      } catch (error) {
+        showError(error.message || t('删除操作失败'));
+      } finally {
+        setDeleteLoading(false);
+        setDeleteTarget(null);
+      }
+    },
+    [loadSubmissions, t],
+  );
+
   const formatTime = (timestamp) => {
     if (!timestamp) return '-';
     return dayjs(timestamp * 1000).format('YYYY/MM/DD HH:mm');
@@ -148,8 +298,14 @@ const SettingsCreativeSpaceReview = () => {
         </div>
         <div className='creative-review-main'>
           <div className='creative-review-head'>
-            <div className='creative-review-title'>
-              {item.display_name || item.model_id || t('未知模型')}
+            <div className='creative-review-head-left'>
+              <Checkbox
+                checked={selectedIds.includes(item.id)}
+                onChange={(e) => toggleSelection(item.id, e.target.checked)}
+              />
+              <div className='creative-review-title'>
+                {item.display_name || item.model_id || t('未知模型')}
+              </div>
             </div>
             <Tag color={meta.color}>{meta.label}</Tag>
           </div>
@@ -187,10 +343,18 @@ const SettingsCreativeSpaceReview = () => {
               icon={<IconCheckCircleStroked />}
               loading={reviewingId === item.id}
               onClick={() => reviewSubmission(item, 'approved')}
-            >
+              >
               {t('通过')}
             </Button>
           )}
+          <Button
+            type='tertiary'
+            icon={<IconDelete />}
+            loading={deleteLoading && deleteTarget?.id === item.id}
+            onClick={() => setDeleteTarget(item)}
+          >
+            {t('删除')}
+          </Button>
           {item.status !== 'rejected' && (
             <Button
               type='danger'
@@ -221,6 +385,19 @@ const SettingsCreativeSpaceReview = () => {
           align-items: center;
           gap: 12px;
           margin-bottom: 12px;
+          flex-wrap: wrap;
+        }
+        .creative-review-toolbar-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          align-items: center;
+        }
+        .creative-review-head-left {
+          min-width: 0;
+          display: flex;
+          align-items: center;
+          gap: 8px;
         }
         .creative-review-list {
           display: flex;
@@ -288,7 +465,6 @@ const SettingsCreativeSpaceReview = () => {
         }
         .creative-review-actions {
           display: flex;
-          flex-direction: column;
           gap: 8px;
           justify-content: center;
           min-width: 86px;
@@ -299,10 +475,6 @@ const SettingsCreativeSpaceReview = () => {
           padding: 14px 0 0;
         }
         @media (max-width: 720px) {
-          .creative-review-toolbar {
-            align-items: stretch;
-            flex-direction: column;
-          }
           .creative-review-item {
             grid-template-columns: 86px minmax(0, 1fr);
           }
@@ -310,7 +482,6 @@ const SettingsCreativeSpaceReview = () => {
             width: 86px;
           }
           .creative-review-actions {
-            grid-column: 1 / -1;
             flex-direction: row;
             justify-content: flex-start;
           }
@@ -329,12 +500,62 @@ const SettingsCreativeSpaceReview = () => {
             <TabPane key={key} itemKey={key} tab={meta.label} />
           ))}
         </Tabs>
-        <Button
-          icon={<IconRefresh />}
-          onClick={() => loadSubmissions(status, page)}
-        >
-          {t('刷新')}
-        </Button>
+        <div className='creative-review-toolbar-actions'>
+          {hasSelection && (
+            <>
+              <Tag color='blue'>
+                {t('已选择 {{selected}} / {{total}}', {
+                  selected: selectedSubmissions.length,
+                  total: submissions.length,
+                })}
+              </Tag>
+              <Button
+                type='primary'
+                loading={bulkProcessing}
+                onClick={() => runBulkReview(selectedSubmissions, 'approved')}
+              >
+                {t('批量通过')}
+              </Button>
+              <Button
+                type='danger'
+                loading={bulkProcessing}
+                onClick={() => {
+                  setBulkRejectReason('');
+                  setBulkRejectOpen(true);
+                }}
+              >
+                {t('批量驳回')}
+              </Button>
+              <Button
+                type='secondary'
+                loading={bulkProcessing}
+                onClick={() => {
+                  Modal.confirm({
+                    title: t('确认删除所选投稿？'),
+                    content: t('此修改将不可逆'),
+                    onOk: () => runBulkDelete(selectedSubmissions),
+                  });
+                }}
+              >
+                {t('批量删除')}
+              </Button>
+              <Button onClick={clearSelection}>{t('清空选择')}</Button>
+            </>
+          )}
+          <Button
+            type='tertiary'
+            icon={<IconCheckCircleStroked />}
+            onClick={toggleCurrentPageSelection}
+          >
+            {allCurrentSelected ? t('取消全选当前页') : t('全选当前页')}
+          </Button>
+          <Button
+            icon={<IconRefresh />}
+            onClick={() => loadSubmissions(status, page)}
+          >
+            {t('刷新')}
+          </Button>
+        </div>
       </div>
       <Spin spinning={loading}>
         {submissions.length > 0 ? (
@@ -381,8 +602,38 @@ const SettingsCreativeSpaceReview = () => {
           placeholder={t('填写驳回原因，可选')}
         />
       </Modal>
+      <Modal
+        visible={bulkRejectOpen}
+        title={t('批量驳回')}
+        okText={t('确认驳回')}
+        cancelText={t('取消')}
+        onCancel={() => {
+          setBulkRejectOpen(false);
+          setBulkRejectReason('');
+        }}
+        onOk={() => runBulkReview(selectedSubmissions, 'rejected', bulkRejectReason)}
+        confirmLoading={bulkProcessing}
+      >
+        <TextArea
+          value={bulkRejectReason}
+          onChange={setBulkRejectReason}
+          autosize
+          placeholder={t('填写驳回原因，可选')}
+        />
+      </Modal>
+      <Modal
+        visible={Boolean(deleteTarget)}
+        title={t('确认删除该投稿？')}
+        okText={t('确认删除')}
+        cancelText={t('取消')}
+        onCancel={() => setDeleteTarget(null)}
+        onOk={() => deleteSubmission(deleteTarget)}
+        confirmLoading={deleteLoading}
+      >
+        {t('此修改将不可逆')}
+      </Modal>
     </Form.Section>
   );
 };
 
-export default SettingsCreativeSpaceReview;
+export default SettingsInspirationReview;

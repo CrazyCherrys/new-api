@@ -52,13 +52,14 @@ import ModelDeploymentPage from './pages/ModelDeployment';
 import ModelMapping from './pages/ModelMapping';
 import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
+import CreativeSpaceReviewPage from './pages/Channel/CreativeSpaceReview';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
 import SetupCheck from './components/layout/SetupCheck';
 import ImageGeneration from './pages/ImageGeneration';
 import Assets from './pages/Assets';
-import CreativeSpace from './pages/CreativeSpace';
+import Inspiration from './pages/Inspiration';
 
 const Home = lazy(() => import('./pages/Home'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -150,6 +151,14 @@ function App() {
           }
         />
         <Route
+          path='/console/creative-space-review'
+          element={
+            <AdminRoute>
+              <CreativeSpaceReviewPage />
+            </AdminRoute>
+          }
+        />
+        <Route
           path='/console/model-mapping'
           element={
             <AdminRoute>
@@ -185,7 +194,8 @@ function App() {
             </PrivateRoute>
           }
         />
-        <Route path='/creative-space' element={<CreativeSpace />} />
+        <Route path='/inspiration' element={<Inspiration />} />
+        <Route path='/creative-space' element={<Navigate to='/inspiration' replace />} />
         <Route
           path='/console/redemption'
           element={
