@@ -54,7 +54,7 @@ func setupImageAssetTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestSubmitImageAssetToCreativeSpaceValidatesOwnershipAndDuplicates(t *testing.T) {
+func TestSubmitImageAssetToInspirationValidatesOwnershipAndDuplicates(t *testing.T) {
 	db := setupImageAssetTestDB(t)
 
 	ownedSuccess := &ImageGenerationTask{
@@ -91,7 +91,7 @@ func TestSubmitImageAssetToCreativeSpaceValidatesOwnershipAndDuplicates(t *testi
 		}
 	}
 
-	submission, err := SubmitImageAssetToCreativeSpace(1, ownedSuccess.Id)
+	submission, err := SubmitImageAssetToInspiration(1, ownedSuccess.Id)
 	if err != nil {
 		t.Fatalf("expected owned success asset to be submitted: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestSubmitImageAssetToCreativeSpaceValidatesOwnershipAndDuplicates(t *testi
 		t.Fatalf("unexpected submission: %#v", submission)
 	}
 
-	duplicate, err := SubmitImageAssetToCreativeSpace(1, ownedSuccess.Id)
+	duplicate, err := SubmitImageAssetToInspiration(1, ownedSuccess.Id)
 	if err != nil {
 		t.Fatalf("expected duplicate submit to return existing submission: %v", err)
 	}
@@ -107,10 +107,10 @@ func TestSubmitImageAssetToCreativeSpaceValidatesOwnershipAndDuplicates(t *testi
 		t.Fatalf("expected duplicate submission id %d, got %d", submission.Id, duplicate.Id)
 	}
 
-	if _, err := SubmitImageAssetToCreativeSpace(1, failedTask.Id); err == nil {
+	if _, err := SubmitImageAssetToInspiration(1, failedTask.Id); err == nil {
 		t.Fatalf("expected failed task submission to be rejected")
 	}
-	if _, err := SubmitImageAssetToCreativeSpace(1, otherUserTask.Id); err == nil {
+	if _, err := SubmitImageAssetToInspiration(1, otherUserTask.Id); err == nil {
 		t.Fatalf("expected other user's task submission to be rejected")
 	}
 }
@@ -224,7 +224,7 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 		}
 	}
 
-	assets, total, err := GetApprovedCreativeAssets(0, 10)
+	assets, total, err := GetApprovedInspirationAssets(0, 10)
 	if err != nil {
 		t.Fatalf("failed to get creative assets: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 		t.Fatalf("expected model mapping metadata, got display=%q series=%q", assets[0].DisplayName, assets[0].ModelSeries)
 	}
 
-	detail, err := GetApprovedCreativeAssetByID(approvedSubmission.Id)
+	detail, err := GetApprovedInspirationAssetByID(approvedSubmission.Id)
 	if err != nil {
 		t.Fatalf("failed to get creative asset detail: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 		t.Fatalf("expected approved asset detail, got %#v", detail)
 	}
 
-	pendingDetail, err := GetApprovedCreativeAssetByID(submissions[1].Id)
+	pendingDetail, err := GetApprovedInspirationAssetByID(submissions[1].Id)
 	if err != nil {
 		t.Fatalf("failed to get pending creative asset detail: %v", err)
 	}

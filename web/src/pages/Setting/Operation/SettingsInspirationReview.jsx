@@ -101,11 +101,11 @@ const SettingsInspirationReview = () => {
             prev.filter((id) => (data.items || []).some((item) => item.id === id)),
           );
         } else {
-          showError(res.data.message || t('加载创意空间审核列表失败'));
+          showError(res.data.message || t('加载灵感审核列表失败'));
         }
       } catch (error) {
         if (requestSeq !== loadSeqRef.current) return;
-        showError(error.message || t('加载创意空间审核列表失败'));
+        showError(error.message || t('加载灵感审核列表失败'));
       } finally {
         if (requestSeq === loadSeqRef.current) {
           setLoading(false);
@@ -375,8 +375,8 @@ const SettingsInspirationReview = () => {
 
   return (
     <Form.Section
-      text={t('创意空间审核')}
-      extraText={t('审核用户提交的图片资产，通过后会公开显示在创意空间')}
+      text={t('灵感审核')}
+      extraText={t('审核用户提交的图片资产，通过后会公开显示在灵感')}
     >
       <style>{`
         .creative-review-toolbar {

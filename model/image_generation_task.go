@@ -107,9 +107,9 @@ type ImageGenerationAsset struct {
 	Cost                     int    `json:"cost"`
 	CreatedTime              int64  `json:"created_time"`
 	CompletedTime            int64  `json:"completed_time"`
-	CreativeSubmissionId     int    `json:"creative_submission_id"`
-	CreativeSubmissionStatus string `json:"creative_submission_status"`
-	CreativeRejectReason     string `json:"creative_reject_reason"`
+	InspirationSubmissionId     int    `json:"inspiration_submission_id"`
+	InspirationSubmissionStatus string `json:"inspiration_submission_status"`
+	InspirationRejectReason     string `json:"inspiration_reject_reason"`
 }
 
 type ImageAssetStats struct {
@@ -185,7 +185,7 @@ func GetImageTasksByUserID(userId int, startIdx int, num int, queryParams ImageT
 
 func imageAssetsBaseQuery(userId int) *gorm.DB {
 	return DB.Table("image_generation_tasks AS t").
-		Select("t.id, t.id AS task_id, t.user_id, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.request_endpoint, t.params, t.image_url, t.image_metadata, t.cost, t.created_time, t.completed_time, COALESCE(s.id, 0) AS creative_submission_id, COALESCE(s.status, '') AS creative_submission_status, COALESCE(s.reject_reason, '') AS creative_reject_reason").
+		Select("t.id, t.id AS task_id, t.user_id, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.request_endpoint, t.params, t.image_url, t.image_metadata, t.cost, t.created_time, t.completed_time, COALESCE(s.id, 0) AS inspiration_submission_id, COALESCE(s.status, '') AS inspiration_submission_status, COALESCE(s.reject_reason, '') AS inspiration_reject_reason").
 		Joins("LEFT JOIN model_mappings AS m ON m.request_model = t.model_id").
 		Joins("LEFT JOIN image_creative_submissions AS s ON s.task_id = t.id").
 		Where("t.user_id = ? AND t.status = ? AND t.image_url <> ?", userId, ImageTaskStatusSuccess, "")

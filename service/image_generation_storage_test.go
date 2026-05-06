@@ -103,7 +103,7 @@ func TestCanAccessImageGenerationLocalAssetRequiresOwner(t *testing.T) {
 	}
 }
 
-func TestCanAccessApprovedCreativeSpaceLocalAssetRequiresApprovedSubmission(t *testing.T) {
+func TestCanAccessApprovedInspirationLocalAssetRequiresApprovedSubmission(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
 	objectKey := "image-generation/20260428/123-approved.png"
 	assetURL := buildImageGenerationLocalObjectURL(objectKey)
@@ -143,7 +143,7 @@ func TestCanAccessApprovedCreativeSpaceLocalAssetRequiresApprovedSubmission(t *t
 		t.Fatalf("failed to create pending submission: %v", err)
 	}
 
-	allowed, err := CanAccessApprovedCreativeSpaceLocalAsset(objectKey)
+	allowed, err := CanAccessApprovedInspirationLocalAsset(objectKey)
 	if err != nil {
 		t.Fatalf("failed to check approved public access: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestCanAccessApprovedCreativeSpaceLocalAssetRequiresApprovedSubmission(t *t
 		t.Fatal("expected approved creative asset to be public")
 	}
 
-	allowed, err = CanAccessApprovedCreativeSpaceLocalAsset("image-generation/20260428/456-pending.png")
+	allowed, err = CanAccessApprovedInspirationLocalAsset("image-generation/20260428/456-pending.png")
 	if err != nil {
 		t.Fatalf("failed to check pending public access: %v", err)
 	}

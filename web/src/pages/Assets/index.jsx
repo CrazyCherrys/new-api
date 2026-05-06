@@ -70,7 +70,7 @@ const Assets = () => {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [creativeSubmitting, setCreativeSubmitting] = useState(false);
+  const [inspirationSubmitting, setInspirationSubmitting] = useState(false);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState(null);
@@ -147,7 +147,7 @@ const Assets = () => {
     [selectedAsset?.image_metadata],
   );
 
-  const getCreativeStatusMeta = useCallback(
+  const getInspirationStatusMeta = useCallback(
     (status) => {
       const statusMap = {
         pending: { label: t('审核中'), color: 'orange' },
@@ -159,9 +159,9 @@ const Assets = () => {
     [t],
   );
 
-  const selectedCreativeStatusMeta = useMemo(
-    () => getCreativeStatusMeta(selectedAsset?.creative_submission_status),
-    [getCreativeStatusMeta, selectedAsset?.creative_submission_status],
+  const selectedInspirationStatusMeta = useMemo(
+    () => getInspirationStatusMeta(selectedAsset?.inspiration_submission_status),
+    [getInspirationStatusMeta, selectedAsset?.inspiration_submission_status],
   );
 
   const selectedAssets = useMemo(
@@ -442,12 +442,12 @@ const Assets = () => {
     }
   };
 
-  const submitSelectedAssetsToCreativeSpace = async () => {
+  const submitSelectedAssetsToInspiration = async () => {
     if (!selectedAssets.length) return;
     setBatchSubmitting(true);
     try {
       const submitableAssets = selectedAssets.filter(
-        (asset) => !asset.creative_submission_status,
+        (asset) => !asset.inspiration_submission_status,
       );
       if (submitableAssets.length === 0) {
         showError(t('已选择的资产都已提交'));
@@ -456,7 +456,7 @@ const Assets = () => {
       const results = await Promise.allSettled(
         submitableAssets.map((asset) =>
           API.post(
-            `/api/image-generation/assets/${asset.task_id || asset.id}/creative-submission`,
+            `/api/image-generation/assets/${asset.task_id || asset.id}/inspiration-submission`,
           ),
         ),
       );
@@ -467,9 +467,9 @@ const Assets = () => {
           const submission = result.value.data.data || {};
           const asset = submitableAssets[index];
           const patch = {
-            creative_submission_id: submission.id,
-            creative_submission_status: submission.status,
-            creative_reject_reason: submission.reject_reason || '',
+            inspiration_submission_id: submission.id,
+            inspiration_submission_status: submission.status,
+            inspiration_reject_reason: submission.reject_reason || '',
           };
           patchIds.push(asset.task_id || asset.id);
           setSelectedAsset((prev) =>
@@ -511,22 +511,22 @@ const Assets = () => {
     navigate(`/ai-generation?task_id=${asset.task_id || asset.id}`);
   };
 
-  const submitToCreativeSpace = async () => {
-    if (!selectedAsset?.task_id || selectedAsset.creative_submission_status) {
+  const submitToInspiration = async () => {
+    if (!selectedAsset?.task_id || selectedAsset.inspiration_submission_status) {
       return;
     }
     const taskId = selectedAsset.task_id;
-    setCreativeSubmitting(true);
+    setInspirationSubmitting(true);
     try {
       const res = await API.post(
-        `/api/image-generation/assets/${taskId}/creative-submission`,
+        `/api/image-generation/assets/${taskId}/inspiration-submission`,
       );
       if (res.data.success) {
         const submission = res.data.data || {};
         const patch = {
-          creative_submission_id: submission.id,
-          creative_submission_status: submission.status,
-          creative_reject_reason: submission.reject_reason || '',
+          inspiration_submission_id: submission.id,
+          inspiration_submission_status: submission.status,
+          inspiration_reject_reason: submission.reject_reason || '',
         };
         setSelectedAsset((prev) =>
           prev?.task_id === taskId ? { ...prev, ...patch } : prev,
@@ -543,7 +543,7 @@ const Assets = () => {
     } catch (error) {
       showError(error.message || t('提交失败'));
     } finally {
-      setCreativeSubmitting(false);
+      setInspirationSubmitting(false);
     }
   };
 
@@ -1121,7 +1121,7 @@ const Assets = () => {
                 type='primary'
                 icon={<IconImage />}
                 loading={batchSubmitting}
-                onClick={submitSelectedAssetsToCreativeSpace}
+                onClick={submitSelectedAssetsToInspiration}
               >
                 {t('发布选中')}
               </Button>
@@ -1206,9 +1206,9 @@ const Assets = () => {
                   className='asset-submit-action'
                   type='primary'
                   icon={<IconImage />}
-                  loading={creativeSubmitting}
-                  disabled={Boolean(selectedAsset.creative_submission_status)}
-                  onClick={submitToCreativeSpace}
+                  loading={inspirationSubmitting}
+                  disabled={Boolean(selectedAsset.inspiration_submission_status)}
+                  onClick={submitToInspiration}
                 >
                   {t('提交到灵感')}
                 </Button>
@@ -1278,13 +1278,13 @@ const Assets = () => {
                 <div className='asset-info-block asset-info-wide'>
                   <span className='asset-info-label'>{t('灵感')}</span>
                   <span className='asset-info-value'>
-                    <Tag color={selectedCreativeStatusMeta.color}>
-                      {selectedCreativeStatusMeta.label}
+                    <Tag color={selectedInspirationStatusMeta.color}>
+                      {selectedInspirationStatusMeta.label}
                     </Tag>
                   </span>
-                  {selectedAsset.creative_reject_reason && (
+                  {selectedAsset.inspiration_reject_reason && (
                     <span className='asset-reject-reason'>
-                      {selectedAsset.creative_reject_reason}
+                      {selectedAsset.inspiration_reject_reason}
                     </span>
                   )}
                 </div>

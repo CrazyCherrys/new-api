@@ -17,15 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
-import { Button, Empty, SideSheet, Spin, Typography } from '@douyinfe/semi-ui';
-import {
-  IconCopy,
-  IconDownload,
-  IconImage,
-} from '@douyinfe/semi-icons';
+import { Button, SideSheet, Spin, Typography } from '@douyinfe/semi-ui';
+import { IconCopy, IconDownload } from '@douyinfe/semi-icons';
 import { API, copy, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 
@@ -34,7 +35,6 @@ const PAGE_SIZE = 24;
 
 const Inspiration = () => {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [assets, setAssets] = useState([]);
   const [page, setPage] = useState(1);
@@ -55,7 +55,7 @@ const Inspiration = () => {
     try {
       const parsed = JSON.parse(raw);
       return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (e) {
+    } catch (error) {
       return {};
     }
   };
@@ -65,21 +65,24 @@ const Inspiration = () => {
     [selectedAsset?.params],
   );
 
-  const formatSeries = (series) => {
-    if (!series) return t('未分组');
-    const seriesMap = {
-      openai: 'OpenAI',
-      gemini: 'Gemini',
-      dalle: 'OpenAI',
-      flux: 'Flux',
-      midjourney: 'Midjourney',
-      'stable-diffusion': 'Stable Diffusion',
-    };
-    return (
-      seriesMap[series.toLowerCase()] ||
-      series.charAt(0).toUpperCase() + series.slice(1)
-    );
-  };
+  const formatSeries = useCallback(
+    (series) => {
+      if (!series) return t('未分组');
+      const seriesMap = {
+        openai: 'OpenAI',
+        gemini: 'Gemini',
+        dalle: 'OpenAI',
+        flux: 'Flux',
+        midjourney: 'Midjourney',
+        'stable-diffusion': 'Stable Diffusion',
+      };
+      return (
+        seriesMap[series.toLowerCase()] ||
+        series.charAt(0).toUpperCase() + series.slice(1)
+      );
+    },
+    [t],
+  );
 
   const loadAssets = useCallback(
     async (nextPage = 1, append = false) => {
@@ -145,6 +148,7 @@ const Inspiration = () => {
       },
       { rootMargin: '360px 0px' },
     );
+
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasMore, loadAssets, loading, loadingMore, page]);
@@ -190,26 +194,15 @@ const Inspiration = () => {
     document.body.removeChild(link);
   };
 
-  const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
   const renderAssetCard = (asset) => (
     <button
       type='button'
       key={asset.id}
       className='inspiration-card'
       onClick={() => openDetail(asset)}
+      aria-label={t('查看详情')}
     >
-      <span className='inspiration-image-wrap'>
-        <img src={asset.image_url} alt={asset.prompt || 'Generated'} />
-      </span>
-      <span className='inspiration-card-body'>
-        <span className='inspiration-card-model'>
-          {asset.display_name || asset.model_id || t('未知模型')}
-        </span>
-        <span className='inspiration-card-prompt'>{asset.prompt || '-'}</span>
-      </span>
+      <img src={asset.image_url} alt={asset.prompt || 'Generated'} />
     </button>
   );
 
@@ -228,38 +221,7 @@ const Inspiration = () => {
           margin: 0 auto;
           display: flex;
           flex-direction: column;
-          gap: 16px;
-        }
-        .creative-topbar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          min-height: 38px;
-        }
-        .creative-title-wrap {
-          display: flex;
-          align-items: baseline;
-          gap: 10px;
-          min-width: 0;
-        }
-        .creative-title {
-          margin: 0;
-          font-size: 20px;
-          line-height: 1.3;
-          font-weight: 700;
-          letter-spacing: 0;
-          color: var(--semi-color-text-0);
-        }
-        .creative-count {
-          color: var(--semi-color-text-2);
-          font-size: 13px;
-          white-space: nowrap;
-        }
-        .creative-actions {
-          display: flex;
-          gap: 8px;
-          flex-shrink: 0;
+          gap: 14px;
         }
         .inspiration-masonry {
           column-count: 6;
@@ -273,7 +235,7 @@ const Inspiration = () => {
           margin: 0 0 14px;
           padding: 0;
           border: 1px solid var(--semi-color-border);
-          border-radius: 8px;
+          border-radius: 10px;
           overflow: hidden;
           background: var(--semi-color-bg-0);
           color: inherit;
@@ -286,45 +248,16 @@ const Inspiration = () => {
           border-color: var(--semi-color-primary-light-default);
           box-shadow: 0 18px 42px -30px rgba(15, 23, 42, 0.5);
         }
-        .inspiration-image-wrap {
-          display: block;
-          width: 100%;
-          background: var(--semi-color-fill-0);
-        }
-        .inspiration-image-wrap img {
+        .inspiration-card img {
           display: block;
           width: 100%;
           height: auto;
         }
-        .inspiration-card-body {
-          display: flex;
-          flex-direction: column;
-          gap: 5px;
-          padding: 9px 10px 11px;
-        }
-        .inspiration-card-model {
-          font-size: 13px;
-          line-height: 1.35;
-          font-weight: 600;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .inspiration-card-prompt {
-          color: var(--semi-color-text-2);
-          font-size: 12px;
-          line-height: 1.45;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-          overflow-wrap: anywhere;
-        }
         .inspiration-load-more {
           display: flex;
           justify-content: center;
-          padding: 8px 0 0;
-          min-height: 46px;
+          padding: 8px 0 24px;
+          min-height: 40px;
         }
         .inspiration-detail {
           display: flex;
@@ -345,6 +278,11 @@ const Inspiration = () => {
           max-width: 100%;
           max-height: 62vh;
           object-fit: contain;
+        }
+        .inspiration-detail-actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
         }
         .inspiration-info-block {
           display: flex;
@@ -372,11 +310,6 @@ const Inspiration = () => {
           white-space: pre-wrap;
           overflow-wrap: anywhere;
         }
-        .inspiration-detail-actions {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px;
-        }
         @media (max-width: 1480px) {
           .inspiration-masonry { column-count: 5; }
         }
@@ -388,14 +321,7 @@ const Inspiration = () => {
         }
         @media (max-width: 720px) {
           .inspiration-page {
-            padding: 8px 8px 20px;
-          }
-          .creative-topbar {
-            align-items: flex-start;
-            flex-direction: column;
-          }
-          .creative-actions {
-            width: 100%;
+            padding: 12px 10px 22px;
           }
           .inspiration-masonry {
             column-count: 2;
@@ -404,6 +330,9 @@ const Inspiration = () => {
           .inspiration-card {
             margin-bottom: 10px;
           }
+          .inspiration-detail-actions {
+            grid-template-columns: 1fr;
+          }
         }
         @media (max-width: 420px) {
           .inspiration-masonry { column-count: 1; }
@@ -411,44 +340,13 @@ const Inspiration = () => {
       `}</style>
 
       <div className='inspiration-shell'>
-        <div className='creative-topbar'>
-          <div className='creative-title-wrap'>
-            <h1 className='creative-title'>{t('灵感')}</h1>
-            <span className='creative-count'>
-              {t('公开作品')} {total}
-            </span>
-          </div>
-          <div className='creative-actions'>
-            <Button onClick={scrollToTop}>{t('回到顶部')}</Button>
-          </div>
-        </div>
         <Spin spinning={loading}>
-          {assets.length > 0 ? (
-            <>
-              <div className='inspiration-masonry'>
-                {assets.map(renderAssetCard)}
-              </div>
-              <div ref={sentinelRef} className='inspiration-load-more'>
-                {loadingMore && <Spin size='small' />}
-                {!hasMore && total > 0 && (
-                  <span className='creative-count'>{t('已加载全部作品')}</span>
-                )}
-              </div>
-            </>
-          ) : (
-            <Empty
-              image={<IconImage size='extra-large' />}
-              title={t('暂无公开作品')}
-            >
-              <Button
-                theme='solid'
-                type='primary'
-                onClick={() => navigate('/ai-generation')}
-              >
-                {t('去生成图片')}
-              </Button>
-            </Empty>
-          )}
+          <div className='inspiration-masonry'>
+            {assets.map(renderAssetCard)}
+          </div>
+          <div ref={sentinelRef} className='inspiration-load-more'>
+            {loadingMore && <Spin size='small' />}
+          </div>
         </Spin>
       </div>
 
@@ -456,7 +354,7 @@ const Inspiration = () => {
         placement='right'
         visible={detailVisible}
         width={isMobile ? '100%' : 520}
-        title={t('灵感详情')}
+        title={t('作品详情')}
         onCancel={() => setDetailVisible(false)}
         bodyStyle={{ padding: 0 }}
       >

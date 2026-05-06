@@ -182,7 +182,7 @@ export default function SettingsHeaderNavModules(props) {
     {
       key: 'inspiration',
       title: t('灵感'),
-      description: t('公开展示审核通过的创意作品'),
+      description: t('公开展示审核通过的图片作品'),
     },
     {
       key: 'pricing',
