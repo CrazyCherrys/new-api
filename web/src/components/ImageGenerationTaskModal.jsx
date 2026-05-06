@@ -40,6 +40,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import { API, copy, showError, showSuccess } from '../helpers';
+import { useIsMobile } from '../hooks/common/useIsMobile';
 
 const { Text } = Typography;
 
@@ -51,6 +52,7 @@ const ImageGenerationTaskModal = ({
   onDeleted,
 }) => {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const [retrying, setRetrying] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -190,13 +192,18 @@ const ImageGenerationTaskModal = ({
     },
     body: {
       display: 'flex',
-      gap: 16,
-      padding: 20,
+      flexDirection: isMobile ? 'column' : 'row',
+      gap: isMobile ? 12 : 16,
+      padding: isMobile ? 12 : 20,
       alignItems: 'stretch',
+      flex: 1,
+      minHeight: 0,
+      overflow: 'hidden',
     },
     previewCol: {
       flex: 1,
       minWidth: 0,
+      minHeight: 0,
       display: 'flex',
       flexDirection: 'column',
       gap: 12,
@@ -204,7 +211,8 @@ const ImageGenerationTaskModal = ({
     previewCard: {
       position: 'relative',
       flex: 1,
-      minHeight: 360,
+      minHeight: isMobile ? 240 : 320,
+      maxHeight: isMobile ? '50vh' : 'none',
       borderRadius: 16,
       border: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-fill-0)',
@@ -238,11 +246,15 @@ const ImageGenerationTaskModal = ({
       backdropFilter: 'blur(6px)',
     },
     sideCol: {
-      width: 240,
-      minWidth: 240,
+      width: isMobile ? '100%' : 240,
+      minWidth: isMobile ? 0 : 240,
+      maxHeight: isMobile ? 'none' : '100%',
       display: 'flex',
       flexDirection: 'column',
-      gap: 16,
+      gap: isMobile ? 12 : 16,
+      minHeight: 0,
+      overflowY: 'auto',
+      paddingRight: isMobile ? 0 : 4,
     },
     infoBlock: {
       display: 'flex',
@@ -417,9 +429,20 @@ const ImageGenerationTaskModal = ({
       footer={null}
       header={null}
       closable={false}
-      width={1024}
-      bodyStyle={{ padding: 0 }}
-      style={{ borderRadius: 12, overflow: 'hidden' }}
+      width={
+        isMobile ? 'calc(100vw - 24px)' : 'min(1024px, calc(100vw - 48px))'
+      }
+      bodyStyle={{
+        padding: 0,
+        height: isMobile
+          ? 'calc(100vh - 24px)'
+          : 'min(720px, calc(100vh - 48px))',
+        maxHeight: isMobile ? 'calc(100vh - 24px)' : 'calc(100vh - 48px)',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+      style={{ borderRadius: isMobile ? 10 : 12, overflow: 'hidden' }}
       maskClosable
     >
       {renderHeader}
