@@ -78,6 +78,7 @@ const Assets = () => {
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [detailVisible, setDetailVisible] = useState(false);
+  const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedAssetIds, setSelectedAssetIds] = useState(() => new Set());
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -327,6 +328,12 @@ const Assets = () => {
     return () => observer.disconnect();
   }, [hasMore, loadAssets, loading, loadingMore, page]);
 
+  useEffect(() => {
+    if (!detailVisible) {
+      setImagePreviewVisible(false);
+    }
+  }, [detailVisible]);
+
   const queueListReload = useCallback(() => {
     loadSeqRef.current += 1;
     loadingPagesRef.current.clear();
@@ -343,6 +350,7 @@ const Assets = () => {
 
   const openDetail = async (asset) => {
     const requestSeq = ++detailSeqRef.current;
+    setImagePreviewVisible(false);
     setSelectedAsset(asset);
     setDetailVisible(true);
     setDetailLoading(true);
@@ -642,6 +650,15 @@ const Assets = () => {
     }
   };
 
+  const openImagePreview = () => {
+    if (!selectedAsset?.image_url) return;
+    setImagePreviewVisible(true);
+  };
+
+  const closeImagePreview = () => {
+    setImagePreviewVisible(false);
+  };
+
   const renderAssetCard = (asset) => (
     <div
       key={asset.task_id || asset.id}
@@ -868,10 +885,59 @@ const Assets = () => {
           justify-content: center;
           overflow: hidden;
         }
-        .asset-detail-preview img {
+        .asset-detail-preview-button {
+          display: block;
+          width: 100%;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          cursor: zoom-in;
+          line-height: 0;
+        }
+        .asset-detail-preview-button img {
           display: block;
           max-width: 100%;
           max-height: 62vh;
+          object-fit: contain;
+          transition: transform 0.18s ease;
+        }
+        .asset-detail-preview-button:hover img {
+          transform: scale(1.01);
+        }
+        .asset-detail-preview-button:focus-visible {
+          outline: 2px solid var(--semi-color-primary);
+          outline-offset: -2px;
+        }
+        .asset-detail-preview-empty {
+          padding: 56px 0;
+          color: var(--semi-color-text-2);
+          font-size: 14px;
+        }
+        .asset-image-preview-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 2200;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 24px;
+          background: rgba(2, 6, 23, 0.74);
+          backdrop-filter: blur(10px);
+          cursor: zoom-out;
+        }
+        .asset-image-preview-panel {
+          max-width: min(92vw, 1280px);
+          max-height: 92vh;
+          overflow: hidden;
+          border-radius: 16px;
+          background: var(--semi-color-bg-0);
+          box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+          cursor: default;
+        }
+        .asset-image-preview-panel img {
+          display: block;
+          max-width: 100%;
+          max-height: 92vh;
           object-fit: contain;
         }
         .asset-detail-actions {
@@ -1209,10 +1275,24 @@ const Assets = () => {
           {selectedAsset && (
             <div className='asset-detail'>
               <div className='asset-detail-preview'>
-                <img
-                  src={selectedAsset.image_url}
-                  alt={selectedAsset.prompt || 'Generated'}
-                />
+                {selectedAsset.image_url ? (
+                  <button
+                    type='button'
+                    className='asset-detail-preview-button'
+                    onClick={openImagePreview}
+                    aria-label={t('点击放大图片')}
+                    title={t('点击放大图片')}
+                  >
+                    <img
+                      src={selectedAsset.image_url}
+                      alt={selectedAsset.prompt || 'Generated'}
+                    />
+                  </button>
+                ) : (
+                  <div className='asset-detail-preview-empty'>
+                    {t('暂无图片')}
+                  </div>
+                )}
               </div>
 
               <div className='asset-detail-actions'>
@@ -1337,6 +1417,25 @@ const Assets = () => {
           )}
         </Spin>
       </SideSheet>
+
+      {imagePreviewVisible && selectedAsset?.image_url && (
+        <div
+          className='asset-image-preview-overlay'
+          role='presentation'
+          onClick={closeImagePreview}
+        >
+          <div
+            className='asset-image-preview-panel'
+            role='presentation'
+            onClick={(event) => event.stopPropagation()}
+          >
+            <img
+              src={selectedAsset.image_url}
+              alt={selectedAsset.prompt || 'Generated'}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
