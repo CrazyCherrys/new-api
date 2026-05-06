@@ -579,14 +579,14 @@ const Assets = () => {
         }
         .assets-masonry {
           column-count: 6;
-          column-gap: 8px;
+          column-gap: 4px;
           width: 100%;
         }
         .asset-card {
           display: inline-block;
           width: 100%;
           break-inside: avoid;
-          margin: 0 0 8px;
+          margin: 0 0 4px;
           overflow: hidden;
           border: 1px solid var(--semi-color-border);
           border-radius: 8px;
@@ -741,10 +741,10 @@ const Assets = () => {
           }
           .assets-masonry {
             column-count: 2;
-            column-gap: 6px;
+            column-gap: 4px;
           }
           .asset-card {
-            margin-bottom: 6px;
+            margin-bottom: 4px;
           }
           .asset-info-grid {
             grid-template-columns: 1fr;
