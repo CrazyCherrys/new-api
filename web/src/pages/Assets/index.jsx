@@ -350,7 +350,7 @@ const Assets = () => {
   };
 
   const openSourceTask = (asset) => {
-    navigate(`/image-generation?task_id=${asset.task_id || asset.id}`);
+    navigate(`/ai-generation?task_id=${asset.task_id || asset.id}`);
   };
 
   const submitToCreativeSpace = async () => {
@@ -483,58 +483,8 @@ const Assets = () => {
     >
       <div className='asset-image-wrap'>
         <img src={asset.image_url} alt={asset.prompt || 'Generated'} />
-        <div className='asset-overlay'>
-          <div className='asset-actions' onClick={(e) => e.stopPropagation()}>
-            <button
-              type='button'
-              title={t('查看详情')}
-              aria-label={t('查看详情')}
-              onClick={() => openDetail(asset)}
-            >
-              <IconImage size='small' />
-            </button>
-            <button
-              type='button'
-              title={t('复制提示词')}
-              aria-label={t('复制提示词')}
-              onClick={() => copyPrompt(asset)}
-            >
-              <IconCopy size='small' />
-            </button>
-            <button
-              type='button'
-              title={t('下载图片')}
-              aria-label={t('下载图片')}
-              onClick={() => downloadAsset(asset)}
-            >
-              <IconDownload size='small' />
-            </button>
-            <button
-              type='button'
-              title={t('打开源任务')}
-              aria-label={t('打开源任务')}
-              onClick={() => openSourceTask(asset)}
-            >
-              <IconExternalOpen size='small' />
-            </button>
-          </div>
-        </div>
-      </div>
-      <div className='asset-card-body'>
-        <div className='asset-card-title-row'>
-          <div className='asset-card-title'>
-            {asset.display_name || asset.model_id || t('未知模型')}
-          </div>
+        <div className='asset-card-status'>
           {renderCreativeStatusTag(asset.creative_submission_status)}
-        </div>
-        <div className='asset-card-prompt'>{asset.prompt || '-'}</div>
-        <div className='asset-card-meta'>
-          <span>{formatTime(asset.created_time)}</span>
-          {asset.model_series && (
-            <span className='asset-card-series'>
-              {formatSeries(asset.model_series)}
-            </span>
-          )}
         </div>
       </div>
     </div>
@@ -676,87 +626,12 @@ const Assets = () => {
           width: 100%;
           height: auto;
         }
-        .asset-overlay {
+        .asset-card-status {
           position: absolute;
-          inset: 0;
-          display: flex;
-          align-items: flex-end;
-          justify-content: flex-end;
-          padding: 10px;
-          opacity: 0;
-          transition: opacity 0.18s;
-          background: linear-gradient(to top, rgba(0,0,0,0.42), transparent 58%);
-        }
-        .asset-card:hover .asset-overlay,
-        .asset-card:focus-visible .asset-overlay {
-          opacity: 1;
-        }
-        .asset-actions {
-          display: flex;
-          gap: 6px;
-        }
-        .asset-actions button {
-          width: 30px;
-          height: 30px;
-          border-radius: 7px;
-          border: 1px solid rgba(255,255,255,0.16);
-          background: rgba(0,0,0,0.56);
-          color: #fff;
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          backdrop-filter: blur(8px);
-        }
-        .asset-actions button:hover {
-          background: rgba(0,0,0,0.72);
-        }
-        .asset-card-body {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-          padding: 9px 10px 11px;
-        }
-        .asset-card-title-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 8px;
-          min-width: 0;
-        }
-        .asset-card-title {
-          font-size: 13px;
-          line-height: 1.35;
-          font-weight: 600;
-          min-width: 0;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .asset-card-prompt {
-          font-size: 12px;
-          line-height: 1.45;
-          color: var(--semi-color-text-2);
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-          min-height: 34px;
-          overflow-wrap: anywhere;
-        }
-        .asset-card-meta {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 8px;
-          color: var(--semi-color-text-3);
-          font-size: 12px;
-        }
-        .asset-card-series {
-          min-width: 0;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
+          top: 8px;
+          right: 8px;
+          z-index: 1;
+          pointer-events: none;
         }
         .assets-load-more {
           display: flex;
@@ -890,9 +765,9 @@ const Assets = () => {
           .asset-card {
             margin-bottom: 10px;
           }
-          .asset-overlay {
-            opacity: 1;
-            background: linear-gradient(to top, rgba(0,0,0,0.38), transparent 62%);
+          .asset-card-status {
+            top: 6px;
+            right: 6px;
           }
           .asset-info-grid {
             grid-template-columns: 1fr;
@@ -937,7 +812,7 @@ const Assets = () => {
             <Button
               type='primary'
               icon={<IconImage />}
-              onClick={() => navigate('/image-generation')}
+              onClick={() => navigate('/ai-generation')}
             >
               {t('去生成图片')}
             </Button>
@@ -1048,7 +923,7 @@ const Assets = () => {
                 <Button
                   type='primary'
                   icon={<IconImage />}
-                  onClick={() => navigate('/image-generation')}
+                  onClick={() => navigate('/ai-generation')}
                 >
                   {t('去生成图片')}
                 </Button>

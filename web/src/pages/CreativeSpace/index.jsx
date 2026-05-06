@@ -471,7 +471,7 @@ const CreativeSpace = () => {
               {userState.user && (
                 <Button
                   type='primary'
-                  onClick={() => navigate('/image-generation')}
+                  onClick={() => navigate('/ai-generation')}
                 >
                   {t('去生成图片')}
                 </Button>

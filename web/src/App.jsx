@@ -18,7 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { lazy, Suspense, useContext, useMemo } from 'react';
-import { Route, Routes, useLocation, useParams } from 'react-router-dom';
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useParams,
+} from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import User from './pages/User';
 import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers';
@@ -169,6 +175,10 @@ function App() {
         />
         <Route
           path='/image-generation'
+          element={<Navigate to={`/ai-generation${location.search}`} replace />}
+        />
+        <Route
+          path='/ai-generation'
           element={
             <PrivateRoute>
               <ImageGeneration />

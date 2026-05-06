@@ -97,7 +97,7 @@ const ImageGeneration = () => {
     getStoredValue(STORAGE_KEYS.MODEL, ''),
   );
   const [selectedModelData, setSelectedModelData] = useState(null);
-  const [prompt, setPrompt] = useState('');
+  const [inspiration, setInspiration] = useState('');
   const [referenceImages, setReferenceImages] = useState([]);
   const [aspectRatio, setAspectRatio] = useState(() =>
     getStoredValue(STORAGE_KEYS.ASPECT_RATIO, ''),
@@ -638,13 +638,18 @@ const ImageGeneration = () => {
     setReferenceImages(referenceImages.filter((img) => img.uid !== file.uid));
   };
 
+  const normalizeTaskCount = (value) => {
+    const count = Number(value);
+    return Number.isFinite(count) ? Math.max(1, Math.floor(count)) : 1;
+  };
+
   const handleGenerate = async () => {
     if (!selectedModel) {
       showError(t('请选择模型'));
       return;
     }
-    if (!prompt.trim()) {
-      showError(t('请输入提示词'));
+    if (!inspiration.trim()) {
+      showError(t('请输入灵感'));
       return;
     }
     if (!selectedModelData?.request_endpoint) {
@@ -654,10 +659,10 @@ const ImageGeneration = () => {
 
     setGenerating(true);
     try {
+      const taskCount = normalizeTaskCount(quantity);
+
       // 准备参数对象
-      const params = {
-        quantity: quantity,
-      };
+      const params = {};
 
       if (aspectRatio) {
         params.aspect_ratio = aspectRatio;
@@ -680,27 +685,64 @@ const ImageGeneration = () => {
         params.reference_images = base64Images;
       }
 
-      // 创建任务（使用后端期望的字段名）
+      // UI uses inspiration wording; backend task DTO still expects prompt.
       const taskPayload = {
         model_id: selectedModel,
-        prompt: prompt.trim(),
+        prompt: inspiration.trim(),
         request_endpoint: selectedModelData.request_endpoint,
         params: JSON.stringify(params),
       };
 
-      const res = await API.post('/api/image-generation/tasks', taskPayload);
-      if (res.data.success) {
-        showSuccess(t('任务已创建，正在生成中...'));
-        // 立即将新任务添加到列表开头，避免等待 loadTasks() 的延迟
-        const newTask = res.data.data;
-        if (newTask) {
-          setTasks((prevTasks) => [newTask, ...prevTasks]);
-          setTaskTotal((prev) => prev + 1);
+      const results = await Promise.allSettled(
+        Array.from({ length: taskCount }, () =>
+          API.post('/api/image-generation/tasks', taskPayload),
+        ),
+      );
+
+      const createdTasks = [];
+      let firstError = '';
+
+      results.forEach((result) => {
+        if (result.status === 'fulfilled' && result.value.data.success) {
+          if (result.value.data.data) {
+            createdTasks.push(result.value.data.data);
+          }
+          return;
         }
+
+        if (!firstError) {
+          firstError =
+            result.status === 'fulfilled'
+              ? result.value.data.message
+              : result.reason?.response?.data?.message ||
+                result.reason?.message;
+        }
+      });
+
+      if (createdTasks.length > 0) {
+        showSuccess(
+          createdTasks.length === 1
+            ? t('任务已创建，正在生成中...')
+            : t('已创建 {{count}} 个任务，正在生成中...', {
+                count: createdTasks.length,
+              }),
+        );
+        // 立即将新任务添加到列表开头，避免等待 loadTasks() 的延迟
+        setTasks((prevTasks) => [...createdTasks, ...prevTasks]);
+        setTaskTotal((prev) => prev + createdTasks.length);
         // 同时刷新任务列表以确保数据一致性
         loadTasks();
-      } else {
-        showError(res.data.message || t('创建任务失败'));
+      }
+
+      if (createdTasks.length === 0) {
+        showError(firstError || t('创建任务失败'));
+      } else if (createdTasks.length < taskCount) {
+        showError(
+          t('部分任务创建失败：已创建 {{success}} / {{total}} 个任务', {
+            success: createdTasks.length,
+            total: taskCount,
+          }),
+        );
       }
     } catch (error) {
       if (error.response?.data?.message) {
@@ -808,12 +850,6 @@ const ImageGeneration = () => {
       border: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-fill-0)',
       padding: 0,
-    },
-    charCount: {
-      fontSize: 12,
-      color: 'var(--semi-color-text-3)',
-      padding: '4px 12px 8px',
-      textAlign: 'left',
     },
     emptyState: {
       display: 'flex',
@@ -953,7 +989,7 @@ const ImageGeneration = () => {
                 marginBottom: 6,
               }}
             >
-              <span style={styles.label}>{t('描述你的创意')}</span>
+              <span style={styles.label}>{t('灵感')}</span>
               <span
                 style={{
                   fontSize: 12,
@@ -970,10 +1006,10 @@ const ImageGeneration = () => {
             </div>
             <div style={styles.textareaWrapper}>
               <TextArea
-                placeholder={t('描述你的创意...')}
-                value={prompt}
-                onChange={setPrompt}
-                maxCount={5000}
+                placeholder={t('请输入灵感...')}
+                value={inspiration}
+                onChange={setInspiration}
+                maxLength={5000}
                 showClear
                 autosize={{ minRows: 6, maxRows: 12 }}
                 style={{
@@ -982,7 +1018,6 @@ const ImageGeneration = () => {
                   resize: 'none',
                 }}
               />
-              <div style={styles.charCount}>{prompt.length}/5000</div>
             </div>
           </div>
 
@@ -1076,9 +1111,8 @@ const ImageGeneration = () => {
             <span style={styles.paramLabel}>{t('生成数量')}</span>
             <InputNumber
               min={1}
-              max={4}
               value={quantity}
-              onChange={(val) => setQuantity(val || 1)}
+              onChange={(val) => setQuantity(normalizeTaskCount(val))}
               style={{ width: '100%' }}
             />
           </div>
@@ -1087,12 +1121,15 @@ const ImageGeneration = () => {
         <button
           style={{
             ...styles.generateBtn,
-            opacity: generating || !selectedModel || !prompt.trim() ? 0.6 : 1,
+            opacity:
+              generating || !selectedModel || !inspiration.trim() ? 0.6 : 1,
             pointerEvents:
-              generating || !selectedModel || !prompt.trim() ? 'none' : 'auto',
+              generating || !selectedModel || !inspiration.trim()
+                ? 'none'
+                : 'auto',
           }}
           onClick={handleGenerate}
-          disabled={generating || !selectedModel || !prompt.trim()}
+          disabled={generating || !selectedModel || !inspiration.trim()}
         >
           {generating ? (
             <Spin size='small' />

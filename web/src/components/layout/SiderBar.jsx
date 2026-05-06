@@ -49,7 +49,7 @@ const routerMap = {
   models: '/console/models',
   deployment: '/console/deployment',
   playground: '/console/playground',
-  'image-generation': '/image-generation',
+  'ai-generation': '/ai-generation',
   personal: '/console/personal',
   'model-mapping': '/console/model-mapping',
 };
@@ -223,8 +223,8 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       },
       {
         text: t('AI绘画'),
-        itemKey: 'image-generation',
-        to: '/image-generation',
+        itemKey: 'ai-generation',
+        to: '/ai-generation',
       },
       {
         text: t('聊天'),

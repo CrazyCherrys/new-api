@@ -46,6 +46,7 @@ import { UserContext } from '../../../../context/User';
 import { useUserPermissions } from '../../../../hooks/common/useUserPermissions';
 import {
   mergeAdminConfig,
+  normalizeSidebarConfig,
   useSidebar,
 } from '../../../../hooks/common/useSidebar';
 
@@ -67,6 +68,7 @@ const NotificationSettings = ({
     chat: {
       enabled: true,
       playground: true,
+      'ai-generation': true,
       chat: true,
     },
     console: {
@@ -157,7 +159,12 @@ const NotificationSettings = ({
 
   const resetSidebarModules = () => {
     const defaultConfig = {
-      chat: { enabled: true, playground: true, chat: true },
+      chat: {
+        enabled: true,
+        playground: true,
+        'ai-generation': true,
+        chat: true,
+      },
       console: {
         enabled: true,
         detail: true,
@@ -208,7 +215,7 @@ const NotificationSettings = ({
           } else {
             userConf = userRes.data.data.sidebar_modules;
           }
-          setSidebarModulesUser(userConf);
+          setSidebarModulesUser(normalizeSidebarConfig(userConf));
         }
       } catch (error) {
         console.error('加载边栏配置失败:', error);

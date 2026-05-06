@@ -61,7 +61,7 @@ const PageLayout = () => {
     '/console/models',
     '/console/assets',
     '/pricing',
-    '/image-generation',
+    '/ai-generation',
     '/creative-space',
   ];
 

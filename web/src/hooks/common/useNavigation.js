@@ -49,7 +49,7 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
       {
         text: t('AI绘画'),
         itemKey: 'imageGeneration',
-        to: '/image-generation',
+        to: '/ai-generation',
       },
       {
         text: t('创意空间'),
