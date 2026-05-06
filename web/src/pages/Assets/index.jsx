@@ -36,10 +36,13 @@ import {
   Spin,
   Tag,
   Typography,
+  Checkbox,
+  Popconfirm,
 } from '@douyinfe/semi-ui';
 import {
   IconChevronUp,
   IconCopy,
+  IconCheck,
   IconDownload,
   IconExternalOpen,
   IconFilter,
@@ -68,8 +71,11 @@ const Assets = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [creativeSubmitting, setCreativeSubmitting] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [detailVisible, setDetailVisible] = useState(false);
+  const [selectedAssetIds, setSelectedAssetIds] = useState(() => new Set());
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [keyword, setKeyword] = useState('');
@@ -157,6 +163,18 @@ const Assets = () => {
     () => getCreativeStatusMeta(selectedAsset?.creative_submission_status),
     [getCreativeStatusMeta, selectedAsset?.creative_submission_status],
   );
+
+  const selectedAssets = useMemo(
+    () =>
+      assets.filter((asset) => selectedAssetIds.has(asset.task_id || asset.id)),
+    [assets, selectedAssetIds],
+  );
+
+  const selectedCount = selectedAssetIds.size;
+  const hasSelectedAssets = selectedCount > 0;
+  const allVisibleSelected =
+    assets.length > 0 &&
+    assets.every((asset) => selectedAssetIds.has(asset.task_id || asset.id));
 
   const getTimeRangeParams = useCallback(() => {
     const now = dayjs();
@@ -326,6 +344,33 @@ const Assets = () => {
     }
   };
 
+  const toggleAssetSelection = (asset, checked) => {
+    const key = asset.task_id || asset.id;
+    setSelectedAssetIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
+  };
+
+  const selectAllVisibleAssets = () => {
+    setSelectedAssetIds((prev) => {
+      const next = new Set(prev);
+      assets.forEach((asset) => {
+        next.add(asset.task_id || asset.id);
+      });
+      return next;
+    });
+  };
+
+  const clearSelectedAssets = () => {
+    setSelectedAssetIds(new Set());
+  };
+
   const copyPrompt = async (asset) => {
     if (!asset?.prompt) {
       showError(t('暂无提示词'));
@@ -347,6 +392,119 @@ const Assets = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const downloadSelectedAssets = () => {
+    if (!selectedAssets.length) return;
+    selectedAssets.forEach((asset, index) => {
+      setTimeout(() => downloadAsset(asset), index * 120);
+    });
+  };
+
+  const deleteSelectedAssets = async () => {
+    if (!selectedAssets.length) return;
+    setBatchDeleting(true);
+    try {
+      const results = await Promise.allSettled(
+        selectedAssets.map((asset) =>
+          API.delete(`/api/image-generation/tasks/${asset.task_id || asset.id}`),
+        ),
+      );
+      const successIds = [];
+      const failedCount = results.reduce((count, result, index) => {
+        if (result.status === 'fulfilled' && result.value?.data?.success) {
+          successIds.push(selectedAssets[index].task_id || selectedAssets[index].id);
+          return count;
+        }
+        return count + 1;
+      }, 0);
+      if (successIds.length > 0) {
+        setAssets((prev) =>
+          prev.filter((asset) => !successIds.includes(asset.task_id || asset.id)),
+        );
+        setTotal((prev) => Math.max(0, prev - successIds.length));
+        setSelectedAssetIds((prev) => {
+          const next = new Set(prev);
+          successIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      }
+      if (successIds.length > 0) {
+        showSuccess(t('删除成功 {{count}} 个任务', { count: successIds.length }));
+      }
+      if (failedCount > 0) {
+        showError(t('删除失败 {{count}} 个任务', { count: failedCount }));
+      }
+    } catch (error) {
+      showError(error.message || t('删除失败'));
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
+  const submitSelectedAssetsToCreativeSpace = async () => {
+    if (!selectedAssets.length) return;
+    setBatchSubmitting(true);
+    try {
+      const submitableAssets = selectedAssets.filter(
+        (asset) => !asset.creative_submission_status,
+      );
+      if (submitableAssets.length === 0) {
+        showError(t('已选择的资产都已提交'));
+        return;
+      }
+      const results = await Promise.allSettled(
+        submitableAssets.map((asset) =>
+          API.post(
+            `/api/image-generation/assets/${asset.task_id || asset.id}/creative-submission`,
+          ),
+        ),
+      );
+      let successCount = 0;
+      const patchIds = [];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value?.data?.success) {
+          const submission = result.value.data.data || {};
+          const asset = submitableAssets[index];
+          const patch = {
+            creative_submission_id: submission.id,
+            creative_submission_status: submission.status,
+            creative_reject_reason: submission.reject_reason || '',
+          };
+          patchIds.push(asset.task_id || asset.id);
+          setSelectedAsset((prev) =>
+            prev && (prev.task_id || prev.id) === (asset.task_id || asset.id)
+              ? { ...prev, ...patch }
+              : prev,
+          );
+          setAssets((prev) =>
+            prev.map((item) =>
+              (item.task_id || item.id) === (asset.task_id || asset.id)
+                ? { ...item, ...patch }
+                : item,
+            ),
+          );
+          successCount += 1;
+        }
+      });
+      if (patchIds.length > 0) {
+        setSelectedAssetIds((prev) => {
+          const next = new Set(prev);
+          patchIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      }
+      if (successCount > 0) {
+        showSuccess(t('已提交到创意空间审核'));
+      }
+      if (results.some((result) => result.status === 'rejected')) {
+        showError(t('部分提交失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('提交失败'));
+    } finally {
+      setBatchSubmitting(false);
+    }
   };
 
   const openSourceTask = (asset) => {
@@ -472,6 +630,14 @@ const Assets = () => {
       onClick={() => openDetail(asset)}
       onKeyDown={(event) => handleCardKeyDown(event, asset)}
     >
+      <div className='asset-card-select'>
+        <div onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            checked={selectedAssetIds.has(asset.task_id || asset.id)}
+            onChange={(e) => toggleAssetSelection(asset, e.target.checked)}
+          />
+        </div>
+      </div>
       <div className='asset-image-wrap'>
         <img src={asset.image_url} alt={asset.prompt || 'Generated'} />
       </div>
@@ -583,6 +749,7 @@ const Assets = () => {
           width: 100%;
         }
         .asset-card {
+          position: relative;
           display: inline-block;
           width: 100%;
           break-inside: avoid;
@@ -609,6 +776,19 @@ const Assets = () => {
           min-height: 120px;
           background: var(--semi-color-fill-0);
         }
+        .asset-card-select {
+          position: absolute;
+          top: 8px;
+          left: 8px;
+          z-index: 2;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 4px;
+          border-radius: 8px;
+          background: rgba(0, 0, 0, 0.34);
+          backdrop-filter: blur(6px);
+        }
         .asset-image-wrap img {
           display: block;
           width: 100%;
@@ -623,6 +803,32 @@ const Assets = () => {
           padding: 4px 0 18px;
           color: var(--semi-color-text-2);
           font-size: 13px;
+        }
+        .assets-batch-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 12px 14px;
+          border: 1px solid var(--semi-color-border);
+          border-radius: 10px;
+          background: var(--semi-color-fill-0);
+        }
+        .assets-batch-meta {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+          min-width: 0;
+          color: var(--semi-color-text-1);
+          font-size: 13px;
+        }
+        .assets-batch-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
         }
         .assets-empty-wrap {
           padding: 48px 0;
@@ -718,6 +924,13 @@ const Assets = () => {
             justify-content: flex-start;
           }
           .assets-masonry { column-count: 3; }
+          .assets-batch-bar {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .assets-batch-actions {
+            justify-content: flex-start;
+          }
         }
         @media (max-width: 720px) {
           .assets-page {
@@ -769,17 +982,24 @@ const Assets = () => {
                 </Tag>
               )}
             </div>
-            <div className='assets-subtitle'>
-              <span>
-                {t('资产总数')} <strong>{stats.total_assets || total}</strong>
-              </span>
-              <span>
-                {t('最近生成')}{' '}
-                <strong>{formatTime(stats.latest_created_time)}</strong>
-              </span>
-            </div>
           </div>
           <div className='assets-top-actions'>
+            <Button
+              type={hasSelectedAssets ? 'primary' : 'tertiary'}
+              icon={<IconCheck />}
+              onClick={() => {
+                if (allVisibleSelected) {
+                  clearSelectedAssets();
+                } else {
+                  selectAllVisibleAssets();
+                }
+              }}
+              disabled={assets.length === 0}
+            >
+              {allVisibleSelected
+                ? t('取消全选')
+                : t('全选')}
+            </Button>
             <Button icon={<IconRefresh />} onClick={refreshAssets}>
               {t('刷新')}
             </Button>
@@ -874,6 +1094,59 @@ const Assets = () => {
             </Button>
           </div>
         </div>
+
+        {hasSelectedAssets && (
+          <div className='assets-batch-bar'>
+            <div className='assets-batch-meta'>
+              <span>
+                {t('已选择')} <strong>{selectedCount}</strong> {t('个')}
+              </span>
+              <Button size='small' type='tertiary' onClick={clearSelectedAssets}>
+                {t('取消选择')}
+              </Button>
+            </div>
+            <div className='assets-batch-actions'>
+              <Button
+                size='small'
+                theme='outline'
+                type='tertiary'
+                icon={<IconDownload />}
+                onClick={downloadSelectedAssets}
+              >
+                {t('下载选中')}
+              </Button>
+              <Button
+                size='small'
+                theme='outline'
+                type='primary'
+                icon={<IconImage />}
+                loading={batchSubmitting}
+                onClick={submitSelectedAssetsToCreativeSpace}
+              >
+                {t('发布选中')}
+              </Button>
+              <Popconfirm
+                title={t('确定要删除选中的')}
+                content={t('删除后无法恢复，请确认是否继续')}
+                okText={t('确认删除')}
+                cancelText={t('取消')}
+                okType='danger'
+                onConfirm={deleteSelectedAssets}
+                position='bottom'
+              >
+                <Button
+                  size='small'
+                  theme='outline'
+                  type='danger'
+                  icon={<IconDelete />}
+                  loading={batchDeleting}
+                >
+                  {t('删除选中')}
+                </Button>
+              </Popconfirm>
+            </div>
+          </div>
+        )}
 
         <Spin spinning={loading && assets.length === 0}>
           {assets.length > 0 ? (
