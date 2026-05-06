@@ -148,7 +148,7 @@ const Assets = () => {
         approved: { label: t('已展示'), color: 'green' },
         rejected: { label: t('已驳回'), color: 'red' },
       };
-      return statusMap[status || ''] || { label: t('未提交'), color: 'grey' };
+      return statusMap[status || ''] || { label: t('未提交'), color: 'blue' };
     },
     [t],
   );
