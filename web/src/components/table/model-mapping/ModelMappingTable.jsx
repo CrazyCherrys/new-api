@@ -18,12 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Table, Tag, Typography, Popconfirm, Button, Space, Switch } from '@douyinfe/semi-ui';
+import {
+  Table,
+  Tag,
+  Typography,
+  Popconfirm,
+  Button,
+  Space,
+  Switch,
+} from '@douyinfe/semi-ui';
 import { IconEdit, IconDelete } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../../helpers';
 
 const { Text } = Typography;
+const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
 
 const renderTimestamp = (timestampInSeconds) => {
   const date = new Date(timestampInSeconds * 1000);
@@ -46,51 +55,79 @@ const ModelMappingTable = ({
 }) => {
   const { t } = useTranslation();
 
+  const normalizeImageCapabilities = (raw) => {
+    if (Array.isArray(raw)) {
+      return raw;
+    }
+    if (typeof raw === 'string' && raw.trim() !== '') {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch (e) {
+        return [...DEFAULT_IMAGE_CAPABILITIES];
+      }
+    }
+    return [...DEFAULT_IMAGE_CAPABILITIES];
+  };
+
   const formatModelSeries = (series) => {
     if (!series) return '-';
 
     const seriesMap = {
-      'openai': 'OpenAI',
-      'gemini': 'Gemini',
-      'claude': 'Claude',
-      'grok': 'Grok',
-      'deepseek': 'DeepSeek',
-      'qwen': 'Qwen',
-      'glm': 'GLM',
-      'hunyuan': 'Hunyuan',
-      'doubao': 'Doubao',
-      'spark': 'Spark',
-      'baichuan': 'Baichuan',
-      'minimax': 'Minimax',
-      'moonshot': 'Moonshot',
-      'yi': 'Yi',
-      'chatglm': 'ChatGLM',
-      'ernie': 'ERNIE',
-      'wenxin': 'Wenxin',
-      'tongyi': 'Tongyi',
-      'azure': 'Azure',
-      'aws': 'AWS',
-      'cohere': 'Cohere',
-      'anthropic': 'Anthropic',
-      'mistral': 'Mistral',
-      'llama': 'Llama',
-      'palm': 'PaLM',
-      'bard': 'Bard',
-      'midjourney': 'Midjourney',
+      openai: 'OpenAI',
+      gemini: 'Gemini',
+      claude: 'Claude',
+      grok: 'Grok',
+      deepseek: 'DeepSeek',
+      qwen: 'Qwen',
+      glm: 'GLM',
+      hunyuan: 'Hunyuan',
+      doubao: 'Doubao',
+      spark: 'Spark',
+      baichuan: 'Baichuan',
+      minimax: 'Minimax',
+      moonshot: 'Moonshot',
+      yi: 'Yi',
+      chatglm: 'ChatGLM',
+      ernie: 'ERNIE',
+      wenxin: 'Wenxin',
+      tongyi: 'Tongyi',
+      azure: 'Azure',
+      aws: 'AWS',
+      cohere: 'Cohere',
+      anthropic: 'Anthropic',
+      mistral: 'Mistral',
+      llama: 'Llama',
+      palm: 'PaLM',
+      bard: 'Bard',
+      midjourney: 'Midjourney',
       'stable-diffusion': 'Stable Diffusion',
-      'flux': 'Flux',
-      'suno': 'Suno',
+      flux: 'Flux',
+      suno: 'Suno',
     };
 
-    return seriesMap[series.toLowerCase()] || series.charAt(0).toUpperCase() + series.slice(1);
+    return (
+      seriesMap[series.toLowerCase()] ||
+      series.charAt(0).toUpperCase() + series.slice(1)
+    );
   };
 
   const handleStatusToggle = async (record) => {
     try {
       const newStatus = record.status === 1 ? 0 : 1;
-      const res = await API.put(`/api/model-mapping/`, {
+      const payload = {
         ...record,
         status: newStatus,
+      };
+      if (record.model_type === 2) {
+        payload.image_capabilities = JSON.stringify(
+          normalizeImageCapabilities(record.image_capabilities),
+        );
+      }
+      const res = await API.put(`/api/model-mapping/`, {
+        ...payload,
       });
 
       if (res.data.success) {
@@ -132,6 +169,17 @@ const ModelMappingTable = ({
     };
 
     return endpointMap[endpoint] || endpoint || '-';
+  };
+
+  const formatImageCapabilities = (raw) => {
+    const capabilities = normalizeImageCapabilities(raw);
+    const capabilityMap = {
+      image_generation: t('图片生成'),
+      image_editing: t('图像编辑'),
+    };
+    return capabilities
+      .map((capability) => capabilityMap[capability] || capability)
+      .join(', ');
   };
 
   const columns = [
@@ -178,6 +226,12 @@ const ModelMappingTable = ({
       title: t('请求端点'),
       dataIndex: 'request_endpoint',
       render: (text) => formatRequestEndpoint(text),
+    },
+    {
+      title: t('模型能力'),
+      dataIndex: 'image_capabilities',
+      render: (text, record) =>
+        record.model_type === 2 ? formatImageCapabilities(text) : '-',
     },
     {
       title: t('分辨率'),

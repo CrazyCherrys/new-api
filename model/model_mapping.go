@@ -1,26 +1,121 @@
 package model
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
 
+const (
+	ImageCapabilityGeneration = "image_generation"
+	ImageCapabilityEditing    = "image_editing"
+)
+
+var defaultImageCapabilities = []string{
+	ImageCapabilityGeneration,
+	ImageCapabilityEditing,
+}
+
 // ModelMapping 模型映射配置
 type ModelMapping struct {
-	Id              int    `json:"id"`
-	RequestModel    string `json:"request_model" gorm:"size:128;not null;uniqueIndex:uk_request_model"`
-	ActualModel     string `json:"actual_model" gorm:"size:128;not null"`
-	DisplayName     string `json:"display_name" gorm:"size:255;not null"`
-	ModelSeries     string `json:"model_series" gorm:"size:64;default:'';index"`
-	ModelType       int    `json:"model_type" gorm:"default:1;index"` // 1=对话 2=绘画 3=视频 4=音频
-	Description     string `json:"description" gorm:"type:text"`
-	Status          int    `json:"status" gorm:"default:1;index"`
-	Priority        int    `json:"priority" gorm:"default:0"`
-	RequestEndpoint string `json:"request_endpoint" gorm:"size:32;default:''"` // openai, gemini, openai_mod
-	Resolutions     string `json:"resolutions" gorm:"type:text"`               // JSON array: ["1K","2K","4K"]
-	AspectRatios    string `json:"aspect_ratios" gorm:"type:text"`             // JSON array: ["1:1","16:9",...]
-	CreatedTime     int64  `json:"created_time" gorm:"bigint"`
-	UpdatedTime     int64  `json:"updated_time" gorm:"bigint"`
+	Id                int    `json:"id"`
+	RequestModel      string `json:"request_model" gorm:"size:128;not null;uniqueIndex:uk_request_model"`
+	ActualModel       string `json:"actual_model" gorm:"size:128;not null"`
+	DisplayName       string `json:"display_name" gorm:"size:255;not null"`
+	ModelSeries       string `json:"model_series" gorm:"size:64;default:'';index"`
+	ModelType         int    `json:"model_type" gorm:"default:1;index"` // 1=对话 2=绘画 3=视频 4=音频
+	Description       string `json:"description" gorm:"type:text"`
+	Status            int    `json:"status" gorm:"default:1;index"`
+	Priority          int    `json:"priority" gorm:"default:0"`
+	RequestEndpoint   string `json:"request_endpoint" gorm:"size:32;default:''"` // openai, gemini, openai_mod
+	Resolutions       string `json:"resolutions" gorm:"type:text"`               // JSON array: ["1K","2K","4K"]
+	AspectRatios      string `json:"aspect_ratios" gorm:"type:text"`             // JSON array: ["1:1","16:9",...]
+	ImageCapabilities string `json:"image_capabilities" gorm:"type:text"`        // JSON array: ["image_generation","image_editing"]
+	CreatedTime       int64  `json:"created_time" gorm:"bigint"`
+	UpdatedTime       int64  `json:"updated_time" gorm:"bigint"`
+}
+
+func DefaultImageCapabilities() []string {
+	return append([]string(nil), defaultImageCapabilities...)
+}
+
+func normalizeImageCapability(capability string) string {
+	return strings.ToLower(strings.TrimSpace(capability))
+}
+
+func parseImageCapabilities(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+
+	var capabilities []string
+	if err := common.UnmarshalJsonStr(raw, &capabilities); err != nil {
+		return nil, fmt.Errorf("failed to parse image capabilities: %w", err)
+	}
+
+	normalized := make([]string, 0, len(capabilities))
+	seen := make(map[string]struct{}, len(capabilities))
+	for _, capability := range capabilities {
+		value := normalizeImageCapability(capability)
+		if value == "" {
+			continue
+		}
+		switch value {
+		case ImageCapabilityGeneration, ImageCapabilityEditing:
+		default:
+			return nil, fmt.Errorf("unsupported image capability: %s", capability)
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+
+	return normalized, nil
+}
+
+func NormalizeImageCapabilities(raw string) (string, error) {
+	capabilities, err := parseImageCapabilities(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(capabilities) == 0 {
+		return "", nil
+	}
+
+	data, err := common.Marshal(capabilities)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal image capabilities: %w", err)
+	}
+	return string(data), nil
+}
+
+func EffectiveImageCapabilities(raw string) ([]string, error) {
+	capabilities, err := parseImageCapabilities(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(capabilities) == 0 {
+		return DefaultImageCapabilities(), nil
+	}
+	return capabilities, nil
+}
+
+func HasImageCapability(raw string, target string) (bool, error) {
+	capabilities, err := EffectiveImageCapabilities(raw)
+	if err != nil {
+		return false, err
+	}
+	normalizedTarget := normalizeImageCapability(target)
+	for _, capability := range capabilities {
+		if capability == normalizedTarget {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (mm *ModelMapping) Insert() error {

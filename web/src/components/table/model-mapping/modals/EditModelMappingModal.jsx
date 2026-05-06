@@ -18,17 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useState, useEffect } from 'react';
-import {
-  Modal,
-  Form,
-  Input,
-  Select,
-  Button,
-  Space,
-  Checkbox,
-} from '@douyinfe/semi-ui';
+import { Modal, Form, Select, Button, Space } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../../../helpers';
+
+const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
 
 const EditModelMappingModal = ({
   visible,
@@ -41,6 +35,7 @@ const EditModelMappingModal = ({
   const [formApi, setFormApi] = useState(null);
   const [selectedResolutions, setSelectedResolutions] = useState([]);
   const [selectedAspectRatios, setSelectedAspectRatios] = useState([]);
+  const [selectedModelType, setSelectedModelType] = useState(1);
 
   const modelSeriesOptions = [
     { value: 'openai', label: 'OpenAI' },
@@ -94,34 +89,53 @@ const EditModelMappingModal = ({
     { value: '21:9', label: '21:9' },
   ];
 
+  const imageCapabilityOptions = [
+    { value: 'image_generation', label: t('图片生成') },
+    { value: 'image_editing', label: t('图像编辑') },
+  ];
+
+  const parseJsonArray = (value) => {
+    if (Array.isArray(value)) {
+      return value;
+    }
+    if (typeof value !== 'string' || value.trim() === '') {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  };
+
   useEffect(() => {
     if (visible && formApi) {
       if (editingMapping) {
         // 解析 JSON 字符串为数组
-        let resolutions = [];
-        let aspectRatios = [];
-        try {
-          if (editingMapping.resolutions) {
-            resolutions = JSON.parse(editingMapping.resolutions);
-          }
-          if (editingMapping.aspect_ratios) {
-            aspectRatios = JSON.parse(editingMapping.aspect_ratios);
-          }
-        } catch (e) {
-          console.error('Failed to parse resolutions or aspect_ratios:', e);
+        const resolutions = parseJsonArray(editingMapping.resolutions);
+        const aspectRatios = parseJsonArray(editingMapping.aspect_ratios);
+        let imageCapabilities = parseJsonArray(
+          editingMapping.image_capabilities,
+        );
+        if (editingMapping.model_type === 2 && imageCapabilities.length === 0) {
+          imageCapabilities = imageCapabilityOptions.map((item) => item.value);
         }
 
         setSelectedResolutions(resolutions);
         setSelectedAspectRatios(aspectRatios);
+        setSelectedModelType(editingMapping.model_type || 1);
 
         formApi.setValues({
           ...editingMapping,
           resolutions,
           aspect_ratios: aspectRatios,
+          image_capabilities: imageCapabilities,
         });
       } else {
         setSelectedResolutions([]);
         setSelectedAspectRatios([]);
+        setSelectedModelType(1);
 
         formApi.setValues({
           request_model: '',
@@ -132,19 +146,37 @@ const EditModelMappingModal = ({
           request_endpoint: '',
           resolutions: [],
           aspect_ratios: [],
+          image_capabilities: [],
         });
       }
     }
   }, [visible, editingMapping, formApi]);
 
   const handleSubmit = async (values) => {
+    if (
+      values.model_type === 2 &&
+      (!Array.isArray(values.image_capabilities) ||
+        values.image_capabilities.length === 0)
+    ) {
+      showError(t('请选择至少一个模型能力'));
+      return;
+    }
+
     setLoading(true);
     try {
       const payload = {
         ...values,
         // 将数组转换为 JSON 字符串
-        resolutions: values.resolutions ? JSON.stringify(values.resolutions) : '',
-        aspect_ratios: values.aspect_ratios ? JSON.stringify(values.aspect_ratios) : '',
+        resolutions: values.resolutions
+          ? JSON.stringify(values.resolutions)
+          : '',
+        aspect_ratios: values.aspect_ratios
+          ? JSON.stringify(values.aspect_ratios)
+          : '',
+        image_capabilities:
+          values.model_type === 2 && values.image_capabilities
+            ? JSON.stringify(values.image_capabilities)
+            : '',
       };
 
       if (editingMapping) {
@@ -174,7 +206,7 @@ const EditModelMappingModal = ({
   };
 
   const handleSelectAllAspectRatios = () => {
-    const allValues = aspectRatioOptions.map(opt => opt.value);
+    const allValues = aspectRatioOptions.map((opt) => opt.value);
     setSelectedAspectRatios(allValues);
     formApi?.setValue('aspect_ratios', allValues);
   };
@@ -185,7 +217,7 @@ const EditModelMappingModal = ({
   };
 
   const handleSelectAllResolutions = () => {
-    const allValues = resolutionOptions.map(opt => opt.value);
+    const allValues = resolutionOptions.map((opt) => opt.value);
     setSelectedResolutions(allValues);
     formApi?.setValue('resolutions', allValues);
   };
@@ -235,6 +267,24 @@ const EditModelMappingModal = ({
           placeholder={t('选择模型类型')}
           optionList={modelTypeOptions}
           rules={[{ required: true, message: t('请选择模型类型') }]}
+          onChange={(value) => {
+            setSelectedModelType(value);
+            if (value === 2) {
+              const currentCapabilities =
+                formApi?.getValue('image_capabilities');
+              if (
+                !Array.isArray(currentCapabilities) ||
+                currentCapabilities.length === 0
+              ) {
+                formApi?.setValue(
+                  'image_capabilities',
+                  DEFAULT_IMAGE_CAPABILITIES,
+                );
+              }
+            } else {
+              formApi?.setValue('image_capabilities', []);
+            }
+          }}
         />
         <Form.Select
           field='request_endpoint'
@@ -243,8 +293,29 @@ const EditModelMappingModal = ({
           optionList={requestEndpointOptions}
           rules={[{ required: true, message: t('请选择请求端点') }]}
         />
+        {selectedModelType === 2 && (
+          <Form.CheckboxGroup
+            field='image_capabilities'
+            label={t('模型能力')}
+            options={imageCapabilityOptions}
+            direction='horizontal'
+            rules={[
+              {
+                required: true,
+                message: t('请选择至少一个模型能力'),
+              },
+            ]}
+          />
+        )}
         <div>
-          <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div
+            style={{
+              marginBottom: 8,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
             <span style={{ fontSize: 14, fontWeight: 600 }}>{t('分辨率')}</span>
             <Space>
               <Button size='small' onClick={handleSelectAllResolutions}>
@@ -262,7 +333,14 @@ const EditModelMappingModal = ({
           />
         </div>
         <div>
-          <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div
+            style={{
+              marginBottom: 8,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
             <span style={{ fontSize: 14, fontWeight: 600 }}>{t('宽高比')}</span>
             <Space>
               <Button size='small' onClick={handleSelectAllAspectRatios}>
@@ -279,7 +357,9 @@ const EditModelMappingModal = ({
             direction='horizontal'
           />
         </div>
-        <Space style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+        <Space
+          style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}
+        >
           <Button onClick={handleClose}>{t('取消')}</Button>
           <Button
             theme='solid'

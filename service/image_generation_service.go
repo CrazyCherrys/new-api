@@ -112,6 +112,20 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 	if err := validateImageGenerationReferenceImages(params); err != nil {
 		return nil, err
 	}
+	mapping, err := model.GetModelMappingByRequestModel(modelId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get model mapping: %w", err)
+	}
+	if mapping == nil {
+		return nil, fmt.Errorf("model mapping not found for: %s", modelId)
+	}
+	mappingEndpoint := normalizeImageEndpoint(mapping.RequestEndpoint)
+	if mappingEndpoint != requestEndpoint {
+		return nil, fmt.Errorf("request endpoint mismatch: expected %s, got %s", mappingEndpoint, requestEndpoint)
+	}
+	if err := validateImageGenerationModelCapabilities(mapping, params); err != nil {
+		return nil, err
+	}
 
 	// 检查用户余额
 	userQuota, err := model.GetUserQuota(userId, false)
@@ -272,18 +286,26 @@ func ProcessImageGenerationTask(taskId int) error {
 	return fmt.Errorf("task %d failed: %s", taskId, errorMsg)
 }
 
-func validateImageGenerationReferenceImages(params string) error {
+func extractImageGenerationReferenceImages(params string) ([]string, error) {
 	if strings.TrimSpace(params) == "" {
-		return nil
+		return nil, nil
 	}
 
 	var parsed struct {
 		ReferenceImages []string `json:"reference_images"`
 	}
 	if err := common.UnmarshalJsonStr(params, &parsed); err != nil {
-		return fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
-	if len(parsed.ReferenceImages) == 0 {
+	return parsed.ReferenceImages, nil
+}
+
+func validateImageGenerationReferenceImages(params string) error {
+	referenceImages, err := extractImageGenerationReferenceImages(params)
+	if err != nil {
+		return err
+	}
+	if len(referenceImages) == 0 {
 		return nil
 	}
 
@@ -293,7 +315,7 @@ func validateImageGenerationReferenceImages(params string) error {
 		maxImageSizeMB = 10
 	}
 	maxBytes := int64(maxImageSizeMB) * 1024 * 1024
-	for idx, imageData := range parsed.ReferenceImages {
+	for idx, imageData := range referenceImages {
 		size, ok, err := referenceImageDecodedSize(imageData)
 		if err != nil {
 			return fmt.Errorf("reference image %d is invalid: %w", idx+1, err)
@@ -306,6 +328,41 @@ func validateImageGenerationReferenceImages(params string) error {
 		}
 	}
 	return nil
+}
+
+func validateImageGenerationModelCapabilities(mapping *model.ModelMapping, params string) error {
+	referenceImages, err := extractImageGenerationReferenceImages(params)
+	if err != nil {
+		return err
+	}
+	capabilities, err := model.EffectiveImageCapabilities(mapping.ImageCapabilities)
+	if err != nil {
+		return fmt.Errorf("invalid image capabilities for model %s: %w", mapping.RequestModel, err)
+	}
+
+	hasReferenceImage := false
+	for _, imageData := range referenceImages {
+		if strings.TrimSpace(imageData) != "" {
+			hasReferenceImage = true
+			break
+		}
+	}
+
+	if hasReferenceImage {
+		for _, capability := range capabilities {
+			if capability == model.ImageCapabilityEditing {
+				return nil
+			}
+		}
+		return fmt.Errorf("selected model does not support image editing")
+	}
+
+	for _, capability := range capabilities {
+		if capability == model.ImageCapabilityGeneration {
+			return nil
+		}
+	}
+	return fmt.Errorf("selected model does not support image generation")
 }
 
 func referenceImageDecodedSize(raw string) (int64, bool, error) {

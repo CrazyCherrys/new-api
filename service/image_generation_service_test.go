@@ -37,7 +37,7 @@ func setupImageGenerationServiceTestDB(t *testing.T) *gorm.DB {
 	model.DB = db
 	model.LOG_DB = db
 
-	if err := db.AutoMigrate(&model.ImageGenerationTask{}, &model.ImageCreativeSubmission{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.ModelMapping{}, &model.ImageGenerationTask{}, &model.ImageCreativeSubmission{}); err != nil {
 		t.Fatalf("failed to migrate image generation task table: %v", err)
 	}
 
@@ -189,4 +189,75 @@ func TestImageGenerationWorkerLimiterReadsCurrentMaxWorkers(t *testing.T) {
 	}
 	limiter.release()
 	limiter.release()
+}
+
+func TestImageGenerationModelCapabilitiesValidation(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	user := &model.User{
+		Username: "image-capability-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-1",
+		ActualModel:       "gpt-image-1",
+		DisplayName:       "GPT Image",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+	})
+
+	if _, err := CreateImageGenerationTask(user.Id, "gpt-image-1", "prompt", "openai", `{"reference_images":["data:image/png;base64,AAAA"]}`); err == nil {
+		t.Fatal("expected image editing to be rejected when capability is missing")
+	}
+
+	task, err := CreateImageGenerationTask(user.Id, "gpt-image-1", "prompt", "openai", `{}`)
+	if err != nil {
+		t.Fatalf("expected generation without reference image to succeed: %v", err)
+	}
+	if task == nil || task.Id == 0 {
+		t.Fatal("expected task to be created")
+	}
+	if task.Status != model.ImageTaskStatusPending {
+		t.Fatalf("expected pending task, got %s", task.Status)
+	}
+	created, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if created == nil || created.RequestEndpoint != "openai" {
+		t.Fatalf("unexpected created task: %#v", created)
+	}
+}
+
+func TestModelMappingImageCapabilitiesNormalizeAndDefault(t *testing.T) {
+	if got, err := model.NormalizeImageCapabilities(`["IMAGE_GENERATION","image_editing","image_generation"]`); err != nil {
+		t.Fatalf("unexpected normalize error: %v", err)
+	} else if got != `["image_generation","image_editing"]` {
+		t.Fatalf("unexpected normalized capabilities: %s", got)
+	}
+
+	if got, err := model.EffectiveImageCapabilities(""); err != nil {
+		t.Fatalf("unexpected effective capabilities error: %v", err)
+	} else if len(got) != 2 || got[0] != model.ImageCapabilityGeneration || got[1] != model.ImageCapabilityEditing {
+		t.Fatalf("unexpected default capabilities: %#v", got)
+	}
 }

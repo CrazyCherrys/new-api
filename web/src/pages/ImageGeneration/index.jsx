@@ -48,6 +48,34 @@ import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal'
 
 const { Text } = Typography;
 
+const IMAGE_CAPABILITY_GENERATION = 'image_generation';
+const IMAGE_CAPABILITY_EDITING = 'image_editing';
+const DEFAULT_IMAGE_CAPABILITIES = [
+  IMAGE_CAPABILITY_GENERATION,
+  IMAGE_CAPABILITY_EDITING,
+];
+
+const normalizeImageCapabilities = (raw) => {
+  if (Array.isArray(raw)) {
+    return raw;
+  }
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse image capabilities:', e);
+    }
+  }
+  return [...DEFAULT_IMAGE_CAPABILITIES];
+};
+
+const modelSupportsCapability = (model, capability) =>
+  !!model &&
+  normalizeImageCapabilities(model.image_capabilities).includes(capability);
+
 const ImageGeneration = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -237,7 +265,12 @@ const ImageGeneration = () => {
     try {
       const res = await API.get('/api/image-generation/models');
       if (res.data.success) {
-        const drawingModels = res.data.data || [];
+        const drawingModels = (res.data.data || []).map((model) => ({
+          ...model,
+          image_capabilities: normalizeImageCapabilities(
+            model.image_capabilities,
+          ),
+        }));
         setModels(drawingModels);
 
         const seriesSet = new Set();
@@ -616,6 +649,15 @@ const ImageGeneration = () => {
     }
   }, [selectedModel, models]);
 
+  useEffect(() => {
+    if (
+      !selectedModelData ||
+      !modelSupportsCapability(selectedModelData, IMAGE_CAPABILITY_EDITING)
+    ) {
+      setReferenceImages([]);
+    }
+  }, [selectedModelData]);
+
   const handleImageUpload = ({ fileList }) => {
     setReferenceImages(fileList);
   };
@@ -644,6 +686,15 @@ const ImageGeneration = () => {
   };
 
   const handleGenerate = async () => {
+    const supportsImageGeneration = modelSupportsCapability(
+      selectedModelData,
+      IMAGE_CAPABILITY_GENERATION,
+    );
+    const supportsImageEditing = modelSupportsCapability(
+      selectedModelData,
+      IMAGE_CAPABILITY_EDITING,
+    );
+
     if (!selectedModel) {
       showError(t('请选择模型'));
       return;
@@ -654,6 +705,14 @@ const ImageGeneration = () => {
     }
     if (!selectedModelData?.request_endpoint) {
       showError(t('模型配置错误：缺少 request_endpoint'));
+      return;
+    }
+    if (referenceImages.length > 0 && !supportsImageEditing) {
+      showError(t('当前模型不支持图像编辑'));
+      return;
+    }
+    if (!supportsImageGeneration && referenceImages.length === 0) {
+      showError(t('当前模型至少需要上传一张参考图'));
       return;
     }
 
@@ -938,6 +997,20 @@ const ImageGeneration = () => {
     },
   };
 
+  const selectedModelSupportsGeneration =
+    !!selectedModelData &&
+    modelSupportsCapability(selectedModelData, IMAGE_CAPABILITY_GENERATION);
+  const selectedModelSupportsEditing =
+    !!selectedModelData &&
+    modelSupportsCapability(selectedModelData, IMAGE_CAPABILITY_EDITING);
+  const requiresReferenceImage =
+    selectedModelSupportsEditing && !selectedModelSupportsGeneration;
+  const canGenerate =
+    !!selectedModel &&
+    !!selectedModelData &&
+    !!inspiration.trim() &&
+    (!requiresReferenceImage || referenceImages.length > 0);
+
   const renderLeftPanel = () => (
     <div style={styles.leftPanel}>
       <div style={styles.leftContent}>
@@ -1021,53 +1094,55 @@ const ImageGeneration = () => {
             </div>
           </div>
 
-          <div style={styles.fieldGroup}>
-            <span style={styles.label}>{t('参考图像')}</span>
-            <div
-              style={{
-                display: 'flex',
-                gap: 8,
-                flexWrap: 'wrap',
-                alignItems: 'center',
-              }}
-            >
-              {referenceImages.map((file, idx) => (
-                <div
-                  key={file.uid || idx}
-                  style={styles.referenceImageContainer}
-                >
-                  <img
-                    src={
-                      file.url ||
-                      (file.fileInstance &&
-                        URL.createObjectURL(file.fileInstance))
-                    }
-                    alt=''
-                    style={styles.referenceImageThumb}
-                  />
-                  <button
-                    style={styles.removeImageBtn}
-                    onClick={() => handleImageRemove(file)}
-                  >
-                    <IconDelete size='extra-small' />
-                  </button>
-                </div>
-              ))}
-              <Upload
-                action=''
-                accept='image/*'
-                multiple
-                fileList={referenceImages}
-                onChange={handleImageUpload}
-                showUploadList={false}
-                beforeUpload={validateImageSize}
+          {selectedModelSupportsEditing && (
+            <div style={styles.fieldGroup}>
+              <span style={styles.label}>{t('参考图像')}</span>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                }}
               >
-                <div style={styles.addImageBtn}>
-                  <IconPlus size='large' />
-                </div>
-              </Upload>
+                {referenceImages.map((file, idx) => (
+                  <div
+                    key={file.uid || idx}
+                    style={styles.referenceImageContainer}
+                  >
+                    <img
+                      src={
+                        file.url ||
+                        (file.fileInstance &&
+                          URL.createObjectURL(file.fileInstance))
+                      }
+                      alt=''
+                      style={styles.referenceImageThumb}
+                    />
+                    <button
+                      style={styles.removeImageBtn}
+                      onClick={() => handleImageRemove(file)}
+                    >
+                      <IconDelete size='extra-small' />
+                    </button>
+                  </div>
+                ))}
+                <Upload
+                  action=''
+                  accept='image/*'
+                  multiple
+                  fileList={referenceImages}
+                  onChange={handleImageUpload}
+                  showUploadList={false}
+                  beforeUpload={validateImageSize}
+                >
+                  <div style={styles.addImageBtn}>
+                    <IconPlus size='large' />
+                  </div>
+                </Upload>
+              </div>
             </div>
-          </div>
+          )}
         </Spin>
       </div>
 
@@ -1121,15 +1196,11 @@ const ImageGeneration = () => {
         <button
           style={{
             ...styles.generateBtn,
-            opacity:
-              generating || !selectedModel || !inspiration.trim() ? 0.6 : 1,
-            pointerEvents:
-              generating || !selectedModel || !inspiration.trim()
-                ? 'none'
-                : 'auto',
+            opacity: generating || !canGenerate ? 0.6 : 1,
+            pointerEvents: generating || !canGenerate ? 'none' : 'auto',
           }}
           onClick={handleGenerate}
-          disabled={generating || !selectedModel || !inspiration.trim()}
+          disabled={generating || !canGenerate}
         >
           {generating ? (
             <Spin size='small' />

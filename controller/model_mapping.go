@@ -36,6 +36,21 @@ func validateImageModelEndpoint(modelType int, endpoint string) error {
 	return nil
 }
 
+func validateImageModelCapabilities(modelType int, raw string) (string, error) {
+	if modelType != 2 {
+		return "", nil
+	}
+
+	normalized, err := model.NormalizeImageCapabilities(raw)
+	if err != nil {
+		return "", err
+	}
+	if normalized == "" {
+		return "", errors.New("绘画模型必须至少选择一个模型能力")
+	}
+	return normalized, nil
+}
+
 // GetAllModelMappings 获取模型映射列表（分页）
 func GetAllModelMappings(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
@@ -121,6 +136,12 @@ func CreateModelMapping(c *gin.Context) {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
+	normalizedCapabilities, err := validateImageModelCapabilities(mm.ModelType, mm.ImageCapabilities)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	mm.ImageCapabilities = normalizedCapabilities
 
 	// 如果 ActualModel 为空，使用 RequestModel 作为默认值
 	if mm.ActualModel == "" {
@@ -176,6 +197,12 @@ func UpdateModelMapping(c *gin.Context) {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
+	normalizedCapabilities, err := validateImageModelCapabilities(mm.ModelType, mm.ImageCapabilities)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	mm.ImageCapabilities = normalizedCapabilities
 
 	// 如果 ActualModel 为空，使用 RequestModel 作为默认值
 	if mm.ActualModel == "" {
