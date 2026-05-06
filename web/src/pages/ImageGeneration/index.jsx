@@ -761,16 +761,6 @@ const ImageGeneration = () => {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    selectionBar: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '8px 20px',
-      borderBottom: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
-      gap: 12,
-      flexWrap: 'wrap',
-    },
     label: {
       display: 'block',
       fontSize: 13,
@@ -1208,6 +1198,47 @@ const ImageGeneration = () => {
             {t('查看资产仓库')}
           </Button>
 
+          {tasks.length > 0 && (
+            <>
+              <Text type='tertiary' size='small'>
+                {t('共')} {taskTotal} {t('个任务')}
+              </Text>
+              {selectedTaskIds.size > 0 && (
+                <Text type='tertiary' size='small'>
+                  ({t('已选择')} {selectedTaskIds.size} {t('个')})
+                </Text>
+              )}
+              {selectedTaskIds.size > 0 ? (
+                <>
+                  <Button
+                    size='small'
+                    type='tertiary'
+                    onClick={() => handleSelectAll(false)}
+                  >
+                    {t('取消选择')}
+                  </Button>
+                  <Button
+                    size='small'
+                    type='danger'
+                    icon={<IconDelete />}
+                    loading={deletingTasks}
+                    onClick={handleBatchDelete}
+                  >
+                    {t('删除选中')}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size='small'
+                  type='tertiary'
+                  onClick={() => handleSelectAll(true)}
+                >
+                  {t('全选')}
+                </Button>
+              )}
+            </>
+          )}
+
           <span style={styles.filterLabel}>{t('状态')}</span>
           <Select
             size='small'
@@ -1284,52 +1315,6 @@ const ImageGeneration = () => {
           </Button>
         </div>
       </div>
-
-      {/* 选择/批量操作条 */}
-      {(selectedTaskIds.size > 0 || tasks.length > 0) && (
-        <div style={styles.selectionBar}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <Text type='tertiary' size='small'>
-              {t('共')} {taskTotal} {t('个任务')}
-            </Text>
-            {selectedTaskIds.size > 0 && (
-              <Text type='tertiary' size='small'>
-                ({t('已选择')} {selectedTaskIds.size} {t('个')})
-              </Text>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {selectedTaskIds.size > 0 ? (
-              <>
-                <Button
-                  size='small'
-                  type='tertiary'
-                  onClick={() => handleSelectAll(false)}
-                >
-                  {t('取消选择')}
-                </Button>
-                <Button
-                  size='small'
-                  type='danger'
-                  icon={<IconDelete />}
-                  loading={deletingTasks}
-                  onClick={handleBatchDelete}
-                >
-                  {t('删除选中')}
-                </Button>
-              </>
-            ) : (
-              <Button
-                size='small'
-                type='tertiary'
-                onClick={() => handleSelectAll(true)}
-              >
-                {t('全选')}
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
 
       <div style={styles.rightContent}>{renderHistoryContent()}</div>
 
