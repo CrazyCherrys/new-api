@@ -53,6 +53,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { API, copy, renderQuota, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
+import { useContainerWidth } from '../../hooks/common/useContainerWidth';
 
 const { Paragraph } = Typography;
 const PAGE_SIZE = 24;
@@ -61,6 +62,7 @@ const Assets = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const [shellRef, shellWidth] = useContainerWidth();
 
   const [assets, setAssets] = useState([]);
   const [filters, setFilters] = useState({ models: [], series: [] });
@@ -176,6 +178,24 @@ const Assets = () => {
   const allVisibleSelected =
     assets.length > 0 &&
     assets.every((asset) => selectedAssetIds.has(asset.task_id || asset.id));
+
+  const getMaxColumnCount = useCallback((width) => {
+    if (!width) return 6;
+    if (width <= 420) return 1;
+    if (width <= 720) return 2;
+    if (width <= 960) return 3;
+    if (width <= 1280) return 4;
+    if (width <= 1480) return 5;
+    return 6;
+  }, []);
+
+  const masonryColumnCount = useMemo(() => {
+    if (!assets.length) return 1;
+    return Math.max(
+      1,
+      Math.min(assets.length, getMaxColumnCount(shellWidth)),
+    );
+  }, [assets.length, getMaxColumnCount, shellWidth]);
 
   const getTimeRangeParams = useCallback(() => {
     const now = dayjs();
@@ -745,7 +765,6 @@ const Assets = () => {
           flex-wrap: wrap;
         }
         .assets-masonry {
-          column-count: 6;
           column-gap: 4px;
           width: 100%;
         }
@@ -905,11 +924,7 @@ const Assets = () => {
           line-height: 1.45;
           overflow-wrap: anywhere;
         }
-        @media (max-width: 1480px) {
-          .assets-masonry { column-count: 5; }
-        }
         @media (max-width: 1280px) {
-          .assets-masonry { column-count: 4; }
           .assets-select,
           .assets-sort {
             width: 160px;
@@ -924,7 +939,6 @@ const Assets = () => {
           .assets-top-actions {
             justify-content: flex-start;
           }
-          .assets-masonry { column-count: 3; }
           .assets-batch-bar {
             flex-direction: column;
             align-items: stretch;
@@ -954,7 +968,6 @@ const Assets = () => {
             width: 100%;
           }
           .assets-masonry {
-            column-count: 2;
             column-gap: 4px;
           }
           .asset-card {
@@ -967,12 +980,9 @@ const Assets = () => {
             grid-template-columns: 1fr;
           }
         }
-        @media (max-width: 420px) {
-          .assets-masonry { column-count: 1; }
-        }
       `}</style>
 
-      <div className='assets-shell'>
+      <div className='assets-shell' ref={shellRef}>
         <div className='assets-topbar'>
           <div className='assets-title-wrap'>
             <div className='assets-title-line'>
@@ -1152,7 +1162,10 @@ const Assets = () => {
         <Spin spinning={loading && assets.length === 0}>
           {assets.length > 0 ? (
             <>
-              <div className='assets-masonry'>
+              <div
+                className='assets-masonry'
+                style={{ columnCount: masonryColumnCount }}
+              >
                 {assets.map(renderAssetCard)}
               </div>
               <div ref={sentinelRef} className='assets-load-more'>
