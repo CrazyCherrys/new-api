@@ -180,23 +180,15 @@ const Assets = () => {
     assets.length > 0 &&
     assets.every((asset) => selectedAssetIds.has(asset.task_id || asset.id));
 
-  const getMaxColumnCount = useCallback((width) => {
-    if (!width) return 6;
-    if (width <= 420) return 1;
-    if (width <= 720) return 2;
-    if (width <= 960) return 3;
-    if (width <= 1280) return 4;
-    if (width <= 1480) return 5;
-    return 6;
-  }, []);
-
   const masonryColumnCount = useMemo(() => {
-    if (!assets.length) return 1;
-    return Math.max(
+    if (!shellWidth) return 1;
+    const minCardWidth = shellWidth <= 720 ? 180 : 260;
+    const maxColumns = Math.max(
       1,
-      Math.min(assets.length, getMaxColumnCount(shellWidth)),
+      Math.min(6, Math.floor(shellWidth / minCardWidth)),
     );
-  }, [assets.length, getMaxColumnCount, shellWidth]);
+    return Math.max(1, Math.min(assets.length || 1, maxColumns));
+  }, [assets.length, shellWidth]);
 
   const getTimeRangeParams = useCallback(() => {
     const now = dayjs();
