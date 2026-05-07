@@ -721,7 +721,6 @@ const SettingsInspirationReview = ({ standalone = false }) => {
       {standalone ? (
         <CardPro
           type='type3'
-          descriptionArea={descriptionArea}
           tabsArea={tabsArea}
           actionsArea={[standaloneSelectionArea, standaloneUtilityArea].filter(Boolean)}
           paginationArea={createCardProPagination({
