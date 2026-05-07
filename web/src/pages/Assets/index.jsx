@@ -182,12 +182,17 @@ const Assets = () => {
 
   const masonryColumnCount = useMemo(() => {
     if (!shellWidth) return 1;
-    const minCardWidth = shellWidth <= 720 ? 180 : 260;
-    const maxColumns = Math.max(
-      1,
-      Math.min(6, Math.floor(shellWidth / minCardWidth)),
-    );
-    return Math.max(1, Math.min(assets.length || 1, maxColumns));
+    let preferredColumns = 5;
+    if (shellWidth <= 420) {
+      preferredColumns = 1;
+    } else if (shellWidth <= 780) {
+      preferredColumns = 2;
+    } else if (shellWidth <= 1180) {
+      preferredColumns = 3;
+    } else if (shellWidth <= 1540) {
+      preferredColumns = 4;
+    }
+    return Math.max(1, Math.min(assets.length || 1, preferredColumns));
   }, [assets.length, shellWidth]);
 
   const getTimeRangeParams = useCallback(() => {
