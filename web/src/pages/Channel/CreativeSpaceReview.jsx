@@ -18,15 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Card } from '@douyinfe/semi-ui';
 import SettingsInspirationReview from '../Setting/Operation/SettingsInspirationReview';
 
 const CreativeSpaceReviewPage = () => {
   return (
     <div className='mt-[60px] px-2'>
-      <Card>
-        <SettingsInspirationReview />
-      </Card>
+      <SettingsInspirationReview standalone />
     </div>
   );
 };

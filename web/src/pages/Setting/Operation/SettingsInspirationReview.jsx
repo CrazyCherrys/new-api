@@ -42,13 +42,17 @@ import {
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 import { API, showError, showSuccess } from '../../../helpers';
+import CardPro from '../../../components/common/ui/CardPro';
+import { createCardProPagination } from '../../../helpers/utils';
+import { useIsMobile } from '../../../hooks/common/useIsMobile';
 
 const { Paragraph } = Typography;
 
 const PAGE_SIZE = 10;
 
-const SettingsInspirationReview = () => {
+const SettingsInspirationReview = ({ standalone = false }) => {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const [status, setStatus] = useState('pending');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -285,6 +289,156 @@ const SettingsInspirationReview = () => {
     return dayjs(timestamp * 1000).format('YYYY/MM/DD HH:mm');
   };
 
+  const descriptionArea = (
+    <div className='creative-review-overview'>
+      <div className='creative-review-overview-title'>{t('灵感审核')}</div>
+      <div className='creative-review-overview-text'>
+        {t('审核用户提交的图片资产，通过后会公开显示在灵感')}
+      </div>
+    </div>
+  );
+
+  const tabsArea = (
+    <Tabs
+      type='button'
+      activeKey={status}
+      onChange={(key) => {
+        setStatus(key);
+        setPage(1);
+      }}
+    >
+      {Object.entries(statusMeta).map(([key, meta]) => (
+        <TabPane key={key} itemKey={key} tab={meta.label} />
+      ))}
+    </Tabs>
+  );
+
+  const standaloneSelectionArea = hasSelection ? (
+    <div className='creative-review-selection-bar'>
+      <Tag color='blue' size='large'>
+        {t('已选择 {{selected}} / {{total}}', {
+          selected: selectedSubmissions.length,
+          total: submissions.length,
+        })}
+      </Tag>
+      <div className='creative-review-selection-actions'>
+        <Button
+          theme='light'
+          type='primary'
+          loading={bulkProcessing}
+          onClick={() => runBulkReview(selectedSubmissions, 'approved')}
+        >
+          {t('批量通过')}
+        </Button>
+        <Button
+          theme='light'
+          type='danger'
+          loading={bulkProcessing}
+          onClick={() => {
+            setBulkRejectReason('');
+            setBulkRejectOpen(true);
+          }}
+        >
+          {t('批量驳回')}
+        </Button>
+        <Button
+          theme='light'
+          type='secondary'
+          loading={bulkProcessing}
+          onClick={() => {
+            Modal.confirm({
+              title: t('确认删除所选投稿？'),
+              content: t('此修改将不可逆'),
+              onOk: () => runBulkDelete(selectedSubmissions),
+            });
+          }}
+        >
+          {t('批量删除')}
+        </Button>
+        <Button onClick={clearSelection}>{t('清空选择')}</Button>
+      </div>
+    </div>
+  ) : null;
+
+  const standaloneUtilityArea = (
+    <div className='creative-review-toolbar-actions'>
+      <Button
+        type='tertiary'
+        icon={<IconCheckCircleStroked />}
+        onClick={toggleCurrentPageSelection}
+      >
+        {allCurrentSelected ? t('取消全选当前页') : t('全选当前页')}
+      </Button>
+      <Button
+        theme='light'
+        type='secondary'
+        icon={<IconRefresh />}
+        onClick={() => loadSubmissions(status, page)}
+      >
+        {t('刷新')}
+      </Button>
+    </div>
+  );
+
+  const embeddedToolbarActions = (
+    <div className='creative-review-toolbar-actions'>
+      {hasSelection && (
+        <>
+          <Tag color='blue'>
+            {t('已选择 {{selected}} / {{total}}', {
+              selected: selectedSubmissions.length,
+              total: submissions.length,
+            })}
+          </Tag>
+          <Button
+            type='primary'
+            loading={bulkProcessing}
+            onClick={() => runBulkReview(selectedSubmissions, 'approved')}
+          >
+            {t('批量通过')}
+          </Button>
+          <Button
+            type='danger'
+            loading={bulkProcessing}
+            onClick={() => {
+              setBulkRejectReason('');
+              setBulkRejectOpen(true);
+            }}
+          >
+            {t('批量驳回')}
+          </Button>
+          <Button
+            type='secondary'
+            loading={bulkProcessing}
+            onClick={() => {
+              Modal.confirm({
+                title: t('确认删除所选投稿？'),
+                content: t('此修改将不可逆'),
+                onOk: () => runBulkDelete(selectedSubmissions),
+              });
+            }}
+          >
+            {t('批量删除')}
+          </Button>
+          <Button onClick={clearSelection}>{t('清空选择')}</Button>
+        </>
+      )}
+      <Button
+        type='tertiary'
+        icon={<IconCheckCircleStroked />}
+        onClick={toggleCurrentPageSelection}
+      >
+        {allCurrentSelected ? t('取消全选当前页') : t('全选当前页')}
+      </Button>
+      <Button
+        icon={<IconRefresh />}
+        onClick={() => loadSubmissions(status, page)}
+      >
+        {t('刷新')}
+      </Button>
+    </div>
+  );
+
   const renderSubmission = (item) => {
     const meta = statusMeta[item.status] || statusMeta.pending;
     return (
@@ -339,16 +493,18 @@ const SettingsInspirationReview = () => {
         <div className='creative-review-actions'>
           {item.status !== 'approved' && (
             <Button
+              theme='light'
               type='primary'
               icon={<IconCheckCircleStroked />}
               loading={reviewingId === item.id}
               onClick={() => reviewSubmission(item, 'approved')}
-              >
+            >
               {t('通过')}
             </Button>
           )}
           <Button
-            type='tertiary'
+            theme='light'
+            type='secondary'
             icon={<IconDelete />}
             loading={deleteLoading && deleteTarget?.id === item.id}
             onClick={() => setDeleteTarget(item)}
@@ -357,6 +513,7 @@ const SettingsInspirationReview = () => {
           </Button>
           {item.status !== 'rejected' && (
             <Button
+              theme='light'
               type='danger'
               icon={<IconClose />}
               loading={reviewingId === item.id}
@@ -373,18 +530,61 @@ const SettingsInspirationReview = () => {
     );
   };
 
+  const reviewListContent = (
+    <Spin spinning={loading}>
+      {submissions.length > 0 ? (
+        <div className='creative-review-list'>{submissions.map(renderSubmission)}</div>
+      ) : (
+        <Empty
+          image={<IconImage size='extra-large' />}
+          title={t('暂无审核作品')}
+        />
+      )}
+    </Spin>
+  );
+
   return (
-    <Form.Section
-      text={t('灵感审核')}
-      extraText={t('审核用户提交的图片资产，通过后会公开显示在灵感')}
-    >
+    <>
       <style>{`
+        .creative-review-overview {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .creative-review-overview-title {
+          font-size: 18px;
+          font-weight: 700;
+          color: var(--semi-color-text-0);
+          line-height: 1.3;
+        }
+        .creative-review-overview-text {
+          font-size: 13px;
+          line-height: 1.5;
+          color: var(--semi-color-text-2);
+        }
         .creative-review-toolbar {
           display: flex;
           justify-content: space-between;
           align-items: center;
           gap: 12px;
           margin-bottom: 12px;
+          flex-wrap: wrap;
+        }
+        .creative-review-selection-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+          padding: 12px 14px;
+          border: 1px solid var(--semi-color-border);
+          border-radius: 14px;
+          background: var(--semi-color-fill-0);
+        }
+        .creative-review-selection-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
           flex-wrap: wrap;
         }
         .creative-review-toolbar-actions {
@@ -409,15 +609,26 @@ const SettingsInspirationReview = () => {
           grid-template-columns: 112px minmax(0, 1fr) auto;
           gap: 14px;
           align-items: stretch;
-          padding: 12px;
+          padding: 14px;
           border: 1px solid var(--semi-color-border);
-          border-radius: 8px;
-          background: var(--semi-color-bg-1);
+          border-radius: 16px;
+          background: linear-gradient(
+            180deg,
+            var(--semi-color-bg-0) 0%,
+            var(--semi-color-fill-0) 100%
+          );
+          box-shadow: 0 18px 38px -34px rgba(15, 23, 42, 0.4);
+          transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+        }
+        .creative-review-item:hover {
+          transform: translateY(-1px);
+          border-color: var(--semi-color-primary-light-default);
+          box-shadow: 0 22px 44px -34px rgba(15, 23, 42, 0.5);
         }
         .creative-review-preview {
           width: 112px;
           aspect-ratio: 1 / 1;
-          border-radius: 8px;
+          border-radius: 12px;
           overflow: hidden;
           background: var(--semi-color-fill-0);
           display: flex;
@@ -465,9 +676,14 @@ const SettingsInspirationReview = () => {
         }
         .creative-review-actions {
           display: flex;
+          flex-direction: column;
           gap: 8px;
           justify-content: center;
-          min-width: 86px;
+          min-width: 112px;
+        }
+        .creative-review-actions .semi-button {
+          width: 100%;
+          justify-content: center;
         }
         .creative-review-pagination {
           display: flex;
@@ -475,6 +691,15 @@ const SettingsInspirationReview = () => {
           padding: 14px 0 0;
         }
         @media (max-width: 720px) {
+          .creative-review-selection-bar {
+            align-items: stretch;
+          }
+          .creative-review-selection-actions {
+            width: 100%;
+          }
+          .creative-review-selection-actions .semi-button {
+            flex: 1 1 calc(50% - 8px);
+          }
           .creative-review-item {
             grid-template-columns: 86px minmax(0, 1fr);
           }
@@ -484,103 +709,57 @@ const SettingsInspirationReview = () => {
           .creative-review-actions {
             flex-direction: row;
             justify-content: flex-start;
+            min-width: 0;
+            grid-column: 1 / -1;
+            flex-wrap: wrap;
+          }
+          .creative-review-actions .semi-button {
+            width: auto;
           }
         }
       `}</style>
-      <div className='creative-review-toolbar'>
-        <Tabs
-          type='button'
-          activeKey={status}
-          onChange={(key) => {
-            setStatus(key);
-            setPage(1);
-          }}
+      {standalone ? (
+        <CardPro
+          type='type3'
+          descriptionArea={descriptionArea}
+          tabsArea={tabsArea}
+          actionsArea={[standaloneSelectionArea, standaloneUtilityArea].filter(Boolean)}
+          paginationArea={createCardProPagination({
+            currentPage: page,
+            pageSize: PAGE_SIZE,
+            total,
+            onPageChange: setPage,
+            onPageSizeChange: () => {},
+            showSizeChanger: false,
+            isMobile,
+            t,
+          })}
+          t={t}
         >
-          {Object.entries(statusMeta).map(([key, meta]) => (
-            <TabPane key={key} itemKey={key} tab={meta.label} />
-          ))}
-        </Tabs>
-        <div className='creative-review-toolbar-actions'>
-          {hasSelection && (
-            <>
-              <Tag color='blue'>
-                {t('已选择 {{selected}} / {{total}}', {
-                  selected: selectedSubmissions.length,
-                  total: submissions.length,
-                })}
-              </Tag>
-              <Button
-                type='primary'
-                loading={bulkProcessing}
-                onClick={() => runBulkReview(selectedSubmissions, 'approved')}
-              >
-                {t('批量通过')}
-              </Button>
-              <Button
-                type='danger'
-                loading={bulkProcessing}
-                onClick={() => {
-                  setBulkRejectReason('');
-                  setBulkRejectOpen(true);
-                }}
-              >
-                {t('批量驳回')}
-              </Button>
-              <Button
-                type='secondary'
-                loading={bulkProcessing}
-                onClick={() => {
-                  Modal.confirm({
-                    title: t('确认删除所选投稿？'),
-                    content: t('此修改将不可逆'),
-                    onOk: () => runBulkDelete(selectedSubmissions),
-                  });
-                }}
-              >
-                {t('批量删除')}
-              </Button>
-              <Button onClick={clearSelection}>{t('清空选择')}</Button>
-            </>
-          )}
-          <Button
-            type='tertiary'
-            icon={<IconCheckCircleStroked />}
-            onClick={toggleCurrentPageSelection}
-          >
-            {allCurrentSelected ? t('取消全选当前页') : t('全选当前页')}
-          </Button>
-          <Button
-            icon={<IconRefresh />}
-            onClick={() => loadSubmissions(status, page)}
-          >
-            {t('刷新')}
-          </Button>
-        </div>
-      </div>
-      <Spin spinning={loading}>
-        {submissions.length > 0 ? (
-          <>
-            <div className='creative-review-list'>
-              {submissions.map(renderSubmission)}
+          {reviewListContent}
+        </CardPro>
+      ) : (
+        <Form.Section
+          text={t('灵感审核')}
+          extraText={t('审核用户提交的图片资产，通过后会公开显示在灵感')}
+        >
+          <div className='creative-review-toolbar'>
+            {tabsArea}
+            {embeddedToolbarActions}
+          </div>
+          {reviewListContent}
+          {total > PAGE_SIZE && (
+            <div className='creative-review-pagination'>
+              <Pagination
+                total={total}
+                currentPage={page}
+                pageSize={PAGE_SIZE}
+                onPageChange={setPage}
+              />
             </div>
-            {total > PAGE_SIZE && (
-              <div className='creative-review-pagination'>
-                <Pagination
-                  total={total}
-                  currentPage={page}
-                  pageSize={PAGE_SIZE}
-                  onPageChange={setPage}
-                />
-              </div>
-            )}
-          </>
-        ) : (
-          <Empty
-            image={<IconImage size='extra-large' />}
-            title={t('暂无审核作品')}
-          />
-        )}
-      </Spin>
+          )}
+        </Form.Section>
+      )}
       <Modal
         visible={Boolean(rejectTarget)}
         title={t('驳回投稿')}
@@ -632,7 +811,7 @@ const SettingsInspirationReview = () => {
       >
         {t('此修改将不可逆')}
       </Modal>
-    </Form.Section>
+    </>
   );
 };
 
