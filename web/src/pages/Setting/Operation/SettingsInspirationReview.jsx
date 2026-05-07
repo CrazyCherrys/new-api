@@ -360,26 +360,6 @@ const SettingsInspirationReview = ({ standalone = false }) => {
     </div>
   ) : null;
 
-  const standaloneUtilityArea = (
-    <div className='creative-review-toolbar-actions'>
-      <Button
-        type='tertiary'
-        icon={<IconCheckCircleStroked />}
-        onClick={toggleCurrentPageSelection}
-      >
-        {allCurrentSelected ? t('取消全选当前页') : t('全选当前页')}
-      </Button>
-      <Button
-        theme='light'
-        type='secondary'
-        icon={<IconRefresh />}
-        onClick={() => loadSubmissions(status, page)}
-      >
-        {t('刷新')}
-      </Button>
-    </div>
-  );
-
   const embeddedToolbarActions = (
     <div className='creative-review-toolbar-actions'>
       {hasSelection && (
@@ -570,6 +550,21 @@ const SettingsInspirationReview = ({ standalone = false }) => {
           margin-bottom: 12px;
           flex-wrap: wrap;
         }
+        .creative-review-toolbar-single-line {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          flex-wrap: nowrap;
+          margin-bottom: 12px;
+        }
+        .creative-review-toolbar-single-line .semi-tabs {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+        .creative-review-toolbar-single-line > .semi-button {
+          flex-shrink: 0;
+        }
         .creative-review-selection-bar {
           display: flex;
           align-items: center;
@@ -592,6 +587,9 @@ const SettingsInspirationReview = ({ standalone = false }) => {
           flex-wrap: wrap;
           gap: 8px;
           align-items: center;
+        }
+        .creative-review-toolbar-actions-no-wrap {
+          flex-wrap: nowrap;
         }
         .creative-review-head-left {
           min-width: 0;
@@ -694,6 +692,9 @@ const SettingsInspirationReview = ({ standalone = false }) => {
           .creative-review-selection-bar {
             align-items: stretch;
           }
+          .creative-review-toolbar-single-line {
+            flex-wrap: wrap;
+          }
           .creative-review-selection-actions {
             width: 100%;
           }
@@ -721,8 +722,20 @@ const SettingsInspirationReview = ({ standalone = false }) => {
       {standalone ? (
         <CardPro
           type='type3'
-          tabsArea={tabsArea}
-          actionsArea={[standaloneSelectionArea, standaloneUtilityArea].filter(Boolean)}
+          descriptionArea={null}
+          tabsArea={
+            <div className='creative-review-toolbar-single-line'>
+              {tabsArea}
+              <Button
+                type='tertiary'
+                icon={<IconCheckCircleStroked />}
+                onClick={toggleCurrentPageSelection}
+              >
+                {allCurrentSelected ? t('取消全选当前页') : t('全选当前页')}
+              </Button>
+            </div>
+          }
+          actionsArea={standaloneSelectionArea}
           paginationArea={createCardProPagination({
             currentPage: page,
             pageSize: PAGE_SIZE,
