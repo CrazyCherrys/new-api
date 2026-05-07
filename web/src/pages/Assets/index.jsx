@@ -886,13 +886,15 @@ const Assets = () => {
           overflow: hidden;
         }
         .asset-detail-preview-button {
-          display: block;
+          display: flex;
           width: 100%;
           padding: 0;
           border: 0;
           background: transparent;
           cursor: zoom-in;
           line-height: 0;
+          align-items: center;
+          justify-content: center;
         }
         .asset-detail-preview-button img {
           display: block;
