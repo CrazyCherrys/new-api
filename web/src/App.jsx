@@ -188,10 +188,14 @@ function App() {
         />
         <Route
           path='/image-generation'
-          element={<Navigate to={`/ai-generation${location.search}`} replace />}
+          element={<Navigate to={`/canvas${location.search}`} replace />}
         />
         <Route
           path='/ai-generation'
+          element={<Navigate to={`/canvas${location.search}`} replace />}
+        />
+        <Route
+          path='/canvas'
           element={
             <PrivateRoute>
               <ImageGeneration />

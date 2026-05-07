@@ -316,7 +316,7 @@ export default function SettingsWorker(props) {
                 <Form.InputNumber
                   field={'worker_setting.video_timeout'}
                   label={t('视频任务超时（秒）')}
-                  extraText={t('当前不影响 /ai-generation 图片生成请求')}
+                  extraText={t('当前不影响 /canvas 图片生成请求')}
                   min={10}
                   max={7200}
                   onChange={handleFieldChange('worker_setting.video_timeout')}
@@ -359,7 +359,7 @@ export default function SettingsWorker(props) {
                   field={'worker_setting.polling_interval'}
                   label={t('轮询间隔（秒）')}
                   extraText={t(
-                    '当前 /ai-generation 使用实时任务推送，不读取此项',
+                    '当前 /canvas 使用实时任务推送，不读取此项',
                   )}
                   min={1}
                   max={60}

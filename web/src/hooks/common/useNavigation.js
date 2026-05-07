@@ -22,9 +22,16 @@ import { useMemo } from 'react';
 const normalizeHeaderNavModules = (modules) => {
   if (!modules || typeof modules !== 'object') return modules;
   const nextModules = { ...modules };
+  if (
+    nextModules.canvas === undefined &&
+    nextModules.imageGeneration !== undefined
+  ) {
+    nextModules.canvas = nextModules.imageGeneration;
+  }
   if (nextModules.inspiration === undefined && nextModules.creativeSpace !== undefined) {
     nextModules.inspiration = nextModules.creativeSpace;
   }
+  delete nextModules.imageGeneration;
   delete nextModules.creativeSpace;
   return nextModules;
 };
@@ -35,7 +42,7 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
     const defaultModules = {
       home: true,
       console: true,
-      imageGeneration: true,
+      canvas: true,
       inspiration: true,
       pricing: true,
       docs: true,
@@ -60,9 +67,9 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
         to: '/console',
       },
       {
-        text: t('AI绘画'),
-        itemKey: 'imageGeneration',
-        to: '/ai-generation',
+        text: t('画布'),
+        itemKey: 'canvas',
+        to: '/canvas',
       },
       {
         text: t('灵感'),

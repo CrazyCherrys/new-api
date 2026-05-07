@@ -534,7 +534,7 @@ const Assets = () => {
   };
 
   const openSourceTask = (asset) => {
-    navigate(`/ai-generation?task_id=${asset.task_id || asset.id}`);
+    navigate(`/canvas?task_id=${asset.task_id || asset.id}`);
   };
 
   const submitToInspiration = async () => {
@@ -1085,7 +1085,7 @@ const Assets = () => {
             <Button
               type='primary'
               icon={<IconImage />}
-              onClick={() => navigate('/ai-generation')}
+              onClick={() => navigate('/canvas')}
             >
               {t('去生成图片')}
             </Button>
@@ -1252,7 +1252,7 @@ const Assets = () => {
                 <Button
                   type='primary'
                   icon={<IconImage />}
-                  onClick={() => navigate('/ai-generation')}
+                  onClick={() => navigate('/canvas')}
                 >
                   {t('去生成图片')}
                 </Button>

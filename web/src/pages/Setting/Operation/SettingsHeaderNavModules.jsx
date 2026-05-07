@@ -41,7 +41,7 @@ export default function SettingsHeaderNavModules(props) {
   const defaultHeaderNavModules = {
     home: true,
     console: true,
-    imageGeneration: true,
+    canvas: true,
     inspiration: true,
     pricing: {
       enabled: true,
@@ -60,11 +60,18 @@ export default function SettingsHeaderNavModules(props) {
     if (!modules || typeof modules !== 'object') return modules;
     const nextModules = { ...modules };
     if (
+      nextModules.canvas === undefined &&
+      nextModules.imageGeneration !== undefined
+    ) {
+      nextModules.canvas = nextModules.imageGeneration;
+    }
+    if (
       nextModules.inspiration === undefined &&
       nextModules.creativeSpace !== undefined
     ) {
       nextModules.inspiration = nextModules.creativeSpace;
     }
+    delete nextModules.imageGeneration;
     delete nextModules.creativeSpace;
     return nextModules;
   };
@@ -175,9 +182,9 @@ export default function SettingsHeaderNavModules(props) {
       description: t('用户控制面板，管理账户'),
     },
     {
-      key: 'imageGeneration',
-      title: t('AI绘画'),
-      description: t('图片生成入口，需要登录访问'),
+      key: 'canvas',
+      title: t('画布'),
+      description: t('画布入口，需要登录访问'),
     },
     {
       key: 'inspiration',

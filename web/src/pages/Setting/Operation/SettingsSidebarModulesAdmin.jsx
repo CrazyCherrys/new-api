@@ -44,7 +44,7 @@ export default function SettingsSidebarModulesAdmin(props) {
     chat: {
       enabled: true,
       playground: true,
-      'ai-generation': true,
+      canvas: true,
       chat: true,
     },
     console: {
@@ -108,7 +108,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       chat: {
         enabled: true,
         playground: true,
-        'ai-generation': true,
+        canvas: true,
         chat: true,
       },
       console: {
@@ -188,7 +188,7 @@ export default function SettingsSidebarModulesAdmin(props) {
           chat: {
             enabled: true,
             playground: true,
-            'ai-generation': true,
+            canvas: true,
             chat: true,
           },
           console: {
@@ -234,9 +234,9 @@ export default function SettingsSidebarModulesAdmin(props) {
           description: t('AI模型测试环境'),
         },
         {
-          key: 'ai-generation',
-          title: t('AI绘画'),
-          description: t('AI图片生成'),
+          key: 'canvas',
+          title: t('画布'),
+          description: t('画布入口，需要登录访问'),
         },
         { key: 'chat', title: t('聊天'), description: t('聊天会话管理') },
       ],

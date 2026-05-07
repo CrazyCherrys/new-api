@@ -50,7 +50,7 @@ const routerMap = {
   models: '/console/models',
   deployment: '/console/deployment',
   playground: '/console/playground',
-  'ai-generation': '/ai-generation',
+  canvas: '/canvas',
   personal: '/console/personal',
   'model-mapping': '/console/model-mapping',
 };
@@ -229,9 +229,9 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/playground',
       },
       {
-        text: t('AI绘画'),
-        itemKey: 'ai-generation',
-        to: '/ai-generation',
+        text: t('画布'),
+        itemKey: 'canvas',
+        to: '/canvas',
       },
       {
         text: t('聊天'),

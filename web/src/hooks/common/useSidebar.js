@@ -29,7 +29,7 @@ export const DEFAULT_ADMIN_CONFIG = {
   chat: {
     enabled: true,
     playground: true,
-    'ai-generation': true,
+    canvas: true,
     chat: true,
   },
   console: {
@@ -64,7 +64,8 @@ const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
 const SIDEBAR_MODULE_ALIASES = {
   chat: {
-    'image-generation': 'ai-generation',
+    'image-generation': 'canvas',
+    'ai-generation': 'canvas',
   },
   admin: {
     'creative-space-review': 'inspiration-review',
