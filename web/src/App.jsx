@@ -52,7 +52,7 @@ import ModelDeploymentPage from './pages/ModelDeployment';
 import ModelMapping from './pages/ModelMapping';
 import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
-import CreativeSpaceReviewPage from './pages/Channel/CreativeSpaceReview';
+import InspirationReviewPage from './pages/Channel/InspirationReview';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -151,12 +151,16 @@ function App() {
           }
         />
         <Route
-          path='/console/creative-space-review'
+          path='/console/inspiration-review'
           element={
             <AdminRoute>
-              <CreativeSpaceReviewPage />
+              <InspirationReviewPage />
             </AdminRoute>
           }
+        />
+        <Route
+          path='/console/creative-space-review'
+          element={<Navigate to='/console/inspiration-review' replace />}
         />
         <Route
           path='/console/model-mapping'

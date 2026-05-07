@@ -514,12 +514,7 @@ const SettingsInspirationReview = ({ standalone = false }) => {
     <Spin spinning={loading}>
       {submissions.length > 0 ? (
         <div className='creative-review-list'>{submissions.map(renderSubmission)}</div>
-      ) : (
-        <Empty
-          image={<IconImage size='extra-large' />}
-          title={t('暂无审核作品')}
-        />
-      )}
+      ) : null}
     </Spin>
   );
 

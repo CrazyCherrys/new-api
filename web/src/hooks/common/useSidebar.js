@@ -49,7 +49,7 @@ export const DEFAULT_ADMIN_CONFIG = {
   admin: {
     enabled: true,
     channel: true,
-    'creative-space-review': true,
+    'inspiration-review': true,
     'model-mapping': true,
     models: true,
     deployment: true,
@@ -67,7 +67,7 @@ const SIDEBAR_MODULE_ALIASES = {
     'image-generation': 'ai-generation',
   },
   admin: {
-    'inspiration-review': 'creative-space-review',
+    'creative-space-review': 'inspiration-review',
   },
 };
 

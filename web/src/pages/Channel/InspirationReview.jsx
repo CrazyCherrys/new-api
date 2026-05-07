@@ -20,7 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import SettingsInspirationReview from '../Setting/Operation/SettingsInspirationReview';
 
-const CreativeSpaceReviewPage = () => {
+const InspirationReviewPage = () => {
   return (
     <div className='mt-[60px] px-2'>
       <SettingsInspirationReview standalone />
@@ -28,4 +28,4 @@ const CreativeSpaceReviewPage = () => {
   );
 };
 
-export default CreativeSpaceReviewPage;
+export default InspirationReviewPage;

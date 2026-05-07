@@ -42,7 +42,7 @@ const routerMap = {
   log: '/console/log',
   midjourney: '/console/midjourney',
   setting: '/console/setting',
-  'creative-space-review': '/console/creative-space-review',
+  'inspiration-review': '/console/inspiration-review',
   about: '/about',
   detail: '/console',
   pricing: '/pricing',
@@ -163,9 +163,9 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {
-        text: t('创意空间审核'),
-        itemKey: 'creative-space-review',
-        to: '/console/creative-space-review',
+        text: t('灵感审核'),
+        itemKey: 'inspiration-review',
+        to: '/console/inspiration-review',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

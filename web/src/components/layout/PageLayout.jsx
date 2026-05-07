@@ -60,7 +60,7 @@ const PageLayout = () => {
     '/console/task',
     '/console/models',
     '/console/assets',
-    '/console/creative-space-review',
+    '/console/inspiration-review',
     '/pricing',
     '/ai-generation',
     '/creative-space',
