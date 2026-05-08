@@ -3,54 +3,39 @@ package service
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
-var openAIImageSizeMappings = map[string]map[string]string{
-	"1K": {
-		"1:1":  "1024x1024",
-		"4:3":  "1024x1024",
-		"3:4":  "1024x1024",
-		"4:5":  "1024x1280",
-		"5:4":  "1280x1024",
-		"3:2":  "1536x1024",
-		"16:9": "1536x1024",
-		"21:9": "1536x1024",
-		"2:3":  "1024x1536",
-		"9:16": "1024x1536",
-		"9:21": "1024x1536",
-	},
-	"2K": {
-		"1:1":  "2048x2048",
-		"4:3":  "2048x2048",
-		"4:5":  "2048x2560",
-		"5:4":  "2560x2048",
-		"3:2":  "2048x1152",
-		"16:9": "2048x1152",
-		"21:9": "2048x1152",
-		"2:3":  "2160x3840",
-		"9:16": "2160x3840",
-		"3:4":  "2160x3840",
-		"9:21": "2160x3840",
-	},
-	"4K": {
-		"1:1":  "2048x2048",
-		"4:3":  "2048x2048",
-		"3:4":  "2048x2048",
-		"4:5":  "3072x3840",
-		"5:4":  "3840x3072",
-		"3:2":  "3840x2160",
-		"16:9": "3840x2160",
-		"21:9": "3840x2160",
-		"2:3":  "2160x3840",
-		"9:16": "2160x3840",
-		"9:21": "2160x3840",
-	},
-}
+const (
+	openAIImageSizeMultiple = 16
+	openAIImageMaxEdge      = 3840
+	openAIImageMaxAspect    = 3.0
+	openAIImageMinPixels    = 655_360
+	openAIImageMaxPixels    = 8_294_400
+)
 
-func normalizeOpenAIImageResolution(value string) string {
-	return strings.ToUpper(strings.TrimSpace(value))
+var (
+	openAIImageSizePattern = regexp.MustCompile(`^\s*(\d+)\s*[xX×]\s*(\d+)\s*$`)
+	openAIImageRatioPattern = regexp.MustCompile(`^\s*(\d+(?:\.\d+)?)\s*[:xX×]\s*(\d+(?:\.\d+)?)\s*$`)
+)
+
+type openAIImageTier string
+
+const (
+	openAIImageTier1K openAIImageTier = "1K"
+	openAIImageTier2K openAIImageTier = "2K"
+	openAIImageTier4K openAIImageTier = "4K"
+)
+
+func normalizeOpenAIImageSizeTier(value string) openAIImageTier {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case string(openAIImageTier1K), string(openAIImageTier2K), string(openAIImageTier4K):
+		return openAIImageTier(strings.ToUpper(strings.TrimSpace(value)))
+	default:
+		return ""
+	}
 }
 
 func normalizeOpenAIImageAspectRatio(value string) string {
@@ -69,115 +54,162 @@ func normalizeOpenAIImageAspectRatio(value string) string {
 	return trimmed
 }
 
-// ResolveOpenAIImageSize maps an image resolution tier and aspect ratio to a concrete OpenAI size.
-// It returns the resolved size string and whether the pair was explicitly understood.
-//
-// If the caller passes aspectRatio=auto, the size is intentionally auto-selected and returns true.
-// If the pair is missing or unsupported, the function returns auto with false so callers can
-// decide whether to keep auto or fall back to a legacy explicit size.
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func roundToMultiple(value float64, multiple int) int {
+	return maxInt(multiple, int(math.Round(value/float64(multiple)))*multiple)
+}
+
+func floorToMultiple(value float64, multiple int) int {
+	return maxInt(multiple, int(math.Floor(value/float64(multiple)))*multiple)
+}
+
+func ceilToMultiple(value float64, multiple int) int {
+	return maxInt(multiple, int(math.Ceil(value/float64(multiple)))*multiple)
+}
+
+func normalizeDimensions(width, height int) (int, int) {
+	normalizedWidth := roundToMultiple(float64(width), openAIImageSizeMultiple)
+	normalizedHeight := roundToMultiple(float64(height), openAIImageSizeMultiple)
+
+	scaleToFit := func(scale float64) {
+		normalizedWidth = floorToMultiple(float64(normalizedWidth)*scale, openAIImageSizeMultiple)
+		normalizedHeight = floorToMultiple(float64(normalizedHeight)*scale, openAIImageSizeMultiple)
+	}
+
+	scaleToFill := func(scale float64) {
+		normalizedWidth = ceilToMultiple(float64(normalizedWidth)*scale, openAIImageSizeMultiple)
+		normalizedHeight = ceilToMultiple(float64(normalizedHeight)*scale, openAIImageSizeMultiple)
+	}
+
+	for i := 0; i < 4; i++ {
+		maxEdge := maxInt(normalizedWidth, normalizedHeight)
+		if maxEdge > openAIImageMaxEdge {
+			scaleToFit(float64(openAIImageMaxEdge) / float64(maxEdge))
+		}
+
+		if float64(normalizedWidth)/float64(normalizedHeight) > openAIImageMaxAspect {
+			normalizedWidth = floorToMultiple(float64(normalizedHeight)*openAIImageMaxAspect, openAIImageSizeMultiple)
+		} else if float64(normalizedHeight)/float64(normalizedWidth) > openAIImageMaxAspect {
+			normalizedHeight = floorToMultiple(float64(normalizedWidth)*openAIImageMaxAspect, openAIImageSizeMultiple)
+		}
+
+		pixels := normalizedWidth * normalizedHeight
+		if pixels > openAIImageMaxPixels {
+			scaleToFit(math.Sqrt(float64(openAIImageMaxPixels) / float64(pixels)))
+		} else if pixels < openAIImageMinPixels {
+			scaleToFill(math.Sqrt(float64(openAIImageMinPixels) / float64(pixels)))
+		}
+	}
+
+	return normalizedWidth, normalizedHeight
+}
+
+func normalizeImageSize(size string) string {
+	trimmed := strings.TrimSpace(size)
+	match := openAIImageSizePattern.FindStringSubmatch(trimmed)
+	if len(match) != 3 {
+		return trimmed
+	}
+
+	width, err := strconv.Atoi(match[1])
+	if err != nil {
+		return trimmed
+	}
+	height, err := strconv.Atoi(match[2])
+	if err != nil {
+		return trimmed
+	}
+
+	normalizedWidth, normalizedHeight := normalizeDimensions(width, height)
+	return fmt.Sprintf("%dx%d", normalizedWidth, normalizedHeight)
+}
+
+func parseRatio(ratio string) (float64, float64, bool) {
+	match := openAIImageRatioPattern.FindStringSubmatch(strings.TrimSpace(ratio))
+	if len(match) != 3 {
+		return 0, 0, false
+	}
+
+	widthRatio, err := strconv.ParseFloat(match[1], 64)
+	if err != nil || widthRatio <= 0 {
+		return 0, 0, false
+	}
+	heightRatio, err := strconv.ParseFloat(match[2], 64)
+	if err != nil || heightRatio <= 0 {
+		return 0, 0, false
+	}
+
+	return widthRatio, heightRatio, true
+}
+
+func calculateOpenAIImageSize(tier openAIImageTier, ratio string) string {
+	widthRatio, heightRatio, ok := parseRatio(ratio)
+	if !ok {
+		return ""
+	}
+
+	if widthRatio == heightRatio {
+		side := 1024
+		switch tier {
+		case openAIImageTier1K:
+			side = 1024
+		case openAIImageTier2K:
+			side = 2048
+		case openAIImageTier4K:
+			side = 3840
+		default:
+			return ""
+		}
+		return normalizeImageSize(fmt.Sprintf("%dx%d", side, side))
+	}
+
+	switch tier {
+	case openAIImageTier1K:
+		shortSide := 1024
+		if widthRatio > heightRatio {
+			width := roundToMultiple(float64(shortSide)*widthRatio/heightRatio, openAIImageSizeMultiple)
+			return fmt.Sprintf("%dx%d", width, shortSide)
+		}
+		height := roundToMultiple(float64(shortSide)*heightRatio/widthRatio, openAIImageSizeMultiple)
+		return fmt.Sprintf("%dx%d", shortSide, height)
+	case openAIImageTier2K, openAIImageTier4K:
+		longSide := 2048
+		if tier == openAIImageTier4K {
+			longSide = 3840
+		}
+		if widthRatio > heightRatio {
+			height := roundToMultiple(float64(longSide)*heightRatio/widthRatio, openAIImageSizeMultiple)
+			return normalizeImageSize(fmt.Sprintf("%dx%d", longSide, height))
+		}
+		width := roundToMultiple(float64(longSide)*widthRatio/heightRatio, openAIImageSizeMultiple)
+		return normalizeImageSize(fmt.Sprintf("%dx%d", width, longSide))
+	default:
+		return ""
+	}
+}
+
+// ResolveOpenAIImageSize maps resolution + aspect ratio to the same normalized size
+// calculation used by the playground UI.
 func ResolveOpenAIImageSize(resolution, aspectRatio string) (string, bool) {
-	res := normalizeOpenAIImageResolution(resolution)
+	tier := normalizeOpenAIImageSizeTier(resolution)
 	ar := normalizeOpenAIImageAspectRatio(aspectRatio)
 
 	if ar == "auto" {
 		return "auto", true
 	}
-	if res == "" || ar == "" {
+	if tier == "" || ar == "" {
 		return "auto", false
 	}
 
-	if sizeByRatio, ok := openAIImageSizeMappings[res]; ok {
-		if size, ok := sizeByRatio[ar]; ok {
-			return size, true
-		}
+	size := calculateOpenAIImageSize(tier, ar)
+	if size == "" {
+		return "auto", false
 	}
-
-	return "auto", false
-}
-
-// AspectRatioDimensions represents width and height for a given aspect ratio
-type AspectRatioDimensions struct {
-	Width  int
-	Height int
-}
-
-// supportedAspectRatios defines the standard aspect ratios and their base dimensions
-// Based on gpt_image_playground reference implementation
-var supportedAspectRatios = map[string]AspectRatioDimensions{
-	"1:1":  {Width: 1024, Height: 1024},
-	"16:9": {Width: 1792, Height: 1024},
-	"9:16": {Width: 1024, Height: 1792},
-	"4:3":  {Width: 1408, Height: 1024},
-	"3:4":  {Width: 1024, Height: 1408},
-}
-
-// CalculateImageDimensions calculates width and height based on aspect ratio string
-// Supports standard ratios (1:1, 16:9, 9:16, 4:3, 3:4) and custom ratios (e.g., "3:2")
-// Returns width, height, and error if the ratio is invalid
-func CalculateImageDimensions(aspectRatio string) (int, int, error) {
-	normalized := normalizeOpenAIImageAspectRatio(aspectRatio)
-
-	if normalized == "" || normalized == "auto" {
-		// Default to 1:1 if not specified
-		return 1024, 1024, nil
-	}
-
-	// Check if it's a standard supported ratio
-	if dims, ok := supportedAspectRatios[normalized]; ok {
-		return dims.Width, dims.Height, nil
-	}
-
-	// Parse custom ratio (e.g., "3:2", "21:9")
-	parts := strings.Split(normalized, ":")
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("invalid aspect ratio format: %s", aspectRatio)
-	}
-
-	widthRatio, err := strconv.ParseFloat(parts[0], 64)
-	if err != nil || widthRatio <= 0 {
-		return 0, 0, fmt.Errorf("invalid width ratio: %s", parts[0])
-	}
-
-	heightRatio, err := strconv.ParseFloat(parts[1], 64)
-	if err != nil || heightRatio <= 0 {
-		return 0, 0, fmt.Errorf("invalid height ratio: %s", parts[1])
-	}
-
-	// Calculate dimensions maintaining the ratio
-	// Target total pixels around 1024*1024 = 1,048,576
-	const targetPixels = 1024 * 1024
-	ratio := widthRatio / heightRatio
-
-	// Calculate height first, then width to maintain ratio
-	height := math.Sqrt(float64(targetPixels) / ratio)
-	width := height * ratio
-
-	// Round to nearest multiple of 64 for better compatibility
-	finalWidth := int(math.Round(width/64) * 64)
-	finalHeight := int(math.Round(height/64) * 64)
-
-	// Ensure minimum dimensions
-	if finalWidth < 256 {
-		finalWidth = 256
-	}
-	if finalHeight < 256 {
-		finalHeight = 256
-	}
-
-	return finalWidth, finalHeight, nil
-}
-
-// FormatImageSize formats width and height into "WxH" string format
-func FormatImageSize(width, height int) string {
-	return fmt.Sprintf("%dx%d", width, height)
-}
-
-// ResolveImageSizeFromAspectRatio resolves aspect ratio to concrete size string
-// This is a convenience function combining CalculateImageDimensions and FormatImageSize
-func ResolveImageSizeFromAspectRatio(aspectRatio string) (string, error) {
-	width, height, err := CalculateImageDimensions(aspectRatio)
-	if err != nil {
-		return "", err
-	}
-	return FormatImageSize(width, height), nil
+	return size, true
 }
