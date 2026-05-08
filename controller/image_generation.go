@@ -556,31 +556,28 @@ func GetImageGenerationModels(c *gin.Context) {
 		return
 	}
 
-	// 获取所有绘画模型（model_type=2）
-	mappings, _, err := model.SearchModelMappings("", 2, 0, 1000)
+	// 获取所有启用的绘画模型
+	mappings, _, err := model.GetActiveImageModelMappings(0, 1000)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	// 过滤出 status=1 且 request_endpoint 不为空的记录
 	var models []gin.H
 	for _, mapping := range mappings {
-		if mapping.Status == 1 && mapping.RequestEndpoint != "" {
-			imageCapabilities, err := model.EffectiveImageCapabilities(mapping.ImageCapabilities)
-			if err != nil {
-				imageCapabilities = model.DefaultImageCapabilities()
-			}
-			models = append(models, gin.H{
-				"request_model":      mapping.RequestModel,
-				"display_name":       mapping.DisplayName,
-				"model_series":       mapping.ModelSeries,
-				"request_endpoint":   mapping.RequestEndpoint,
-				"resolutions":        mapping.Resolutions,
-				"aspect_ratios":      mapping.AspectRatios,
-				"image_capabilities": imageCapabilities,
-			})
+		imageCapabilities, err := model.EffectiveImageCapabilities(mapping.ImageCapabilities)
+		if err != nil {
+			imageCapabilities = model.DefaultImageCapabilities()
 		}
+		models = append(models, gin.H{
+			"request_model":      mapping.RequestModel,
+			"display_name":       mapping.DisplayName,
+			"model_series":       mapping.ModelSeries,
+			"request_endpoint":   mapping.RequestEndpoint,
+			"resolutions":        mapping.Resolutions,
+			"aspect_ratios":      mapping.AspectRatios,
+			"image_capabilities": imageCapabilities,
+		})
 	}
 
 	common.ApiSuccess(c, models)

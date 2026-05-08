@@ -13,7 +13,7 @@ type ImageGenerationTask struct {
 	UserId          int    `json:"user_id" gorm:"index;not null"`
 	ModelId         string `json:"model_id" gorm:"size:128;not null;index"`
 	Prompt          string `json:"prompt" gorm:"type:text;not null"`
-	RequestEndpoint string `json:"request_endpoint" gorm:"size:32;not null;index"` // openai, gemini, openai_mod
+	RequestEndpoint string `json:"request_endpoint" gorm:"size:32;not null;index"` // openai, openai-response, gemini, openai_mod
 	Status          string `json:"status" gorm:"size:20;not null;index;default:'pending'"`
 	Params          string `json:"params" gorm:"type:text"`          // JSON: size, quality, style, n, etc.
 	ImageUrl        string `json:"image_url" gorm:"type:text"`       // 生成的图片URL
@@ -93,20 +93,20 @@ type ImageAssetQueryParams struct {
 
 // ImageGenerationAsset 图片生成资产视图，数据源仍为成功的图片生成任务。
 type ImageGenerationAsset struct {
-	Id                       int    `json:"id"`
-	TaskId                   int    `json:"task_id"`
-	UserId                   int    `json:"user_id"`
-	ModelId                  string `json:"model_id"`
-	DisplayName              string `json:"display_name"`
-	ModelSeries              string `json:"model_series"`
-	Prompt                   string `json:"prompt"`
-	RequestEndpoint          string `json:"request_endpoint"`
-	Params                   string `json:"params"`
-	ImageUrl                 string `json:"image_url"`
-	ImageMetadata            string `json:"image_metadata"`
-	Cost                     int    `json:"cost"`
-	CreatedTime              int64  `json:"created_time"`
-	CompletedTime            int64  `json:"completed_time"`
+	Id                          int    `json:"id"`
+	TaskId                      int    `json:"task_id"`
+	UserId                      int    `json:"user_id"`
+	ModelId                     string `json:"model_id"`
+	DisplayName                 string `json:"display_name"`
+	ModelSeries                 string `json:"model_series"`
+	Prompt                      string `json:"prompt"`
+	RequestEndpoint             string `json:"request_endpoint"`
+	Params                      string `json:"params"`
+	ImageUrl                    string `json:"image_url"`
+	ImageMetadata               string `json:"image_metadata"`
+	Cost                        int    `json:"cost"`
+	CreatedTime                 int64  `json:"created_time"`
+	CompletedTime               int64  `json:"completed_time"`
 	InspirationSubmissionId     int    `json:"inspiration_submission_id"`
 	InspirationSubmissionStatus string `json:"inspiration_submission_status"`
 	InspirationRejectReason     string `json:"inspiration_reject_reason"`

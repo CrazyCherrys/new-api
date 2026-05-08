@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/worker_setting"
 	"github.com/glebarez/sqlite"
@@ -259,5 +260,96 @@ func TestModelMappingImageCapabilitiesNormalizeAndDefault(t *testing.T) {
 		t.Fatalf("unexpected effective capabilities error: %v", err)
 	} else if len(got) != 2 || got[0] != model.ImageCapabilityGeneration || got[1] != model.ImageCapabilityEditing {
 		t.Fatalf("unexpected default capabilities: %#v", got)
+	}
+}
+
+func TestBuildOpenAIResponsesImageRequest(t *testing.T) {
+	req, err := buildOpenAIResponsesImageRequest(&dto.ImageRequest{
+		Model:       "gpt-image-1",
+		Prompt:      "generate a skyline",
+		Resolution:  "2K",
+		AspectRatio: "16:9",
+		Quality:     "high",
+	})
+	if err != nil {
+		t.Fatalf("unexpected build error: %v", err)
+	}
+
+	if req.Model != "gpt-image-1" {
+		t.Fatalf("unexpected model: %s", req.Model)
+	}
+
+	var input string
+	if err := common.Unmarshal(req.Input, &input); err != nil {
+		t.Fatalf("failed to decode string input: %v", err)
+	}
+	if input != "generate a skyline" {
+		t.Fatalf("unexpected input: %q", input)
+	}
+
+	var tools []map[string]any
+	if err := common.Unmarshal(req.Tools, &tools); err != nil {
+		t.Fatalf("failed to decode tools: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected one tool, got %d", len(tools))
+	}
+	if got := tools[0]["type"]; got != "image_generation" {
+		t.Fatalf("unexpected tool type: %#v", got)
+	}
+	if got := tools[0]["action"]; got != "generate" {
+		t.Fatalf("unexpected tool action: %#v", got)
+	}
+	if got := tools[0]["size"]; got != "2048x1152" {
+		t.Fatalf("unexpected tool size: %#v", got)
+	}
+	if got := tools[0]["quality"]; got != "high" {
+		t.Fatalf("unexpected tool quality: %#v", got)
+	}
+}
+
+func TestBuildOpenAIResponsesImageRequestWithReferenceImages(t *testing.T) {
+	req, err := buildOpenAIResponsesImageRequest(&dto.ImageRequest{
+		Model:           "gpt-image-1",
+		Prompt:          "edit this image",
+		Size:            "1536x1024",
+		ReferenceImages: []string{"https://example.com/ref.png"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected build error: %v", err)
+	}
+
+	var input []map[string]any
+	if err := common.Unmarshal(req.Input, &input); err != nil {
+		t.Fatalf("failed to decode structured input: %v", err)
+	}
+	if len(input) != 1 {
+		t.Fatalf("expected one input item, got %d", len(input))
+	}
+
+	content, ok := input[0]["content"].([]any)
+	if !ok || len(content) != 2 {
+		t.Fatalf("unexpected content: %#v", input[0]["content"])
+	}
+
+	var tools []map[string]any
+	if err := common.Unmarshal(req.Tools, &tools); err != nil {
+		t.Fatalf("failed to decode tools: %v", err)
+	}
+	if got := tools[0]["action"]; got != "edit" {
+		t.Fatalf("unexpected tool action: %#v", got)
+	}
+	if got := tools[0]["size"]; got != "1536x1024" {
+		t.Fatalf("unexpected tool size: %#v", got)
+	}
+}
+
+func TestNormalizeOpenAIResponsesImageResult(t *testing.T) {
+	if got := normalizeOpenAIResponsesImageResult(" https://example.com/image.png "); got != "https://example.com/image.png" {
+		t.Fatalf("unexpected URL normalization result: %q", got)
+	}
+
+	if got := normalizeOpenAIResponsesImageResult(" iVBORw0KGgoAAAANSUhEUgAAAAUA "); got != "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA" {
+		t.Fatalf("unexpected base64 normalization result: %q", got)
 	}
 }

@@ -433,56 +433,11 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 	}
 }
 
-// calculateOpenAIPixelSize 将 resolution + aspect_ratio 映射到 gpt-image-2 / gpt-image-1
-// 的合法预设尺寸。
-//
-// 合法预设（ref: https://docs.newapi.ai/zh/docs/api/ai-model/images/openai/post-v1-images-generations）：
-//
-//	1024x1024 · 1536x1024 · 1024x1536 · 2048x2048 · 2048x1152 · 3840x2160 · 2160x3840
-//
-// 此函数仅用于标准 "openai" 端点，不适用于 openai_mod（原样透传）或 gemini（独立处理）。
+// calculateOpenAIPixelSize is a thin wrapper over the shared OpenAI image size resolver.
+// It is kept for the standard OpenAI image request path in this package.
 func calculateOpenAIPixelSize(resolution, aspectRatio string) string {
-	if resolution == "" || aspectRatio == "" {
-		return ""
-	}
-
-	res := strings.ToUpper(strings.TrimSpace(resolution))
-	ar := strings.TrimSpace(aspectRatio)
-
-	// 直查表：只输出官方预设尺寸，拒绝一切非预设值。
-	// 横向优先比例（landscape）→ 横版预设；纵向优先比例 → 竖版预设；方形 → 正方预设。
-	switch res {
-	case "1K":
-		switch ar {
-		case "1:1", "4:3", "3:4":
-			return "1024x1024"
-		case "3:2", "16:9", "21:9":
-			return "1536x1024"
-		case "2:3", "9:16", "9:21":
-			return "1024x1536"
-		}
-	case "2K":
-		switch ar {
-		case "1:1", "4:3":
-			return "2048x2048"
-		case "3:2", "16:9", "21:9":
-			return "2048x1152"
-		case "2:3", "9:16", "3:4", "9:21":
-			return "2160x3840"
-		}
-	case "4K":
-		switch ar {
-		case "1:1", "4:3", "3:4":
-			return "2048x2048" // 无 4K 正方预设，回退到最大正方预设
-		case "3:2", "16:9", "21:9":
-			return "3840x2160"
-		case "2:3", "9:16", "9:21":
-			return "2160x3840"
-		}
-	}
-
-	// 不支持的组合返回空字符串，上游将使用默认 auto 尺寸
-	return ""
+	size, _ := service.ResolveOpenAIImageSize(resolution, aspectRatio)
+	return size
 }
 
 // StandardOpenAIImageRequest 是「openai」标准端点（经 /console/model-mapping 配置）

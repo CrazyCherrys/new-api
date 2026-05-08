@@ -18,7 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useState, useEffect } from 'react';
-import { Modal, Form, Select, Button, Space } from '@douyinfe/semi-ui';
+import {
+  Modal,
+  Form,
+  Select,
+  Button,
+  Space,
+  InputNumber,
+} from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../../../helpers';
 
@@ -63,11 +70,19 @@ const EditModelMappingModal = ({
     { value: 4, label: t('音频') },
   ];
 
-  const requestEndpointOptions = [
-    { value: 'openai', label: 'OpenAI' },
-    { value: 'gemini', label: 'Gemini' },
-    { value: 'openai_mod', label: 'OpenAI魔改' },
-  ];
+  const requestEndpointOptions =
+    selectedModelType === 2
+      ? [
+          { value: 'openai', label: 'OpenAI (/v1/images)' },
+          { value: 'openai-response', label: 'OpenAI (/v1/responses)' },
+          { value: 'gemini', label: 'Gemini' },
+          { value: 'openai_mod', label: 'OpenAI魔改' },
+        ]
+      : [
+          { value: 'openai', label: 'OpenAI (/v1/images)' },
+          { value: 'gemini', label: 'Gemini' },
+          { value: 'openai_mod', label: 'OpenAI魔改' },
+        ];
 
   const resolutionOptions = [
     { value: '1K', label: '1K' },
@@ -76,17 +91,17 @@ const EditModelMappingModal = ({
   ];
 
   const aspectRatioOptions = [
-    { value: 'auto', label: 'Auto' },
     { value: '1:1', label: '1:1' },
-    { value: '2:3', label: '2:3' },
-    { value: '3:2', label: '3:2' },
-    { value: '3:4', label: '3:4' },
+    { value: '16:9', label: '16:9' },
+    { value: '9:16', label: '9:16' },
     { value: '4:3', label: '4:3' },
+    { value: '3:4', label: '3:4' },
     { value: '4:5', label: '4:5' },
     { value: '5:4', label: '5:4' },
-    { value: '9:16', label: '9:16' },
-    { value: '16:9', label: '16:9' },
+    { value: '3:2', label: '3:2' },
+    { value: '2:3', label: '2:3' },
     { value: '21:9', label: '21:9' },
+    { value: 'auto', label: 'Auto' },
   ];
 
   const imageCapabilityOptions = [
@@ -128,9 +143,13 @@ const EditModelMappingModal = ({
 
         formApi.setValues({
           ...editingMapping,
+          actual_model:
+            editingMapping.actual_model || editingMapping.request_model || '',
           resolutions,
           aspect_ratios: aspectRatios,
           image_capabilities: imageCapabilities,
+          status: editingMapping.status === 1,
+          priority: editingMapping.priority ?? 0,
         });
       } else {
         setSelectedResolutions([]);
@@ -139,11 +158,14 @@ const EditModelMappingModal = ({
 
         formApi.setValues({
           request_model: '',
+          actual_model: '',
           display_name: '',
           model_series: '',
           model_type: 1,
           description: '',
-          request_endpoint: '',
+          status: true,
+          priority: 0,
+          request_endpoint: 'openai',
           resolutions: [],
           aspect_ratios: [],
           image_capabilities: [],
@@ -166,6 +188,14 @@ const EditModelMappingModal = ({
     try {
       const payload = {
         ...values,
+        actual_model:
+          typeof values.actual_model === 'string'
+            ? values.actual_model.trim()
+            : values.actual_model,
+        status: values.status ? 1 : 0,
+        priority: Number.isFinite(Number(values.priority))
+          ? Number(values.priority)
+          : 0,
         // 将数组转换为 JSON 字符串
         resolutions: values.resolutions
           ? JSON.stringify(values.resolutions)
@@ -249,6 +279,11 @@ const EditModelMappingModal = ({
           disabled={!!editingMapping}
         />
         <Form.Input
+          field='actual_model'
+          label={t('实际调用模型ID')}
+          placeholder={t('为空时默认与模型ID相同')}
+        />
+        <Form.Input
           field='display_name'
           label={t('显示名称')}
           placeholder={t('用户界面显示的友好名称')}
@@ -269,7 +304,11 @@ const EditModelMappingModal = ({
           rules={[{ required: true, message: t('请选择模型类型') }]}
           onChange={(value) => {
             setSelectedModelType(value);
+            const currentEndpoint = formApi?.getValue('request_endpoint');
             if (value === 2) {
+              if (!currentEndpoint) {
+                formApi?.setValue('request_endpoint', 'openai');
+              }
               const currentCapabilities =
                 formApi?.getValue('image_capabilities');
               if (
@@ -282,6 +321,9 @@ const EditModelMappingModal = ({
                 );
               }
             } else {
+              if (currentEndpoint === 'openai-response') {
+                formApi?.setValue('request_endpoint', 'openai');
+              }
               formApi?.setValue('image_capabilities', []);
             }
           }}
@@ -292,6 +334,14 @@ const EditModelMappingModal = ({
           placeholder={t('选择请求端点类型')}
           optionList={requestEndpointOptions}
           rules={[{ required: true, message: t('请选择请求端点') }]}
+        />
+        <Form.Switch field='status' label={t('状态')} size='large' />
+        <Form.InputNumber
+          field='priority'
+          label={t('优先级')}
+          min={0}
+          precision={0}
+          style={{ width: '100%' }}
         />
         {selectedModelType === 2 && (
           <Form.CheckboxGroup
@@ -357,6 +407,13 @@ const EditModelMappingModal = ({
             direction='horizontal'
           />
         </div>
+        <Form.TextArea
+          field='description'
+          label={t('描述')}
+          placeholder={t('输入模型描述')}
+          autosize
+          showClear
+        />
         <Space
           style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}
         >

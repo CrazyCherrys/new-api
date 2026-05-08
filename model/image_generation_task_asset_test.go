@@ -255,6 +255,178 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	}
 }
 
+func TestSearchModelMappingsIncludesDisabledItemsForAdmin(t *testing.T) {
+	setupImageAssetTestDB(t)
+
+	records := []*ModelMapping{
+		{
+			RequestModel:    "enabled-image-model",
+			ActualModel:     "enabled-image-model",
+			DisplayName:     "Enabled Image Model",
+			ModelSeries:     "openai",
+			ModelType:       2,
+			Status:          1,
+			RequestEndpoint: "openai",
+			CreatedTime:     100,
+			UpdatedTime:     100,
+		},
+		{
+			RequestModel:    "disabled-image-model",
+			ActualModel:     "disabled-image-model",
+			DisplayName:     "Disabled Image Model",
+			ModelSeries:     "openai",
+			ModelType:       2,
+			Status:          0,
+			RequestEndpoint: "openai",
+			CreatedTime:     200,
+			UpdatedTime:     200,
+		},
+	}
+	for _, record := range records {
+		if err := record.Insert(); err != nil {
+			t.Fatalf("failed to create model mapping: %v", err)
+		}
+	}
+
+	mappings, total, err := SearchModelMappings("image-model", 2, 0, 10)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected total 2, got %d", total)
+	}
+	if len(mappings) != 2 {
+		t.Fatalf("expected 2 mappings, got %d", len(mappings))
+	}
+}
+
+func TestGetActiveImageModelMappingsFiltersDisabledAndMissingEndpoint(t *testing.T) {
+	setupImageAssetTestDB(t)
+
+	records := []*ModelMapping{
+		{
+			RequestModel:    "enabled-with-endpoint",
+			ActualModel:     "enabled-with-endpoint",
+			DisplayName:     "Enabled With Endpoint",
+			ModelSeries:     "openai",
+			ModelType:       2,
+			Status:          1,
+			RequestEndpoint: "openai",
+		},
+		{
+			RequestModel:    "disabled-with-endpoint",
+			ActualModel:     "disabled-with-endpoint",
+			DisplayName:     "Disabled With Endpoint",
+			ModelSeries:     "openai",
+			ModelType:       2,
+			Status:          0,
+			RequestEndpoint: "openai",
+		},
+		{
+			RequestModel:    "enabled-without-endpoint",
+			ActualModel:     "enabled-without-endpoint",
+			DisplayName:     "Enabled Without Endpoint",
+			ModelSeries:     "openai",
+			ModelType:       2,
+			Status:          1,
+			RequestEndpoint: "",
+		},
+	}
+	for _, record := range records {
+		if err := record.Insert(); err != nil {
+			t.Fatalf("failed to create model mapping: %v", err)
+		}
+	}
+
+	mappings, total, err := GetActiveImageModelMappings(0, 10)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected total 1, got %d", total)
+	}
+	if len(mappings) != 1 || mappings[0].RequestModel != "enabled-with-endpoint" {
+		t.Fatalf("unexpected mappings: %#v", mappings)
+	}
+}
+
+func TestModelMappingUpdatePreservesCreatedTime(t *testing.T) {
+	setupImageAssetTestDB(t)
+
+	record := &ModelMapping{
+		RequestModel:      "source-model",
+		ActualModel:       "target-model-v1",
+		DisplayName:       "Source Model",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		Priority:          3,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation"]`,
+		CreatedTime:       12345,
+		UpdatedTime:       12345,
+	}
+	if err := record.Insert(); err != nil {
+		t.Fatalf("failed to create model mapping: %v", err)
+	}
+	createdTime := record.CreatedTime
+
+	record.ActualModel = "target-model-v2"
+	record.Priority = 9
+	record.Status = 0
+	record.Description = "updated description"
+	if err := record.Update(); err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+
+	reloaded, err := GetModelMapping(record.Id)
+	if err != nil {
+		t.Fatalf("failed to reload model mapping: %v", err)
+	}
+	if reloaded.CreatedTime != createdTime {
+		t.Fatalf("expected created_time to be preserved, got %d", reloaded.CreatedTime)
+	}
+	if reloaded.ActualModel != "target-model-v2" {
+		t.Fatalf("expected actual model to update, got %q", reloaded.ActualModel)
+	}
+	if reloaded.Priority != 9 || reloaded.Status != 0 {
+		t.Fatalf("unexpected updated values: %#v", reloaded)
+	}
+}
+
+func TestGetModelMappingByRequestModelAndActiveVariant(t *testing.T) {
+	setupImageAssetTestDB(t)
+
+	record := &ModelMapping{
+		RequestModel:    "disabled-source-model",
+		ActualModel:     "disabled-target-model",
+		DisplayName:     "Disabled Source Model",
+		ModelSeries:     "openai",
+		ModelType:       2,
+		Status:          0,
+		RequestEndpoint: "openai",
+	}
+	if err := record.Insert(); err != nil {
+		t.Fatalf("failed to create model mapping: %v", err)
+	}
+
+	gotAny, err := GetModelMappingByRequestModel("disabled-source-model")
+	if err != nil {
+		t.Fatalf("failed to get mapping by request model: %v", err)
+	}
+	if gotAny == nil || gotAny.Id != record.Id {
+		t.Fatalf("expected to find disabled record, got %#v", gotAny)
+	}
+
+	gotActive, err := GetActiveModelMappingByRequestModel("disabled-source-model")
+	if err != nil {
+		t.Fatalf("failed to get active mapping by request model: %v", err)
+	}
+	if gotActive != nil {
+		t.Fatalf("expected no active mapping, got %#v", gotActive)
+	}
+}
+
 func TestGetImageAssetsByUserIDFiltersSuccessfulOwnedImages(t *testing.T) {
 	db := setupImageAssetTestDB(t)
 

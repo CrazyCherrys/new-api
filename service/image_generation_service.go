@@ -42,6 +42,129 @@ func normalizeImageEndpoint(endpoint string) string {
 	}
 }
 
+func imageEndpointIsResponses(endpoint string) bool {
+	switch normalizeImageEndpoint(endpoint) {
+	case "openai-response":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveOpenAIImageSize(resolution, aspectRatio string) string {
+	size, _ := ResolveOpenAIImageSize(resolution, aspectRatio)
+	return size
+}
+
+func buildOpenAIResponsesImageRequest(imageReq *dto.ImageRequest) (*dto.OpenAIResponsesRequest, error) {
+	if imageReq == nil {
+		return nil, fmt.Errorf("image request is nil")
+	}
+
+	var inputRaw []byte
+	if len(imageReq.ReferenceImages) > 0 {
+		content := make([]map[string]any, 0, len(imageReq.ReferenceImages)+1)
+		content = append(content, map[string]any{
+			"type": "input_text",
+			"text": imageReq.Prompt,
+		})
+		for _, refImage := range imageReq.ReferenceImages {
+			if strings.TrimSpace(refImage) == "" {
+				continue
+			}
+			content = append(content, map[string]any{
+				"type":      "input_image",
+				"image_url": refImage,
+			})
+		}
+		inputItems := []map[string]any{
+			{
+				"role":    "user",
+				"content": content,
+			},
+		}
+		raw, err := common.Marshal(inputItems)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal responses input: %w", err)
+		}
+		inputRaw = raw
+	} else {
+		raw, err := common.Marshal(imageReq.Prompt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal responses prompt: %w", err)
+		}
+		inputRaw = raw
+	}
+
+	tool := map[string]any{
+		"type": "image_generation",
+	}
+	if mappedSize, ok := ResolveOpenAIImageSize(imageReq.Resolution, imageReq.AspectRatio); ok {
+		tool["size"] = mappedSize
+	} else if explicitSize := strings.TrimSpace(imageReq.Size); explicitSize != "" {
+		tool["size"] = explicitSize
+	} else {
+		tool["size"] = mappedSize
+	}
+	if strings.TrimSpace(imageReq.Quality) != "" {
+		tool["quality"] = strings.TrimSpace(imageReq.Quality)
+	}
+	if len(imageReq.ReferenceImages) > 0 {
+		tool["action"] = "edit"
+	} else {
+		tool["action"] = "generate"
+	}
+
+	toolsBytes, err := common.Marshal([]map[string]any{tool})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal responses tools: %w", err)
+	}
+
+	toolChoiceBytes, err := common.Marshal(map[string]any{
+		"type": "image_generation",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal responses tool choice: %w", err)
+	}
+
+	return &dto.OpenAIResponsesRequest{
+		Model:      imageReq.Model,
+		Input:      inputRaw,
+		Tools:      toolsBytes,
+		ToolChoice: toolChoiceBytes,
+	}, nil
+}
+
+func normalizeOpenAIResponsesImageResult(result string) string {
+	trimmed := strings.TrimSpace(result)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "data:") ||
+		strings.HasPrefix(trimmed, "http://") ||
+		strings.HasPrefix(trimmed, "https://") {
+		return trimmed
+	}
+
+	cleaned := strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\n', '\r', '\t':
+			return -1
+		default:
+			return r
+		}
+	}, trimmed)
+
+	if _, err := base64.StdEncoding.DecodeString(cleaned); err == nil {
+		return "data:image/png;base64," + cleaned
+	}
+	if _, err := base64.RawStdEncoding.DecodeString(cleaned); err == nil {
+		return "data:image/png;base64," + cleaned
+	}
+
+	return trimmed
+}
+
 func imageGenerationTimeout() time.Duration {
 	cfg := worker_setting.GetWorkerSetting()
 	timeout := time.Duration(cfg.ImageTimeout) * time.Second
@@ -112,7 +235,7 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 	if err := validateImageGenerationReferenceImages(params); err != nil {
 		return nil, err
 	}
-	mapping, err := model.GetModelMappingByRequestModel(modelId)
+	mapping, err := model.GetActiveModelMappingByRequestModel(modelId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get model mapping: %w", err)
 	}
@@ -461,7 +584,7 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	}
 
 	// 获取模型映射
-	mapping, err := model.GetModelMappingByRequestModel(task.ModelId)
+	mapping, err := model.GetActiveModelMappingByRequestModel(task.ModelId)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("failed to get model mapping: %w", err)
 	}
@@ -535,17 +658,26 @@ func callUpstreamImageAPIViaRelay(ctx context.Context, ch *model.Channel, task *
 	// 路由规则（按 request_endpoint 区分）：
 	//   - "openai"（标准 OpenAI 端点）：无论是否带参考图，统一发往 /v1/images/generations。
 	//     由 convertStandardOpenAIImageRequest 序列化为精简 JSON: {prompt, model, size, image[]}。
+	//   - "openai-response"（Responses 图像工具）：统一发往 /v1/responses，
+	//     由 convertOpenAIResponsesImageRequest 组装 Responses API payload。
 	//   - "openai_mod"（魔改端点）：无参考图走 /v1/images/generations；
 	//     有参考图走 /v1/images/edits（JSON 透传，由 convertOpenAIModImageEditRequest 处理）。
 	//   - 其他端点（gemini 等）：保持原行为。
 	taskEndpoint := normalizeImageEndpoint(imageReq.RequestEndpoint)
 	requestURL := fmt.Sprintf("http://127.0.0.1:%s/v1/images/generations", port)
-	if len(imageReq.ReferenceImages) > 0 && taskEndpoint != "openai" {
+	requestPayload := any(imageReq)
+	if imageEndpointIsResponses(taskEndpoint) {
+		requestURL = fmt.Sprintf("http://127.0.0.1:%s/v1/responses", port)
+		requestPayload, err = buildOpenAIResponsesImageRequest(imageReq)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build responses image request: %w", err)
+		}
+	} else if len(imageReq.ReferenceImages) > 0 && taskEndpoint != "openai" {
 		requestURL = fmt.Sprintf("http://127.0.0.1:%s/v1/images/edits", port)
 	}
 
 	// 序列化请求
-	jsonData, err := common.Marshal(imageReq)
+	jsonData, err := common.Marshal(requestPayload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -593,6 +725,34 @@ func parseImageResponse(resp *http.Response) (imageUrl string, metadata string, 
 	}
 
 	if len(imageResp.Data) == 0 {
+		var responsesResp dto.OpenAIResponsesResponse
+		if err := common.Unmarshal(body, &responsesResp); err == nil {
+			for _, output := range responsesResp.Output {
+				if output.Type != dto.ResponsesOutputTypeImageGenerationCall {
+					continue
+				}
+				if strings.TrimSpace(output.Result) == "" {
+					continue
+				}
+				imageUrl = normalizeOpenAIResponsesImageResult(output.Result)
+				metadataMap := make(map[string]any)
+				if output.RevisedPrompt != "" {
+					metadataMap["revised_prompt"] = output.RevisedPrompt
+				}
+				if output.Quality != "" {
+					metadataMap["quality"] = output.Quality
+				}
+				if output.Size != "" {
+					metadataMap["size"] = output.Size
+				}
+				if responsesResp.Metadata != nil {
+					metadataMap["metadata"] = responsesResp.Metadata
+				}
+				metadataBytes, _ := common.Marshal(metadataMap)
+				metadata = string(metadataBytes)
+				return imageUrl, metadata, nil
+			}
+		}
 		return "", "", fmt.Errorf("no image data in response")
 	}
 
@@ -672,7 +832,7 @@ func deductUserQuota(userId int, quota int) error {
 // channelTypesForImageEndpoint 根据 endpoint 返回对应的渠道类型列表
 func channelTypesForImageEndpoint(endpoint string) ([]int, error) {
 	switch normalizeImageEndpoint(endpoint) {
-	case "openai", "openai_mod":
+	case "openai", "openai-response", "openai_mod":
 		return []int{constant.ChannelTypeOpenAI}, nil
 	case "gemini":
 		return []int{constant.ChannelTypeGemini}, nil

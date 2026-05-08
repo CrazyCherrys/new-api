@@ -160,7 +160,18 @@ const ModelMappingTable = ({
     );
   };
 
-  const formatRequestEndpoint = (endpoint) => {
+  const formatRequestEndpoint = (endpoint, modelType) => {
+    if (modelType === 2) {
+      const endpointMap = {
+        openai: 'OpenAI (/v1/images)',
+        dalle: 'OpenAI',
+        gemini: 'Gemini',
+        'openai-response': 'OpenAI (/v1/responses)',
+        openai_mod: 'OpenAI魔改',
+      };
+      return endpointMap[endpoint] || endpoint || '-';
+    }
+
     const endpointMap = {
       openai: 'OpenAI',
       dalle: 'OpenAI',
@@ -209,6 +220,18 @@ const ModelMappingTable = ({
       ),
     },
     {
+      title: t('实际调用模型ID'),
+      dataIndex: 'actual_model',
+      render: (text) =>
+        text ? (
+          <Text copyable onClick={(e) => e.stopPropagation()}>
+            {text}
+          </Text>
+        ) : (
+          '-'
+        ),
+    },
+    {
       title: t('显示名称'),
       dataIndex: 'display_name',
     },
@@ -225,7 +248,7 @@ const ModelMappingTable = ({
     {
       title: t('请求端点'),
       dataIndex: 'request_endpoint',
-      render: (text) => formatRequestEndpoint(text),
+      render: (text, record) => formatRequestEndpoint(text, record.model_type),
     },
     {
       title: t('模型能力'),
@@ -263,6 +286,12 @@ const ModelMappingTable = ({
       title: t('创建时间'),
       dataIndex: 'created_time',
       render: (timestamp) => renderTimestamp(timestamp),
+    },
+    {
+      title: t('优先级'),
+      dataIndex: 'priority',
+      width: 100,
+      render: (value) => value ?? 0,
     },
     {
       title: t('操作'),
