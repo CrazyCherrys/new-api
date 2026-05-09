@@ -43,6 +43,7 @@ const EditModelMappingModal = ({
   const [selectedResolutions, setSelectedResolutions] = useState([]);
   const [selectedAspectRatios, setSelectedAspectRatios] = useState([]);
   const [selectedModelType, setSelectedModelType] = useState(1);
+  const isImageModel = Number(selectedModelType) === 2;
 
   const modelSeriesOptions = [
     { value: 'openai', label: 'OpenAI' },
@@ -133,13 +134,13 @@ const EditModelMappingModal = ({
         let imageCapabilities = parseJsonArray(
           editingMapping.image_capabilities,
         );
-        if (editingMapping.model_type === 2 && imageCapabilities.length === 0) {
+        if (Number(editingMapping.model_type) === 2 && imageCapabilities.length === 0) {
           imageCapabilities = imageCapabilityOptions.map((item) => item.value);
         }
 
         setSelectedResolutions(resolutions);
         setSelectedAspectRatios(aspectRatios);
-        setSelectedModelType(editingMapping.model_type || 1);
+        setSelectedModelType(Number(editingMapping.model_type) || 1);
 
         formApi.setValues({
           ...editingMapping,
@@ -174,9 +175,22 @@ const EditModelMappingModal = ({
     }
   }, [visible, editingMapping, formApi]);
 
+  useEffect(() => {
+    if (!visible || !formApi || !isImageModel) {
+      return;
+    }
+
+    const currentCapabilities = formApi.getValue('image_capabilities');
+    if (Array.isArray(currentCapabilities) && currentCapabilities.length > 0) {
+      return;
+    }
+
+    formApi.setValue('image_capabilities', DEFAULT_IMAGE_CAPABILITIES);
+  }, [visible, formApi, selectedModelType]);
+
   const handleSubmit = async (values) => {
     if (
-      values.model_type === 2 &&
+      Number(values.model_type) === 2 &&
       (!Array.isArray(values.image_capabilities) ||
         values.image_capabilities.length === 0)
     ) {
@@ -204,7 +218,7 @@ const EditModelMappingModal = ({
           ? JSON.stringify(values.aspect_ratios)
           : '',
         image_capabilities:
-          values.model_type === 2 && values.image_capabilities
+          Number(values.model_type) === 2 && values.image_capabilities
             ? JSON.stringify(values.image_capabilities)
             : '',
       };
@@ -303,9 +317,9 @@ const EditModelMappingModal = ({
           optionList={modelTypeOptions}
           rules={[{ required: true, message: t('请选择模型类型') }]}
           onChange={(value) => {
-            setSelectedModelType(value);
+            setSelectedModelType(Number(value) || 1);
             const currentEndpoint = formApi?.getValue('request_endpoint');
-            if (value === 2) {
+            if (Number(value) === 2) {
               if (!currentEndpoint) {
                 formApi?.setValue('request_endpoint', 'openai');
               }
@@ -343,20 +357,24 @@ const EditModelMappingModal = ({
           precision={0}
           style={{ width: '100%' }}
         />
-        {selectedModelType === 2 && (
+        <div hidden={!isImageModel}>
           <Form.CheckboxGroup
             field='image_capabilities'
             label={t('模型能力')}
             options={imageCapabilityOptions}
             direction='horizontal'
-            rules={[
-              {
-                required: true,
-                message: t('请选择至少一个模型能力'),
-              },
-            ]}
+            rules={
+              isImageModel
+                ? [
+                    {
+                      required: true,
+                      message: t('请选择至少一个模型能力'),
+                    },
+                  ]
+                : []
+            }
           />
-        )}
+        </div>
         <div>
           <div
             style={{
