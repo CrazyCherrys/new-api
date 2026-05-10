@@ -266,3 +266,114 @@ func TestDeleteImageGenerationTaskRemovesStoredMaskImages(t *testing.T) {
 		t.Fatalf("expected task to be deleted, got %#v", reloaded)
 	}
 }
+
+func TestBuildImageGenerationObjectURLUsesCDNBaseURL(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousEndpoint := cfg.S3Endpoint
+	previousBucket := cfg.S3Bucket
+	previousURLMode := cfg.S3URLMode
+	previousPublicBaseURL := cfg.S3PublicBaseURL
+	t.Cleanup(func() {
+		cfg.S3Endpoint = previousEndpoint
+		cfg.S3Bucket = previousBucket
+		cfg.S3URLMode = previousURLMode
+		cfg.S3PublicBaseURL = previousPublicBaseURL
+	})
+
+	cfg.S3Endpoint = "https://oss-cn-hongkong-internal.aliyuncs.com"
+	cfg.S3Bucket = "image-bucket"
+	cfg.S3URLMode = "cdn"
+	cfg.S3PublicBaseURL = "https://img.example.com"
+
+	actualURL := buildImageGenerationObjectURL(cfg, "image-generation/20260510/test image.png")
+	expectedURL := "https://img.example.com/image-generation/20260510/test%20image.png"
+	if actualURL != expectedURL {
+		t.Fatalf("expected CDN URL %q, got %q", expectedURL, actualURL)
+	}
+}
+
+func TestImageGenerationS3ObjectKeyFromCDNURL(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousEndpoint := cfg.S3Endpoint
+	previousBucket := cfg.S3Bucket
+	previousURLMode := cfg.S3URLMode
+	previousPublicBaseURL := cfg.S3PublicBaseURL
+	t.Cleanup(func() {
+		cfg.S3Endpoint = previousEndpoint
+		cfg.S3Bucket = previousBucket
+		cfg.S3URLMode = previousURLMode
+		cfg.S3PublicBaseURL = previousPublicBaseURL
+	})
+
+	cfg.S3Endpoint = "https://oss-cn-hongkong-internal.aliyuncs.com"
+	cfg.S3Bucket = "image-bucket"
+	cfg.S3URLMode = "cdn"
+	cfg.S3PublicBaseURL = "https://img.example.com/static"
+
+	objectKey, ok := imageGenerationS3ObjectKeyFromURL(
+		"https://img.example.com/static/image-generation/20260510/test%20image.png",
+		cfg,
+	)
+	if !ok {
+		t.Fatal("expected CDN URL to map back to object key")
+	}
+
+	expectedKey := "image-generation/20260510/test image.png"
+	if objectKey != expectedKey {
+		t.Fatalf("expected object key %q, got %q", expectedKey, objectKey)
+	}
+}
+
+func TestImageGenerationS3ObjectKeyFromLegacyPublicOSSURL(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousEndpoint := cfg.S3Endpoint
+	previousBucket := cfg.S3Bucket
+	t.Cleanup(func() {
+		cfg.S3Endpoint = previousEndpoint
+		cfg.S3Bucket = previousBucket
+	})
+
+	cfg.S3Endpoint = "https://oss-cn-hongkong-internal.aliyuncs.com"
+	cfg.S3Bucket = "image-bucket"
+
+	objectKey, ok := imageGenerationS3ObjectKeyFromURL(
+		"https://oss-cn-hongkong.aliyuncs.com/image-bucket/image-generation/20260510/test.png",
+		cfg,
+	)
+	if !ok {
+		t.Fatal("expected legacy public OSS URL to map back to object key")
+	}
+	if objectKey != "image-generation/20260510/test.png" {
+		t.Fatalf("unexpected object key %q", objectKey)
+	}
+}
+
+func TestValidateImageS3ConfigRequiresPublicBaseURLForCDNMode(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousEndpoint := cfg.S3Endpoint
+	previousBucket := cfg.S3Bucket
+	previousAccessKey := cfg.S3AccessKey
+	previousSecretKey := cfg.S3SecretKey
+	previousURLMode := cfg.S3URLMode
+	previousPublicBaseURL := cfg.S3PublicBaseURL
+	t.Cleanup(func() {
+		cfg.S3Endpoint = previousEndpoint
+		cfg.S3Bucket = previousBucket
+		cfg.S3AccessKey = previousAccessKey
+		cfg.S3SecretKey = previousSecretKey
+		cfg.S3URLMode = previousURLMode
+		cfg.S3PublicBaseURL = previousPublicBaseURL
+	})
+
+	cfg.S3Endpoint = "https://oss-cn-hongkong-internal.aliyuncs.com"
+	cfg.S3Bucket = "image-bucket"
+	cfg.S3AccessKey = "ak"
+	cfg.S3SecretKey = "sk"
+	cfg.S3URLMode = "cdn"
+	cfg.S3PublicBaseURL = ""
+
+	err := validateImageS3Config(cfg)
+	if err == nil || !strings.Contains(err.Error(), "s3 public base url is empty") {
+		t.Fatalf("expected missing public base url validation error, got %v", err)
+	}
+}

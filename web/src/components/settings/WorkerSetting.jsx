@@ -33,6 +33,8 @@ const WorkerSetting = () => {
     'worker_setting.s3_access_key': '',
     'worker_setting.s3_secret_key': '',
     'worker_setting.s3_path_prefix': '',
+    'worker_setting.s3_url_mode': 'direct',
+    'worker_setting.s3_public_base_url': '',
     'worker_setting.image_timeout': 120,
     'worker_setting.video_timeout': 600,
     'worker_setting.retry_delay': 5,

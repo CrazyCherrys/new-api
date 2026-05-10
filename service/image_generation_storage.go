@@ -155,7 +155,22 @@ func validateImageS3Config(cfg *worker_setting.WorkerSetting) error {
 	if strings.TrimSpace(cfg.S3AccessKey) == "" || strings.TrimSpace(cfg.S3SecretKey) == "" {
 		return fmt.Errorf("s3 credentials are empty")
 	}
-	return nil
+	switch strings.ToLower(strings.TrimSpace(cfg.S3URLMode)) {
+	case "", "direct":
+		return nil
+	case "cdn":
+		publicBase := strings.TrimSpace(cfg.S3PublicBaseURL)
+		if publicBase == "" {
+			return fmt.Errorf("s3 public base url is empty")
+		}
+		parsed, err := url.Parse(publicBase)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return fmt.Errorf("s3 public base url is invalid")
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid s3 url mode")
+	}
 }
 
 func saveImageGenerationResultLocally(ctx context.Context, taskId int, imageUrl string, cfg *worker_setting.WorkerSetting) (string, error) {
@@ -288,34 +303,17 @@ func imageGenerationS3ObjectKeyFromURL(imageUrl string, cfg *worker_setting.Work
 	if trimmed == "" {
 		return "", false
 	}
-	endpoint := strings.TrimRight(strings.TrimSpace(cfg.S3Endpoint), "/")
-	bucket := strings.Trim(strings.TrimSpace(cfg.S3Bucket), "/")
-	if bucket == "" {
-		return "", false
-	}
-
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
 		return "", false
 	}
-	endpointURL, err := url.Parse(endpoint)
-	if err != nil {
-		return "", false
+	for _, baseURL := range imageGenerationS3ObjectBaseURLs(cfg) {
+		objectKey, ok := imageGenerationObjectKeyFromBaseURL(parsed, baseURL)
+		if ok {
+			return objectKey, true
+		}
 	}
-	if !strings.EqualFold(parsed.Scheme, endpointURL.Scheme) || parsed.Host != endpointURL.Host {
-		return "", false
-	}
-
-	candidate := strings.Trim(strings.TrimPrefix(parsed.Path, endpointURL.Path), "/")
-	if !strings.HasPrefix(candidate, bucket+"/") {
-		return "", false
-	}
-	objectKey := strings.TrimPrefix(candidate, bucket+"/")
-	objectKey, err = unescapeImageGenerationObjectKey(objectKey)
-	if err != nil {
-		return "", false
-	}
-	return objectKey, true
+	return "", false
 }
 
 func unescapeImageGenerationObjectKey(objectKey string) (string, error) {
@@ -495,11 +493,128 @@ func newImageS3Client(cfg *worker_setting.WorkerSetting) *s3.Client {
 	return s3.New(options)
 }
 
-func buildImageGenerationObjectURL(cfg *worker_setting.WorkerSetting, objectKey string) string {
+func imageGenerationS3ObjectBaseURLs(cfg *worker_setting.WorkerSetting) []string {
+	if cfg == nil {
+		return nil
+	}
+
+	bases := make([]string, 0, 3)
+	for _, directBase := range buildImageGenerationDirectObjectBaseURLs(cfg) {
+		isDuplicate := false
+		for _, base := range bases {
+			if base == directBase {
+				isDuplicate = true
+				break
+			}
+		}
+		if !isDuplicate {
+			bases = append(bases, directBase)
+		}
+	}
+	if publicBase := strings.TrimRight(strings.TrimSpace(cfg.S3PublicBaseURL), "/"); publicBase != "" {
+		isDuplicate := false
+		for _, base := range bases {
+			if base == publicBase {
+				isDuplicate = true
+				break
+			}
+		}
+		if !isDuplicate {
+			bases = append(bases, publicBase)
+		}
+	}
+	return bases
+}
+
+func imageGenerationObjectKeyFromBaseURL(assetURL *url.URL, baseURL string) (string, bool) {
+	parsedBaseURL, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return "", false
+	}
+	if !strings.EqualFold(assetURL.Scheme, parsedBaseURL.Scheme) || assetURL.Host != parsedBaseURL.Host {
+		return "", false
+	}
+
+	basePath := strings.TrimRight(parsedBaseURL.Path, "/")
+	assetPath := assetURL.Path
+	var candidate string
+	switch {
+	case basePath == "":
+		candidate = strings.Trim(assetPath, "/")
+	case assetPath == basePath:
+		return "", false
+	case strings.HasPrefix(assetPath, basePath+"/"):
+		candidate = strings.TrimPrefix(assetPath, basePath+"/")
+	default:
+		return "", false
+	}
+	if strings.TrimSpace(candidate) == "" {
+		return "", false
+	}
+
+	objectKey, err := unescapeImageGenerationObjectKey(candidate)
+	if err != nil {
+		return "", false
+	}
+	return objectKey, true
+}
+
+func buildImageGenerationDirectObjectBaseURLs(cfg *worker_setting.WorkerSetting) []string {
+	if cfg == nil {
+		return nil
+	}
 	endpoint := strings.TrimRight(strings.TrimSpace(cfg.S3Endpoint), "/")
 	bucket := strings.Trim(strings.TrimSpace(cfg.S3Bucket), "/")
+	if endpoint == "" || bucket == "" {
+		return nil
+	}
+
+	bases := []string{endpoint + "/" + bucket}
+	parsedEndpoint, err := url.Parse(endpoint)
+	if err != nil {
+		return bases
+	}
+
+	legacyHosts := make([]string, 0, 2)
+	if strings.Contains(parsedEndpoint.Host, "-internal.") {
+		legacyHosts = append(legacyHosts, strings.Replace(parsedEndpoint.Host, "-internal.", ".", 1))
+	}
+	if strings.Contains(parsedEndpoint.Host, ".internal.") {
+		legacyHosts = append(legacyHosts, strings.Replace(parsedEndpoint.Host, ".internal.", ".", 1))
+	}
+
+	for _, host := range legacyHosts {
+		clone := *parsedEndpoint
+		clone.Host = host
+		legacyEndpoint := strings.TrimRight(clone.String(), "/")
+		baseURL := legacyEndpoint + "/" + bucket
+		isDuplicate := false
+		for _, base := range bases {
+			if base == baseURL {
+				isDuplicate = true
+				break
+			}
+		}
+		if !isDuplicate {
+			bases = append(bases, baseURL)
+		}
+	}
+	return bases
+}
+
+func buildImageGenerationObjectURL(cfg *worker_setting.WorkerSetting, objectKey string) string {
 	escapedKey := pathEscapeObjectKey(objectKey)
-	return endpoint + "/" + bucket + "/" + escapedKey
+	mode := strings.ToLower(strings.TrimSpace(cfg.S3URLMode))
+	if mode == "cdn" {
+		if publicBase := strings.TrimRight(strings.TrimSpace(cfg.S3PublicBaseURL), "/"); publicBase != "" {
+			return publicBase + "/" + escapedKey
+		}
+	}
+	directBases := buildImageGenerationDirectObjectBaseURLs(cfg)
+	if len(directBases) == 0 {
+		return escapedKey
+	}
+	return directBases[0] + "/" + escapedKey
 }
 
 func buildImageGenerationLocalObjectURL(objectKey string) string {

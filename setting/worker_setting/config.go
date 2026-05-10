@@ -15,12 +15,14 @@ type WorkerSetting struct {
 	LocalStoragePath string `json:"local_storage_path"`
 
 	// S3 对象存储配置
-	S3Endpoint  string `json:"s3_endpoint"`
-	S3Bucket    string `json:"s3_bucket"`
-	S3Region    string `json:"s3_region"`
-	S3AccessKey string `json:"s3_access_key"`
-	S3SecretKey string `json:"s3_secret_key"`
-	S3PathPrefix string `json:"s3_path_prefix"`
+	S3Endpoint      string `json:"s3_endpoint"`
+	S3Bucket        string `json:"s3_bucket"`
+	S3Region        string `json:"s3_region"`
+	S3AccessKey     string `json:"s3_access_key"`
+	S3SecretKey     string `json:"s3_secret_key"`
+	S3PathPrefix    string `json:"s3_path_prefix"`
+	S3URLMode       string `json:"s3_url_mode"`
+	S3PublicBaseURL string `json:"s3_public_base_url"`
 
 	// ImageTimeout 图片任务超时时间（秒）
 	ImageTimeout int `json:"image_timeout"`
@@ -54,6 +56,8 @@ var workerSetting = WorkerSetting{
 	S3AccessKey:        "",
 	S3SecretKey:        "",
 	S3PathPrefix:       "",
+	S3URLMode:          "direct",
+	S3PublicBaseURL:    "",
 	ImageTimeout:       120,
 	VideoTimeout:       600,
 	RetryDelay:         5,

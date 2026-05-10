@@ -52,6 +52,8 @@ export default function SettingsWorker(props) {
     'worker_setting.s3_access_key': '',
     'worker_setting.s3_secret_key': '',
     'worker_setting.s3_path_prefix': '',
+    'worker_setting.s3_url_mode': 'direct',
+    'worker_setting.s3_public_base_url': '',
     'worker_setting.image_timeout': 120,
     'worker_setting.video_timeout': 600,
     'worker_setting.retry_delay': 5,
@@ -224,9 +226,11 @@ export default function SettingsWorker(props) {
                   <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                     <Form.Input
                       field={'worker_setting.s3_endpoint'}
-                      label={t('S3 端点地址')}
-                      extraText={t('S3 兼容存储的端点 URL')}
-                      placeholder='https://s3.amazonaws.com'
+                      label={t('S3 上传端点地址')}
+                      extraText={t(
+                        '服务端上传、读取和删除对象时使用的 S3 兼容端点 URL，可填写 OSS 内网 Endpoint',
+                      )}
+                      placeholder='https://oss-cn-hongkong-internal.aliyuncs.com'
                       onChange={handleFieldChange('worker_setting.s3_endpoint')}
                       showClear
                     />
@@ -290,6 +294,36 @@ export default function SettingsWorker(props) {
                       placeholder='worker/output'
                       onChange={handleFieldChange(
                         'worker_setting.s3_path_prefix',
+                      )}
+                      showClear
+                    />
+                  </Col>
+                </Row>
+                <Row gutter={16}>
+                  <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                    <Form.Select
+                      field={'worker_setting.s3_url_mode'}
+                      label={t('图片访问地址模式')}
+                      extraText={t(
+                        '控制返回给前端的图片链接是直连对象存储，还是使用 CDN 域名',
+                      )}
+                      onChange={handleFieldChange('worker_setting.s3_url_mode')}
+                      optionList={[
+                        { value: 'direct', label: t('直连对象存储') },
+                        { value: 'cdn', label: t('CDN 域名') },
+                      ]}
+                    />
+                  </Col>
+                  <Col xs={24} sm={12} md={16} lg={16} xl={16}>
+                    <Form.Input
+                      field={'worker_setting.s3_public_base_url'}
+                      label={t('对外访问基础地址')}
+                      extraText={t(
+                        '当图片访问地址模式为 CDN 时填写 CDN 域名；留空时回退为直连对象存储地址',
+                      )}
+                      placeholder='https://img.example.com'
+                      onChange={handleFieldChange(
+                        'worker_setting.s3_public_base_url',
                       )}
                       showClear
                     />
