@@ -228,11 +228,8 @@ func getUserCustomImageGenerationChannel(c *gin.Context, modelRequest *ModelRequ
 		}
 	}
 
-	var baseURLPtr *string
-	if baseURL != "" {
-		baseURLCopy := baseURL
-		baseURLPtr = &baseURLCopy
-	}
+	baseURLCopy := baseURL
+	baseURLPtr := &baseURLCopy
 	autoBan := 0
 	return &model.Channel{
 		Id:      0,
