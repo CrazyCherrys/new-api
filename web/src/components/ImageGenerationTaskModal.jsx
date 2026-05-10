@@ -114,22 +114,25 @@ const ImageGenerationTaskModal = ({
     : 1;
   const isTallImage = Boolean(imageAspectRatio && imageAspectRatio < 0.8);
   const isUltraTallImage = Boolean(imageAspectRatio && imageAspectRatio < 0.65);
+  const modalWidth = isMobile
+    ? 'calc(100vw - 24px)'
+    : 'min(1180px, calc(100vw - 64px))';
   const previewMaxWidth = isMobile
     ? '100%'
-    : isUltraTallImage
-      ? 300
-      : isTallImage
-        ? 360
-        : imageAspectRatio && imageAspectRatio > 1.35
-          ? '100%'
-          : 520;
-  const previewMaxHeight = isMobile
-    ? '44vh'
     : isUltraTallImage
       ? 360
       : isTallImage
         ? 420
-        : '52vh';
+        : imageAspectRatio && imageAspectRatio > 1.35
+          ? '100%'
+          : 640;
+  const previewMaxHeight = isMobile
+    ? '44vh'
+    : isUltraTallImage
+      ? 440
+      : isTallImage
+        ? 520
+        : '62vh';
 
   const formatTime = (timestamp) => {
     if (!timestamp) return '-';
@@ -243,12 +246,12 @@ const ImageGenerationTaskModal = ({
     body: {
       display: 'flex',
       flexDirection: isMobile ? 'column' : 'row',
-      gap: isMobile ? 12 : 16,
-      padding: isMobile ? 12 : 20,
+      gap: isMobile ? 12 : 20,
+      padding: isMobile ? 12 : 24,
       alignItems: isMobile ? 'stretch' : 'flex-start',
     },
     previewCol: {
-      flex: isMobile ? 'none' : isTallImage ? '0 1 380px' : '1 1 0',
+      flex: isMobile ? 'none' : isTallImage ? '0 1 460px' : '1 1 0',
       minWidth: 0,
       display: 'flex',
       flexDirection: 'column',
@@ -304,8 +307,8 @@ const ImageGenerationTaskModal = ({
       backdropFilter: 'blur(6px)',
     },
     sideCol: {
-      width: isMobile ? '100%' : 280,
-      minWidth: isMobile ? 0 : 280,
+      width: isMobile ? '100%' : 320,
+      minWidth: isMobile ? 0 : 320,
       display: 'flex',
       flexDirection: 'column',
       gap: 12,
@@ -503,12 +506,11 @@ const ImageGenerationTaskModal = ({
       footer={null}
       header={null}
       closable={false}
-      width={
-        isMobile ? 'calc(100vw - 24px)' : 'min(1024px, calc(100vw - 48px))'
-      }
+      centered
+      width={modalWidth}
       bodyStyle={{
         padding: 0,
-        maxHeight: isMobile ? 'calc(100vh - 24px)' : 'calc(100vh - 48px)',
+        maxHeight: isMobile ? 'calc(100vh - 24px)' : 'calc(100vh - 64px)',
         overflowY: 'auto',
         display: 'flex',
         flexDirection: 'column',
