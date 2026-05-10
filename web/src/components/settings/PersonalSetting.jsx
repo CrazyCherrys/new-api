@@ -89,6 +89,8 @@ const PersonalSetting = () => {
     upstreamModelUpdateNotifyEnabled: false,
     acceptUnsetModelRatioModel: false,
     recordIpLog: false,
+    workerApiKey: '',
+    workerApiBase: '',
   });
 
   useEffect(() => {
@@ -164,6 +166,8 @@ const PersonalSetting = () => {
         acceptUnsetModelRatioModel:
           settings.accept_unset_model_ratio_model || false,
         recordIpLog: settings.record_ip_log || false,
+        workerApiKey: settings.worker_api_key || '',
+        workerApiBase: settings.worker_api_base || '',
       });
     }
   }, [userState?.user?.setting]);
@@ -435,6 +439,8 @@ const PersonalSetting = () => {
         accept_unset_model_ratio_model:
           notificationSettings.acceptUnsetModelRatioModel,
         record_ip_log: notificationSettings.recordIpLog,
+        worker_api_key: notificationSettings.workerApiKey,
+        worker_api_base: notificationSettings.workerApiBase,
       });
 
       if (res.data.success) {

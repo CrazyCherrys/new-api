@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/worker_setting"
 
 	"github.com/QuantumNous/new-api/constant"
 
@@ -1055,6 +1056,8 @@ type UpdateUserSettingRequest struct {
 	UpstreamModelUpdateNotifyEnabled *bool   `json:"upstream_model_update_notify_enabled,omitempty"`
 	AcceptUnsetModelRatioModel       bool    `json:"accept_unset_model_ratio_model"`
 	RecordIpLog                      bool    `json:"record_ip_log"`
+	WorkerApiKey                     string  `json:"worker_api_key,omitempty"`
+	WorkerApiBase                    string  `json:"worker_api_base,omitempty"`
 }
 
 func UpdateUserSetting(c *gin.Context) {
@@ -1149,6 +1152,31 @@ func UpdateUserSetting(c *gin.Context) {
 	if user.Role >= common.RoleAdminUser && req.UpstreamModelUpdateNotifyEnabled != nil {
 		upstreamModelUpdateNotifyEnabled = *req.UpstreamModelUpdateNotifyEnabled
 	}
+	workerApiKey := existingSettings.WorkerApiKey
+	workerApiBase := existingSettings.WorkerApiBase
+	workerSetting := worker_setting.GetWorkerSetting()
+	if workerSetting.UserCustomKeyEnabled {
+		workerApiKey = strings.TrimSpace(req.WorkerApiKey)
+	} else {
+		workerApiKey = ""
+	}
+	if workerSetting.UserCustomBaseURLAllowed {
+		workerApiBase = strings.TrimSpace(req.WorkerApiBase)
+		if workerApiBase != "" {
+			parsedURL, err := url.ParseRequestURI(workerApiBase)
+			if err != nil {
+				common.ApiErrorI18n(c, i18n.MsgSettingWebhookInvalid)
+				return
+			}
+			if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+				common.ApiErrorI18n(c, i18n.MsgSettingUrlMustHttp)
+				return
+			}
+			workerApiBase = strings.TrimRight(workerApiBase, "/")
+		}
+	} else {
+		workerApiBase = ""
+	}
 
 	// 构建设置
 	settings := dto.UserSetting{
@@ -1157,6 +1185,11 @@ func UpdateUserSetting(c *gin.Context) {
 		UpstreamModelUpdateNotifyEnabled: upstreamModelUpdateNotifyEnabled,
 		AcceptUnsetRatioModel:            req.AcceptUnsetModelRatioModel,
 		RecordIpLog:                      req.RecordIpLog,
+		SidebarModules:                   existingSettings.SidebarModules,
+		BillingPreference:                existingSettings.BillingPreference,
+		Language:                         existingSettings.Language,
+		WorkerApiKey:                     workerApiKey,
+		WorkerApiBase:                    workerApiBase,
 	}
 
 	// 如果是webhook类型,添加webhook相关设置

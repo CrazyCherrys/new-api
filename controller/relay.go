@@ -284,6 +284,23 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
+	if common.GetContextKeyBool(c, constant.ContextKeyUserCustomImageChannel) {
+		autoBan := 0
+		baseURL := common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl)
+		var baseURLPtr *string
+		if baseURL != "" {
+			baseURLCopy := baseURL
+			baseURLPtr = &baseURLCopy
+		}
+		return &model.Channel{
+			Id:      c.GetInt("channel_id"),
+			Type:    c.GetInt("channel_type"),
+			Name:    c.GetString("channel_name"),
+			Key:     common.GetContextKeyString(c, constant.ContextKeyChannelKey),
+			BaseURL: baseURLPtr,
+			AutoBan: &autoBan,
+		}, nil
+	}
 	if info.ChannelMeta == nil {
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1

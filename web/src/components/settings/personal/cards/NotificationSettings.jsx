@@ -31,8 +31,15 @@ import {
   Switch,
   Row,
   Col,
+  Banner,
 } from '@douyinfe/semi-ui';
-import { IconMail, IconKey, IconBell, IconLink } from '@douyinfe/semi-icons';
+import {
+  IconMail,
+  IconKey,
+  IconBell,
+  IconLink,
+  IconGlobe,
+} from '@douyinfe/semi-icons';
 import { ShieldCheck, Bell, DollarSign, Settings } from 'lucide-react';
 import {
   renderQuotaWithPrompt,
@@ -814,6 +821,59 @@ const NotificationSettings = ({
                   extraText={t(
                     '开启后，仅"消费"和"错误"日志将记录您的客户端IP地址',
                   )}
+                />
+              </div>
+            </TabPane>
+
+            <TabPane
+              tab={
+                <div className='flex items-center'>
+                  <Settings size={16} className='mr-2' />
+                  {t('Worker设置')}
+                </div>
+              }
+              itemKey='worker'
+            >
+              <div className='py-4'>
+                <Banner
+                  type='info'
+                  description={t(
+                    '这里的设置仅用于图片生成。是否允许填写由管理员在 Worker 设置页控制。',
+                  )}
+                  closeIcon={null}
+                  style={{ marginBottom: 16 }}
+                />
+                <Form.Input
+                  field='workerApiBase'
+                  label={t('API 地址')}
+                  placeholder='https://api.example.com'
+                  prefix={<IconGlobe />}
+                  onChange={(val) => handleFormChange('workerApiBase', val)}
+                  disabled={
+                    statusState?.status?.user_custom_worker_base_url_allowed !==
+                    true
+                  }
+                  extraText={
+                    statusState?.status?.user_custom_worker_base_url_allowed ===
+                    true
+                      ? t('填写兼容的图片生成 API 基础地址')
+                      : t('管理员未开启用户自定义 API 地址')
+                  }
+                />
+                <Form.Input
+                  field='workerApiKey'
+                  label={t('API 密钥')}
+                  mode='password'
+                  prefix={<IconKey />}
+                  onChange={(val) => handleFormChange('workerApiKey', val)}
+                  disabled={
+                    statusState?.status?.user_custom_worker_key_enabled !== true
+                  }
+                  extraText={
+                    statusState?.status?.user_custom_worker_key_enabled === true
+                      ? t('填写你自己的图片生成 API 密钥')
+                      : t('管理员未开启用户自定义 API 密钥')
+                  }
                 />
               </div>
             </TabPane>

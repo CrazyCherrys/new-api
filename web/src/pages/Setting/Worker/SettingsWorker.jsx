@@ -44,6 +44,8 @@ export default function SettingsWorker(props) {
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState({
     'worker_setting.max_workers': 4,
+    'worker_setting.user_custom_key_enabled': false,
+    'worker_setting.user_custom_base_url_allowed': false,
     'worker_setting.storage_type': 'local',
     'worker_setting.local_storage_path': '',
     'worker_setting.s3_endpoint': '',
@@ -183,6 +185,40 @@ export default function SettingsWorker(props) {
                   min={1}
                   max={64}
                   onChange={handleFieldChange('worker_setting.max_workers')}
+                />
+              </Col>
+            </Row>
+          </Form.Section>
+
+          <Form.Section text={t('用户自定义 Worker 设置')}>
+            <Banner
+              type='info'
+              description={t(
+                '开启后，用户可以在个人设置的 Worker设置 中填写自己的 API 密钥和 API 地址。',
+              )}
+              style={{ marginBottom: 16 }}
+            />
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'worker_setting.user_custom_key_enabled'}
+                  label={t('允许用户自定义 API 密钥')}
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
+                  onChange={handleFieldChange(
+                    'worker_setting.user_custom_key_enabled',
+                  )}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'worker_setting.user_custom_base_url_allowed'}
+                  label={t('允许用户自定义 API 地址')}
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
+                  onChange={handleFieldChange(
+                    'worker_setting.user_custom_base_url_allowed',
+                  )}
                 />
               </Col>
             </Row>

@@ -9,6 +9,11 @@ type WorkerSetting struct {
 	// MaxWorkers 最大并发 Worker 数量
 	MaxWorkers int `json:"max_workers"`
 
+	// UserCustomKeyEnabled 是否允许用户自定义 API 密钥
+	UserCustomKeyEnabled bool `json:"user_custom_key_enabled"`
+	// UserCustomBaseURLAllowed 是否允许用户自定义 API 地址
+	UserCustomBaseURLAllowed bool `json:"user_custom_base_url_allowed"`
+
 	// StorageType 存储类型: local / s3
 	StorageType string `json:"storage_type"`
 	// LocalStoragePath 本地存储路径（空使用系统临时目录）
@@ -47,25 +52,27 @@ type WorkerSetting struct {
 
 // 默认配置
 var workerSetting = WorkerSetting{
-	MaxWorkers:         4,
-	StorageType:        "local",
-	LocalStoragePath:   "",
-	S3Endpoint:         "",
-	S3Bucket:           "",
-	S3Region:           "",
-	S3AccessKey:        "",
-	S3SecretKey:        "",
-	S3PathPrefix:       "",
-	S3URLMode:          "direct",
-	S3PublicBaseURL:    "",
-	ImageTimeout:       120,
-	VideoTimeout:       600,
-	RetryDelay:         5,
-	MaxRetries:         3,
-	PollingInterval:    5,
-	AutoCleanupEnabled: false,
-	RetentionDays:      30,
-	MaxImageSize:       10,
+	MaxWorkers:               4,
+	UserCustomKeyEnabled:     false,
+	UserCustomBaseURLAllowed: false,
+	StorageType:              "local",
+	LocalStoragePath:         "",
+	S3Endpoint:               "",
+	S3Bucket:                 "",
+	S3Region:                 "",
+	S3AccessKey:              "",
+	S3SecretKey:              "",
+	S3PathPrefix:             "",
+	S3URLMode:                "direct",
+	S3PublicBaseURL:          "",
+	ImageTimeout:             120,
+	VideoTimeout:             600,
+	RetryDelay:               5,
+	MaxRetries:               3,
+	PollingInterval:          5,
+	AutoCleanupEnabled:       false,
+	RetentionDays:            30,
+	MaxImageSize:             10,
 }
 
 func init() {

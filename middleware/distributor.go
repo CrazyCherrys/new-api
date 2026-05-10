@@ -17,6 +17,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/setting/worker_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -52,6 +53,18 @@ func Distribute() func(c *gin.Context) {
 				return
 			}
 		} else {
+			if shouldSelectChannel {
+				customChannel, customErr := getUserCustomImageGenerationChannel(c, modelRequest)
+				if customErr != nil {
+					abortWithOpenAiMessage(c, http.StatusBadRequest, customErr.Error())
+					return
+				}
+				if customChannel != nil {
+					channel = customChannel
+					common.SetContextKey(c, constant.ContextKeyUserCustomImageChannel, true)
+				}
+			}
+
 			// Select a channel for the user
 			// check token model mapping
 			modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)
@@ -74,7 +87,7 @@ func Distribute() func(c *gin.Context) {
 				}
 			}
 
-			if shouldSelectChannel {
+			if shouldSelectChannel && channel == nil {
 				if modelRequest.Model == "" {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorModelNameRequired))
 					return
@@ -158,10 +171,77 @@ func Distribute() func(c *gin.Context) {
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
 		c.Next()
-		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
+		if channel != nil && channel.Id > 0 && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
 		}
 	}
+}
+
+func getUserCustomImageGenerationChannel(c *gin.Context, modelRequest *ModelRequest) (*model.Channel, error) {
+	if c.GetHeader("X-New-API-Image-Generation-Task") != "true" {
+		return nil, nil
+	}
+	path := c.Request.URL.Path
+	if !strings.HasPrefix(path, "/v1/images/") && path != "/v1/responses" {
+		return nil, nil
+	}
+	userId := c.GetInt("id")
+	if userId == 0 {
+		return nil, nil
+	}
+	cfg := worker_setting.GetWorkerSetting()
+	if !cfg.UserCustomKeyEnabled && !cfg.UserCustomBaseURLAllowed {
+		return nil, nil
+	}
+	settings, err := model.GetUserSetting(userId, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load user worker settings: %w", err)
+	}
+
+	apiKey := ""
+	baseURL := ""
+	if cfg.UserCustomKeyEnabled {
+		apiKey = strings.TrimSpace(settings.WorkerApiKey)
+	}
+	if apiKey == "" {
+		return nil, nil
+	}
+	if cfg.UserCustomBaseURLAllowed {
+		baseURL = strings.TrimRight(strings.TrimSpace(settings.WorkerApiBase), "/")
+	}
+
+	channelType := constant.ChannelTypeOpenAI
+	switch strings.ToLower(strings.TrimSpace(c.GetHeader("X-New-API-Image-Request-Endpoint"))) {
+	case "gemini":
+		channelType = constant.ChannelTypeGemini
+	case "openai", "openai-response", "openai_mod", "":
+		channelType = constant.ChannelTypeOpenAI
+	default:
+		if modelRequest != nil && strings.TrimSpace(modelRequest.Model) != "" {
+			mapping, err := model.GetActiveModelMappingByRequestModel(modelRequest.Model)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get model mapping: %w", err)
+			}
+			if mapping != nil && strings.EqualFold(strings.TrimSpace(mapping.RequestEndpoint), "gemini") {
+				channelType = constant.ChannelTypeGemini
+			}
+		}
+	}
+
+	var baseURLPtr *string
+	if baseURL != "" {
+		baseURLCopy := baseURL
+		baseURLPtr = &baseURLCopy
+	}
+	autoBan := 0
+	return &model.Channel{
+		Id:      0,
+		Type:    channelType,
+		Name:    "User Custom Image Channel",
+		Key:     apiKey,
+		BaseURL: baseURLPtr,
+		AutoBan: &autoBan,
+	}, nil
 }
 
 // getModelFromRequest 从请求中读取模型信息

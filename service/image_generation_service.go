@@ -23,6 +23,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+const (
+	imageGenerationContextUseUserCustomChannel = "image_generation_use_user_custom_channel"
+)
+
 var (
 	imageWorkerLimiter         imageGenerationWorkerLimiter
 	enqueueImageGenerationTask = func(taskId int) {
@@ -33,6 +37,11 @@ var (
 type imageGenerationWorkerLimiter struct {
 	mutex  sync.Mutex
 	active int
+}
+
+type imageGenerationUserChannelOverride struct {
+	APIKey  string
+	BaseURL string
 }
 
 func normalizeImageEndpoint(endpoint string) string {
@@ -205,6 +214,30 @@ func imageGenerationRetryDelay() time.Duration {
 		return 5 * time.Second
 	}
 	return retryDelay
+}
+
+func getImageGenerationUserChannelOverride(userId int) (*imageGenerationUserChannelOverride, error) {
+	cfg := worker_setting.GetWorkerSetting()
+	if !cfg.UserCustomKeyEnabled && !cfg.UserCustomBaseURLAllowed {
+		return nil, nil
+	}
+
+	settings, err := model.GetUserSetting(userId, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user setting: %w", err)
+	}
+
+	override := &imageGenerationUserChannelOverride{}
+	if cfg.UserCustomKeyEnabled {
+		override.APIKey = strings.TrimSpace(settings.WorkerApiKey)
+	}
+	if cfg.UserCustomBaseURLAllowed {
+		override.BaseURL = strings.TrimRight(strings.TrimSpace(settings.WorkerApiBase), "/")
+	}
+	if override.APIKey == "" {
+		return nil, nil
+	}
+	return override, nil
 }
 
 func (l *imageGenerationWorkerLimiter) acquire(ctx context.Context) error {
@@ -829,26 +862,8 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	}
 	imageReq.Model = actualModel
 
-	// 根据 request_endpoint 获取渠道类型列表
-	channelTypes, err := channelTypesForImageEndpoint(taskEndpoint)
-	if err != nil {
-		return "", "", 0, err
-	}
-
-	// 选择渠道（根据 channelTypes 过滤）
-	channelId, err := selectChannelForModel(actualModel, task.UserId, channelTypes)
-	if err != nil {
-		return "", "", 0, fmt.Errorf("failed to select channel: %w", err)
-	}
-
-	// 获取渠道信息
-	ch, err := model.GetChannelById(channelId, true)
-	if err != nil {
-		return "", "", 0, fmt.Errorf("failed to get channel: %w", err)
-	}
-
 	// 使用 relay 层调用上游 API
-	resp, err := callUpstreamImageAPIViaRelay(ctx, ch, task, imageReq)
+	resp, err := callUpstreamImageAPIViaRelay(ctx, task, imageReq)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("failed to call upstream API: %w", err)
 	}
@@ -867,7 +882,7 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 }
 
 // callUpstreamImageAPIViaRelay 通过内部 API 调用 relay 层处理图片生成
-func callUpstreamImageAPIViaRelay(ctx context.Context, ch *model.Channel, task *model.ImageGenerationTask, imageReq *dto.ImageRequest) (*http.Response, error) {
+func callUpstreamImageAPIViaRelay(ctx context.Context, task *model.ImageGenerationTask, imageReq *dto.ImageRequest) (*http.Response, error) {
 	// 获取用户的有效 Token
 	userToken, err := getUserValidToken(task.UserId)
 	if err != nil {
@@ -918,6 +933,18 @@ func callUpstreamImageAPIViaRelay(ctx context.Context, ch *model.Channel, task *
 	// 设置请求头 - 使用用户的 token 来调用内部 API
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+userToken)
+
+	override, err := getImageGenerationUserChannelOverride(task.UserId)
+	if err != nil {
+		return nil, err
+	}
+	if override != nil {
+		req.Header.Set("X-New-API-Image-Generation-Task", "true")
+		req.Header.Set(
+			"X-New-API-Image-Request-Endpoint",
+			normalizeImageEndpoint(imageReq.RequestEndpoint),
+		)
+	}
 
 	// 发送请求
 	client := &http.Client{

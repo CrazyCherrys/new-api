@@ -161,6 +161,10 @@ const ImageGeneration = () => {
   const sseRef = useRef(null);
   const pollingTimerRef = useRef(null);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
+  const [userCustomWorkerKeyEnabled, setUserCustomWorkerKeyEnabled] =
+    useState(false);
+  const [userCustomWorkerBaseUrlAllowed, setUserCustomWorkerBaseUrlAllowed] =
+    useState(false);
 
   const formatModelSeries = (series) => {
     if (!series) return '';
@@ -306,6 +310,12 @@ const ImageGeneration = () => {
         if (!isNaN(size) && size > 0) {
           setMaxImageSize(size);
         }
+        setUserCustomWorkerKeyEnabled(
+          res.data.data.user_custom_key_enabled === true,
+        );
+        setUserCustomWorkerBaseUrlAllowed(
+          res.data.data.user_custom_base_url_allowed === true,
+        );
       }
     } catch (error) {
       // 静默失败，使用默认值
