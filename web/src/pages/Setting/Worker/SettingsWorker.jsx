@@ -34,6 +34,17 @@ const S3_SECRET_FIELDS = new Set([
   'worker_setting.s3_access_key',
   'worker_setting.s3_secret_key',
 ]);
+const STORAGE_FIELD_NAMES = [
+  'worker_setting.local_storage_path',
+  'worker_setting.s3_endpoint',
+  'worker_setting.s3_bucket',
+  'worker_setting.s3_region',
+  'worker_setting.s3_access_key',
+  'worker_setting.s3_secret_key',
+  'worker_setting.s3_path_prefix',
+  'worker_setting.s3_url_mode',
+  'worker_setting.s3_public_base_url',
+];
 
 function isMaskedSecretValue(value) {
   return value === MASKED_SECRET_VALUE || value === LEGACY_MASKED_SECRET_VALUE;
@@ -143,6 +154,21 @@ export default function SettingsWorker(props) {
       refForm.current.setValues({ ...nextInputs, ...currentInputs });
     }
   }, [props.options]);
+
+  useEffect(() => {
+    if (!refForm.current) {
+      return;
+    }
+
+    // Storage inputs are mounted conditionally. Re-apply their values after the
+    // section is rendered so configured S3 fields stay visible when switching
+    // from the default local mode to s3 mode.
+    const storageInputs = {};
+    STORAGE_FIELD_NAMES.forEach((fieldName) => {
+      storageInputs[fieldName] = inputs[fieldName];
+    });
+    refForm.current.setValues(storageInputs);
+  }, [inputs['worker_setting.storage_type']]);
 
   const storageType = inputs['worker_setting.storage_type'];
 

@@ -47,13 +47,17 @@ const WorkerSetting = () => {
     const res = await API.get('/api/option/');
     const { success, message, data } = res.data;
     if (success) {
-      let newInputs = {};
+      // Keep the worker-setting shape stable even if the server omits some keys.
+      const newInputs = { ...inputs };
       data.forEach((item) => {
-        if (typeof inputs[item.key] === 'boolean') {
-          newInputs[item.key] = toBoolean(item.value);
-        } else {
-          newInputs[item.key] = item.value;
+        if (!Object.prototype.hasOwnProperty.call(newInputs, item.key)) {
+          return;
         }
+        if (typeof newInputs[item.key] === 'boolean') {
+          newInputs[item.key] = toBoolean(item.value);
+          return;
+        }
+        newInputs[item.key] = item.value;
       });
       setInputs(newInputs);
     } else {

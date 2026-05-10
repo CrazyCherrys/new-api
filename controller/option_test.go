@@ -43,9 +43,12 @@ func withOptionMap(t *testing.T, options map[string]string) {
 func TestGetOptionsMasksWorkerS3SecretFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	withOptionMap(t, map[string]string{
+		"worker_setting.s3_endpoint":   "https://s3.example.com",
+		"worker_setting.s3_bucket":     "bucket",
+		"worker_setting.s3_region":     "us-east-1",
+		"worker_setting.s3_path_prefix": "worker/output",
 		"worker_setting.s3_access_key": "raw-access-key",
 		"worker_setting.s3_secret_key": "raw-secret-key",
-		"worker_setting.s3_bucket":     "bucket",
 	})
 
 	recorder := httptest.NewRecorder()
@@ -75,9 +78,51 @@ func TestGetOptionsMasksWorkerS3SecretFields(t *testing.T) {
 	if values["worker_setting.s3_bucket"] != "bucket" {
 		t.Fatalf("expected bucket to be returned normally, got %q", values["worker_setting.s3_bucket"])
 	}
+	if values["worker_setting.s3_endpoint"] != "https://s3.example.com" {
+		t.Fatalf("expected endpoint to be returned normally, got %q", values["worker_setting.s3_endpoint"])
+	}
+	if values["worker_setting.s3_region"] != "us-east-1" {
+		t.Fatalf("expected region to be returned normally, got %q", values["worker_setting.s3_region"])
+	}
+	if values["worker_setting.s3_path_prefix"] != "worker/output" {
+		t.Fatalf("expected path prefix to be returned normally, got %q", values["worker_setting.s3_path_prefix"])
+	}
 	if string(recorder.Body.Bytes()) == "" ||
 		containsAny(recorder.Body.String(), "raw-access-key", "raw-secret-key") {
 		t.Fatalf("response leaked raw S3 credentials: %s", recorder.Body.String())
+	}
+}
+
+func TestGetOptionsLeavesUnsetWorkerS3SecretsBlank(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withOptionMap(t, map[string]string{
+		"worker_setting.s3_access_key": "",
+		"worker_setting.s3_secret_key": "",
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/option/", nil)
+
+	GetOptions(ctx)
+
+	var response optionAPIResponse
+	if err := common.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !response.Success {
+		t.Fatalf("expected success response, got message: %s", response.Message)
+	}
+
+	values := make(map[string]string, len(response.Data))
+	for _, option := range response.Data {
+		values[option.Key] = option.Value
+	}
+	if values["worker_setting.s3_access_key"] != "" {
+		t.Fatalf("expected unset access key to stay blank, got %q", values["worker_setting.s3_access_key"])
+	}
+	if values["worker_setting.s3_secret_key"] != "" {
+		t.Fatalf("expected unset secret key to stay blank, got %q", values["worker_setting.s3_secret_key"])
 	}
 }
 
