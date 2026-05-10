@@ -38,6 +38,8 @@ type ImageRequest struct {
 	Resolution  string `json:"resolution,omitempty"`
 	// 参考图片列表，Data URL 格式（"data:image/png;base64,..."）或纯 base64 字符串
 	ReferenceImages []string `json:"reference_images,omitempty"`
+	// 遮罩图片，Data URL 格式（"data:image/png;base64,..."）或可访问 URL
+	Mask string `json:"mask,omitempty"`
 	// 用匿名参数接收额外参数
 	Extra map[string]json.RawMessage `json:"-"`
 	// RawParams 保留原始参数用于传递给relay层

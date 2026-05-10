@@ -213,3 +213,56 @@ func TestDeleteImageGenerationTaskRemovesStoredReferenceImages(t *testing.T) {
 		t.Fatalf("expected task to be deleted, got %#v", reloaded)
 	}
 }
+
+func TestDeleteImageGenerationTaskRemovesStoredMaskImages(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+
+	objectKey := "image-generation/ref/20260428/124-mask.png"
+	maskURL := buildImageGenerationLocalObjectURL(objectKey)
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
+	if err != nil {
+		t.Fatalf("failed to resolve local mask path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("failed to create local mask directory: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("mask"), 0o644); err != nil {
+		t.Fatalf("failed to write local mask file: %v", err)
+	}
+
+	task := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusFailed,
+		Params:          `{"mask":"` + maskURL + `"}`,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	if err := DeleteImageGenerationTask(task); err != nil {
+		t.Fatalf("failed to delete image generation task: %v", err)
+	}
+	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
+		t.Fatalf("expected stored mask image file to be removed, stat err=%v", err)
+	}
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded != nil {
+		t.Fatalf("expected task to be deleted, got %#v", reloaded)
+	}
+}

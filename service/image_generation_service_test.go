@@ -167,6 +167,14 @@ func TestValidateImageGenerationReferenceImagesUsesWorkerSetting(t *testing.T) {
 	if err := validateImageGenerationReferenceImages(`{"reference_images":["data:image/png;base64,` + strings.Repeat("A", 2*1024*1024) + `"]}`); err == nil {
 		t.Fatal("expected oversized reference image to fail")
 	}
+
+	if err := validateImageGenerationReferenceImages(`{"mask":"data:image/png;base64,` + strings.Repeat("A", 1024) + `"}`); err != nil {
+		t.Fatalf("expected small mask image to pass, got %v", err)
+	}
+
+	if err := validateImageGenerationReferenceImages(`{"mask":"data:image/png;base64,` + strings.Repeat("A", 2*1024*1024) + `"}`); err == nil {
+		t.Fatal("expected oversized mask image to fail")
+	}
 }
 
 func TestImageGenerationWorkerLimiterReadsCurrentMaxWorkers(t *testing.T) {
@@ -234,6 +242,10 @@ func TestImageGenerationModelCapabilitiesValidation(t *testing.T) {
 
 	if _, err := CreateImageGenerationTask(user.Id, "gpt-image-1", "prompt", "openai", `{"reference_images":["data:image/png;base64,AAAA"]}`); err == nil {
 		t.Fatal("expected image editing to be rejected when capability is missing")
+	}
+
+	if _, err := CreateImageGenerationTask(user.Id, "gpt-image-1", "prompt", "openai", `{"mask":"data:image/png;base64,AAAA"}`); err == nil {
+		t.Fatal("expected mask-only edit request to be rejected")
 	}
 
 	task, err := CreateImageGenerationTask(user.Id, "gpt-image-1", "prompt", "openai", `{}`)
@@ -343,6 +355,94 @@ func TestCreateImageGenerationTaskStoresReferenceImagesOutsideDatabase(t *testin
 	}
 	if _, err := os.Stat(fullPath); err != nil {
 		t.Fatalf("expected stored reference image file to exist: %v", err)
+	}
+}
+
+func TestCreateImageGenerationTaskStoresMaskOutsideDatabase(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+
+	user := &model.User{
+		Username: "image-mask-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-mask",
+		ActualModel:       "gpt-image-mask",
+		DisplayName:       "GPT Image Mask",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation","image_editing"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to encode test image: %v", err)
+	}
+	source := "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+	})
+
+	task, err := CreateImageGenerationTask(user.Id, "gpt-image-mask", "prompt", "openai", `{"reference_images":["`+source+`"],"mask":"`+source+`","resolution":"2K"}`)
+	if err != nil {
+		t.Fatalf("expected task creation to succeed: %v", err)
+	}
+
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("expected task to be reloaded")
+	}
+	if strings.Contains(reloaded.Params, "data:image/png;base64") {
+		t.Fatalf("expected database params to avoid base64 mask image, got %s", reloaded.Params)
+	}
+
+	mask, err := extractImageGenerationMask(reloaded.Params)
+	if err != nil {
+		t.Fatalf("failed to extract stored mask image: %v", err)
+	}
+	if !strings.HasPrefix(mask, imageGenerationAssetURLPrefix) {
+		t.Fatalf("expected stored mask image URL, got %q", mask)
+	}
+	objectKey, ok := imageGenerationLocalAssetKeyFromURL(mask)
+	if !ok {
+		t.Fatalf("expected local asset key from %q", mask)
+	}
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
+	if err != nil {
+		t.Fatalf("failed to resolve local mask image path: %v", err)
+	}
+	if _, err := os.Stat(fullPath); err != nil {
+		t.Fatalf("expected stored mask image file to exist: %v", err)
 	}
 }
 

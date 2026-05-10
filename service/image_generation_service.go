@@ -111,7 +111,12 @@ func buildOpenAIResponsesImageRequest(imageReq *dto.ImageRequest) (*dto.OpenAIRe
 	if strings.TrimSpace(imageReq.Quality) != "" {
 		tool["quality"] = strings.TrimSpace(imageReq.Quality)
 	}
-	if len(imageReq.ReferenceImages) > 0 {
+	if strings.TrimSpace(imageReq.Mask) != "" {
+		tool["input_image_mask"] = map[string]any{
+			"image_url": imageReq.Mask,
+		}
+	}
+	if len(imageReq.ReferenceImages) > 0 || strings.TrimSpace(imageReq.Mask) != "" {
 		tool["action"] = "edit"
 	} else {
 		tool["action"] = "generate"
@@ -269,6 +274,8 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 	var (
 		paramMap                map[string]interface{}
 		referenceInputs         []string
+		maskInput               string
+		hasMaskInput            bool
 		hadLegacyReferenceImage bool
 		storedParams            = params
 	)
@@ -277,8 +284,10 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 			return nil, fmt.Errorf("failed to parse params: %w", err)
 		}
 		referenceInputs, hadLegacyReferenceImage = collectImageGenerationReferenceImagesFromParamsMap(paramMap)
-		if len(referenceInputs) > 0 {
+		maskInput, hasMaskInput = collectImageGenerationMaskFromParamsMap(paramMap)
+		if len(referenceInputs) > 0 || strings.TrimSpace(maskInput) != "" || hasMaskInput {
 			setImageGenerationReferenceImagesInParamsMap(paramMap, nil, false)
+			setImageGenerationMaskInParamsMap(paramMap, "")
 			storedParamsBytes, err := common.Marshal(paramMap)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal stored params: %w", err)
@@ -303,22 +312,32 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 		return nil, fmt.Errorf("failed to insert task: %w", err)
 	}
 
-	if len(referenceInputs) > 0 {
+	if len(referenceInputs) > 0 || strings.TrimSpace(maskInput) != "" {
 		storedRefs, err := storeImageGenerationReferenceImages(context.Background(), task.Id, referenceInputs)
 		if err != nil {
 			_ = model.DeleteImageTask(task.Id)
 			return nil, fmt.Errorf("failed to store reference images: %w", err)
 		}
+		storedMask := ""
+		if strings.TrimSpace(maskInput) != "" {
+			storedMask, err = storeImageGenerationReferenceImage(context.Background(), task.Id, maskInput)
+			if err != nil {
+				cleanupStoredImageGenerationAssets(storedRefs)
+				_ = model.DeleteImageTask(task.Id)
+				return nil, fmt.Errorf("failed to store mask image: %w", err)
+			}
+		}
 		setImageGenerationReferenceImagesInParamsMap(paramMap, storedRefs, hadLegacyReferenceImage)
+		setImageGenerationMaskInParamsMap(paramMap, storedMask)
 		storedParamsBytes, err := common.Marshal(paramMap)
 		if err != nil {
-			cleanupStoredImageGenerationAssets(storedRefs)
+			cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
 			_ = model.DeleteImageTask(task.Id)
 			return nil, fmt.Errorf("failed to marshal stored params: %w", err)
 		}
 		task.Params = string(storedParamsBytes)
 		if err := task.Update(); err != nil {
-			cleanupStoredImageGenerationAssets(storedRefs)
+			cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
 			_ = model.DeleteImageTask(task.Id)
 			return nil, fmt.Errorf("failed to update stored params: %w", err)
 		}
@@ -466,6 +485,19 @@ func extractImageGenerationReferenceImages(params string) ([]string, error) {
 	return referenceImages, nil
 }
 
+func extractImageGenerationMask(params string) (string, error) {
+	if strings.TrimSpace(params) == "" {
+		return "", nil
+	}
+
+	var paramMap map[string]interface{}
+	if err := common.UnmarshalJsonStr(params, &paramMap); err != nil {
+		return "", fmt.Errorf("failed to parse params: %w", err)
+	}
+	mask, _ := collectImageGenerationMaskFromParamsMap(paramMap)
+	return mask, nil
+}
+
 func collectImageGenerationReferenceImagesFromParamsMap(paramMap map[string]interface{}) ([]string, bool) {
 	if len(paramMap) == 0 {
 		return nil, false
@@ -520,6 +552,21 @@ func collectImageGenerationReferenceImagesFromParamsMap(paramMap map[string]inte
 	return out, hadLegacyReferenceImage
 }
 
+func collectImageGenerationMaskFromParamsMap(paramMap map[string]interface{}) (string, bool) {
+	if len(paramMap) == 0 {
+		return "", false
+	}
+	raw, ok := paramMap["mask"]
+	if !ok {
+		return "", false
+	}
+	mask, ok := raw.(string)
+	if !ok {
+		return "", true
+	}
+	return strings.TrimSpace(mask), true
+}
+
 func setImageGenerationReferenceImagesInParamsMap(paramMap map[string]interface{}, refs []string, keepLegacySingle bool) {
 	delete(paramMap, "reference_images")
 	delete(paramMap, "reference_image")
@@ -532,6 +579,32 @@ func setImageGenerationReferenceImagesInParamsMap(paramMap map[string]interface{
 	}
 }
 
+func setImageGenerationMaskInParamsMap(paramMap map[string]interface{}, mask string) {
+	delete(paramMap, "mask")
+	mask = strings.TrimSpace(mask)
+	if mask == "" {
+		return
+	}
+	paramMap["mask"] = mask
+}
+
+func hasImageGenerationEditInputs(params string) (bool, error) {
+	if strings.TrimSpace(params) == "" {
+		return false, nil
+	}
+
+	var paramMap map[string]interface{}
+	if err := common.UnmarshalJsonStr(params, &paramMap); err != nil {
+		return false, fmt.Errorf("failed to parse params: %w", err)
+	}
+	referenceImages, _ := collectImageGenerationReferenceImagesFromParamsMap(paramMap)
+	if len(referenceImages) > 0 {
+		return true, nil
+	}
+	mask, _ := collectImageGenerationMaskFromParamsMap(paramMap)
+	return strings.TrimSpace(mask) != "", nil
+}
+
 func SanitizeImageGenerationParamsForResponse(params string) string {
 	if strings.TrimSpace(params) == "" {
 		return ""
@@ -541,6 +614,7 @@ func SanitizeImageGenerationParamsForResponse(params string) string {
 		return params
 	}
 	setImageGenerationReferenceImagesInParamsMap(paramMap, nil, false)
+	setImageGenerationMaskInParamsMap(paramMap, "")
 	if len(paramMap) == 0 {
 		return ""
 	}
@@ -556,8 +630,9 @@ func validateImageGenerationReferenceImages(params string) error {
 	if err != nil {
 		return err
 	}
-	if len(referenceImages) == 0 {
-		return nil
+	mask, err := extractImageGenerationMask(params)
+	if err != nil {
+		return err
 	}
 
 	cfg := worker_setting.GetWorkerSetting()
@@ -578,28 +653,40 @@ func validateImageGenerationReferenceImages(params string) error {
 			return fmt.Errorf("reference image %d exceeds maximum size: %.2fMB > %dMB", idx+1, float64(size)/1024/1024, maxImageSizeMB)
 		}
 	}
+	if strings.TrimSpace(mask) != "" {
+		size, ok, err := referenceImageDecodedSize(mask)
+		if err != nil {
+			return fmt.Errorf("mask image is invalid: %w", err)
+		}
+		if ok && size > maxBytes {
+			return fmt.Errorf("mask image exceeds maximum size: %.2fMB > %dMB", float64(size)/1024/1024, maxImageSizeMB)
+		}
+	}
 	return nil
 }
 
 func validateImageGenerationModelCapabilities(mapping *model.ModelMapping, params string) error {
+	hasEditInputs, err := hasImageGenerationEditInputs(params)
+	if err != nil {
+		return err
+	}
 	referenceImages, err := extractImageGenerationReferenceImages(params)
 	if err != nil {
 		return err
+	}
+	mask, err := extractImageGenerationMask(params)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(mask) != "" && len(referenceImages) == 0 {
+		return fmt.Errorf("mask image requires at least one reference image")
 	}
 	capabilities, err := model.EffectiveImageCapabilities(mapping.ImageCapabilities)
 	if err != nil {
 		return fmt.Errorf("invalid image capabilities for model %s: %w", mapping.RequestModel, err)
 	}
 
-	hasReferenceImage := false
-	for _, imageData := range referenceImages {
-		if strings.TrimSpace(imageData) != "" {
-			hasReferenceImage = true
-			break
-		}
-	}
-
-	if hasReferenceImage {
+	if hasEditInputs {
 		for _, capability := range capabilities {
 			if capability == model.ImageCapabilityEditing {
 				return nil
@@ -701,6 +788,13 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 			imageReq.ReferenceImages = append(imageReq.ReferenceImages, dataURL)
 		}
 	}
+	if mask, _ := collectImageGenerationMaskFromParamsMap(params); strings.TrimSpace(mask) != "" {
+		dataURL, convErr := referenceImageAsDataURL(ctx, mask)
+		if convErr != nil {
+			return "", "", 0, fmt.Errorf("failed to load mask image: %w", convErr)
+		}
+		imageReq.Mask = dataURL
+	}
 
 	var nVal float64
 	hasN := false
@@ -786,8 +880,9 @@ func callUpstreamImageAPIViaRelay(ctx context.Context, ch *model.Channel, task *
 		port = "3000"
 	}
 	// 路由规则（按 request_endpoint 区分）：
-	//   - "openai"（标准 OpenAI 端点）：无论是否带参考图，统一发往 /v1/images/generations。
-	//     由 convertStandardOpenAIImageRequest 序列化为精简 JSON: {prompt, model, size, image[]}。
+	//   - "openai"（标准 OpenAI 端点）：
+	//     无编辑输入走 /v1/images/generations；
+	//     有参考图或遮罩时走 /v1/images/edits。
 	//   - "openai-response"（Responses 图像工具）：统一发往 /v1/responses，
 	//     由 convertOpenAIResponsesImageRequest 组装 Responses API payload。
 	//   - "openai_mod"（魔改端点）：无参考图走 /v1/images/generations；
@@ -802,6 +897,8 @@ func callUpstreamImageAPIViaRelay(ctx context.Context, ch *model.Channel, task *
 		if err != nil {
 			return nil, fmt.Errorf("failed to build responses image request: %w", err)
 		}
+	} else if (len(imageReq.ReferenceImages) > 0 || strings.TrimSpace(imageReq.Mask) != "") && taskEndpoint == "openai" {
+		requestURL = fmt.Sprintf("http://127.0.0.1:%s/v1/images/edits", port)
 	} else if len(imageReq.ReferenceImages) > 0 && taskEndpoint != "openai" {
 		requestURL = fmt.Sprintf("http://127.0.0.1:%s/v1/images/edits", port)
 	}
@@ -1176,7 +1273,18 @@ func deleteS3File(imageUrl string, cfg *worker_setting.WorkerSetting) error {
 }
 
 func collectStoredReferenceImages(params string) ([]string, error) {
-	return extractImageGenerationReferenceImages(params)
+	references, err := extractImageGenerationReferenceImages(params)
+	if err != nil {
+		return nil, err
+	}
+	mask, err := extractImageGenerationMask(params)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(mask) != "" {
+		references = append(references, mask)
+	}
+	return references, nil
 }
 
 // StartImageCleanupTask 启动图片清理定时任务

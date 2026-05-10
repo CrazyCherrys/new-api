@@ -127,6 +127,7 @@ const ImageGeneration = () => {
   const [selectedModelData, setSelectedModelData] = useState(null);
   const [inspiration, setInspiration] = useState('');
   const [referenceImages, setReferenceImages] = useState([]);
+  const [maskImage, setMaskImage] = useState(null);
   const [aspectRatio, setAspectRatio] = useState(() =>
     getStoredValue(STORAGE_KEYS.ASPECT_RATIO, ''),
   );
@@ -655,11 +656,22 @@ const ImageGeneration = () => {
       !modelSupportsCapability(selectedModelData, IMAGE_CAPABILITY_EDITING)
     ) {
       setReferenceImages([]);
+      setMaskImage(null);
     }
   }, [selectedModelData]);
 
+  useEffect(() => {
+    if (referenceImages.length === 0) {
+      setMaskImage(null);
+    }
+  }, [referenceImages]);
+
   const handleImageUpload = ({ fileList }) => {
     setReferenceImages(fileList);
+  };
+
+  const handleMaskUpload = ({ fileList }) => {
+    setMaskImage(fileList[0] || null);
   };
 
   const validateImageSize = (file) => {
@@ -678,6 +690,10 @@ const ImageGeneration = () => {
 
   const handleImageRemove = (file) => {
     setReferenceImages(referenceImages.filter((img) => img.uid !== file.uid));
+  };
+
+  const handleMaskRemove = () => {
+    setMaskImage(null);
   };
 
   const normalizeTaskCount = (value) => {
@@ -711,6 +727,10 @@ const ImageGeneration = () => {
       showError(t('当前模型不支持图像编辑'));
       return;
     }
+    if (maskImage && referenceImages.length === 0) {
+      showError(t('请先上传参考图再添加遮罩'));
+      return;
+    }
     if (!supportsImageGeneration && referenceImages.length === 0) {
       showError(t('当前模型至少需要上传一张参考图'));
       return;
@@ -742,6 +762,14 @@ const ImageGeneration = () => {
         });
         const base64Images = await Promise.all(imagePromises);
         params.reference_images = base64Images;
+      }
+      if (maskImage?.fileInstance) {
+        params.mask = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(maskImage.fileInstance);
+        });
       }
 
       // UI uses inspiration wording; backend task DTO still expects prompt.
@@ -1003,6 +1031,10 @@ const ImageGeneration = () => {
   const selectedModelSupportsEditing =
     !!selectedModelData &&
     modelSupportsCapability(selectedModelData, IMAGE_CAPABILITY_EDITING);
+  const selectedModelSupportsMaskEditing =
+    !!selectedModelData &&
+    selectedModelSupportsEditing &&
+    ['openai', 'openai-response'].includes(selectedModelData.request_endpoint);
   const requiresReferenceImage =
     selectedModelSupportsEditing && !selectedModelSupportsGeneration;
   const canGenerate =
@@ -1141,6 +1173,70 @@ const ImageGeneration = () => {
                   </div>
                 </Upload>
               </div>
+            </div>
+          )}
+
+          {selectedModelSupportsMaskEditing && (
+            <div style={styles.fieldGroup}>
+              <span style={styles.label}>{t('遮罩图像')}</span>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                }}
+              >
+                {maskImage && (
+                  <div style={styles.referenceImageContainer}>
+                    <img
+                      src={
+                        maskImage.url ||
+                        (maskImage.fileInstance &&
+                          URL.createObjectURL(maskImage.fileInstance))
+                      }
+                      alt=''
+                      style={styles.referenceImageThumb}
+                    />
+                    <button
+                      style={styles.removeImageBtn}
+                      onClick={handleMaskRemove}
+                    >
+                      <IconDelete size='extra-small' />
+                    </button>
+                  </div>
+                )}
+                <Upload
+                  action=''
+                  accept='image/*'
+                  multiple={false}
+                  fileList={maskImage ? [maskImage] : []}
+                  onChange={handleMaskUpload}
+                  showUploadList={false}
+                  beforeUpload={validateImageSize}
+                  disabled={referenceImages.length === 0}
+                >
+                  <div
+                    style={{
+                      ...styles.addImageBtn,
+                      opacity: referenceImages.length === 0 ? 0.5 : 1,
+                      cursor:
+                        referenceImages.length === 0 ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    <IconImage size='large' />
+                  </div>
+                </Upload>
+              </div>
+              <Text
+                type='tertiary'
+                size='small'
+                style={{ display: 'block', marginTop: 8 }}
+              >
+                {referenceImages.length === 0
+                  ? t('请先上传参考图再添加遮罩')
+                  : t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
+              </Text>
             </div>
           )}
         </Spin>

@@ -445,9 +445,9 @@ func calculateOpenAIPixelSize(resolution, aspectRatio string) string {
 //
 //	{ prompt, model, size, image[] }
 //
-// - size：从合法预设中选取（1024x1024 / 1536x1024 / 1024x1536 / 2048x2048 /
-//   2048x1152 / 3840x2160 / 2160x3840 / auto），由 calculateOpenAIPixelSize 映射。
-// - image：参考图数组（URL 或 base64 data URL）。无参考图时省略整个字段。
+//   - size：从合法预设中选取（1024x1024 / 1536x1024 / 1024x1536 / 2048x2048 /
+//     2048x1152 / 3840x2160 / 2160x3840 / auto），由 calculateOpenAIPixelSize 映射。
+//   - image：参考图数组（URL 或 base64 data URL）。无参考图时省略整个字段。
 //
 // 该结构与 openai_mod / gemini 端点的请求体完全独立，互不影响。
 type StandardOpenAIImageRequest struct {
@@ -455,6 +455,30 @@ type StandardOpenAIImageRequest struct {
 	Model  string   `json:"model"`
 	Size   string   `json:"size,omitempty"`
 	Image  []string `json:"image,omitempty"`
+}
+
+func standardOpenAIRequestHasEditInputs(request dto.ImageRequest) bool {
+	if len(request.ReferenceImages) > 0 {
+		return true
+	}
+	if strings.TrimSpace(request.Mask) != "" {
+		return true
+	}
+	if len(request.Image) > 0 {
+		var single string
+		if err := common.Unmarshal(request.Image, &single); err == nil && strings.TrimSpace(single) != "" {
+			return true
+		}
+		var multi []string
+		if err := common.Unmarshal(request.Image, &multi); err == nil {
+			for _, item := range multi {
+				if strings.TrimSpace(item) != "" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // convertOpenAIStandardJSONImageRequest 处理 request_endpoint == "openai" 的图片请求。
@@ -725,10 +749,9 @@ func (a *Adaptor) convertOpenAIModImageEditRequest(request dto.ImageRequest) (an
 //   - "openai_mod" + RelayModeImagesGenerations → convertOpenAIModImageRequest
 //     resolution/aspect_ratio 原样写入 image_config（上游自行解释 "1K"/"2K"/"4K"）
 //
-//   - "openai" → convertOpenAIStandardJSONImageRequest（精简 JSON 协议）
-//     仅发送 {prompt, model, size, image[]} 四个字段，全部走 /v1/images/generations。
-//     resolution + aspect_ratio → calculateOpenAIPixelSize → WxH 像素字符串（如 "2048x1152"）；
-//     映射不到合法预设时回退 size="auto"。无参考图时省略 image 字段。
+//   - "openai"：
+//     无编辑输入 -> convertOpenAIStandardJSONImageRequest（精简 JSON 协议，走 /v1/images/generations）
+//     有编辑输入 -> convertStandardOpenAIImageRequest（标准 multipart 协议，走 /v1/images/edits）
 //
 //   - ""（空）→ convertStandardOpenAIImageRequest（兼容标准 OpenAI SDK 直调）
 //     保留 multipart/form-data + 全字段 JSON 的原行为，避免破坏外部 SDK 调用。
@@ -748,7 +771,10 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		return a.convertOpenAIModImageRequest(request)
 	case "openai":
 		// 标准 OpenAI 端点（由 /console/model-mapping 配置触发）：
-		// 始终以精简 JSON 发送到 /v1/images/generations。
+		// 文生图走精简 JSON；图像编辑走标准 multipart /v1/images/edits。
+		if info.RelayMode == relayconstant.RelayModeImagesEdits || standardOpenAIRequestHasEditInputs(request) {
+			return a.convertStandardOpenAIImageRequest(c, info, request)
+		}
 		return a.convertOpenAIStandardJSONImageRequest(c, info, request)
 	default:
 		// 兼容外部 OpenAI SDK 直调：默认行为不变，使用 multipart 或全字段 JSON
@@ -946,6 +972,23 @@ func (a *Adaptor) convertStandardOpenAIImageRequest(c *gin.Context, info *relayc
 				}
 				if _, err := part.Write(imgBytes); err != nil {
 					return nil, fmt.Errorf("write image data failed for image %d: %w", i, err)
+				}
+			}
+			if strings.TrimSpace(request.Mask) != "" {
+				maskBytes, mimeType, err := parseDataURLToBytes(request.Mask)
+				if err != nil {
+					return nil, fmt.Errorf("invalid mask image: %w", err)
+				}
+				ext := mimeTypeToExt(mimeType)
+				h := make(textproto.MIMEHeader)
+				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="mask"; filename="mask.%s"`, ext))
+				h.Set("Content-Type", mimeType)
+				part, err := writer.CreatePart(h)
+				if err != nil {
+					return nil, fmt.Errorf("create form part failed for mask: %w", err)
+				}
+				if _, err := part.Write(maskBytes); err != nil {
+					return nil, fmt.Errorf("write mask data failed: %w", err)
 				}
 			}
 		} else {
