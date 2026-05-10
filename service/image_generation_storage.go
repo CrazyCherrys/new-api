@@ -32,49 +32,105 @@ import (
 
 const imageGenerationAssetURLPrefix = "/api/image-generation/files/"
 
+const imageGenerationReferenceSubdir = "ref"
+
 type imageGenerationAsset struct {
 	data        []byte
 	contentType string
 	extension   string
 }
 
+type imageGenerationAssetLoader func(context.Context, string) (*imageGenerationAsset, error)
+
 func storeImageGenerationResult(ctx context.Context, taskId int, imageUrl string) string {
+	storedURL, err := storeImageGenerationAssetWithLoader(ctx, taskId, imageUrl, "", loadImageGenerationAsset)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("Failed to store image generation task %d result, fallback to original result: %v", taskId, err))
+		return imageUrl
+	}
+	return storedURL
+}
+
+func storeImageGenerationReferenceImage(ctx context.Context, taskId int, imageUrl string) (string, error) {
+	return storeImageGenerationAssetWithLoader(ctx, taskId, imageUrl, imageGenerationReferenceSubdir, loadImageGenerationReferenceAsset)
+}
+
+func storeImageGenerationReferenceImages(ctx context.Context, taskId int, refs []string) ([]string, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		if isImageGenerationStoredReferenceURL(ref) {
+			out = append(out, ref)
+			continue
+		}
+		stored, err := storeImageGenerationReferenceImage(ctx, taskId, ref)
+		if err != nil {
+			cleanupStoredImageGenerationAssets(out)
+			return nil, err
+		}
+		out = append(out, stored)
+	}
+	return out, nil
+}
+
+func cleanupStoredImageGenerationAssets(refs []string) {
+	cfg := worker_setting.GetWorkerSetting()
+	if cfg == nil {
+		return
+	}
+	for _, ref := range refs {
+		if err := deleteImageFile(ref, cfg); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to cleanup stored image generation asset %q: %v", ref, err))
+		}
+	}
+}
+
+func storeImageGenerationAsset(ctx context.Context, taskId int, imageUrl string, subdir string) (string, error) {
+	return storeImageGenerationAssetWithLoader(ctx, taskId, imageUrl, subdir, loadImageGenerationAsset)
+}
+
+func storeImageGenerationAssetWithLoader(ctx context.Context, taskId int, imageUrl string, subdir string, loader imageGenerationAssetLoader) (string, error) {
 	cfg := worker_setting.GetWorkerSetting()
 	if cfg == nil || strings.TrimSpace(imageUrl) == "" {
-		return imageUrl
+		return imageUrl, nil
 	}
 
 	switch strings.ToLower(strings.TrimSpace(cfg.StorageType)) {
 	case "s3":
-		storedURL, err := uploadImageGenerationResultToS3(ctx, taskId, imageUrl, cfg)
-		if err != nil {
-			common.SysLog(fmt.Sprintf("Failed to upload image generation task %d result to S3, fallback to original result: %v", taskId, err))
-			return imageUrl
-		}
-		return storedURL
+		return uploadImageGenerationAssetToS3(ctx, taskId, imageUrl, cfg, subdir, loader)
 	case "local":
-		storedURL, err := saveImageGenerationResultLocally(ctx, taskId, imageUrl, cfg)
-		if err != nil {
-			common.SysLog(fmt.Sprintf("Failed to save image generation task %d result locally, fallback to original result: %v", taskId, err))
-			return imageUrl
-		}
-		return storedURL
+		return saveImageGenerationAssetLocally(ctx, taskId, imageUrl, cfg, subdir, loader)
 	default:
-		return imageUrl
+		return imageUrl, nil
 	}
 }
 
 func uploadImageGenerationResultToS3(ctx context.Context, taskId int, imageUrl string, cfg *worker_setting.WorkerSetting) (string, error) {
+	return uploadImageGenerationAssetToS3(ctx, taskId, imageUrl, cfg, "", loadImageGenerationAsset)
+}
+
+func uploadImageGenerationAssetToS3(ctx context.Context, taskId int, imageUrl string, cfg *worker_setting.WorkerSetting, subdir string, loader imageGenerationAssetLoader) (string, error) {
 	if err := validateImageS3Config(cfg); err != nil {
 		return "", err
 	}
 
-	asset, err := loadImageGenerationAsset(ctx, imageUrl)
+	if loader == nil {
+		loader = loadImageGenerationAsset
+	}
+
+	asset, err := loader(ctx, imageUrl)
 	if err != nil {
 		return "", err
 	}
 
-	objectKey := buildImageGenerationObjectKey(taskId, cfg.S3PathPrefix, asset.extension)
+	objectKey := buildImageGenerationObjectKeyWithSubdir(taskId, cfg.S3PathPrefix, subdir, asset.extension)
 	client := newImageS3Client(cfg)
 	_, err = client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(strings.TrimSpace(cfg.S3Bucket)),
@@ -103,12 +159,20 @@ func validateImageS3Config(cfg *worker_setting.WorkerSetting) error {
 }
 
 func saveImageGenerationResultLocally(ctx context.Context, taskId int, imageUrl string, cfg *worker_setting.WorkerSetting) (string, error) {
-	asset, err := loadImageGenerationAsset(ctx, imageUrl)
+	return saveImageGenerationAssetLocally(ctx, taskId, imageUrl, cfg, "", loadImageGenerationAsset)
+}
+
+func saveImageGenerationAssetLocally(ctx context.Context, taskId int, imageUrl string, cfg *worker_setting.WorkerSetting, subdir string, loader imageGenerationAssetLoader) (string, error) {
+	if loader == nil {
+		loader = loadImageGenerationAsset
+	}
+
+	asset, err := loader(ctx, imageUrl)
 	if err != nil {
 		return "", err
 	}
 
-	objectKey := buildImageGenerationObjectKey(taskId, "", asset.extension)
+	objectKey := buildImageGenerationObjectKeyWithSubdir(taskId, "", subdir, asset.extension)
 	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
 	if err != nil {
 		return "", err
@@ -128,6 +192,145 @@ func loadImageGenerationAsset(ctx context.Context, imageUrl string) (*imageGener
 		return decodeImageGenerationBase64Asset(imageUrl)
 	}
 	return downloadImageGenerationAsset(ctx, imageUrl)
+}
+
+func loadImageGenerationReferenceAsset(ctx context.Context, ref string) (*imageGenerationAsset, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, fmt.Errorf("reference image is empty")
+	}
+
+	if objectKey, ok := imageGenerationLocalAssetKeyFromURL(ref); ok {
+		cfg := worker_setting.GetWorkerSetting()
+		fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
+		if err != nil {
+			return nil, err
+		}
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			return nil, fmt.Errorf("read local image file: %w", err)
+		}
+		return normalizeImageGenerationAsset(data, mime.TypeByExtension(filepath.Ext(fullPath)))
+	}
+
+	cfg := worker_setting.GetWorkerSetting()
+	if cfg != nil {
+		if objectKey, ok := imageGenerationS3ObjectKeyFromURL(ref, cfg); ok {
+			client := newImageS3Client(cfg)
+			resp, err := client.GetObject(ctx, &s3.GetObjectInput{
+				Bucket: aws.String(strings.TrimSpace(cfg.S3Bucket)),
+				Key:    aws.String(objectKey),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("get s3 image object: %w", err)
+			}
+			defer resp.Body.Close()
+			data, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return nil, fmt.Errorf("read s3 image object: %w", err)
+			}
+			contentType := ""
+			if resp.ContentType != nil {
+				contentType = strings.TrimSpace(*resp.ContentType)
+			}
+			return normalizeImageGenerationAsset(data, contentType)
+		}
+	}
+
+	return loadImageGenerationAsset(ctx, ref)
+}
+
+func referenceImageAsDataURL(ctx context.Context, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(ref, "data:") {
+		return ref, nil
+	}
+	if !isImageGenerationStoredReferenceURL(ref) {
+		return ref, nil
+	}
+
+	asset, err := loadImageGenerationReferenceAsset(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+
+	contentType := strings.TrimSpace(asset.contentType)
+	if contentType == "" {
+		contentType = "image/png"
+	}
+	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(asset.data), nil
+}
+
+func isImageGenerationStoredReferenceURL(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return false
+	}
+	if _, ok := imageGenerationLocalAssetKeyFromURL(ref); ok {
+		return true
+	}
+	cfg := worker_setting.GetWorkerSetting()
+	if cfg == nil {
+		return false
+	}
+	_, ok := imageGenerationS3ObjectKeyFromURL(ref, cfg)
+	return ok
+}
+
+func imageGenerationS3ObjectKeyFromURL(imageUrl string, cfg *worker_setting.WorkerSetting) (string, bool) {
+	if cfg == nil {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(imageUrl)
+	if trimmed == "" {
+		return "", false
+	}
+	endpoint := strings.TrimRight(strings.TrimSpace(cfg.S3Endpoint), "/")
+	bucket := strings.Trim(strings.TrimSpace(cfg.S3Bucket), "/")
+	if bucket == "" {
+		return "", false
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", false
+	}
+	endpointURL, err := url.Parse(endpoint)
+	if err != nil {
+		return "", false
+	}
+	if !strings.EqualFold(parsed.Scheme, endpointURL.Scheme) || parsed.Host != endpointURL.Host {
+		return "", false
+	}
+
+	candidate := strings.Trim(strings.TrimPrefix(parsed.Path, endpointURL.Path), "/")
+	if !strings.HasPrefix(candidate, bucket+"/") {
+		return "", false
+	}
+	objectKey := strings.TrimPrefix(candidate, bucket+"/")
+	objectKey, err = unescapeImageGenerationObjectKey(objectKey)
+	if err != nil {
+		return "", false
+	}
+	return objectKey, true
+}
+
+func unescapeImageGenerationObjectKey(objectKey string) (string, error) {
+	parts := strings.Split(strings.TrimSpace(objectKey), "/")
+	if len(parts) == 0 {
+		return "", fmt.Errorf("empty object key")
+	}
+	for i, part := range parts {
+		unescaped, err := url.PathUnescape(part)
+		if err != nil {
+			return "", err
+		}
+		parts[i] = unescaped
+	}
+	return strings.Join(parts, "/"), nil
 }
 
 func decodeImageGenerationBase64Asset(raw string) (*imageGenerationAsset, error) {
@@ -255,13 +458,22 @@ func imageExtensionFromContentType(contentType string, fallbackFormat string) st
 }
 
 func buildImageGenerationObjectKey(taskId int, prefix string, extension string) string {
+	return buildImageGenerationObjectKeyWithSubdir(taskId, prefix, "", extension)
+}
+
+func buildImageGenerationObjectKeyWithSubdir(taskId int, prefix string, subdir string, extension string) string {
 	cleanPrefix := strings.Trim(strings.TrimSpace(prefix), "/")
 	day := time.Now().Format("20060102")
 	filename := fmt.Sprintf("%d-%s%s", taskId, uuid.NewString(), extension)
-	if cleanPrefix == "" {
-		return path.Join("image-generation", day, filename)
+	parts := []string{"image-generation"}
+	if strings.TrimSpace(subdir) != "" {
+		parts = append(parts, strings.Trim(strings.TrimSpace(subdir), "/"))
 	}
-	return path.Join(cleanPrefix, "image-generation", day, filename)
+	parts = append(parts, day, filename)
+	if cleanPrefix == "" {
+		return path.Join(parts...)
+	}
+	return path.Join(append([]string{cleanPrefix}, parts...)...)
 }
 
 func newImageS3Client(cfg *worker_setting.WorkerSetting) *s3.Client {

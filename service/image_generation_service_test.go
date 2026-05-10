@@ -1,8 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -246,6 +252,97 @@ func TestImageGenerationModelCapabilitiesValidation(t *testing.T) {
 	}
 	if created == nil || created.RequestEndpoint != "openai" {
 		t.Fatalf("unexpected created task: %#v", created)
+	}
+}
+
+func TestCreateImageGenerationTaskStoresReferenceImagesOutsideDatabase(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+
+	user := &model.User{
+		Username: "image-storage-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-edit",
+		ActualModel:       "gpt-image-edit",
+		DisplayName:       "GPT Image Edit",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation","image_editing"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to encode test image: %v", err)
+	}
+	source := "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+	})
+
+	task, err := CreateImageGenerationTask(user.Id, "gpt-image-edit", "prompt", "openai", `{"reference_images":["`+source+`"],"resolution":"2K"}`)
+	if err != nil {
+		t.Fatalf("expected task creation to succeed: %v", err)
+	}
+
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("expected task to be reloaded")
+	}
+	if strings.Contains(reloaded.Params, "data:image/png;base64") {
+		t.Fatalf("expected database params to avoid base64 reference image, got %s", reloaded.Params)
+	}
+
+	references, err := extractImageGenerationReferenceImages(reloaded.Params)
+	if err != nil {
+		t.Fatalf("failed to extract stored reference images: %v", err)
+	}
+	if len(references) != 1 {
+		t.Fatalf("expected 1 stored reference image, got %v", references)
+	}
+	if !strings.HasPrefix(references[0], imageGenerationAssetURLPrefix) {
+		t.Fatalf("expected stored reference image URL, got %q", references[0])
+	}
+	objectKey, ok := imageGenerationLocalAssetKeyFromURL(references[0])
+	if !ok {
+		t.Fatalf("expected local asset key from %q", references[0])
+	}
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
+	if err != nil {
+		t.Fatalf("failed to resolve local reference image path: %v", err)
+	}
+	if _, err := os.Stat(fullPath); err != nil {
+		t.Fatalf("expected stored reference image file to exist: %v", err)
 	}
 }
 

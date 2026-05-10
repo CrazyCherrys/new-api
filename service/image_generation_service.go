@@ -19,6 +19,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/worker_setting"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 var (
@@ -264,6 +266,27 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 			logger.FormatQuota(userQuota))
 	}
 
+	var (
+		paramMap                map[string]interface{}
+		referenceInputs         []string
+		hadLegacyReferenceImage bool
+		storedParams            = params
+	)
+	if strings.TrimSpace(params) != "" {
+		if err := common.UnmarshalJsonStr(params, &paramMap); err != nil {
+			return nil, fmt.Errorf("failed to parse params: %w", err)
+		}
+		referenceInputs, hadLegacyReferenceImage = collectImageGenerationReferenceImagesFromParamsMap(paramMap)
+		if len(referenceInputs) > 0 {
+			setImageGenerationReferenceImagesInParamsMap(paramMap, nil, false)
+			storedParamsBytes, err := common.Marshal(paramMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal stored params: %w", err)
+			}
+			storedParams = string(storedParamsBytes)
+		}
+	}
+
 	// 创建任务记录
 	task := &model.ImageGenerationTask{
 		UserId:          userId,
@@ -271,13 +294,34 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 		Prompt:          prompt,
 		RequestEndpoint: requestEndpoint,
 		Status:          model.ImageTaskStatusPending,
-		Params:          params,
+		Params:          storedParams,
 		Cost:            0, // 实际费用在完成后计算
 		CreatedTime:     common.GetTimestamp(),
 	}
 
 	if err := task.Insert(); err != nil {
 		return nil, fmt.Errorf("failed to insert task: %w", err)
+	}
+
+	if len(referenceInputs) > 0 {
+		storedRefs, err := storeImageGenerationReferenceImages(context.Background(), task.Id, referenceInputs)
+		if err != nil {
+			_ = model.DeleteImageTask(task.Id)
+			return nil, fmt.Errorf("failed to store reference images: %w", err)
+		}
+		setImageGenerationReferenceImagesInParamsMap(paramMap, storedRefs, hadLegacyReferenceImage)
+		storedParamsBytes, err := common.Marshal(paramMap)
+		if err != nil {
+			cleanupStoredImageGenerationAssets(storedRefs)
+			_ = model.DeleteImageTask(task.Id)
+			return nil, fmt.Errorf("failed to marshal stored params: %w", err)
+		}
+		task.Params = string(storedParamsBytes)
+		if err := task.Update(); err != nil {
+			cleanupStoredImageGenerationAssets(storedRefs)
+			_ = model.DeleteImageTask(task.Id)
+			return nil, fmt.Errorf("failed to update stored params: %w", err)
+		}
 	}
 
 	// 启动异步处理
@@ -414,13 +458,97 @@ func extractImageGenerationReferenceImages(params string) ([]string, error) {
 		return nil, nil
 	}
 
-	var parsed struct {
-		ReferenceImages []string `json:"reference_images"`
-	}
-	if err := common.UnmarshalJsonStr(params, &parsed); err != nil {
+	var paramMap map[string]interface{}
+	if err := common.UnmarshalJsonStr(params, &paramMap); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
-	return parsed.ReferenceImages, nil
+	referenceImages, _ := collectImageGenerationReferenceImagesFromParamsMap(paramMap)
+	return referenceImages, nil
+}
+
+func collectImageGenerationReferenceImagesFromParamsMap(paramMap map[string]interface{}) ([]string, bool) {
+	if len(paramMap) == 0 {
+		return nil, false
+	}
+
+	refs := make([]string, 0)
+	if raw, ok := paramMap["reference_images"]; ok {
+		switch typed := raw.(type) {
+		case []interface{}:
+			for _, item := range typed {
+				if ref, ok := item.(string); ok {
+					ref = strings.TrimSpace(ref)
+					if ref != "" {
+						refs = append(refs, ref)
+					}
+				}
+			}
+		case []string:
+			for _, item := range typed {
+				item = strings.TrimSpace(item)
+				if item != "" {
+					refs = append(refs, item)
+				}
+			}
+		}
+	}
+
+	hadLegacyReferenceImage := false
+	if raw, ok := paramMap["reference_image"]; ok {
+		hadLegacyReferenceImage = true
+		if ref, ok := raw.(string); ok {
+			ref = strings.TrimSpace(ref)
+			if ref != "" {
+				refs = append([]string{ref}, refs...)
+			}
+		}
+	}
+
+	if len(refs) == 0 {
+		return nil, hadLegacyReferenceImage
+	}
+
+	seen := make(map[string]struct{}, len(refs))
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, ref)
+	}
+	return out, hadLegacyReferenceImage
+}
+
+func setImageGenerationReferenceImagesInParamsMap(paramMap map[string]interface{}, refs []string, keepLegacySingle bool) {
+	delete(paramMap, "reference_images")
+	delete(paramMap, "reference_image")
+	if len(refs) == 0 {
+		return
+	}
+	paramMap["reference_images"] = refs
+	if keepLegacySingle {
+		paramMap["reference_image"] = refs[0]
+	}
+}
+
+func SanitizeImageGenerationParamsForResponse(params string) string {
+	if strings.TrimSpace(params) == "" {
+		return ""
+	}
+	var paramMap map[string]interface{}
+	if err := common.UnmarshalJsonStr(params, &paramMap); err != nil {
+		return params
+	}
+	setImageGenerationReferenceImagesInParamsMap(paramMap, nil, false)
+	if len(paramMap) == 0 {
+		return ""
+	}
+	data, err := common.Marshal(paramMap)
+	if err != nil {
+		return params
+	}
+	return string(data)
 }
 
 func validateImageGenerationReferenceImages(params string) error {
@@ -564,11 +692,13 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	}
 
 	// 参考图片：从 params 提取并写入可序列化字段
-	if refImages, ok := params["reference_images"].([]interface{}); ok && len(refImages) > 0 {
-		for _, img := range refImages {
-			if s, ok := img.(string); ok && s != "" {
-				imageReq.ReferenceImages = append(imageReq.ReferenceImages, s)
+	if referenceImages, _ := collectImageGenerationReferenceImagesFromParamsMap(params); len(referenceImages) > 0 {
+		for _, ref := range referenceImages {
+			dataURL, convErr := referenceImageAsDataURL(ctx, ref)
+			if convErr != nil {
+				return "", "", 0, fmt.Errorf("failed to load reference image: %w", convErr)
 			}
+			imageReq.ReferenceImages = append(imageReq.ReferenceImages, dataURL)
 		}
 	}
 
@@ -939,15 +1069,30 @@ func CleanupExpiredImageTasks() error {
 	return nil
 }
 
-// cleanupSingleTask 清理单个任务
-func cleanupSingleTask(task *model.ImageGenerationTask, cfg *worker_setting.WorkerSetting) error {
-	// 删除图片文件
+// DeleteImageGenerationTaskAssets 删除任务关联的图片资产（结果图 + 参考图）。
+func DeleteImageGenerationTaskAssets(task *model.ImageGenerationTask, cfg *worker_setting.WorkerSetting) {
+	if task == nil || cfg == nil {
+		return
+	}
+
 	if task.ImageUrl != "" {
 		if err := deleteImageFile(task.ImageUrl, cfg); err != nil {
 			common.SysLog(fmt.Sprintf("Failed to delete image file for task %d: %v", task.Id, err))
-			// 继续删除数据库记录，即使文件删除失败
 		}
 	}
+
+	if refs, err := collectStoredReferenceImages(task.Params); err == nil {
+		for _, ref := range refs {
+			if err := deleteImageFile(ref, cfg); err != nil {
+				common.SysLog(fmt.Sprintf("Failed to delete reference image for task %d: %v", task.Id, err))
+			}
+		}
+	}
+}
+
+// cleanupSingleTask 清理单个任务
+func cleanupSingleTask(task *model.ImageGenerationTask, cfg *worker_setting.WorkerSetting) error {
+	DeleteImageGenerationTaskAssets(task, cfg)
 
 	// 删除数据库记录
 	if err := model.DeleteImageTask(task.Id); err != nil {
@@ -957,18 +1102,30 @@ func cleanupSingleTask(task *model.ImageGenerationTask, cfg *worker_setting.Work
 	return nil
 }
 
+func DeleteImageGenerationTask(task *model.ImageGenerationTask) error {
+	if task == nil {
+		return nil
+	}
+	return cleanupSingleTask(task, worker_setting.GetWorkerSetting())
+}
+
 // deleteImageFile 删除图片文件（本地或S3）
 func deleteImageFile(imageUrl string, cfg *worker_setting.WorkerSetting) error {
-	if objectKey, ok := imageGenerationLocalAssetKeyFromURL(imageUrl); ok {
-		return deleteLocalFile(objectKey, cfg)
+	if isImageGenerationStoredReferenceURL(imageUrl) {
+		if objectKey, ok := imageGenerationLocalAssetKeyFromURL(imageUrl); ok {
+			return deleteLocalFile(objectKey, cfg)
+		}
+		if cfg != nil &&
+			strings.TrimSpace(cfg.S3Endpoint) != "" &&
+			strings.TrimSpace(cfg.S3Bucket) != "" &&
+			strings.TrimSpace(cfg.S3AccessKey) != "" &&
+			strings.TrimSpace(cfg.S3SecretKey) != "" {
+			return deleteS3File(imageUrl, cfg)
+		}
 	}
 
 	// 如果是外部URL（http/https），不需要删除
 	if strings.HasPrefix(imageUrl, "http://") || strings.HasPrefix(imageUrl, "https://") {
-		// 检查是否是S3 URL
-		if cfg.StorageType == "s3" && strings.Contains(imageUrl, cfg.S3Bucket) {
-			return deleteS3File(imageUrl, cfg)
-		}
 		// 外部URL，跳过删除
 		return nil
 	}
@@ -1002,35 +1159,24 @@ func deleteLocalFile(filePath string, cfg *worker_setting.WorkerSetting) error {
 
 // deleteS3File 删除S3文件
 func deleteS3File(imageUrl string, cfg *worker_setting.WorkerSetting) error {
-	// 从URL中提取对象键
-	// 假设URL格式: https://{bucket}.s3.{region}.amazonaws.com/{key}
-	// 或: https://{endpoint}/{bucket}/{key}
-
-	var objectKey string
-
-	// 尝试从URL中提取key
-	if strings.Contains(imageUrl, cfg.S3Bucket) {
-		parts := strings.Split(imageUrl, cfg.S3Bucket+"/")
-		if len(parts) > 1 {
-			objectKey = parts[1]
-		}
+	objectKey, ok := imageGenerationS3ObjectKeyFromURL(imageUrl, cfg)
+	if !ok {
+		return nil
 	}
 
-	if objectKey == "" {
-		return fmt.Errorf("failed to extract S3 object key from URL: %s", imageUrl)
+	client := newImageS3Client(cfg)
+	_, err := client.DeleteObject(context.Background(), &s3.DeleteObjectInput{
+		Bucket: aws.String(strings.TrimSpace(cfg.S3Bucket)),
+		Key:    aws.String(objectKey),
+	})
+	if err != nil {
+		return fmt.Errorf("delete s3 object: %w", err)
 	}
-
-	// 注意：这里需要AWS SDK来删除S3对象
-	// 由于项目中已经有AWS相关代码，这里提供接口
-	// 实际实现需要导入 github.com/aws/aws-sdk-go-v2/service/s3
-
-	common.SysLog(fmt.Sprintf("S3 file deletion not fully implemented yet: %s", objectKey))
-	// TODO: 实现S3删除逻辑
-	// 需要使用 AWS SDK v2:
-	// 1. 创建 S3 client
-	// 2. 调用 DeleteObject
-
 	return nil
+}
+
+func collectStoredReferenceImages(params string) ([]string, error) {
+	return extractImageGenerationReferenceImages(params)
 }
 
 // StartImageCleanupTask 启动图片清理定时任务

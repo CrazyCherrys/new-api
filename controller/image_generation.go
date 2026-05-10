@@ -16,6 +16,34 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func sanitizeImageGenerationTaskParams(task *model.ImageGenerationTask) {
+	if task == nil {
+		return
+	}
+	task.Params = service.SanitizeImageGenerationParamsForResponse(task.Params)
+}
+
+func sanitizeImageGenerationAssetParams(asset *model.ImageGenerationAsset) {
+	if asset == nil {
+		return
+	}
+	asset.Params = service.SanitizeImageGenerationParamsForResponse(asset.Params)
+}
+
+func sanitizeImageCreativeAssetParams(asset *model.ImageCreativeAsset) {
+	if asset == nil {
+		return
+	}
+	asset.Params = service.SanitizeImageGenerationParamsForResponse(asset.Params)
+}
+
+func sanitizeImageCreativeAdminSubmissionParams(submission *model.ImageCreativeAdminSubmission) {
+	if submission == nil {
+		return
+	}
+	submission.Params = service.SanitizeImageGenerationParamsForResponse(submission.Params)
+}
+
 // CreateImageGenerationTask 创建图片生成任务
 func CreateImageGenerationTask(c *gin.Context) {
 	userId := c.GetInt("id")
@@ -49,6 +77,7 @@ func CreateImageGenerationTask(c *gin.Context) {
 		return
 	}
 
+	sanitizeImageGenerationTaskParams(task)
 	common.ApiSuccess(c, task)
 }
 
@@ -101,6 +130,9 @@ func GetImageGenerationTasks(c *gin.Context) {
 		return
 	}
 
+	for _, task := range tasks {
+		sanitizeImageGenerationTaskParams(task)
+	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(tasks)
 	common.ApiSuccess(c, pageInfo)
@@ -149,6 +181,7 @@ func GetImageGenerationTaskDetail(c *gin.Context) {
 		return
 	}
 
+	sanitizeImageGenerationTaskParams(task)
 	common.ApiSuccess(c, task)
 }
 
@@ -183,6 +216,9 @@ func GetImageGenerationAssets(c *gin.Context) {
 		return
 	}
 
+	for _, asset := range assets {
+		sanitizeImageGenerationAssetParams(asset)
+	}
 	filterOptions, err := model.GetImageAssetFilterOptions(userId)
 	if err != nil {
 		common.ApiError(c, err)
@@ -232,6 +268,7 @@ func GetImageGenerationAssetDetail(c *gin.Context) {
 		return
 	}
 
+	sanitizeImageGenerationAssetParams(asset)
 	common.ApiSuccess(c, asset)
 }
 
@@ -273,6 +310,9 @@ func GetInspirationAssets(c *gin.Context) {
 		return
 	}
 
+	for _, asset := range assets {
+		sanitizeImageCreativeAssetParams(asset)
+	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(assets)
 	common.ApiSuccess(c, pageInfo)
@@ -302,6 +342,7 @@ func GetInspirationAssetDetail(c *gin.Context) {
 		return
 	}
 
+	sanitizeImageCreativeAssetParams(asset)
 	common.ApiSuccess(c, asset)
 }
 
@@ -314,6 +355,9 @@ func GetImageInspirationSubmissions(c *gin.Context) {
 		return
 	}
 
+	for _, submission := range submissions {
+		sanitizeImageCreativeAdminSubmissionParams(submission)
+	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(submissions)
 	common.ApiSuccess(c, pageInfo)
@@ -354,6 +398,7 @@ func ReviewImageInspirationSubmission(c *gin.Context) {
 		return
 	}
 
+	sanitizeImageCreativeAdminSubmissionParams(submission)
 	common.ApiSuccess(c, submission)
 }
 
@@ -490,6 +535,7 @@ func RetryImageGenerationTask(c *gin.Context) {
 		return
 	}
 
+	sanitizeImageGenerationTaskParams(reloadedTask)
 	common.ApiSuccess(c, reloadedTask)
 }
 
@@ -537,7 +583,7 @@ func DeleteImageGenerationTask(c *gin.Context) {
 	}
 
 	// 删除任务
-	if err := model.DeleteImageTask(taskId); err != nil {
+	if err := service.DeleteImageGenerationTask(task); err != nil {
 		common.ApiError(c, err)
 		return
 	}
