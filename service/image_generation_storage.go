@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"image"
 	_ "image/gif"
+	"image/jpeg"
 	_ "image/jpeg"
+	"image/png"
 	_ "image/png"
 	"io"
 	"mime"
@@ -27,12 +29,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
+	"golang.org/x/image/draw"
 	"golang.org/x/image/webp"
 )
 
 const imageGenerationAssetURLPrefix = "/api/image-generation/files/"
 
 const imageGenerationReferenceSubdir = "ref"
+const imageGenerationThumbnailSubdir = "thumb"
+const imageGenerationThumbnailMaxEdge = 384
 
 type imageGenerationAsset struct {
 	data        []byte
@@ -42,13 +47,42 @@ type imageGenerationAsset struct {
 
 type imageGenerationAssetLoader func(context.Context, string) (*imageGenerationAsset, error)
 
-func storeImageGenerationResult(ctx context.Context, taskId int, imageUrl string) string {
-	storedURL, err := storeImageGenerationAssetWithLoader(ctx, taskId, imageUrl, "", loadImageGenerationAsset)
+type imageGenerationStoredResult struct {
+	imageURL     string
+	thumbnailURL string
+}
+
+func storeImageGenerationResult(ctx context.Context, taskId int, imageUrl string) imageGenerationStoredResult {
+	result := imageGenerationStoredResult{
+		imageURL: imageUrl,
+	}
+
+	asset, err := loadImageGenerationAsset(ctx, imageUrl)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("Failed to store image generation task %d result, fallback to original result: %v", taskId, err))
-		return imageUrl
+		return result
 	}
-	return storedURL
+	storedAsset, err := storePreparedImageGenerationAsset(ctx, taskId, asset, "")
+	if err != nil {
+		common.SysLog(fmt.Sprintf("Failed to store image generation task %d result, fallback to original result: %v", taskId, err))
+		return result
+	}
+	result.imageURL = storedAsset
+
+	thumbnailAssetData, err := buildImageGenerationThumbnail(asset)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("Failed to store image generation task %d thumbnail, fallback to original result: %v", taskId, err))
+		result.thumbnailURL = result.imageURL
+		return result
+	}
+	thumbnailAsset, err := storePreparedImageGenerationAsset(ctx, taskId, thumbnailAssetData, imageGenerationThumbnailSubdir)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("Failed to store image generation task %d thumbnail, fallback to original result: %v", taskId, err))
+		result.thumbnailURL = result.imageURL
+		return result
+	}
+	result.thumbnailURL = thumbnailAsset
+	return result
 }
 
 func storeImageGenerationReferenceImage(ctx context.Context, taskId int, imageUrl string) (string, error) {
@@ -96,20 +130,26 @@ func storeImageGenerationAsset(ctx context.Context, taskId int, imageUrl string,
 	return storeImageGenerationAssetWithLoader(ctx, taskId, imageUrl, subdir, loadImageGenerationAsset)
 }
 
-func storeImageGenerationAssetWithLoader(ctx context.Context, taskId int, imageUrl string, subdir string, loader imageGenerationAssetLoader) (string, error) {
-	cfg := worker_setting.GetWorkerSetting()
-	if cfg == nil || strings.TrimSpace(imageUrl) == "" {
-		return imageUrl, nil
-	}
+func storeImageGenerationThumbnail(ctx context.Context, taskId int, imageUrl string) (string, error) {
+	return storeImageGenerationAssetWithLoader(ctx, taskId, imageUrl, imageGenerationThumbnailSubdir, loadImageGenerationThumbnailAsset)
+}
 
-	switch strings.ToLower(strings.TrimSpace(cfg.StorageType)) {
-	case "s3":
-		return uploadImageGenerationAssetToS3(ctx, taskId, imageUrl, cfg, subdir, loader)
-	case "local":
-		return saveImageGenerationAssetLocally(ctx, taskId, imageUrl, cfg, subdir, loader)
-	default:
+func storeImageGenerationAssetWithLoader(ctx context.Context, taskId int, imageUrl string, subdir string, loader imageGenerationAssetLoader) (string, error) {
+	if strings.TrimSpace(imageUrl) == "" {
 		return imageUrl, nil
 	}
+	cfg := worker_setting.GetWorkerSetting()
+	if cfg == nil {
+		return imageUrl, nil
+	}
+	if loader == nil {
+		loader = loadImageGenerationAsset
+	}
+	asset, err := loader(ctx, imageUrl)
+	if err != nil {
+		return "", err
+	}
+	return storePreparedImageGenerationAsset(ctx, taskId, asset, subdir)
 }
 
 func uploadImageGenerationResultToS3(ctx context.Context, taskId int, imageUrl string, cfg *worker_setting.WorkerSetting) (string, error) {
@@ -130,9 +170,17 @@ func uploadImageGenerationAssetToS3(ctx context.Context, taskId int, imageUrl st
 		return "", err
 	}
 
+	return uploadPreparedImageGenerationAssetToS3(ctx, taskId, asset, cfg, subdir)
+}
+
+func uploadPreparedImageGenerationAssetToS3(ctx context.Context, taskId int, asset *imageGenerationAsset, cfg *worker_setting.WorkerSetting, subdir string) (string, error) {
+	if asset == nil {
+		return "", fmt.Errorf("image asset is empty")
+	}
+
 	objectKey := buildImageGenerationObjectKeyWithSubdir(taskId, cfg.S3PathPrefix, subdir, asset.extension)
 	client := newImageS3Client(cfg)
-	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+	_, err := client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(strings.TrimSpace(cfg.S3Bucket)),
 		Key:         aws.String(objectKey),
 		Body:        bytes.NewReader(asset.data),
@@ -187,6 +235,14 @@ func saveImageGenerationAssetLocally(ctx context.Context, taskId int, imageUrl s
 		return "", err
 	}
 
+	return savePreparedImageGenerationAssetLocally(taskId, asset, cfg, subdir)
+}
+
+func savePreparedImageGenerationAssetLocally(taskId int, asset *imageGenerationAsset, cfg *worker_setting.WorkerSetting, subdir string) (string, error) {
+	if asset == nil {
+		return "", fmt.Errorf("image asset is empty")
+	}
+
 	objectKey := buildImageGenerationObjectKeyWithSubdir(taskId, "", subdir, asset.extension)
 	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
 	if err != nil {
@@ -200,6 +256,22 @@ func saveImageGenerationAssetLocally(ctx context.Context, taskId int, imageUrl s
 	}
 
 	return buildImageGenerationLocalObjectURL(objectKey), nil
+}
+
+func storePreparedImageGenerationAsset(ctx context.Context, taskId int, asset *imageGenerationAsset, subdir string) (string, error) {
+	cfg := worker_setting.GetWorkerSetting()
+	if cfg == nil || asset == nil {
+		return "", fmt.Errorf("image asset is empty")
+	}
+
+	switch strings.ToLower(strings.TrimSpace(cfg.StorageType)) {
+	case "s3":
+		return uploadPreparedImageGenerationAssetToS3(ctx, taskId, asset, cfg, subdir)
+	case "local":
+		return savePreparedImageGenerationAssetLocally(taskId, asset, cfg, subdir)
+	default:
+		return "", fmt.Errorf("unsupported storage type: %s", cfg.StorageType)
+	}
 }
 
 func loadImageGenerationAsset(ctx context.Context, imageUrl string) (*imageGenerationAsset, error) {
@@ -255,6 +327,14 @@ func loadImageGenerationReferenceAsset(ctx context.Context, ref string) (*imageG
 	return loadImageGenerationAsset(ctx, ref)
 }
 
+func loadImageGenerationThumbnailAsset(ctx context.Context, imageUrl string) (*imageGenerationAsset, error) {
+	asset, err := loadImageGenerationAsset(ctx, imageUrl)
+	if err != nil {
+		return nil, err
+	}
+	return buildImageGenerationThumbnail(asset)
+}
+
 func referenceImageAsDataURL(ctx context.Context, ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -303,13 +383,13 @@ func imageGenerationS3ObjectKeyFromURL(imageUrl string, cfg *worker_setting.Work
 	if trimmed == "" {
 		return "", false
 	}
+
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
 		return "", false
 	}
 	for _, baseURL := range imageGenerationS3ObjectBaseURLs(cfg) {
-		objectKey, ok := imageGenerationObjectKeyFromBaseURL(parsed, baseURL)
-		if ok {
+		if objectKey, ok := imageGenerationObjectKeyFromBaseURL(parsed, baseURL); ok {
 			return objectKey, true
 		}
 	}
@@ -416,6 +496,80 @@ func normalizeImageGenerationAsset(data []byte, contentType string) (*imageGener
 		contentType: contentType,
 		extension:   imageExtensionFromContentType(contentType, format),
 	}, nil
+}
+
+func buildImageGenerationThumbnail(asset *imageGenerationAsset) (*imageGenerationAsset, error) {
+	if asset == nil || len(asset.data) == 0 {
+		return nil, fmt.Errorf("image asset is empty")
+	}
+
+	src, _, err := image.Decode(bytes.NewReader(asset.data))
+	if err != nil {
+		if webpImage, webpErr := webp.Decode(bytes.NewReader(asset.data)); webpErr == nil {
+			src = webpImage
+			err = nil
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("decode image for thumbnail: %w", err)
+	}
+
+	bounds := src.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("invalid image dimensions")
+	}
+
+	targetWidth, targetHeight := fitImageWithinBounds(width, height, imageGenerationThumbnailMaxEdge)
+	dst := image.NewRGBA(image.Rect(0, 0, targetWidth, targetHeight))
+	draw.CatmullRom.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
+
+	var buf bytes.Buffer
+	if imageHasTransparency(src) {
+		if err := png.Encode(&buf, dst); err != nil {
+			return nil, fmt.Errorf("encode transparent thumbnail: %w", err)
+		}
+		return &imageGenerationAsset{
+			data:        buf.Bytes(),
+			contentType: "image/png",
+			extension:   ".png",
+		}, nil
+	}
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 82}); err != nil {
+		return nil, fmt.Errorf("encode thumbnail: %w", err)
+	}
+	return &imageGenerationAsset{
+		data:        buf.Bytes(),
+		contentType: "image/jpeg",
+		extension:   ".jpg",
+	}, nil
+}
+
+func fitImageWithinBounds(width int, height int, maxEdge int) (int, int) {
+	if width <= maxEdge && height <= maxEdge {
+		return width, height
+	}
+	if width >= height {
+		return maxEdge, max(1, height*maxEdge/width)
+	}
+	return max(1, width*maxEdge/height), maxEdge
+}
+
+func imageHasTransparency(img image.Image) bool {
+	if img == nil {
+		return false
+	}
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			_, _, _, alpha := img.At(x, y).RGBA()
+			if alpha != 0xffff {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func imageContentTypeFromFormat(format string) string {
@@ -679,7 +833,7 @@ func CanAccessImageGenerationLocalAsset(userId int, assetPath string) (bool, err
 	assetURL := buildImageGenerationLocalObjectURL(clean)
 	var count int64
 	if err := model.DB.Model(&model.ImageGenerationTask{}).
-		Where("user_id = ? AND image_url = ?", userId, assetURL).
+		Where("user_id = ? AND (image_url = ? OR thumbnail_url = ?)", userId, assetURL, assetURL).
 		Count(&count).Error; err != nil {
 		return false, err
 	}
@@ -696,7 +850,7 @@ func CanAccessApprovedInspirationLocalAsset(assetPath string) (bool, error) {
 	var count int64
 	if err := model.DB.Table("image_generation_tasks AS t").
 		Joins("JOIN image_creative_submissions AS s ON s.task_id = t.id").
-		Where("s.status = ? AND t.status = ? AND t.image_url = ?", model.CreativeSubmissionStatusApproved, model.ImageTaskStatusSuccess, assetURL).
+		Where("s.status = ? AND t.status = ? AND (t.image_url = ? OR t.thumbnail_url = ?)", model.CreativeSubmissionStatusApproved, model.ImageTaskStatusSuccess, assetURL, assetURL).
 		Count(&count).Error; err != nil {
 		return false, err
 	}

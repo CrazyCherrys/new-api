@@ -674,7 +674,11 @@ const Assets = () => {
         </div>
       </div>
       <div className='asset-image-wrap'>
-        <img src={asset.image_url} alt={asset.prompt || 'Generated'} />
+        <img
+          src={asset.thumbnail_url || asset.image_url}
+          alt={asset.prompt || 'Generated'}
+          loading='lazy'
+        />
       </div>
     </div>
   );

@@ -17,6 +17,7 @@ type ImageGenerationTask struct {
 	Status          string `json:"status" gorm:"size:20;not null;index;default:'pending'"`
 	Params          string `json:"params" gorm:"type:text"`          // JSON: size, quality, style, n, etc.
 	ImageUrl        string `json:"image_url" gorm:"type:text"`       // 生成的图片URL
+	ThumbnailUrl    string `json:"thumbnail_url" gorm:"type:text"`   // 列表页缩略图 URL
 	ImageMetadata   string `json:"image_metadata" gorm:"type:text"`  // JSON: revised_prompt, etc.
 	ErrorMessage    string `json:"error_message" gorm:"type:text"`   // 错误信息
 	Cost            int    `json:"cost" gorm:"default:0"`            // 消耗的配额
@@ -106,6 +107,7 @@ type ImageGenerationAsset struct {
 	RequestEndpoint             string `json:"request_endpoint"`
 	Params                      string `json:"params"`
 	ImageUrl                    string `json:"image_url"`
+	ThumbnailUrl                string `json:"thumbnail_url"`
 	ImageMetadata               string `json:"image_metadata"`
 	Cost                        int    `json:"cost"`
 	CreatedTime                 int64  `json:"created_time"`
@@ -188,7 +190,7 @@ func GetImageTasksByUserID(userId int, startIdx int, num int, queryParams ImageT
 
 func imageAssetsBaseQuery(userId int) *gorm.DB {
 	return DB.Table("image_generation_tasks AS t").
-		Select("t.id, t.id AS task_id, t.user_id, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.request_endpoint, t.params, t.image_url, t.image_metadata, t.cost, t.created_time, t.completed_time, COALESCE(s.id, 0) AS inspiration_submission_id, COALESCE(s.status, '') AS inspiration_submission_status, COALESCE(s.reject_reason, '') AS inspiration_reject_reason").
+		Select("t.id, t.id AS task_id, t.user_id, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.request_endpoint, t.params, t.image_url, t.thumbnail_url, t.image_metadata, t.cost, t.created_time, t.completed_time, COALESCE(s.id, 0) AS inspiration_submission_id, COALESCE(s.status, '') AS inspiration_submission_status, COALESCE(s.reject_reason, '') AS inspiration_reject_reason").
 		Joins("LEFT JOIN model_mappings AS m ON m.request_model = t.model_id").
 		Joins("LEFT JOIN image_creative_submissions AS s ON s.task_id = t.id").
 		Where("t.user_id = ? AND t.status = ? AND t.image_url <> ?", userId, ImageTaskStatusSuccess, "")
@@ -331,10 +333,11 @@ func UpdateImageTaskStatus(id int, status string, errorMessage string) error {
 }
 
 // UpdateImageTaskResult 更新任务结果
-func UpdateImageTaskResult(id int, imageUrl string, imageMetadata string, cost int) error {
+func UpdateImageTaskResult(id int, imageUrl string, thumbnailUrl string, imageMetadata string, cost int) error {
 	updates := map[string]interface{}{
 		"status":         ImageTaskStatusSuccess,
 		"image_url":      imageUrl,
+		"thumbnail_url":  thumbnailUrl,
 		"image_metadata": imageMetadata,
 		"cost":           cost,
 		"completed_time": common.GetTimestamp(),

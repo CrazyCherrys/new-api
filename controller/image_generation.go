@@ -683,8 +683,8 @@ func ImageGenerationSSE(c *gin.Context) {
 
 				// 如果状态发生变化，或者是新任务，发送更新
 				if !exists || lastState != currentState {
-					data := fmt.Sprintf(`{"id":%d,"status":"%s","image_url":"%s","error_message":"%s","completed_time":%d}`,
-						task.Id, task.Status, task.ImageUrl, task.ErrorMessage, task.CompletedTime)
+					data := fmt.Sprintf(`{"id":%d,"status":"%s","image_url":"%s","thumbnail_url":"%s","error_message":"%s","completed_time":%d}`,
+						task.Id, task.Status, task.ImageUrl, task.ThumbnailUrl, task.ErrorMessage, task.CompletedTime)
 					fmt.Fprintf(c.Writer, "event: task_update\ndata: %s\n\n", data)
 					c.Writer.Flush()
 

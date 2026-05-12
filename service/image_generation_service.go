@@ -476,10 +476,10 @@ func ProcessImageGenerationTask(taskId int) error {
 		}
 
 		// 执行图片生成
-		imageUrl, metadata, cost, err := generateImage(ctx, task)
+		imageUrl, thumbnailUrl, metadata, cost, err := generateImage(ctx, task)
 		if err == nil {
 			// 成功：更新任务结果
-			if err := model.UpdateImageTaskResult(taskId, imageUrl, metadata, cost); err != nil {
+			if err := model.UpdateImageTaskResult(taskId, imageUrl, thumbnailUrl, metadata, cost); err != nil {
 				return fmt.Errorf("failed to update task result: %w", err)
 			}
 
@@ -802,12 +802,12 @@ func referenceImageDecodedSize(raw string) (int64, bool, error) {
 }
 
 // generateImage 调用上游 API 生成图片
-func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageUrl string, metadata string, cost int, err error) {
+func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageUrl string, thumbnailUrl string, metadata string, cost int, err error) {
 	// 解析请求参数
 	var params map[string]interface{}
 	if task.Params != "" {
 		if err := common.Unmarshal([]byte(task.Params), &params); err != nil {
-			return "", "", 0, fmt.Errorf("failed to parse params: %w", err)
+			return "", "", "", 0, fmt.Errorf("failed to parse params: %w", err)
 		}
 	}
 
@@ -844,7 +844,7 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 		for _, ref := range referenceImages {
 			dataURL, convErr := referenceImageAsDataURL(ctx, ref)
 			if convErr != nil {
-				return "", "", 0, fmt.Errorf("failed to load reference image: %w", convErr)
+				return "", "", "", 0, fmt.Errorf("failed to load reference image: %w", convErr)
 			}
 			imageReq.ReferenceImages = append(imageReq.ReferenceImages, dataURL)
 		}
@@ -852,7 +852,7 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	if mask, _ := collectImageGenerationMaskFromParamsMap(params); strings.TrimSpace(mask) != "" {
 		dataURL, convErr := referenceImageAsDataURL(ctx, mask)
 		if convErr != nil {
-			return "", "", 0, fmt.Errorf("failed to load mask image: %w", convErr)
+			return "", "", "", 0, fmt.Errorf("failed to load mask image: %w", convErr)
 		}
 		imageReq.Mask = dataURL
 	}
@@ -871,16 +871,16 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	// 获取模型映射
 	mapping, err := model.GetActiveModelMappingByRequestModel(task.ModelId)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("failed to get model mapping: %w", err)
+		return "", "", "", 0, fmt.Errorf("failed to get model mapping: %w", err)
 	}
 	if mapping == nil {
-		return "", "", 0, fmt.Errorf("model mapping not found for: %s", task.ModelId)
+		return "", "", "", 0, fmt.Errorf("model mapping not found for: %s", task.ModelId)
 	}
 
 	// 验证 request_endpoint
 	mappingEndpoint := normalizeImageEndpoint(mapping.RequestEndpoint)
 	if mappingEndpoint != taskEndpoint {
-		return "", "", 0, fmt.Errorf("request endpoint mismatch: expected %s, got %s", mappingEndpoint, taskEndpoint)
+		return "", "", "", 0, fmt.Errorf("request endpoint mismatch: expected %s, got %s", mappingEndpoint, taskEndpoint)
 	}
 
 	// 使用 actual_model 作为上游模型名
@@ -893,20 +893,22 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	// 使用 relay 层调用上游 API
 	resp, err := callUpstreamImageAPIViaRelay(ctx, task, imageReq)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("failed to call upstream API: %w", err)
+		return "", "", "", 0, fmt.Errorf("failed to call upstream API: %w", err)
 	}
 
 	// 解析响应
 	imageUrl, metadata, err = parseImageResponse(resp)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("failed to parse response: %w", err)
+		return "", "", "", 0, fmt.Errorf("failed to parse response: %w", err)
 	}
-	imageUrl = storeImageGenerationResult(ctx, task.Id, imageUrl)
+	storedResult := storeImageGenerationResult(ctx, task.Id, imageUrl)
+	imageUrl = storedResult.imageURL
+	thumbnailUrl = storedResult.thumbnailURL
 
 	// 计算费用
 	cost = calculateImageCost(task.ModelId, imageReq)
 
-	return imageUrl, metadata, cost, nil
+	return imageUrl, thumbnailUrl, metadata, cost, nil
 }
 
 // callUpstreamImageAPIViaRelay 通过内部 API 调用 relay 层处理图片生成
@@ -1230,6 +1232,11 @@ func DeleteImageGenerationTaskAssets(task *model.ImageGenerationTask, cfg *worke
 	if task.ImageUrl != "" {
 		if err := deleteImageFile(task.ImageUrl, cfg); err != nil {
 			common.SysLog(fmt.Sprintf("Failed to delete image file for task %d: %v", task.Id, err))
+		}
+	}
+	if strings.TrimSpace(task.ThumbnailUrl) != "" && task.ThumbnailUrl != task.ImageUrl {
+		if err := deleteImageFile(task.ThumbnailUrl, cfg); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to delete thumbnail file for task %d: %v", task.Id, err))
 		}
 	}
 

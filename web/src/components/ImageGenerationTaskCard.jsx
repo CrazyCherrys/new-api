@@ -213,10 +213,11 @@ const ImageGenerationTaskCard = ({
 
   const renderCenter = () => {
     if (isSuccess) {
+      const previewUrl = task.thumbnail_url || task.image_url;
       return (
         <>
-          <div style={styles.imageBg(task.image_url)} />
-          {!task.image_url && (
+          <div style={styles.imageBg(previewUrl)} />
+          {!previewUrl && (
             <div style={styles.body}>
               <div style={{ color: 'var(--semi-color-text-3)' }}>
                 <IconImage size='extra-large' />
@@ -350,6 +351,7 @@ ImageGenerationTaskCard.propTypes = {
     status: PropTypes.oneOf(['pending', 'generating', 'success', 'failed'])
       .isRequired,
     image_url: PropTypes.string,
+    thumbnail_url: PropTypes.string,
     progress: PropTypes.number,
     error_message: PropTypes.string,
     created_time: PropTypes.number.isRequired,
@@ -373,6 +375,7 @@ export default memo(ImageGenerationTaskCard, (prev, next) => {
     prev.task.id === next.task.id &&
     prev.task.status === next.task.status &&
     prev.task.image_url === next.task.image_url &&
+    prev.task.thumbnail_url === next.task.thumbnail_url &&
     prev.task.progress === next.task.progress &&
     prev.task.error_message === next.task.error_message
   );

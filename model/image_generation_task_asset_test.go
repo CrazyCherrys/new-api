@@ -164,6 +164,7 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 		RequestEndpoint: "openai",
 		Status:          ImageTaskStatusSuccess,
 		ImageUrl:        "https://example.com/approved.png",
+		ThumbnailUrl:    "https://example.com/approved-thumb.jpg",
 		Params:          `{"size":"1024x1024"}`,
 		CreatedTime:     1000,
 		CompletedTime:   1100,
@@ -237,6 +238,9 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	if assets[0].DisplayName != "GPT Image" || assets[0].ModelSeries != "openai" {
 		t.Fatalf("expected model mapping metadata, got display=%q series=%q", assets[0].DisplayName, assets[0].ModelSeries)
 	}
+	if assets[0].ThumbnailUrl != approvedTask.ThumbnailUrl {
+		t.Fatalf("expected thumbnail url %q, got %q", approvedTask.ThumbnailUrl, assets[0].ThumbnailUrl)
+	}
 
 	detail, err := GetApprovedInspirationAssetByID(approvedSubmission.Id)
 	if err != nil {
@@ -244,6 +248,9 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	}
 	if detail == nil || detail.Params != approvedTask.Params {
 		t.Fatalf("expected approved asset detail, got %#v", detail)
+	}
+	if detail.ThumbnailUrl != approvedTask.ThumbnailUrl {
+		t.Fatalf("expected detail thumbnail url %q, got %q", approvedTask.ThumbnailUrl, detail.ThumbnailUrl)
 	}
 
 	pendingDetail, err := GetApprovedInspirationAssetByID(submissions[1].Id)
@@ -450,6 +457,7 @@ func TestGetImageAssetsByUserIDFiltersSuccessfulOwnedImages(t *testing.T) {
 		RequestEndpoint: "openai",
 		Status:          ImageTaskStatusSuccess,
 		ImageUrl:        "https://example.com/image.png",
+		ThumbnailUrl:    "https://example.com/image-thumb.jpg",
 		Cost:            100,
 		CreatedTime:     1000,
 		CompletedTime:   1100,
@@ -514,6 +522,9 @@ func TestGetImageAssetsByUserIDFiltersSuccessfulOwnedImages(t *testing.T) {
 	if assets[0].DisplayName != "GPT Image" || assets[0].ModelSeries != "openai" {
 		t.Fatalf("expected model mapping metadata, got display=%q series=%q", assets[0].DisplayName, assets[0].ModelSeries)
 	}
+	if assets[0].ThumbnailUrl != ownedSuccess.ThumbnailUrl {
+		t.Fatalf("expected thumbnail url %q, got %q", ownedSuccess.ThumbnailUrl, assets[0].ThumbnailUrl)
+	}
 
 	asset, err := GetImageAssetByID(1, ownedSuccess.Id)
 	if err != nil {
@@ -521,6 +532,9 @@ func TestGetImageAssetsByUserIDFiltersSuccessfulOwnedImages(t *testing.T) {
 	}
 	if asset == nil || asset.Id != ownedSuccess.Id {
 		t.Fatalf("expected owned asset detail, got %#v", asset)
+	}
+	if asset.ThumbnailUrl != ownedSuccess.ThumbnailUrl {
+		t.Fatalf("expected asset thumbnail url %q, got %q", ownedSuccess.ThumbnailUrl, asset.ThumbnailUrl)
 	}
 
 	asset, err = GetImageAssetByID(2, ownedSuccess.Id)

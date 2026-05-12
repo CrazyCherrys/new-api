@@ -28,13 +28,14 @@ const (
 )
 
 type ImageCreativeAsset struct {
-	Id          int    `json:"id"`
-	ModelId     string `json:"model_id"`
-	DisplayName string `json:"display_name"`
-	ModelSeries string `json:"model_series"`
-	Prompt      string `json:"prompt"`
-	Params      string `json:"params"`
-	ImageUrl    string `json:"image_url"`
+	Id           int    `json:"id"`
+	ModelId      string `json:"model_id"`
+	DisplayName  string `json:"display_name"`
+	ModelSeries  string `json:"model_series"`
+	Prompt       string `json:"prompt"`
+	Params       string `json:"params"`
+	ImageUrl     string `json:"image_url"`
+	ThumbnailUrl string `json:"thumbnail_url"`
 }
 
 type ImageCreativeAdminSubmission struct {
@@ -143,7 +144,7 @@ func SubmitImageAssetToCreativeSpace(userId int, taskId int) (*ImageCreativeSubm
 
 func publicInspirationAssetsBaseQuery() *gorm.DB {
 	return DB.Table("image_creative_submissions AS s").
-		Select("s.id, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.params, t.image_url").
+		Select("s.id, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.params, t.image_url, t.thumbnail_url").
 		Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
 		Joins("LEFT JOIN model_mappings AS m ON m.request_model = t.model_id").
 		Where("s.status = ? AND t.status = ? AND t.image_url <> ?", CreativeSubmissionStatusApproved, ImageTaskStatusSuccess, "")

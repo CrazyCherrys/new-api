@@ -210,7 +210,11 @@ const Inspiration = () => {
       onClick={() => openDetail(asset)}
       aria-label={t('查看详情')}
     >
-      <img src={asset.image_url} alt={asset.prompt || 'Generated'} />
+      <img
+        src={asset.thumbnail_url || asset.image_url}
+        alt={asset.prompt || 'Generated'}
+        loading='lazy'
+      />
     </button>
   );
 

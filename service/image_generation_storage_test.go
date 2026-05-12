@@ -36,14 +36,17 @@ func TestStoreImageGenerationResultLocally(t *testing.T) {
 	}
 
 	source := "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
-	storedURL := storeImageGenerationResult(context.Background(), 123, source)
-	if !strings.HasPrefix(storedURL, imageGenerationAssetURLPrefix) {
-		t.Fatalf("expected local asset URL, got %q", storedURL)
+	stored := storeImageGenerationResult(context.Background(), 123, source)
+	if !strings.HasPrefix(stored.imageURL, imageGenerationAssetURLPrefix) {
+		t.Fatalf("expected local asset URL, got %q", stored.imageURL)
+	}
+	if !strings.HasPrefix(stored.thumbnailURL, imageGenerationAssetURLPrefix) {
+		t.Fatalf("expected local thumbnail URL, got %q", stored.thumbnailURL)
 	}
 
-	objectKey, ok := imageGenerationLocalAssetKeyFromURL(storedURL)
+	objectKey, ok := imageGenerationLocalAssetKeyFromURL(stored.imageURL)
 	if !ok {
-		t.Fatalf("expected local asset key from %q", storedURL)
+		t.Fatalf("expected local asset key from %q", stored.imageURL)
 	}
 	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
 	if err != nil {
@@ -60,6 +63,65 @@ func TestStoreImageGenerationResultLocally(t *testing.T) {
 	_ = file.Close()
 	if contentType != "image/png" {
 		t.Fatalf("expected image/png content type, got %q", contentType)
+	}
+
+	thumbKey, ok := imageGenerationLocalAssetKeyFromURL(stored.thumbnailURL)
+	if !ok {
+		t.Fatalf("expected local thumbnail key from %q", stored.thumbnailURL)
+	}
+	thumbPath, err := imageGenerationLocalAssetPath(cfg, thumbKey)
+	if err != nil {
+		t.Fatalf("failed to resolve local thumbnail path: %v", err)
+	}
+	if _, err := os.Stat(thumbPath); err != nil {
+		t.Fatalf("expected local thumbnail file to exist: %v", err)
+	}
+	thumbFile, thumbContentType, err := OpenImageGenerationLocalAsset(thumbKey)
+	if err != nil {
+		t.Fatalf("failed to open local thumbnail asset: %v", err)
+	}
+	_ = thumbFile.Close()
+	if thumbContentType != "image/jpeg" {
+		t.Fatalf("expected opaque thumbnail to use jpeg, got %q", thumbContentType)
+	}
+}
+
+func TestStoreTransparentImageGenerationThumbnailLocally(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+	})
+
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.RGBA{R: 255, A: 0})
+	img.Set(1, 0, color.RGBA{G: 255, A: 255})
+	img.Set(0, 1, color.RGBA{B: 255, A: 255})
+	img.Set(1, 1, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to encode transparent test image: %v", err)
+	}
+
+	source := "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+	stored := storeImageGenerationResult(context.Background(), 456, source)
+	thumbKey, ok := imageGenerationLocalAssetKeyFromURL(stored.thumbnailURL)
+	if !ok {
+		t.Fatalf("expected local thumbnail key from %q", stored.thumbnailURL)
+	}
+	thumbFile, thumbContentType, err := OpenImageGenerationLocalAsset(thumbKey)
+	if err != nil {
+		t.Fatalf("failed to open transparent local thumbnail asset: %v", err)
+	}
+	_ = thumbFile.Close()
+	if thumbContentType != "image/png" {
+		t.Fatalf("expected transparent thumbnail to stay png, got %q", thumbContentType)
 	}
 }
 
@@ -187,12 +249,26 @@ func TestDeleteImageGenerationTaskRemovesStoredReferenceImages(t *testing.T) {
 		t.Fatalf("failed to write local reference file: %v", err)
 	}
 
+	thumbKey := "image-generation/thumb/20260428/123-thumb.jpg"
+	thumbURL := buildImageGenerationLocalObjectURL(thumbKey)
+	thumbPath, err := imageGenerationLocalAssetPath(cfg, thumbKey)
+	if err != nil {
+		t.Fatalf("failed to resolve local thumbnail path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(thumbPath), 0o755); err != nil {
+		t.Fatalf("failed to create local thumbnail directory: %v", err)
+	}
+	if err := os.WriteFile(thumbPath, []byte("thumbnail"), 0o644); err != nil {
+		t.Fatalf("failed to write local thumbnail file: %v", err)
+	}
+
 	task := &model.ImageGenerationTask{
 		UserId:          1,
 		ModelId:         "gpt-image-1",
 		Prompt:          "prompt",
 		RequestEndpoint: "openai",
 		Status:          model.ImageTaskStatusFailed,
+		ThumbnailUrl:    thumbURL,
 		Params:          `{"reference_images":["` + referenceURL + `"]}`,
 	}
 	if err := db.Create(task).Error; err != nil {
@@ -204,6 +280,9 @@ func TestDeleteImageGenerationTaskRemovesStoredReferenceImages(t *testing.T) {
 	}
 	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
 		t.Fatalf("expected stored reference image file to be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(thumbPath); !os.IsNotExist(err) {
+		t.Fatalf("expected stored thumbnail file to be removed, stat err=%v", err)
 	}
 	reloaded, err := model.GetImageTaskByID(task.Id)
 	if err != nil {
