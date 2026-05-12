@@ -236,14 +236,14 @@ const Inspiration = () => {
           gap: 14px;
         }
         .inspiration-masonry {
-          column-gap: 14px;
+          column-gap: 4px;
           width: 100%;
         }
         .inspiration-card {
           display: inline-block;
           width: 100%;
           break-inside: avoid;
-          margin: 0 0 14px;
+          margin: 0 0 4px;
           padding: 0;
           border: 1px solid var(--semi-color-border);
           border-radius: 10px;
@@ -325,9 +325,9 @@ const Inspiration = () => {
           .inspiration-page {
             padding: 12px 10px 22px;
           }
-          .inspiration-masonry { column-gap: 10px; }
+          .inspiration-masonry { column-gap: 3px; }
           .inspiration-card {
-            margin-bottom: 10px;
+            margin-bottom: 3px;
           }
           .inspiration-detail-actions {
             grid-template-columns: 1fr;
