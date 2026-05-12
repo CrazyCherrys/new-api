@@ -114,8 +114,10 @@ func TestRetryImageGenerationTaskResetsAndEnqueuesFailedTask(t *testing.T) {
 func TestImageGenerationTimeoutUsesWorkerSetting(t *testing.T) {
 	cfg := worker_setting.GetWorkerSetting()
 	previousTimeout := cfg.ImageTimeout
+	previousTimeoutOverride := imageGenerationTimeoutOverride
 	t.Cleanup(func() {
 		cfg.ImageTimeout = previousTimeout
+		imageGenerationTimeoutOverride = previousTimeoutOverride
 	})
 
 	cfg.ImageTimeout = 600
@@ -149,6 +151,221 @@ func TestImageGenerationMaxRetriesPreservesZero(t *testing.T) {
 	cfg.MaxRetries = 4
 	if got := imageGenerationMaxRetries(); got != 4 {
 		t.Fatalf("expected max retries 4, got %d", got)
+	}
+}
+
+func TestProcessTaskAsyncWaitsForWorkerWithoutTimingOut(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	user := &model.User{
+		Username: "image-queue-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-queue",
+		ActualModel:       "gpt-image-queue",
+		DisplayName:       "GPT Image Queue",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+
+	task := &model.ImageGenerationTask{
+		UserId:          user.Id,
+		ModelId:         "gpt-image-queue",
+		Prompt:          "prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusPending,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousMaxWorkers := cfg.MaxWorkers
+	previousTimeoutOverride := imageGenerationTimeoutOverride
+	previousProcessFn := processImageGenerationTaskFn
+	t.Cleanup(func() {
+		cfg.MaxWorkers = previousMaxWorkers
+		imageGenerationTimeoutOverride = previousTimeoutOverride
+		processImageGenerationTaskFn = previousProcessFn
+	})
+
+	cfg.MaxWorkers = 1
+	if err := imageWorkerLimiter.acquire(context.Background()); err != nil {
+		t.Fatalf("failed to occupy worker slot: %v", err)
+	}
+	t.Cleanup(func() {
+		imageWorkerLimiter.release()
+	})
+
+	finished := make(chan struct{})
+	imageGenerationTimeoutOverride = func() time.Duration {
+		return 50 * time.Millisecond
+	}
+	processImageGenerationTaskFn = func(taskId int) error {
+		close(finished)
+		return nil
+	}
+
+	go processTaskAsync(task.Id)
+	time.Sleep(120 * time.Millisecond)
+	select {
+	case <-finished:
+		t.Fatal("task started before worker slot was released")
+	default:
+	}
+
+	imageWorkerLimiter.release()
+	select {
+	case <-finished:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("task did not start after worker slot was released")
+	}
+}
+
+func TestProcessTaskAsyncUsesFreshTimeoutPerRetry(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	user := &model.User{
+		Username: "image-retry-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-retry",
+		ActualModel:       "gpt-image-retry",
+		DisplayName:       "GPT Image Retry",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+
+	task := &model.ImageGenerationTask{
+		UserId:          user.Id,
+		ModelId:         "gpt-image-retry",
+		Prompt:          "prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusPending,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousMaxWorkers := cfg.MaxWorkers
+	previousMaxRetries := cfg.MaxRetries
+	previousRetryDelay := cfg.RetryDelay
+	previousTimeoutOverride := imageGenerationTimeoutOverride
+	previousRetryDelayOverride := imageGenerationRetryDelayOverride
+	previousGenerateFn := generateImageFn
+	previousProcessFn := processImageGenerationTaskFn
+	t.Cleanup(func() {
+		cfg.MaxWorkers = previousMaxWorkers
+		cfg.MaxRetries = previousMaxRetries
+		cfg.RetryDelay = previousRetryDelay
+		imageGenerationTimeoutOverride = previousTimeoutOverride
+		imageGenerationRetryDelayOverride = previousRetryDelayOverride
+		generateImageFn = previousGenerateFn
+		processImageGenerationTaskFn = previousProcessFn
+	})
+
+	cfg.MaxWorkers = 1
+	cfg.MaxRetries = 1
+	cfg.RetryDelay = 0
+	if err := imageWorkerLimiter.acquire(context.Background()); err != nil {
+		t.Fatalf("failed to occupy worker slot: %v", err)
+	}
+	t.Cleanup(func() {
+		imageWorkerLimiter.release()
+	})
+
+	retryCount := 0
+	firstAttemptStarted := make(chan struct{})
+	secondAttemptStarted := make(chan struct{})
+	imageGenerationTimeoutOverride = func() time.Duration {
+		retryCount++
+		if retryCount == 1 {
+			return 50 * time.Millisecond
+		}
+		return 200 * time.Millisecond
+	}
+	imageGenerationRetryDelayOverride = func() time.Duration {
+		return 0
+	}
+	generateImageFn = func(ctx context.Context, task *model.ImageGenerationTask) (string, string, string, int, error) {
+		switch retryCount {
+		case 1:
+			close(firstAttemptStarted)
+			<-ctx.Done()
+			return "", "", "", 0, ctx.Err()
+		case 2:
+			close(secondAttemptStarted)
+			select {
+			case <-ctx.Done():
+				return "", "", "", 0, ctx.Err()
+			case <-time.After(20 * time.Millisecond):
+				return "url", "", "{}", 1, nil
+			}
+		default:
+			return "", "", "", 0, fmt.Errorf("unexpected attempt %d", retryCount)
+		}
+	}
+
+	go processTaskAsync(task.Id)
+	imageWorkerLimiter.release()
+
+	select {
+	case <-firstAttemptStarted:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("first attempt did not start")
+	}
+
+	select {
+	case <-secondAttemptStarted:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("second attempt did not start")
+	}
+
+	var reloaded *model.ImageGenerationTask
+	var err error
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		reloaded, err = model.GetImageTaskByID(task.Id)
+		if err != nil {
+			t.Fatalf("failed to reload task: %v", err)
+		}
+		if reloaded.Status == model.ImageTaskStatusSuccess {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected success after retry, got %s (%s)", reloaded.Status, reloaded.ErrorMessage)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 

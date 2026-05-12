@@ -32,6 +32,10 @@ var (
 	enqueueImageGenerationTask = func(taskId int) {
 		go processTaskAsync(taskId)
 	}
+	processImageGenerationTaskFn      = ProcessImageGenerationTask
+	generateImageFn                   = generateImage
+	imageGenerationTimeoutOverride    func() time.Duration
+	imageGenerationRetryDelayOverride func() time.Duration
 )
 
 type imageGenerationWorkerLimiter struct {
@@ -207,6 +211,9 @@ func mergeImageGenerationOutputMetadata(metadata string, width int, height int) 
 }
 
 func imageGenerationTimeout() time.Duration {
+	if imageGenerationTimeoutOverride != nil {
+		return imageGenerationTimeoutOverride()
+	}
 	cfg := worker_setting.GetWorkerSetting()
 	timeout := time.Duration(cfg.ImageTimeout) * time.Second
 	if timeout <= 0 {
@@ -233,6 +240,9 @@ func imageGenerationMaxRetries() int {
 }
 
 func imageGenerationRetryDelay() time.Duration {
+	if imageGenerationRetryDelayOverride != nil {
+		return imageGenerationRetryDelayOverride()
+	}
 	cfg := worker_setting.GetWorkerSetting()
 	retryDelay := time.Duration(cfg.RetryDelay) * time.Second
 	if retryDelay <= 0 {
@@ -409,26 +419,15 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 
 // processTaskAsync 异步处理任务
 func processTaskAsync(taskId int) {
-	timeout := imageGenerationTimeout()
-
-	// 创建超时上下文，包括等待 worker pool 的时间
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	// 尝试获取 worker slot，带超时
-	if err := imageWorkerLimiter.acquire(ctx); err != nil {
-		// 超时：标记任务为失败
-		errorMsg := fmt.Sprintf("task timeout: failed to acquire worker slot within %v", timeout)
-		if err := model.UpdateImageTaskStatus(taskId, model.ImageTaskStatusFailed, errorMsg); err != nil {
-			common.SysLog(fmt.Sprintf("Failed to update task %d status on timeout: %v", taskId, err))
-		}
-		common.SysLog(fmt.Sprintf("Task %d timed out waiting for worker slot", taskId))
+	// 等待 worker 空闲不计入图片任务超时，直接排队直到拿到 worker slot。
+	if err := imageWorkerLimiter.acquire(context.Background()); err != nil {
+		common.SysLog(fmt.Sprintf("Failed to acquire worker slot for task %d: %v", taskId, err))
 		return
 	}
 	defer imageWorkerLimiter.release()
 
 	// 处理任务
-	if err := ProcessImageGenerationTask(taskId); err != nil {
+	if err := processImageGenerationTaskFn(taskId); err != nil {
 		common.SysLog(fmt.Sprintf("Failed to process image generation task %d: %v", taskId, err))
 	}
 }
@@ -479,11 +478,6 @@ func ProcessImageGenerationTask(taskId int) error {
 		return fmt.Errorf("failed to update task status: %w", err)
 	}
 
-	timeout := imageGenerationTimeout()
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
 	// 重试逻辑
 	maxRetries := imageGenerationMaxRetries()
 	retryDelay := imageGenerationRetryDelay()
@@ -492,16 +486,15 @@ func ProcessImageGenerationTask(taskId int) error {
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			common.SysLog(fmt.Sprintf("Retrying task %d (attempt %d/%d)", taskId, attempt, maxRetries))
-			select {
-			case <-ctx.Done():
-				lastErr = fmt.Errorf("task timeout after %v", timeout)
-				break
-			case <-time.After(retryDelay):
-			}
+			time.Sleep(retryDelay)
 		}
 
+		timeout := imageGenerationTimeout()
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
 		// 执行图片生成
-		imageUrl, thumbnailUrl, metadata, cost, err := generateImage(ctx, task)
+		imageUrl, thumbnailUrl, metadata, cost, err := generateImageFn(ctx, task)
+		cancel()
 		if err == nil {
 			// 成功：更新任务结果
 			if err := model.UpdateImageTaskResult(taskId, imageUrl, thumbnailUrl, metadata, cost); err != nil {
