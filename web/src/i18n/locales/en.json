@@ -3919,6 +3919,16 @@
     "默认折叠侧边栏": "Default collapse sidebar",
     "默认测试模型": "Default Test Model",
     "默认用户消息": "Default User Message",
-    "默认补全倍率": "Default completion ratio"
+    "默认补全倍率": "Default completion ratio",
+    "参考图编辑": "Reference image edit",
+    "参考图 {{count}} 张": "{{count}} reference image(s)",
+    "含遮罩": "With mask",
+    "文生图": "Text to image",
+    "实际输出尺寸": "Actual output size",
+    "请求类型": "Request type",
+    "画质参数": "Quality settings",
+    "消耗配额": "Quota cost",
+    "生成耗时": "Generation time",
+    "数量 {{count}}": "Quantity {{count}}"
   }
 }

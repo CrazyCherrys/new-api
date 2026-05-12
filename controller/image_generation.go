@@ -20,6 +20,7 @@ func sanitizeImageGenerationTaskParams(task *model.ImageGenerationTask) {
 	if task == nil {
 		return
 	}
+	service.FillImageGenerationTaskSummary(task)
 	task.Params = service.SanitizeImageGenerationParamsForResponse(task.Params)
 }
 
@@ -89,9 +90,9 @@ func GetImageGenerationSettings(c *gin.Context) {
 		maxImageSize = 10
 	}
 	common.ApiSuccess(c, gin.H{
-		"max_image_size":                 maxImageSize,
-		"user_custom_key_enabled":       cfg.UserCustomKeyEnabled,
-		"user_custom_base_url_allowed":  cfg.UserCustomBaseURLAllowed,
+		"max_image_size":               maxImageSize,
+		"user_custom_key_enabled":      cfg.UserCustomKeyEnabled,
+		"user_custom_base_url_allowed": cfg.UserCustomBaseURLAllowed,
 	})
 }
 

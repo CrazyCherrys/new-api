@@ -22,6 +22,9 @@ type ImageGenerationTask struct {
 	Cost            int    `json:"cost" gorm:"default:0"`            // 消耗的配额
 	CreatedTime     int64  `json:"created_time" gorm:"bigint;index"` // 创建时间戳
 	CompletedTime   int64  `json:"completed_time" gorm:"bigint"`     // 完成时间戳
+	RequestType     string `json:"request_type" gorm:"-"`
+	ReferenceCount  int    `json:"reference_count" gorm:"-"`
+	HasMask         bool   `json:"has_mask" gorm:"-"`
 }
 
 // 任务状态常量

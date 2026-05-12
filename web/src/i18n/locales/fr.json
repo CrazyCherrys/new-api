@@ -3780,6 +3780,16 @@
     "默认折叠侧边栏": "Réduire la barre latérale par défaut",
     "默认测试模型": "Modèle de test par défaut",
     "默认用户消息": "Bonjour",
-    "默认补全倍率": "Taux de complétion par défaut"
+    "默认补全倍率": "Taux de complétion par défaut",
+    "参考图编辑": "Edition avec image de reference",
+    "参考图 {{count}} 张": "{{count}} image(s) de reference",
+    "含遮罩": "Avec masque",
+    "文生图": "Texte vers image",
+    "实际输出尺寸": "Taille de sortie reelle",
+    "请求类型": "Type de requete",
+    "画质参数": "Parametres de qualite",
+    "消耗配额": "Cout en quota",
+    "生成耗时": "Duree de generation",
+    "数量 {{count}}": "Quantite {{count}}"
   }
 }

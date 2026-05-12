@@ -638,6 +638,34 @@ func hasImageGenerationEditInputs(params string) (bool, error) {
 	return strings.TrimSpace(mask) != "", nil
 }
 
+func FillImageGenerationTaskSummary(task *model.ImageGenerationTask) {
+	if task == nil {
+		return
+	}
+
+	task.RequestType = "generate"
+	task.ReferenceCount = 0
+	task.HasMask = false
+
+	if strings.TrimSpace(task.Params) == "" {
+		return
+	}
+
+	var paramMap map[string]interface{}
+	if err := common.UnmarshalJsonStr(task.Params, &paramMap); err != nil {
+		return
+	}
+
+	referenceImages, _ := collectImageGenerationReferenceImagesFromParamsMap(paramMap)
+	mask, hasMaskField := collectImageGenerationMaskFromParamsMap(paramMap)
+
+	task.ReferenceCount = len(referenceImages)
+	task.HasMask = hasMaskField && strings.TrimSpace(mask) != ""
+	if task.ReferenceCount > 0 || task.HasMask {
+		task.RequestType = "edit"
+	}
+}
+
 func SanitizeImageGenerationParamsForResponse(params string) string {
 	if strings.TrimSpace(params) == "" {
 		return ""

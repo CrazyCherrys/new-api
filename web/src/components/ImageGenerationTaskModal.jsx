@@ -143,6 +143,18 @@ const ImageGenerationTaskModal = ({
     )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   };
 
+  const formatDuration = (seconds) => {
+    if (!Number.isFinite(seconds) || seconds < 0) return '-';
+    if (seconds < 60) return `${seconds}${t('秒')}`;
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainingSeconds = seconds % 60;
+    if (hours > 0) {
+      return `${hours}${t('小时')}${minutes}${t('分钟')}${remainingSeconds}${t('秒')}`;
+    }
+    return `${minutes}${t('分钟')}${remainingSeconds}${t('秒')}`;
+  };
+
   const statusMeta = (() => {
     if (isSuccess)
       return { color: '#3ecf8e', text: t('生成成功') };
@@ -478,6 +490,54 @@ const ImageGenerationTaskModal = ({
   const displayName =
     task.display_name || metadata.display_name || task.model_id || '-';
 
+  const generationDuration = (() => {
+    if (!task.created_time || !task.completed_time) return '-';
+    const duration = task.completed_time - task.created_time;
+    return formatDuration(duration);
+  })();
+
+  const requestTypeText = (() => {
+    if (task.request_type === 'edit') {
+      const parts = [t('参考图编辑')];
+      if (typeof task.reference_count === 'number' && task.reference_count > 0) {
+        parts.push(t('参考图 {{count}} 张', { count: task.reference_count }));
+      }
+      if (task.has_mask) {
+        parts.push(t('含遮罩'));
+      }
+      return parts.join(' · ');
+    }
+    return t('文生图');
+  })();
+
+  const outputSizeText =
+    Number.isFinite(metadataWidth) &&
+    metadataWidth > 0 &&
+    Number.isFinite(metadataHeight) &&
+    metadataHeight > 0
+      ? `${metadataWidth}x${metadataHeight}`
+      : '-';
+
+  const qualityParts = [];
+  if (params.quality) {
+    qualityParts.push(params.quality);
+  }
+  if (params.style) {
+    qualityParts.push(
+      typeof params.style === 'string'
+        ? params.style
+        : JSON.stringify(params.style),
+    );
+  }
+  if (params.n || params.quantity) {
+    qualityParts.push(
+      t('数量 {{count}}', {
+        count: params.n || params.quantity,
+      }),
+    );
+  }
+  const qualityText = qualityParts.length > 0 ? qualityParts.join(' · ') : '-';
+
   // 构建尺寸文本：优先显示 aspect_ratio + resolution，回退到 size 或 width x height
   const sizeText = (() => {
     const parts = [];
@@ -592,6 +652,32 @@ const ImageGenerationTaskModal = ({
             )}
             <div style={styles.metaCard}>
               <div style={styles.infoBlock}>
+                <span style={styles.infoLabel}>{t('实际输出尺寸')}</span>
+                <span style={styles.infoValue}>{outputSizeText}</span>
+              </div>
+            </div>
+            <div style={styles.metaCard}>
+              <div style={styles.infoBlock}>
+                <span style={styles.infoLabel}>{t('请求类型')}</span>
+                <span style={styles.infoValue}>{requestTypeText}</span>
+              </div>
+            </div>
+            <div style={styles.metaCard}>
+              <div style={styles.infoBlock}>
+                <span style={styles.infoLabel}>{t('画质参数')}</span>
+                <span style={styles.infoValue}>{qualityText}</span>
+              </div>
+            </div>
+            <div style={styles.metaCard}>
+              <div style={styles.infoBlock}>
+                <span style={styles.infoLabel}>{t('消耗配额')}</span>
+                <span style={styles.infoValue}>
+                  {Number.isFinite(task.cost) ? task.cost : '-'}
+                </span>
+              </div>
+            </div>
+            <div style={styles.metaCard}>
+              <div style={styles.infoBlock}>
                 <span style={styles.infoLabel}>{t('创建时间')}</span>
                 <span style={styles.infoValue}>
                   {formatTime(task.created_time)}
@@ -604,6 +690,12 @@ const ImageGenerationTaskModal = ({
                 <span style={styles.infoValue}>
                   {formatTime(task.completed_time)}
                 </span>
+              </div>
+            </div>
+            <div style={styles.metaCard}>
+              <div style={styles.infoBlock}>
+                <span style={styles.infoLabel}>{t('生成耗时')}</span>
+                <span style={styles.infoValue}>{generationDuration}</span>
               </div>
             </div>
           </div>

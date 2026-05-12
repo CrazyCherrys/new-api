@@ -4305,6 +4305,16 @@
     "默认折叠侧边栏": "Mặc định thu gọn thanh bên",
     "默认测试模型": "Mô hình kiểm tra mặc định",
     "默认用户消息": "Xin chào",
-    "默认补全倍率": "Tỷ lệ hoàn thành mặc định"
+    "默认补全倍率": "Tỷ lệ hoàn thành mặc định",
+    "参考图编辑": "Chinh sua bang anh tham khao",
+    "参考图 {{count}} 张": "{{count}} anh tham khao",
+    "含遮罩": "Co mat na",
+    "文生图": "Van ban thanh anh",
+    "实际输出尺寸": "Kich thuoc dau ra thuc te",
+    "请求类型": "Loai yeu cau",
+    "画质参数": "Thong so chat luong",
+    "消耗配额": "Chi phi quota",
+    "生成耗时": "Thoi gian tao",
+    "数量 {{count}}": "So luong {{count}}"
   }
 }

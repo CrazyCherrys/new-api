@@ -521,11 +521,23 @@ const ImageGeneration = () => {
       const index = prevTasks.findIndex((t) => t.id === updatedTask.id);
       if (index !== -1) {
         const newTasks = [...prevTasks];
-        newTasks[index] = updatedTask;
+        newTasks[index] = {
+          ...newTasks[index],
+          ...updatedTask,
+        };
         return newTasks;
       }
       // 如果是新任务，添加到列表开头
       return [updatedTask, ...prevTasks];
+    });
+    setSelectedTask((prevTask) => {
+      if (!prevTask || prevTask.id !== updatedTask.id) {
+        return prevTask;
+      }
+      return {
+        ...prevTask,
+        ...updatedTask,
+      };
     });
   };
 
