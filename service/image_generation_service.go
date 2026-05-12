@@ -181,6 +181,31 @@ func normalizeOpenAIResponsesImageResult(result string) string {
 	return trimmed
 }
 
+func mergeImageGenerationOutputMetadata(metadata string, width int, height int) string {
+	if width <= 0 || height <= 0 {
+		return metadata
+	}
+
+	metadataMap := make(map[string]any)
+	if strings.TrimSpace(metadata) != "" {
+		if err := common.UnmarshalJsonStr(metadata, &metadataMap); err != nil {
+			return metadata
+		}
+	}
+
+	metadataMap["width"] = width
+	metadataMap["height"] = height
+	if _, exists := metadataMap["size"]; !exists {
+		metadataMap["size"] = fmt.Sprintf("%dx%d", width, height)
+	}
+
+	data, err := common.Marshal(metadataMap)
+	if err != nil {
+		return metadata
+	}
+	return string(data)
+}
+
 func imageGenerationTimeout() time.Duration {
 	cfg := worker_setting.GetWorkerSetting()
 	timeout := time.Duration(cfg.ImageTimeout) * time.Second
@@ -904,6 +929,7 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 	storedResult := storeImageGenerationResult(ctx, task.Id, imageUrl)
 	imageUrl = storedResult.imageURL
 	thumbnailUrl = storedResult.thumbnailURL
+	metadata = mergeImageGenerationOutputMetadata(metadata, storedResult.width, storedResult.height)
 
 	// 计算费用
 	cost = calculateImageCost(task.ModelId, imageReq)

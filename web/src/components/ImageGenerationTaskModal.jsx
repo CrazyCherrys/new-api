@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Modal,
   Button,
@@ -44,6 +44,83 @@ import { useIsMobile } from '../hooks/common/useIsMobile';
 
 const { Text } = Typography;
 
+const parseJsonObject = (value, errorMessage) => {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value !== 'string') {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch (e) {
+    if (errorMessage) {
+      console.error(errorMessage, e);
+    }
+    return {};
+  }
+};
+
+const readFirstValue = (sources, keys) => {
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+    for (const key of keys) {
+      if (source[key] !== undefined && source[key] !== null && source[key] !== '') {
+        return source[key];
+      }
+    }
+  }
+  return undefined;
+};
+
+const readStringValue = (sources, keys) => {
+  const value = readFirstValue(sources, keys);
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return '';
+};
+
+const readNumberValue = (sources, keys) => {
+  const value = readFirstValue(sources, keys);
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const parseDimensionString = (value) => {
+  const match = String(value || '')
+    .trim()
+    .match(/^(\d{2,5})\s*[xX×*]\s*(\d{2,5})$/);
+  if (!match) {
+    return { width: 0, height: 0 };
+  }
+  return {
+    width: Number(match[1]) || 0,
+    height: Number(match[2]) || 0,
+  };
+};
+
+const joinUniqueTextParts = (parts) => {
+  const seen = new Set();
+  const result = [];
+  parts.forEach((part) => {
+    const normalized = String(part || '').trim();
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+  });
+  return result.join(' · ');
+};
+
 const ImageGenerationTaskModal = ({
   visible,
   onClose,
@@ -55,6 +132,88 @@ const ImageGenerationTaskModal = ({
   const isMobile = useIsMobile();
   const [retrying, setRetrying] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [loadedOutputDimensions, setLoadedOutputDimensions] = useState({
+    width: 0,
+    height: 0,
+  });
+  const metadata = parseJsonObject(
+    task?.image_metadata,
+    'Failed to parse image metadata:',
+  );
+  const metadataDetails = parseJsonObject(
+    metadata.metadata,
+    'Failed to parse nested image metadata:',
+  );
+
+  const params = parseJsonObject(task?.params, 'Failed to parse params:');
+  const metadataSources = [metadata, metadataDetails];
+  const paramSources = [params, metadata, metadataDetails];
+
+  const metadataWidth = readNumberValue(metadataSources, [
+    'width',
+    'output_width',
+    'image_width',
+    'outputWidth',
+    'imageWidth',
+  ]);
+  const metadataHeight = readNumberValue(metadataSources, [
+    'height',
+    'output_height',
+    'image_height',
+    'outputHeight',
+    'imageHeight',
+  ]);
+  const metadataSizeText = readStringValue(metadataSources, [
+    'size',
+    'output_size',
+    'dimensions',
+    'outputSize',
+  ]);
+  const parsedMetadataSize = parseDimensionString(metadataSizeText);
+  const resolvedOutputWidth =
+    metadataWidth || parsedMetadataSize.width || loadedOutputDimensions.width;
+  const resolvedOutputHeight =
+    metadataHeight || parsedMetadataSize.height || loadedOutputDimensions.height;
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadedOutputDimensions({ width: 0, height: 0 });
+
+    if (
+      !visible ||
+      !task?.image_url ||
+      (metadataWidth > 0 && metadataHeight > 0) ||
+      (parsedMetadataSize.width > 0 && parsedMetadataSize.height > 0)
+    ) {
+      return undefined;
+    }
+
+    const previewImage = new window.Image();
+    previewImage.onload = () => {
+      if (cancelled) return;
+      setLoadedOutputDimensions({
+        width: previewImage.naturalWidth || 0,
+        height: previewImage.naturalHeight || 0,
+      });
+    };
+    previewImage.onerror = () => {
+      if (cancelled) return;
+      setLoadedOutputDimensions({ width: 0, height: 0 });
+    };
+    previewImage.src = task.image_url;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    metadataHeight,
+    metadataWidth,
+    parsedMetadataSize.height,
+    parsedMetadataSize.width,
+    task?.id,
+    task?.image_url,
+    visible,
+  ]);
 
   if (!task) return null;
 
@@ -62,24 +221,6 @@ const ImageGenerationTaskModal = ({
   const isFailed = task.status === 'failed';
   const isPending = task.status === 'pending';
   const isGenerating = task.status === 'generating';
-
-  let metadata = {};
-  try {
-    if (task.image_metadata) {
-      metadata = JSON.parse(task.image_metadata);
-    }
-  } catch (e) {
-    console.error('Failed to parse image metadata:', e);
-  }
-
-  let params = {};
-  try {
-    if (task.params) {
-      params = JSON.parse(task.params);
-    }
-  } catch (e) {
-    console.error('Failed to parse params:', e);
-  }
 
   const parseAspectRatio = (value) => {
     if (!value) return null;
@@ -95,18 +236,20 @@ const ImageGenerationTaskModal = ({
     return width / height;
   };
 
-  const metadataWidth = Number(metadata.width);
-  const metadataHeight = Number(metadata.height);
   const imageAspectRatio = (() => {
     if (
-      Number.isFinite(metadataWidth) &&
-      metadataWidth > 0 &&
-      Number.isFinite(metadataHeight) &&
-      metadataHeight > 0
+      Number.isFinite(resolvedOutputWidth) &&
+      resolvedOutputWidth > 0 &&
+      Number.isFinite(resolvedOutputHeight) &&
+      resolvedOutputHeight > 0
     ) {
-      return metadataWidth / metadataHeight;
+      return resolvedOutputWidth / resolvedOutputHeight;
     }
-    return parseAspectRatio(params.aspect_ratio) || parseAspectRatio(params.size);
+    return (
+      parseAspectRatio(readStringValue(paramSources, ['aspect_ratio', 'aspectRatio'])) ||
+      parseAspectRatio(readStringValue(paramSources, ['size'])) ||
+      null
+    );
   })();
 
   const normalizedPreviewRatio = imageAspectRatio
@@ -511,50 +654,64 @@ const ImageGenerationTaskModal = ({
   })();
 
   const outputSizeText =
-    Number.isFinite(metadataWidth) &&
-    metadataWidth > 0 &&
-    Number.isFinite(metadataHeight) &&
-    metadataHeight > 0
-      ? `${metadataWidth}x${metadataHeight}`
-      : '-';
+    Number.isFinite(resolvedOutputWidth) &&
+    resolvedOutputWidth > 0 &&
+    Number.isFinite(resolvedOutputHeight) &&
+    resolvedOutputHeight > 0
+      ? `${resolvedOutputWidth}x${resolvedOutputHeight}`
+      : metadataSizeText || '-';
 
-  const qualityParts = [];
-  if (params.quality) {
-    qualityParts.push(params.quality);
-  }
-  if (params.style) {
-    qualityParts.push(
-      typeof params.style === 'string'
-        ? params.style
-        : JSON.stringify(params.style),
-    );
-  }
-  if (params.n || params.quantity) {
-    qualityParts.push(
-      t('数量 {{count}}', {
-        count: params.n || params.quantity,
-      }),
-    );
-  }
-  const qualityText = qualityParts.length > 0 ? qualityParts.join(' · ') : '-';
+  const qualityValue = readStringValue(paramSources, ['quality', 'quality_level']);
+  const resolutionValue = readStringValue(paramSources, [
+    'resolution',
+    'image_size',
+    'imageSize',
+  ]);
+  const styleValue = readFirstValue(paramSources, ['style']);
+  const quantityValue = readNumberValue([params], ['n', 'quantity']);
+  const qualityText =
+    joinUniqueTextParts([
+      qualityValue,
+      resolutionValue,
+      typeof styleValue === 'string'
+        ? styleValue
+        : styleValue
+          ? JSON.stringify(styleValue)
+          : '',
+      quantityValue > 0
+        ? t('数量 {{count}}', {
+            count: quantityValue,
+          })
+        : '',
+    ]) || '-';
 
   // 构建尺寸文本：优先显示 aspect_ratio + resolution，回退到 size 或 width x height
   const sizeText = (() => {
     const parts = [];
-    if (params.aspect_ratio) {
-      parts.push(params.aspect_ratio);
+    const requestAspectRatio = readStringValue(paramSources, [
+      'aspect_ratio',
+      'aspectRatio',
+    ]);
+    const requestResolution = readStringValue([params], [
+      'resolution',
+      'image_size',
+      'imageSize',
+    ]);
+    const requestSize = readStringValue([params], ['size']);
+    if (requestAspectRatio) {
+      parts.push(requestAspectRatio);
     }
-    if (params.resolution) {
-      parts.push(params.resolution);
+    if (requestResolution) {
+      parts.push(requestResolution);
     }
     if (parts.length > 0) {
       return parts.join(' · ');
     }
-    if (params.size) {
-      return params.size;
+    if (requestSize) {
+      return requestSize;
     }
-    if (metadata.width && metadata.height) {
-      return `${metadata.width}x${metadata.height}`;
+    if (resolvedOutputWidth > 0 && resolvedOutputHeight > 0) {
+      return `${resolvedOutputWidth}x${resolvedOutputHeight}`;
     }
     return '';
   })();

@@ -160,6 +160,7 @@ const ImageGeneration = () => {
   const [deletingTasks, setDeletingTasks] = useState(false);
   const sseRef = useRef(null);
   const pollingTimerRef = useRef(null);
+  const taskDetailRequestSeqRef = useRef(0);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
   const [userCustomWorkerKeyEnabled, setUserCustomWorkerKeyEnabled] =
     useState(false);
@@ -403,6 +404,33 @@ const ImageGeneration = () => {
       if (!silent) showError(error.message || t('加载任务列表失败'));
     } finally {
       if (!silent) setLoadingTasks(false);
+    }
+  };
+
+  const handleTaskCardClick = async (task) => {
+    if (!task?.id) return;
+
+    taskDetailRequestSeqRef.current += 1;
+    const requestSeq = taskDetailRequestSeqRef.current;
+
+    setSelectedTask(task);
+    setTaskModalVisible(true);
+
+    try {
+      const res = await API.get(`/api/image-generation/tasks/${task.id}`);
+      if (requestSeq !== taskDetailRequestSeqRef.current) {
+        return;
+      }
+      if (res.data.success) {
+        updateTaskInList(res.data.data);
+      } else {
+        showError(res.data.message || t('加载任务详情失败'));
+      }
+    } catch (error) {
+      if (requestSeq !== taskDetailRequestSeqRef.current) {
+        return;
+      }
+      showError(error.message || t('加载任务详情失败'));
     }
   };
 
@@ -1351,10 +1379,7 @@ const ImageGeneration = () => {
                 task={task}
                 selected={selectedTaskIds.has(task.id)}
                 onSelectChange={handleTaskSelect}
-                onClick={() => {
-                  setSelectedTask(task);
-                  setTaskModalVisible(true);
-                }}
+                onClick={() => handleTaskCardClick(task)}
               />
             ))}
           </div>
@@ -1547,6 +1572,7 @@ const ImageGeneration = () => {
       <ImageGenerationTaskModal
         visible={taskModalVisible}
         onClose={() => {
+          taskDetailRequestSeqRef.current += 1;
           setTaskModalVisible(false);
           setSelectedTask(null);
         }}

@@ -50,6 +50,8 @@ type imageGenerationAssetLoader func(context.Context, string) (*imageGenerationA
 type imageGenerationStoredResult struct {
 	imageURL     string
 	thumbnailURL string
+	width        int
+	height       int
 }
 
 func storeImageGenerationResult(ctx context.Context, taskId int, imageUrl string) imageGenerationStoredResult {
@@ -62,6 +64,7 @@ func storeImageGenerationResult(ctx context.Context, taskId int, imageUrl string
 		common.SysLog(fmt.Sprintf("Failed to store image generation task %d result, fallback to original result: %v", taskId, err))
 		return result
 	}
+	result.width, result.height = extractImageGenerationAssetDimensions(asset)
 	storedAsset, err := storePreparedImageGenerationAsset(ctx, taskId, asset, "")
 	if err != nil {
 		common.SysLog(fmt.Sprintf("Failed to store image generation task %d result, fallback to original result: %v", taskId, err))
@@ -83,6 +86,17 @@ func storeImageGenerationResult(ctx context.Context, taskId int, imageUrl string
 	}
 	result.thumbnailURL = thumbnailAsset
 	return result
+}
+
+func extractImageGenerationAssetDimensions(asset *imageGenerationAsset) (int, int) {
+	if asset == nil || len(asset.data) == 0 {
+		return 0, 0
+	}
+	config, _, err := getImageConfig(bytes.NewReader(asset.data))
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return 0, 0
+	}
+	return config.Width, config.Height
 }
 
 func storeImageGenerationReferenceImage(ctx context.Context, taskId int, imageUrl string) (string, error) {
