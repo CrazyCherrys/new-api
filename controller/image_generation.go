@@ -400,6 +400,7 @@ func ReviewImageInspirationSubmission(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	service.InvalidateInspirationLocalAssetAccessCache()
 
 	sanitizeImageCreativeAdminSubmissionParams(submission)
 	common.ApiSuccess(c, submission)
@@ -426,6 +427,7 @@ func DeleteImageInspirationSubmission(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	service.InvalidateInspirationLocalAssetAccessCache()
 
 	common.ApiSuccess(c, gin.H{"message": "删除成功"})
 }

@@ -19,16 +19,19 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/worker_setting"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
+	"github.com/samber/hot"
 	"golang.org/x/image/draw"
 	"golang.org/x/image/webp"
 )
@@ -38,6 +41,13 @@ const imageGenerationAssetURLPrefix = "/api/image-generation/files/"
 const imageGenerationReferenceSubdir = "ref"
 const imageGenerationThumbnailSubdir = "thumb"
 const imageGenerationThumbnailMaxEdge = 384
+
+const inspirationLocalAssetAccessCacheNamespace = "new-api:inspiration_local_asset_access:v1"
+
+var (
+	inspirationLocalAssetAccessCacheOnce sync.Once
+	inspirationLocalAssetAccessCache     *cachex.HybridCache[int]
+)
 
 type imageGenerationAsset struct {
 	data        []byte
@@ -52,6 +62,47 @@ type imageGenerationStoredResult struct {
 	thumbnailURL string
 	width        int
 	height       int
+}
+
+func inspirationLocalAssetAccessCacheTTL() time.Duration {
+	ttlSeconds := common.GetEnvOrDefault("INSPIRATION_LOCAL_ASSET_ACCESS_CACHE_TTL", 600)
+	if ttlSeconds <= 0 {
+		ttlSeconds = 600
+	}
+	return time.Duration(ttlSeconds) * time.Second
+}
+
+func inspirationLocalAssetAccessCacheCapacity() int {
+	capacity := common.GetEnvOrDefault("INSPIRATION_LOCAL_ASSET_ACCESS_CACHE_CAP", 10000)
+	if capacity <= 0 {
+		capacity = 10000
+	}
+	return capacity
+}
+
+func getInspirationLocalAssetAccessCache() *cachex.HybridCache[int] {
+	inspirationLocalAssetAccessCacheOnce.Do(func() {
+		ttl := inspirationLocalAssetAccessCacheTTL()
+		inspirationLocalAssetAccessCache = cachex.NewHybridCache[int](cachex.HybridCacheConfig[int]{
+			Namespace: cachex.Namespace(inspirationLocalAssetAccessCacheNamespace),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.IntCodec{},
+			Memory: func() *hot.HotCache[string, int] {
+				return hot.NewHotCache[string, int](hot.LRU, inspirationLocalAssetAccessCacheCapacity()).
+					WithTTL(ttl).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return inspirationLocalAssetAccessCache
+}
+
+func InvalidateInspirationLocalAssetAccessCache() {
+	_ = getInspirationLocalAssetAccessCache().Purge()
 }
 
 func storeImageGenerationResult(ctx context.Context, taskId int, imageUrl string) imageGenerationStoredResult {
@@ -860,6 +911,11 @@ func CanAccessApprovedInspirationLocalAsset(assetPath string) (bool, error) {
 		return false, nil
 	}
 
+	cache := getInspirationLocalAssetAccessCache()
+	if cached, ok, err := cache.Get(clean); err == nil && ok {
+		return cached == 1, nil
+	}
+
 	assetURL := buildImageGenerationLocalObjectURL(clean)
 	var count int64
 	if err := model.DB.Table("image_generation_tasks AS t").
@@ -868,7 +924,11 @@ func CanAccessApprovedInspirationLocalAsset(assetPath string) (bool, error) {
 		Count(&count).Error; err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	allowed := count > 0
+	if allowed {
+		_ = cache.SetWithTTL(clean, 1, inspirationLocalAssetAccessCacheTTL())
+	}
+	return allowed, nil
 }
 
 func CanAccessApprovedCreativeSpaceLocalAsset(assetPath string) (bool, error) {

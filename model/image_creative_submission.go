@@ -2,9 +2,15 @@ package model
 
 import (
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/cachex"
+	"github.com/samber/hot"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -14,9 +20,9 @@ type ImageCreativeSubmission struct {
 	Id            int    `json:"id" gorm:"primaryKey"`
 	TaskId        int    `json:"task_id" gorm:"uniqueIndex;not null"`
 	UserId        int    `json:"user_id" gorm:"index;not null"`
-	Status        string `json:"status" gorm:"size:20;not null;index;default:'pending'"`
-	SubmittedTime int64  `json:"submitted_time" gorm:"bigint;index"`
-	ReviewedTime  int64  `json:"reviewed_time" gorm:"bigint"`
+	Status        string `json:"status" gorm:"size:20;not null;index;index:idx_image_creative_public_order,priority:1;default:'pending'"`
+	SubmittedTime int64  `json:"submitted_time" gorm:"bigint;index;index:idx_image_creative_public_order,priority:3"`
+	ReviewedTime  int64  `json:"reviewed_time" gorm:"bigint;index:idx_image_creative_public_order,priority:2"`
 	ReviewerId    int    `json:"reviewer_id" gorm:"index"`
 	RejectReason  string `json:"reject_reason" gorm:"type:text"`
 }
@@ -60,6 +66,136 @@ type ImageCreativeAdminSubmission struct {
 	ImageMetadata   string `json:"image_metadata"`
 	CreatedTime     int64  `json:"created_time"`
 	CompletedTime   int64  `json:"completed_time"`
+}
+
+type InspirationAssetPage struct {
+	Items []*ImageCreativeAsset `json:"items"`
+	Total int64                 `json:"total"`
+}
+
+const (
+	inspirationAssetListCacheNamespace   = "new-api:inspiration_assets:v1"
+	inspirationAssetDetailCacheNamespace = "new-api:inspiration_asset:v1"
+)
+
+var (
+	inspirationAssetListCacheOnce   sync.Once
+	inspirationAssetDetailCacheOnce sync.Once
+
+	inspirationAssetListCache   *cachex.HybridCache[InspirationAssetPage]
+	inspirationAssetDetailCache *cachex.HybridCache[ImageCreativeAsset]
+)
+
+func inspirationAssetListCacheTTL() time.Duration {
+	ttlSeconds := common.GetEnvOrDefault("INSPIRATION_ASSET_LIST_CACHE_TTL", 60)
+	if ttlSeconds <= 0 {
+		ttlSeconds = 60
+	}
+	return time.Duration(ttlSeconds) * time.Second
+}
+
+func inspirationAssetDetailCacheTTL() time.Duration {
+	ttlSeconds := common.GetEnvOrDefault("INSPIRATION_ASSET_DETAIL_CACHE_TTL", 300)
+	if ttlSeconds <= 0 {
+		ttlSeconds = 300
+	}
+	return time.Duration(ttlSeconds) * time.Second
+}
+
+func inspirationAssetListCacheCapacity() int {
+	capacity := common.GetEnvOrDefault("INSPIRATION_ASSET_LIST_CACHE_CAP", 200)
+	if capacity <= 0 {
+		capacity = 200
+	}
+	return capacity
+}
+
+func inspirationAssetDetailCacheCapacity() int {
+	capacity := common.GetEnvOrDefault("INSPIRATION_ASSET_DETAIL_CACHE_CAP", 2000)
+	if capacity <= 0 {
+		capacity = 2000
+	}
+	return capacity
+}
+
+func getInspirationAssetListCache() *cachex.HybridCache[InspirationAssetPage] {
+	inspirationAssetListCacheOnce.Do(func() {
+		ttl := inspirationAssetListCacheTTL()
+		inspirationAssetListCache = cachex.NewHybridCache[InspirationAssetPage](cachex.HybridCacheConfig[InspirationAssetPage]{
+			Namespace: cachex.Namespace(inspirationAssetListCacheNamespace),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.JSONCodec[InspirationAssetPage]{},
+			Memory: func() *hot.HotCache[string, InspirationAssetPage] {
+				return hot.NewHotCache[string, InspirationAssetPage](hot.LRU, inspirationAssetListCacheCapacity()).
+					WithTTL(ttl).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return inspirationAssetListCache
+}
+
+func getInspirationAssetDetailCache() *cachex.HybridCache[ImageCreativeAsset] {
+	inspirationAssetDetailCacheOnce.Do(func() {
+		ttl := inspirationAssetDetailCacheTTL()
+		inspirationAssetDetailCache = cachex.NewHybridCache[ImageCreativeAsset](cachex.HybridCacheConfig[ImageCreativeAsset]{
+			Namespace: cachex.Namespace(inspirationAssetDetailCacheNamespace),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.JSONCodec[ImageCreativeAsset]{},
+			Memory: func() *hot.HotCache[string, ImageCreativeAsset] {
+				return hot.NewHotCache[string, ImageCreativeAsset](hot.LRU, inspirationAssetDetailCacheCapacity()).
+					WithTTL(ttl).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return inspirationAssetDetailCache
+}
+
+func inspirationAssetListCacheKey(startIdx int, num int) string {
+	if startIdx < 0 || num <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", startIdx, num)
+}
+
+func inspirationAssetDetailCacheKey(id int) string {
+	if id <= 0 {
+		return ""
+	}
+	return strconv.Itoa(id)
+}
+
+func cloneImageCreativeAsset(asset *ImageCreativeAsset) *ImageCreativeAsset {
+	if asset == nil {
+		return nil
+	}
+	next := *asset
+	return &next
+}
+
+func cloneImageCreativeAssets(assets []*ImageCreativeAsset) []*ImageCreativeAsset {
+	if len(assets) == 0 {
+		return assets
+	}
+	next := make([]*ImageCreativeAsset, 0, len(assets))
+	for _, asset := range assets {
+		next = append(next, cloneImageCreativeAsset(asset))
+	}
+	return next
+}
+
+func InvalidateInspirationAssetCache() {
+	_ = getInspirationAssetListCache().Purge()
+	_ = getInspirationAssetDetailCache().Purge()
 }
 
 func isValidCreativeSubmissionStatus(status string) bool {
@@ -151,6 +287,14 @@ func publicInspirationAssetsBaseQuery() *gorm.DB {
 }
 
 func GetApprovedInspirationAssets(startIdx int, num int) ([]*ImageCreativeAsset, int64, error) {
+	cacheKey := inspirationAssetListCacheKey(startIdx, num)
+	if cacheKey != "" {
+		cached, ok, err := getInspirationAssetListCache().Get(cacheKey)
+		if err == nil && ok {
+			return cloneImageCreativeAssets(cached.Items), cached.Total, nil
+		}
+	}
+
 	var assets []*ImageCreativeAsset
 	var total int64
 
@@ -166,7 +310,14 @@ func GetApprovedInspirationAssets(startIdx int, num int) ([]*ImageCreativeAsset,
 		return nil, 0, err
 	}
 
-	return assets, total, nil
+	if cacheKey != "" {
+		_ = getInspirationAssetListCache().SetWithTTL(cacheKey, InspirationAssetPage{
+			Items: cloneImageCreativeAssets(assets),
+			Total: total,
+		}, inspirationAssetListCacheTTL())
+	}
+
+	return cloneImageCreativeAssets(assets), total, nil
 }
 
 func GetApprovedCreativeAssets(startIdx int, num int) ([]*ImageCreativeAsset, int64, error) {
@@ -174,6 +325,14 @@ func GetApprovedCreativeAssets(startIdx int, num int) ([]*ImageCreativeAsset, in
 }
 
 func GetApprovedInspirationAssetByID(id int) (*ImageCreativeAsset, error) {
+	cacheKey := inspirationAssetDetailCacheKey(id)
+	if cacheKey != "" {
+		cached, ok, err := getInspirationAssetDetailCache().Get(cacheKey)
+		if err == nil && ok {
+			return cloneImageCreativeAsset(&cached), nil
+		}
+	}
+
 	var asset ImageCreativeAsset
 	err := publicInspirationAssetsBaseQuery().Where("s.id = ?", id).Scan(&asset).Error
 	if err != nil {
@@ -182,7 +341,10 @@ func GetApprovedInspirationAssetByID(id int) (*ImageCreativeAsset, error) {
 	if asset.Id == 0 {
 		return nil, nil
 	}
-	return &asset, nil
+	if cacheKey != "" {
+		_ = getInspirationAssetDetailCache().SetWithTTL(cacheKey, asset, inspirationAssetDetailCacheTTL())
+	}
+	return cloneImageCreativeAsset(&asset), nil
 }
 
 func GetApprovedCreativeAssetByID(id int) (*ImageCreativeAsset, error) {
@@ -269,6 +431,7 @@ func ReviewImageInspirationSubmission(id int, reviewerId int, status string, rej
 		return nil, errors.New("投稿不存在")
 	}
 
+	InvalidateInspirationAssetCache()
 	return GetImageInspirationAdminSubmissionByID(id)
 }
 
@@ -284,6 +447,7 @@ func DeleteImageInspirationSubmission(id int) error {
 	if result.RowsAffected == 0 {
 		return errors.New("投稿不存在")
 	}
+	InvalidateInspirationAssetCache()
 	return nil
 }
 
