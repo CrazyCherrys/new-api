@@ -160,12 +160,24 @@ const ImageGeneration = () => {
   const [deletingTasks, setDeletingTasks] = useState(false);
   const sseRef = useRef(null);
   const pollingTimerRef = useRef(null);
+  const taskListStateRef = useRef(null);
+  const taskListRequestSeqRef = useRef(0);
   const taskDetailRequestSeqRef = useRef(0);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
   const [userCustomWorkerKeyEnabled, setUserCustomWorkerKeyEnabled] =
     useState(false);
   const [userCustomWorkerBaseUrlAllowed, setUserCustomWorkerBaseUrlAllowed] =
     useState(false);
+
+  taskListStateRef.current = {
+    page: taskPage,
+    pageSize: taskPageSize,
+    statusFilter: taskStatusFilter,
+    modelFilter: taskModelFilter,
+    timeFilter: taskTimeFilter,
+    sortBy: taskSortBy,
+    sortOrder: taskSortOrder,
+  };
 
   const formatModelSeries = (series) => {
     if (!series) return '';
@@ -351,31 +363,49 @@ const ImageGeneration = () => {
 
   // silent=true 时静默刷新（轮询），不触发 loadingTasks，不显示 Spin 遮罩
   const loadTasks = async (silent = false) => {
+    const queryState = taskListStateRef.current || {
+      page: taskPage,
+      pageSize: taskPageSize,
+      statusFilter: taskStatusFilter,
+      modelFilter: taskModelFilter,
+      timeFilter: taskTimeFilter,
+      sortBy: taskSortBy,
+      sortOrder: taskSortOrder,
+    };
+    const requestSeq = silent
+      ? taskListRequestSeqRef.current
+      : taskListRequestSeqRef.current + 1;
+    if (!silent) {
+      taskListRequestSeqRef.current = requestSeq;
+    }
     if (!silent) setLoadingTasks(true);
     try {
       const params = {
-        page: taskPage,
-        page_size: taskPageSize,
+        p: queryState.page,
+        page_size: queryState.pageSize,
       };
-      if (taskStatusFilter) {
-        params.status = taskStatusFilter;
+      if (queryState.statusFilter) {
+        params.status = queryState.statusFilter;
       }
-      if (taskModelFilter) {
-        params.model_id = taskModelFilter;
+      if (queryState.modelFilter) {
+        params.model_id = queryState.modelFilter;
       }
-      const { start, end } = computeTimeRange(taskTimeFilter);
+      const { start, end } = computeTimeRange(queryState.timeFilter);
       if (start > 0) {
         params.start_time = start;
         params.end_time = end;
       }
-      if (taskSortBy) {
-        params.sort_by = taskSortBy;
+      if (queryState.sortBy) {
+        params.sort_by = queryState.sortBy;
       }
-      if (taskSortOrder) {
-        params.sort_order = taskSortOrder;
+      if (queryState.sortOrder) {
+        params.sort_order = queryState.sortOrder;
       }
 
       const res = await API.get('/api/image-generation/tasks', { params });
+      if (requestSeq !== taskListRequestSeqRef.current) {
+        return;
+      }
       if (res.data.success) {
         const newItems = res.data.data.items || [];
         const newTotal = res.data.data.total || 0;
@@ -401,9 +431,13 @@ const ImageGeneration = () => {
         showError(res.data.message || t('加载任务列表失败'));
       }
     } catch (error) {
-      if (!silent) showError(error.message || t('加载任务列表失败'));
+      if (requestSeq === taskListRequestSeqRef.current && !silent) {
+        showError(error.message || t('加载任务列表失败'));
+      }
     } finally {
-      if (!silent) setLoadingTasks(false);
+      if (!silent) {
+        setLoadingTasks(false);
+      }
     }
   };
 
@@ -1397,7 +1431,10 @@ const ImageGeneration = () => {
                 pageSize={taskPageSize}
                 onPageChange={setTaskPage}
                 showSizeChanger
-                onPageSizeChange={setTaskPageSize}
+                onPageSizeChange={(nextPageSize) => {
+                  setTaskPage(1);
+                  setTaskPageSize(nextPageSize);
+                }}
                 pageSizeOpts={[10, 20, 50, 100]}
               />
             </div>
