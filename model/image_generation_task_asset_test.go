@@ -262,6 +262,145 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	}
 }
 
+func TestGetImageTaskUpdatesByUserIDReturnsActiveAndRecentTerminalTasks(t *testing.T) {
+	db := setupImageAssetTestDB(t)
+
+	records := []*ImageGenerationTask{
+		{
+			UserId:          1,
+			ModelId:         "gpt-image-1",
+			Prompt:          "queued",
+			RequestEndpoint: "openai",
+			Status:          ImageTaskStatusPending,
+			CreatedTime:     100,
+		},
+		{
+			UserId:          1,
+			ModelId:         "gpt-image-1",
+			Prompt:          "running",
+			RequestEndpoint: "openai",
+			Status:          ImageTaskStatusGenerating,
+			CreatedTime:     110,
+		},
+		{
+			UserId:          1,
+			ModelId:         "gpt-image-1",
+			Prompt:          "recent success",
+			RequestEndpoint: "openai",
+			Status:          ImageTaskStatusSuccess,
+			ImageUrl:        "https://example.com/recent.png",
+			ThumbnailUrl:    "https://example.com/recent-thumb.jpg",
+			CreatedTime:     120,
+			CompletedTime:   200,
+		},
+		{
+			UserId:          1,
+			ModelId:         "gpt-image-1",
+			Prompt:          "old failure",
+			RequestEndpoint: "openai",
+			Status:          ImageTaskStatusFailed,
+			ErrorMessage:    "old error",
+			CreatedTime:     130,
+			CompletedTime:   50,
+		},
+		{
+			UserId:          2,
+			ModelId:         "gpt-image-1",
+			Prompt:          "other user",
+			RequestEndpoint: "openai",
+			Status:          ImageTaskStatusSuccess,
+			ImageUrl:        "https://example.com/other.png",
+			CreatedTime:     140,
+			CompletedTime:   220,
+		},
+	}
+	for _, record := range records {
+		if err := db.Create(record).Error; err != nil {
+			t.Fatalf("failed to create image task: %v", err)
+		}
+	}
+
+	tasks, err := GetImageTaskUpdatesByUserID(1, 100, 10)
+	if err != nil {
+		t.Fatalf("failed to get task updates: %v", err)
+	}
+
+	gotStatuses := make(map[int]string, len(tasks))
+	for _, task := range tasks {
+		gotStatuses[task.Id] = task.Status
+		if task.UserId != 1 {
+			t.Fatalf("expected only user 1 tasks, got user %d", task.UserId)
+		}
+	}
+	expected := map[int]string{
+		records[0].Id: ImageTaskStatusPending,
+		records[1].Id: ImageTaskStatusGenerating,
+		records[2].Id: ImageTaskStatusSuccess,
+	}
+	if len(gotStatuses) != len(expected) {
+		t.Fatalf("expected %d tasks, got %d: %#v", len(expected), len(gotStatuses), gotStatuses)
+	}
+	for id, status := range expected {
+		if gotStatuses[id] != status {
+			t.Fatalf("expected task %d status %q, got %q", id, status, gotStatuses[id])
+		}
+	}
+}
+
+func TestGetImageTaskUpdatesByUserIDPrioritizesActiveTasks(t *testing.T) {
+	db := setupImageAssetTestDB(t)
+
+	activeTask := &ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "long running",
+		RequestEndpoint: "openai",
+		Status:          ImageTaskStatusGenerating,
+		CreatedTime:     100,
+	}
+	recentTerminalTasks := []*ImageGenerationTask{
+		{
+			UserId:          1,
+			ModelId:         "gpt-image-1",
+			Prompt:          "recent success one",
+			RequestEndpoint: "openai",
+			Status:          ImageTaskStatusSuccess,
+			ImageUrl:        "https://example.com/one.png",
+			CreatedTime:     200,
+			CompletedTime:   300,
+		},
+		{
+			UserId:          1,
+			ModelId:         "gpt-image-1",
+			Prompt:          "recent success two",
+			RequestEndpoint: "openai",
+			Status:          ImageTaskStatusSuccess,
+			ImageUrl:        "https://example.com/two.png",
+			CreatedTime:     210,
+			CompletedTime:   310,
+		},
+	}
+	if err := db.Create(activeTask).Error; err != nil {
+		t.Fatalf("failed to create active task: %v", err)
+	}
+	for _, task := range recentTerminalTasks {
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create terminal task: %v", err)
+		}
+	}
+
+	tasks, err := GetImageTaskUpdatesByUserID(1, 100, 1)
+	if err != nil {
+		t.Fatalf("failed to get task updates: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected one task due to limit, got %d", len(tasks))
+	}
+	if tasks[0].Id != activeTask.Id {
+		t.Fatalf("expected active task %d to be prioritized, got %#v", activeTask.Id, tasks[0])
+	}
+}
+
 func TestSearchModelMappingsIncludesDisabledItemsForAdmin(t *testing.T) {
 	setupImageAssetTestDB(t)
 

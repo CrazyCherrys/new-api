@@ -9,20 +9,20 @@ import (
 
 // ImageGenerationTask 图片生成任务表
 type ImageGenerationTask struct {
-	Id              int    `json:"id" gorm:"primaryKey"`
-	UserId          int    `json:"user_id" gorm:"index;not null"`
+	Id              int    `json:"id" gorm:"primaryKey;index:idx_image_tasks_user_id,priority:2;index:idx_image_tasks_user_status_id,priority:3;index:idx_image_tasks_status_id,priority:2"`
+	UserId          int    `json:"user_id" gorm:"index;index:idx_image_tasks_user_id,priority:1;index:idx_image_tasks_user_created,priority:1;index:idx_image_tasks_user_status_id,priority:1;index:idx_image_tasks_user_completed,priority:1;not null"`
 	ModelId         string `json:"model_id" gorm:"size:128;not null;index"`
 	Prompt          string `json:"prompt" gorm:"type:text;not null"`
 	RequestEndpoint string `json:"request_endpoint" gorm:"size:32;not null;index"` // openai, openai-response, gemini, openai_mod
-	Status          string `json:"status" gorm:"size:20;not null;index;default:'pending'"`
-	Params          string `json:"params" gorm:"type:text"`          // JSON: size, quality, style, n, etc.
-	ImageUrl        string `json:"image_url" gorm:"type:text"`       // 生成的图片URL
-	ThumbnailUrl    string `json:"thumbnail_url" gorm:"type:text"`   // 列表页缩略图 URL
-	ImageMetadata   string `json:"image_metadata" gorm:"type:text"`  // JSON: revised_prompt, etc.
-	ErrorMessage    string `json:"error_message" gorm:"type:text"`   // 错误信息
-	Cost            int    `json:"cost" gorm:"default:0"`            // 消耗的配额
-	CreatedTime     int64  `json:"created_time" gorm:"bigint;index"` // 创建时间戳
-	CompletedTime   int64  `json:"completed_time" gorm:"bigint"`     // 完成时间戳
+	Status          string `json:"status" gorm:"size:20;not null;index;index:idx_image_tasks_user_status_id,priority:2;index:idx_image_tasks_status_id,priority:1;default:'pending'"`
+	Params          string `json:"params" gorm:"type:text"`                                                        // JSON: size, quality, style, n, etc.
+	ImageUrl        string `json:"image_url" gorm:"type:text"`                                                     // 生成的图片URL
+	ThumbnailUrl    string `json:"thumbnail_url" gorm:"type:text"`                                                 // 列表页缩略图 URL
+	ImageMetadata   string `json:"image_metadata" gorm:"type:text"`                                                // JSON: revised_prompt, etc.
+	ErrorMessage    string `json:"error_message" gorm:"type:text"`                                                 // 错误信息
+	Cost            int    `json:"cost" gorm:"default:0"`                                                          // 消耗的配额
+	CreatedTime     int64  `json:"created_time" gorm:"bigint;index;index:idx_image_tasks_user_created,priority:2"` // 创建时间戳
+	CompletedTime   int64  `json:"completed_time" gorm:"bigint;index:idx_image_tasks_user_completed,priority:2"`   // 完成时间戳
 	RequestType     string `json:"request_type" gorm:"-"`
 	ReferenceCount  int    `json:"reference_count" gorm:"-"`
 	HasMask         bool   `json:"has_mask" gorm:"-"`
@@ -186,6 +186,46 @@ func GetImageTasksByUserID(userId int, startIdx int, num int, queryParams ImageT
 
 	err = query.Order(orderClause).Limit(num).Offset(startIdx).Find(&tasks).Error
 	return tasks, total, err
+}
+
+// GetImageTaskUpdatesByUserID 获取 SSE 所需的轻量任务更新，不执行分页统计。
+func GetImageTaskUpdatesByUserID(userId int, completedSince int64, limit int) ([]*ImageGenerationTask, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	var tasks []*ImageGenerationTask
+	activeStatuses := []string{ImageTaskStatusPending, ImageTaskStatusGenerating}
+	query := DB.Model(&ImageGenerationTask{}).
+		Select("id, user_id, status, image_url, thumbnail_url, error_message, completed_time").
+		Where("user_id = ? AND status IN ?", userId, activeStatuses).
+		Order("id DESC").
+		Limit(limit)
+	if err := query.Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+
+	if completedSince <= 0 || len(tasks) >= limit {
+		return tasks, nil
+	}
+
+	var terminalTasks []*ImageGenerationTask
+	remaining := limit - len(tasks)
+	err := DB.Model(&ImageGenerationTask{}).
+		Select("id, user_id, status, image_url, thumbnail_url, error_message, completed_time").
+		Where("user_id = ? AND status NOT IN ? AND completed_time >= ?", userId, activeStatuses, completedSince).
+		Order("id DESC").
+		Limit(remaining).
+		Find(&terminalTasks).Error
+	if err != nil {
+		return nil, err
+	}
+
+	tasks = append(tasks, terminalTasks...)
+	return tasks, nil
 }
 
 func imageAssetsBaseQuery(userId int) *gorm.DB {

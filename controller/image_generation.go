@@ -634,6 +634,24 @@ func GetImageGenerationModels(c *gin.Context) {
 	common.ApiSuccess(c, models)
 }
 
+func writeImageGenerationSSETaskUpdate(c *gin.Context, task *model.ImageGenerationTask) bool {
+	data, err := common.Marshal(gin.H{
+		"id":             task.Id,
+		"status":         task.Status,
+		"image_url":      task.ImageUrl,
+		"thumbnail_url":  task.ThumbnailUrl,
+		"error_message":  task.ErrorMessage,
+		"completed_time": task.CompletedTime,
+	})
+	if err != nil {
+		return false
+	}
+
+	fmt.Fprintf(c.Writer, "event: task_update\ndata: %s\n\n", string(data))
+	c.Writer.Flush()
+	return true
+}
+
 // ImageGenerationSSE SSE推送任务状态更新
 func ImageGenerationSSE(c *gin.Context) {
 	userId := c.GetInt("id")
@@ -664,6 +682,7 @@ func ImageGenerationSSE(c *gin.Context) {
 
 	// 记录上次发送的任务状态，避免重复发送
 	lastTaskStates := make(map[int]string)
+	completedSince := common.GetTimestamp() - 60
 
 	for {
 		select {
@@ -671,41 +690,35 @@ func ImageGenerationSSE(c *gin.Context) {
 			// 客户端断开连接
 			return
 		case <-ticker.C:
-			// 查询用户的所有进行中的任务
-			queryParams := model.ImageTaskQueryParams{}
-			tasks, _, err := model.GetImageTasksByUserID(userId, 0, 100, queryParams)
+			now := common.GetTimestamp()
+			tasks, err := model.GetImageTaskUpdatesByUserID(userId, completedSince, 100)
 			if err != nil {
 				continue
 			}
+			completedSince = now - 5
+			if completedSince < 0 {
+				completedSince = 0
+			}
 
 			// 检查任务状态变化
+			currentTaskIds := make(map[int]struct{}, len(tasks))
 			for _, task := range tasks {
+				currentTaskIds[task.Id] = struct{}{}
 				lastState, exists := lastTaskStates[task.Id]
 				currentState := task.Status
 
 				// 如果状态发生变化，或者是新任务，发送更新
 				if !exists || lastState != currentState {
-					data := fmt.Sprintf(`{"id":%d,"status":"%s","image_url":"%s","thumbnail_url":"%s","error_message":"%s","completed_time":%d}`,
-						task.Id, task.Status, task.ImageUrl, task.ThumbnailUrl, task.ErrorMessage, task.CompletedTime)
-					fmt.Fprintf(c.Writer, "event: task_update\ndata: %s\n\n", data)
-					c.Writer.Flush()
-
-					lastTaskStates[task.Id] = currentState
+					if writeImageGenerationSSETaskUpdate(c, task) {
+						lastTaskStates[task.Id] = currentState
+					}
 				}
 			}
 
 			// 清理已完成或失败的任务状态记录（避免内存泄漏）
 			for taskId, state := range lastTaskStates {
 				if state == model.ImageTaskStatusSuccess || state == model.ImageTaskStatusFailed {
-					// 检查任务是否还在列表中
-					found := false
-					for _, task := range tasks {
-						if task.Id == taskId {
-							found = true
-							break
-						}
-					}
-					if !found {
+					if _, found := currentTaskIds[taskId]; !found {
 						delete(lastTaskStates, taskId)
 					}
 				}

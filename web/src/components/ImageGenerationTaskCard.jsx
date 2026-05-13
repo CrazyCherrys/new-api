@@ -108,14 +108,14 @@ const ImageGenerationTaskCard = ({
       alignItems: 'center',
       justifyContent: 'center',
     },
-    imageBg: (url) => ({
+    image: {
       position: 'absolute',
       inset: 0,
-      backgroundImage: url ? `url(${url})` : 'none',
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
+      width: '100%',
+      height: '100%',
+      objectFit: 'cover',
       backgroundColor: 'var(--semi-color-fill-1)',
-    }),
+    },
     statusBadge: {
       position: 'absolute',
       top: 8,
@@ -216,7 +216,16 @@ const ImageGenerationTaskCard = ({
       const previewUrl = task.thumbnail_url || task.image_url;
       return (
         <>
-          <div style={styles.imageBg(previewUrl)} />
+          {previewUrl && (
+            <img
+              src={previewUrl}
+              alt={task.prompt || t('生成图片')}
+              loading='lazy'
+              decoding='async'
+              draggable={false}
+              style={styles.image}
+            />
+          )}
           {!previewUrl && (
             <div style={styles.body}>
               <div style={{ color: 'var(--semi-color-text-3)' }}>
@@ -352,6 +361,7 @@ ImageGenerationTaskCard.propTypes = {
       .isRequired,
     image_url: PropTypes.string,
     thumbnail_url: PropTypes.string,
+    prompt: PropTypes.string,
     progress: PropTypes.number,
     error_message: PropTypes.string,
     created_time: PropTypes.number.isRequired,

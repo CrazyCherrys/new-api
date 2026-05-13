@@ -224,7 +224,6 @@ const ImageGeneration = () => {
 
   useEffect(() => {
     loadDrawingModels();
-    loadTasks();
     loadWorkerSettings();
     connectSSE();
 
