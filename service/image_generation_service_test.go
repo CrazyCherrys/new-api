@@ -154,6 +154,98 @@ func TestImageGenerationMaxRetriesPreservesZero(t *testing.T) {
 	}
 }
 
+func TestImageGenerationUserChannelOverrideReadsUserWorkerSettings(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	user := &model.User{
+		Username: "worker-settings-user",
+		Password: "hashed-password",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	user.SetSetting(dto.UserSetting{
+		WorkerApiKey:  " sk-user-key ",
+		WorkerApiBase: "https://custom.example.com/v1/",
+	})
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousKeyEnabled := cfg.UserCustomKeyEnabled
+	previousBaseAllowed := cfg.UserCustomBaseURLAllowed
+	t.Cleanup(func() {
+		cfg.UserCustomKeyEnabled = previousKeyEnabled
+		cfg.UserCustomBaseURLAllowed = previousBaseAllowed
+	})
+
+	cfg.UserCustomKeyEnabled = true
+	cfg.UserCustomBaseURLAllowed = true
+	override, err := getImageGenerationUserChannelOverride(user.Id)
+	if err != nil {
+		t.Fatalf("unexpected override error: %v", err)
+	}
+	if override == nil {
+		t.Fatalf("expected custom worker override")
+	}
+	if override.APIKey != "sk-user-key" {
+		t.Fatalf("expected trimmed user API key, got %q", override.APIKey)
+	}
+	if override.BaseURL != "https://custom.example.com/v1" {
+		t.Fatalf("expected trimmed custom base URL, got %q", override.BaseURL)
+	}
+
+	cfg.UserCustomBaseURLAllowed = false
+	override, err = getImageGenerationUserChannelOverride(user.Id)
+	if err != nil {
+		t.Fatalf("unexpected override error with base disabled: %v", err)
+	}
+	if override == nil {
+		t.Fatalf("expected custom worker override when key is enabled")
+	}
+	if override.APIKey != "sk-user-key" {
+		t.Fatalf("expected user API key with base disabled, got %q", override.APIKey)
+	}
+	if override.BaseURL != "" {
+		t.Fatalf("expected empty base URL when custom base is disabled, got %q", override.BaseURL)
+	}
+}
+
+func TestImageGenerationUserChannelOverrideRequiresCustomKey(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	user := &model.User{
+		Username: "worker-settings-no-key",
+		Password: "hashed-password",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	user.SetSetting(dto.UserSetting{
+		WorkerApiBase: "https://custom.example.com/v1",
+	})
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousKeyEnabled := cfg.UserCustomKeyEnabled
+	previousBaseAllowed := cfg.UserCustomBaseURLAllowed
+	t.Cleanup(func() {
+		cfg.UserCustomKeyEnabled = previousKeyEnabled
+		cfg.UserCustomBaseURLAllowed = previousBaseAllowed
+	})
+
+	cfg.UserCustomKeyEnabled = true
+	cfg.UserCustomBaseURLAllowed = true
+	override, err := getImageGenerationUserChannelOverride(user.Id)
+	if err != nil {
+		t.Fatalf("unexpected override error: %v", err)
+	}
+	if override != nil {
+		t.Fatalf("expected no override without user API key, got %+v", override)
+	}
+}
+
 func TestProcessTaskAsyncWaitsForWorkerWithoutTimingOut(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
 
