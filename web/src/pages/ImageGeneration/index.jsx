@@ -54,6 +54,8 @@ const DEFAULT_IMAGE_CAPABILITIES = [
   IMAGE_CAPABILITY_GENERATION,
   IMAGE_CAPABILITY_EDITING,
 ];
+const DEFAULT_POLLING_INTERVAL_SECONDS = 5;
+const DEFAULT_MAX_BATCH_TASKS = 10;
 
 const normalizeImageCapabilities = (raw) => {
   if (Array.isArray(raw)) {
@@ -75,6 +77,15 @@ const normalizeImageCapabilities = (raw) => {
 const modelSupportsCapability = (model, capability) =>
   !!model &&
   normalizeImageCapabilities(model.image_capabilities).includes(capability);
+
+const isDefaultTaskViewState = (state) =>
+  !!state &&
+  state.page === 1 &&
+  !state.statusFilter &&
+  !state.modelFilter &&
+  !state.timeFilter &&
+  state.sortBy === 'created_time' &&
+  state.sortOrder === 'desc';
 
 const ImageGeneration = () => {
   const { t } = useTranslation();
@@ -148,6 +159,7 @@ const ImageGeneration = () => {
   const [taskTotal, setTaskTotal] = useState(0);
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState(20);
+  const [taskHasMore, setTaskHasMore] = useState(false);
   const [taskStatusFilter, setTaskStatusFilter] = useState(''); // '' | 'pending' | 'generating' | 'success' | 'failed'
   const [taskModelFilter, setTaskModelFilter] = useState(''); // '' | model_id
   const [taskTimeFilter, setTaskTimeFilter] = useState(''); // '' | 'today' | 'last7d' | 'last30d' | 'thisMonth'
@@ -160,14 +172,32 @@ const ImageGeneration = () => {
   const [deletingTasks, setDeletingTasks] = useState(false);
   const sseRef = useRef(null);
   const pollingTimerRef = useRef(null);
+  const pollingIntervalRef = useRef(DEFAULT_POLLING_INTERVAL_SECONDS);
   const taskListStateRef = useRef(null);
   const taskListRequestSeqRef = useRef(0);
   const taskDetailRequestSeqRef = useRef(0);
+  const tasksRef = useRef([]);
+  const taskUpdatesCompletedSinceRef = useRef(
+    Math.floor(Date.now() / 1000) - 60,
+  );
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
   const [userCustomWorkerKeyEnabled, setUserCustomWorkerKeyEnabled] =
     useState(false);
   const [userCustomWorkerBaseUrlAllowed, setUserCustomWorkerBaseUrlAllowed] =
     useState(false);
+  const [pollingIntervalSeconds, setPollingIntervalSeconds] = useState(
+    DEFAULT_POLLING_INTERVAL_SECONDS,
+  );
+  const [sseConnected, setSseConnected] = useState(false);
+  const [isPageVisible, setIsPageVisible] = useState(() =>
+    typeof document === 'undefined' ? true : !document.hidden,
+  );
+  const [clockTick, setClockTick] = useState(() => Date.now());
+  const hasActiveTasks = tasks.some(
+    (task) => task.status === 'pending' || task.status === 'generating',
+  );
+  const showsReliableTaskTotal = taskPage <= 1;
+  const hasNextTaskPage = taskHasMore;
 
   taskListStateRef.current = {
     page: taskPage,
@@ -178,6 +208,18 @@ const ImageGeneration = () => {
     sortBy: taskSortBy,
     sortOrder: taskSortOrder,
   };
+  pollingIntervalRef.current = pollingIntervalSeconds;
+  tasksRef.current = tasks;
+
+  useEffect(() => {
+    const latestCompletedTime = tasks.reduce((latest, task) => {
+      const completedAt = Number(task?.completed_time) || 0;
+      return completedAt > latest ? completedAt : latest;
+    }, 0);
+    if (latestCompletedTime > taskUpdatesCompletedSinceRef.current) {
+      taskUpdatesCompletedSinceRef.current = latestCompletedTime;
+    }
+  }, [tasks]);
 
   const formatModelSeries = (series) => {
     if (!series) return '';
@@ -234,6 +276,38 @@ const ImageGeneration = () => {
   }, []);
 
   useEffect(() => {
+    if (!pollingTimerRef.current) {
+      return;
+    }
+    stopPolling();
+    startPolling();
+  }, [pollingIntervalSeconds]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsPageVisible(!document.hidden);
+    };
+
+    handleVisibilityChange();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasActiveTasks || !isPageVisible) {
+      return undefined;
+    }
+
+    const timer = setInterval(() => {
+      setClockTick(Date.now());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [hasActiveTasks, isPageVisible]);
+
+  useEffect(() => {
     const taskId = new URLSearchParams(location.search).get('task_id');
     if (!taskId) return;
 
@@ -269,6 +343,7 @@ const ImageGeneration = () => {
   // 切换任意筛选/排序时回到第一页
   useEffect(() => {
     setTaskPage(1);
+    setTaskHasMore(false);
   }, [
     taskStatusFilter,
     taskModelFilter,
@@ -321,6 +396,12 @@ const ImageGeneration = () => {
         const size = parseInt(res.data.data.max_image_size, 10);
         if (!isNaN(size) && size > 0) {
           setMaxImageSize(size);
+        }
+        const pollingInterval = parseInt(res.data.data.polling_interval, 10);
+        if (!isNaN(pollingInterval) && pollingInterval > 0) {
+          setPollingIntervalSeconds(pollingInterval);
+        } else {
+          setPollingIntervalSeconds(DEFAULT_POLLING_INTERVAL_SECONDS);
         }
         setUserCustomWorkerKeyEnabled(
           res.data.data.user_custom_key_enabled === true,
@@ -407,7 +488,8 @@ const ImageGeneration = () => {
       }
       if (res.data.success) {
         const newItems = res.data.data.items || [];
-        const newTotal = res.data.data.total || 0;
+        const hasTotal = Number.isFinite(res.data.data.total);
+        const newTotal = hasTotal ? res.data.data.total : taskTotal;
         // 智能合并：仅当内容实际变化时才更新，避免全量替换导致卡片无效重渲染
         setTasks((prev) => {
           if (prev.length === newItems.length) {
@@ -418,6 +500,9 @@ const ImageGeneration = () => {
                 old.id === newTask.id &&
                 old.status === newTask.status &&
                 old.image_url === newTask.image_url &&
+                old.thumbnail_url === newTask.thumbnail_url &&
+                old.completed_time === newTask.completed_time &&
+                old.progress === newTask.progress &&
                 old.error_message === newTask.error_message
               );
             });
@@ -425,7 +510,10 @@ const ImageGeneration = () => {
           }
           return newItems;
         });
-        setTaskTotal(newTotal);
+        if (hasTotal) {
+          setTaskTotal(newTotal);
+        }
+        setTaskHasMore(res.data.data.has_more === true);
       } else if (!silent) {
         showError(res.data.message || t('加载任务列表失败'));
       }
@@ -437,6 +525,69 @@ const ImageGeneration = () => {
       if (!silent) {
         setLoadingTasks(false);
       }
+    }
+  };
+
+  const mergeTaskUpdates = (updates) => {
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return;
+    }
+    setTasks((prevTasks) => {
+      const existingById = new Map(prevTasks.map((task) => [task.id, task]));
+      const nextTasks = [...prevTasks];
+
+      updates.forEach((update) => {
+        if (!update?.id) {
+          return;
+        }
+        const existing = existingById.get(update.id);
+        if (!existing) {
+          nextTasks.unshift(update);
+          existingById.set(update.id, update);
+          return;
+        }
+        const merged = {
+          ...existing,
+          ...update,
+        };
+        existingById.set(update.id, merged);
+      });
+
+      return nextTasks
+        .map((task) => existingById.get(task.id) || task)
+        .slice(0, taskPageSize);
+    });
+  };
+
+  const loadTaskUpdates = async () => {
+    const completedSince = Math.max(
+      1,
+      Number(taskUpdatesCompletedSinceRef.current) || 0,
+    );
+
+    try {
+      const res = await API.get('/api/image-generation/tasks/updates', {
+        params: {
+          completed_since: completedSince,
+          limit: Math.max((taskListStateRef.current?.pageSize || taskPageSize) * 2, 50),
+        },
+      });
+      if (!res.data.success) {
+        return;
+      }
+      const latestCompletedTime = (res.data.data?.items || []).reduce(
+        (latest, task) => {
+          const completedAt = Number(task?.completed_time) || 0;
+          return completedAt > latest ? completedAt : latest;
+        },
+        completedSince,
+      );
+      if (latestCompletedTime > taskUpdatesCompletedSinceRef.current) {
+        taskUpdatesCompletedSinceRef.current = latestCompletedTime;
+      }
+      mergeTaskUpdates(res.data.data?.items || []);
+    } catch (error) {
+      console.error('Failed to load task updates:', error);
     }
   };
 
@@ -510,8 +661,21 @@ const ImageGeneration = () => {
 
       if (successCount > 0) {
         showSuccess(t('成功删除 {{count}} 个任务', { count: successCount }));
+        const deletedTaskIds = new Set(
+          Array.from(selectedTaskIds).filter((taskId, index) =>
+            results[index]?.status === 'fulfilled',
+          ),
+        );
+        setTasks((prevTasks) =>
+          prevTasks.filter((task) => !deletedTaskIds.has(task.id)),
+        );
+        setTaskTotal((prev) => Math.max(0, prev - successCount));
+        if (selectedTask && deletedTaskIds.has(selectedTask.id)) {
+          taskDetailRequestSeqRef.current += 1;
+          setTaskModalVisible(false);
+          setSelectedTask(null);
+        }
         setSelectedTaskIds(new Set());
-        loadTasks();
       }
 
       if (failCount > 0) {
@@ -529,6 +693,10 @@ const ImageGeneration = () => {
     try {
       const eventSource = new EventSource('/api/image-generation/sse');
 
+      eventSource.onopen = () => {
+        setSseConnected(true);
+      };
+
       eventSource.addEventListener('task_update', (e) => {
         try {
           const data = JSON.parse(e.data);
@@ -541,6 +709,8 @@ const ImageGeneration = () => {
       eventSource.onerror = () => {
         console.log('SSE connection error, falling back to polling');
         eventSource.close();
+        sseRef.current = null;
+        setSseConnected(false);
         startPolling();
       };
 
@@ -557,6 +727,7 @@ const ImageGeneration = () => {
       sseRef.current.close();
       sseRef.current = null;
     }
+    setSseConnected(false);
   };
 
   // 开始轮询
@@ -564,8 +735,12 @@ const ImageGeneration = () => {
     if (pollingTimerRef.current) return;
 
     pollingTimerRef.current = setInterval(() => {
+      if (isDefaultTaskViewState(taskListStateRef.current)) {
+        loadTaskUpdates();
+        return;
+      }
       loadTasks(true); // 静默刷新，不触发 Spin 遮罩
-    }, 5000); // 5秒轮询
+    }, pollingIntervalRef.current * 1000);
   };
 
   // ���止轮询
@@ -575,6 +750,17 @@ const ImageGeneration = () => {
       pollingTimerRef.current = null;
     }
   };
+
+  useEffect(() => {
+    const shouldPoll = !sseConnected && isPageVisible && hasActiveTasks;
+    if (!shouldPoll) {
+      stopPolling();
+      return undefined;
+    }
+
+    startPolling();
+    return () => stopPolling();
+  }, [hasActiveTasks, isPageVisible, pollingIntervalSeconds, sseConnected]);
 
   // 更新任务列表中的单个任务
   const updateTaskInList = (updatedTask) => {
@@ -588,7 +774,10 @@ const ImageGeneration = () => {
         };
         return newTasks;
       }
-      // 如果是新任务，添加到列表开头
+      if (!isDefaultTaskViewState(taskListStateRef.current)) {
+        return prevTasks;
+      }
+      // 默认首页视图才把未知任务插入到列表开头
       return [updatedTask, ...prevTasks];
     });
     setSelectedTask((prevTask) => {
@@ -781,7 +970,13 @@ const ImageGeneration = () => {
 
   const normalizeTaskCount = (value) => {
     const count = Number(value);
-    return Number.isFinite(count) ? Math.max(1, Math.floor(count)) : 1;
+    if (!Number.isFinite(count)) {
+      return 1;
+    }
+    return Math.min(
+      DEFAULT_MAX_BATCH_TASKS,
+      Math.max(1, Math.floor(count)),
+    );
   };
 
   const handleGenerate = async () => {
@@ -822,6 +1017,14 @@ const ImageGeneration = () => {
     setGenerating(true);
     try {
       const taskCount = normalizeTaskCount(quantity);
+      if (taskCount > DEFAULT_MAX_BATCH_TASKS) {
+        showError(
+          t('单次最多可创建 {{count}} 个任务', {
+            count: DEFAULT_MAX_BATCH_TASKS,
+          }),
+        );
+        return;
+      }
 
       // 准备参数对象
       const params = {};
@@ -897,11 +1100,29 @@ const ImageGeneration = () => {
                 count: createdTasks.length,
               }),
         );
-        // 立即将新任务添加到列表开头，避免等待 loadTasks() 的延迟
-        setTasks((prevTasks) => [...createdTasks, ...prevTasks]);
+        const isDefaultTaskView =
+          taskPage === 1 &&
+          !taskStatusFilter &&
+          !taskModelFilter &&
+          !taskTimeFilter &&
+          taskSortBy === 'created_time' &&
+          taskSortOrder === 'desc';
+
+        // 默认首页视图直接本地插入，避免一次整页回刷
+        if (isDefaultTaskView) {
+          setTasks((prevTasks) =>
+            [...createdTasks, ...prevTasks].slice(0, taskPageSize),
+          );
+          if (selectedTask && createdTasks.some((task) => task.id === selectedTask.id)) {
+            setSelectedTask(
+              createdTasks.find((task) => task.id === selectedTask.id) || selectedTask,
+            );
+          }
+        }
         setTaskTotal((prev) => prev + createdTasks.length);
-        // 同时刷新任务列表以确保数据一致性
-        loadTasks();
+        if (!isDefaultTaskView) {
+          loadTasks();
+        }
       }
 
       if (createdTasks.length === 0) {
@@ -1365,6 +1586,7 @@ const ImageGeneration = () => {
             <span style={styles.paramLabel}>{t('生成数量')}</span>
             <InputNumber
               min={1}
+              max={DEFAULT_MAX_BATCH_TASKS}
               value={quantity}
               onChange={(val) => setQuantity(normalizeTaskCount(val))}
               style={{ width: '100%' }}
@@ -1413,10 +1635,12 @@ const ImageGeneration = () => {
                 selected={selectedTaskIds.has(task.id)}
                 onSelectChange={handleTaskSelect}
                 onClick={() => handleTaskCardClick(task)}
+                clockTick={clockTick}
               />
             ))}
           </div>
-          {taskTotal > taskPageSize && (
+          {((showsReliableTaskTotal && taskTotal > taskPageSize) ||
+            (!showsReliableTaskTotal && (taskPage > 1 || hasNextTaskPage))) && (
             <div
               style={{
                 padding: '16px',
@@ -1424,18 +1648,49 @@ const ImageGeneration = () => {
                 borderTop: '1px solid var(--semi-color-border)',
               }}
             >
-              <Pagination
-                total={taskTotal}
-                currentPage={taskPage}
-                pageSize={taskPageSize}
-                onPageChange={setTaskPage}
-                showSizeChanger
-                onPageSizeChange={(nextPageSize) => {
-                  setTaskPage(1);
-                  setTaskPageSize(nextPageSize);
-                }}
-                pageSizeOpts={[10, 20, 50, 100]}
-              />
+              {showsReliableTaskTotal ? (
+                <Pagination
+                  total={taskTotal}
+                  currentPage={taskPage}
+                  pageSize={taskPageSize}
+                  onPageChange={setTaskPage}
+                  showSizeChanger
+                  onPageSizeChange={(nextPageSize) => {
+                    setTaskPage(1);
+                    setTaskPageSize(nextPageSize);
+                  }}
+                  pageSizeOpts={[10, 20, 50, 100]}
+                />
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 12,
+                  }}
+                >
+                  <Button
+                    size='small'
+                    type='tertiary'
+                    disabled={taskPage <= 1}
+                    onClick={() => setTaskPage((prev) => Math.max(1, prev - 1))}
+                  >
+                    {t('上一步')}
+                  </Button>
+                  <Text type='tertiary' size='small'>
+                    {taskPage}
+                  </Text>
+                  <Button
+                    size='small'
+                    type='tertiary'
+                    disabled={!hasNextTaskPage}
+                    onClick={() => setTaskPage((prev) => prev + 1)}
+                  >
+                    {t('下一步')}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1487,9 +1742,15 @@ const ImageGeneration = () => {
 
           {tasks.length > 0 && (
             <>
-              <Text type='tertiary' size='small'>
-                {t('共')} {taskTotal} {t('个任务')}
-              </Text>
+              {showsReliableTaskTotal ? (
+                <Text type='tertiary' size='small'>
+                  {t('共')} {taskTotal} {t('个任务')}
+                </Text>
+              ) : (
+                <Text type='tertiary' size='small'>
+                  {t('上一步')} / {t('下一步')}
+                </Text>
+              )}
               {selectedTaskIds.size > 0 && (
                 <Text type='tertiary' size='small'>
                   ({t('已选择')} {selectedTaskIds.size} {t('个')})

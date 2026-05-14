@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -151,6 +152,185 @@ func TestImageGenerationMaxRetriesPreservesZero(t *testing.T) {
 	cfg.MaxRetries = 4
 	if got := imageGenerationMaxRetries(); got != 4 {
 		t.Fatalf("expected max retries 4, got %d", got)
+	}
+}
+
+func TestImageGenerationTaskQueueLimitUsesWorkerSetting(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousMaxWorkers := cfg.MaxWorkers
+	t.Cleanup(func() {
+		cfg.MaxWorkers = previousMaxWorkers
+	})
+
+	cfg.MaxWorkers = 0
+	if got := imageGenerationTaskQueueLimit(); got != defaultImageGenerationTaskQueueLimit {
+		t.Fatalf("expected default queue limit %d, got %d", defaultImageGenerationTaskQueueLimit, got)
+	}
+
+	cfg.MaxWorkers = 2
+	if got := imageGenerationTaskQueueLimit(); got != defaultImageGenerationTaskQueueLimit {
+		t.Fatalf("expected floor queue limit %d, got %d", defaultImageGenerationTaskQueueLimit, got)
+	}
+
+	cfg.MaxWorkers = 6
+	if got := imageGenerationTaskQueueLimit(); got != 30 {
+		t.Fatalf("expected queue limit 30, got %d", got)
+	}
+}
+
+func TestEnforceImageGenerationTaskQueueLimitRejectsExcessQueuedTasks(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousMaxWorkers := cfg.MaxWorkers
+	t.Cleanup(func() {
+		cfg.MaxWorkers = previousMaxWorkers
+	})
+	cfg.MaxWorkers = 1
+
+	for i := 0; i < defaultImageGenerationTaskQueueLimit; i++ {
+		task := &model.ImageGenerationTask{
+			UserId:          1,
+			ModelId:         fmt.Sprintf("queued-%d", i),
+			Prompt:          "queued",
+			RequestEndpoint: "openai",
+			Status:          model.ImageTaskStatusPending,
+		}
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create queued task %d: %v", i, err)
+		}
+	}
+
+	if err := enforceImageGenerationTaskQueueLimit(1, 1); err == nil {
+		t.Fatal("expected queue limit error")
+	}
+	if err := enforceImageGenerationTaskQueueLimit(2, 1); err != nil {
+		t.Fatalf("expected different user to pass queue check: %v", err)
+	}
+}
+
+func TestCreateImageGenerationTaskQueueLimitIsSerializedWithinProcess(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousMaxWorkers := cfg.MaxWorkers
+	t.Cleanup(func() {
+		cfg.MaxWorkers = previousMaxWorkers
+	})
+	cfg.MaxWorkers = 1
+
+	user := &model.User{
+		Username: "serialized-queue-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-serialized",
+		ActualModel:       "gpt-image-serialized",
+		DisplayName:       "GPT Image Serialized",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+	})
+
+	successes := 0
+	var successMu sync.Mutex
+	var wg sync.WaitGroup
+	for i := 0; i < defaultImageGenerationTaskQueueLimit+1; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if _, err := CreateImageGenerationTask(
+				user.Id,
+				"gpt-image-serialized",
+				fmt.Sprintf("prompt-%d", i),
+				"openai",
+				`{}`,
+			); err == nil {
+				successMu.Lock()
+				successes++
+				successMu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if successes != defaultImageGenerationTaskQueueLimit {
+		t.Fatalf("expected %d successful creations, got %d", defaultImageGenerationTaskQueueLimit, successes)
+	}
+}
+
+func TestRunImageCleanupTaskOnceReadsLatestConfig(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousAutoCleanupEnabled := cfg.AutoCleanupEnabled
+	previousRetentionDays := cfg.RetentionDays
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousLastRun := imageCleanupLastRun.Load()
+	imageCleanupTaskRunning.Store(false)
+	t.Cleanup(func() {
+		cfg.AutoCleanupEnabled = previousAutoCleanupEnabled
+		cfg.RetentionDays = previousRetentionDays
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		imageCleanupLastRun.Store(previousLastRun)
+		imageCleanupTaskRunning.Store(false)
+	})
+
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+	cfg.AutoCleanupEnabled = false
+	cfg.RetentionDays = 1
+	imageCleanupLastRun.Store(0)
+
+	task := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "cleanup-model",
+		Prompt:          "cleanup prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusSuccess,
+		CreatedTime:     common.GetTimestamp() - 10*24*60*60,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create old task: %v", err)
+	}
+
+	runImageCleanupTaskOnce(time.Now())
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task before enabling cleanup: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("expected task to remain when cleanup is disabled")
+	}
+
+	cfg.AutoCleanupEnabled = true
+	runImageCleanupTaskOnce(time.Now())
+	reloaded, err = model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task after enabling cleanup: %v", err)
+	}
+	if reloaded != nil {
+		t.Fatal("expected task to be cleaned up after enabling cleanup")
 	}
 }
 

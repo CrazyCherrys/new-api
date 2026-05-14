@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -16,12 +18,261 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var imageGenerationDimensionPattern = regexp.MustCompile(`^(\d{2,5})\s*[xX×*]\s*(\d{2,5})$`)
+var imageGenerationAspectRatioPattern = regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*(?::|x|X|/)\s*(\d+(?:\.\d+)?)$`)
+
 func sanitizeImageGenerationTaskParams(task *model.ImageGenerationTask) {
 	if task == nil {
 		return
 	}
 	service.FillImageGenerationTaskSummary(task)
 	task.Params = service.SanitizeImageGenerationParamsForResponse(task.Params)
+}
+
+func resolveImageGenerationTaskDisplayName(task *model.ImageGenerationTask) string {
+	if task == nil || strings.TrimSpace(task.ModelId) == "" {
+		return ""
+	}
+	mapping, err := model.GetModelMappingByRequestModel(task.ModelId)
+	if err != nil || mapping == nil {
+		return ""
+	}
+	return strings.TrimSpace(mapping.DisplayName)
+}
+
+func parseImageGenerationTaskJSON(raw string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var data map[string]any
+	if err := common.UnmarshalJsonStr(raw, &data); err != nil || len(data) == 0 {
+		return nil
+	}
+	return data
+}
+
+func parseImageGenerationNestedJSON(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		if len(typed) == 0 {
+			return nil
+		}
+		return typed
+	case string:
+		return parseImageGenerationTaskJSON(typed)
+	default:
+		return nil
+	}
+}
+
+func readImageGenerationValue(sources []map[string]any, keys []string) any {
+	for _, source := range sources {
+		if len(source) == 0 {
+			continue
+		}
+		for _, key := range keys {
+			value, ok := source[key]
+			if !ok || value == nil {
+				continue
+			}
+			if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
+				continue
+			}
+			return value
+		}
+	}
+	return nil
+}
+
+func readImageGenerationStringValue(sources []map[string]any, keys []string) string {
+	value := readImageGenerationValue(sources, keys)
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(typed), 'f', -1, 64)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	default:
+		if value == nil {
+			return ""
+		}
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
+}
+
+func readImageGenerationPositiveInt(sources []map[string]any, keys []string) int {
+	value := readImageGenerationValue(sources, keys)
+	switch typed := value.(type) {
+	case int:
+		if typed > 0 {
+			return typed
+		}
+	case int64:
+		if typed > 0 {
+			return int(typed)
+		}
+	case float64:
+		if typed > 0 {
+			return int(typed)
+		}
+	case float32:
+		if typed > 0 {
+			return int(typed)
+		}
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func parseImageGenerationDimension(value string) (int, int) {
+	matches := imageGenerationDimensionPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if len(matches) != 3 {
+		return 0, 0
+	}
+	width, err := strconv.Atoi(matches[1])
+	if err != nil || width <= 0 {
+		return 0, 0
+	}
+	height, err := strconv.Atoi(matches[2])
+	if err != nil || height <= 0 {
+		return 0, 0
+	}
+	return width, height
+}
+
+func parseImageGenerationAspectRatio(value string) float64 {
+	matches := imageGenerationAspectRatioPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if len(matches) != 3 {
+		return 0
+	}
+	width, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil || width <= 0 {
+		return 0
+	}
+	height, err := strconv.ParseFloat(matches[2], 64)
+	if err != nil || height <= 0 {
+		return 0
+	}
+	return width / height
+}
+
+func joinImageGenerationTextParts(parts []string) string {
+	result := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		normalized := strings.TrimSpace(part)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return strings.Join(result, " · ")
+}
+
+func buildImageGenerationTaskDetail(task *model.ImageGenerationTask) *model.ImageGenerationTaskDetail {
+	if task == nil {
+		return nil
+	}
+
+	detailQuantity := 0
+	paramsMap := parseImageGenerationTaskJSON(task.Params)
+	metadataMap := parseImageGenerationTaskJSON(task.ImageMetadata)
+	metadataDetails := parseImageGenerationNestedJSON(metadataMap["metadata"])
+	sources := []map[string]any{paramsMap, metadataMap, metadataDetails}
+
+	outputWidth := readImageGenerationPositiveInt([]map[string]any{metadataMap, metadataDetails}, []string{
+		"width",
+		"output_width",
+		"image_width",
+		"outputWidth",
+		"imageWidth",
+	})
+	outputHeight := readImageGenerationPositiveInt([]map[string]any{metadataMap, metadataDetails}, []string{
+		"height",
+		"output_height",
+		"image_height",
+		"outputHeight",
+		"imageHeight",
+	})
+	if outputWidth <= 0 || outputHeight <= 0 {
+		if width, height := parseImageGenerationDimension(readImageGenerationStringValue([]map[string]any{metadataMap, metadataDetails}, []string{
+			"size",
+			"output_size",
+			"dimensions",
+			"outputSize",
+		})); width > 0 && height > 0 {
+			outputWidth = width
+			outputHeight = height
+		}
+	}
+
+	outputSizeText := "-"
+	if outputWidth > 0 && outputHeight > 0 {
+		outputSizeText = fmt.Sprintf("%dx%d", outputWidth, outputHeight)
+	} else if metadataSize := readImageGenerationStringValue([]map[string]any{metadataMap, metadataDetails}, []string{
+		"size",
+		"output_size",
+		"dimensions",
+		"outputSize",
+	}); metadataSize != "" {
+		outputSizeText = metadataSize
+	}
+
+	sizeParts := make([]string, 0, 2)
+	if aspectRatio := readImageGenerationStringValue(sources, []string{"aspect_ratio", "aspectRatio"}); aspectRatio != "" {
+		sizeParts = append(sizeParts, aspectRatio)
+	}
+	if resolution := readImageGenerationStringValue([]map[string]any{paramsMap}, []string{"resolution", "image_size", "imageSize"}); resolution != "" {
+		sizeParts = append(sizeParts, resolution)
+	}
+	sizeText := joinImageGenerationTextParts(sizeParts)
+	if sizeText == "" {
+		if requestSize := readImageGenerationStringValue([]map[string]any{paramsMap}, []string{"size"}); requestSize != "" {
+			sizeText = requestSize
+		} else if outputSizeText != "-" {
+			sizeText = outputSizeText
+		}
+	}
+
+	qualityParts := []string{
+		readImageGenerationStringValue(sources, []string{"quality", "quality_level"}),
+		readImageGenerationStringValue([]map[string]any{paramsMap}, []string{"resolution", "image_size", "imageSize"}),
+		readImageGenerationStringValue(sources, []string{"style"}),
+	}
+	if quantity := readImageGenerationPositiveInt([]map[string]any{paramsMap}, []string{"n", "quantity"}); quantity > 0 {
+		detailQuantity = quantity
+	}
+	qualityText := joinImageGenerationTextParts(qualityParts)
+	if qualityText == "" {
+		qualityText = "-"
+	}
+
+	displayName := resolveImageGenerationTaskDisplayName(task)
+	detail := model.BuildImageGenerationTaskDetail(task, displayName)
+	if detail == nil {
+		return nil
+	}
+	detail.OutputWidth = outputWidth
+	detail.OutputHeight = outputHeight
+	detail.OutputSizeText = outputSizeText
+	detail.SizeText = sizeText
+	detail.QualityText = qualityText
+	detail.Quantity = detailQuantity
+	return detail
 }
 
 func sanitizeImageGenerationAssetParams(asset *model.ImageGenerationAsset) {
@@ -36,6 +287,12 @@ func sanitizeImageCreativeAssetParams(asset *model.ImageCreativeAsset) {
 		return
 	}
 	asset.Params = service.SanitizeImageGenerationParamsForResponse(asset.Params)
+}
+
+func sanitizeImageCreativeListItem(item *model.ImageCreativeListItem) {
+	if item == nil {
+		return
+	}
 }
 
 func sanitizeImageCreativeAdminSubmissionParams(submission *model.ImageCreativeAdminSubmission) {
@@ -79,7 +336,8 @@ func CreateImageGenerationTask(c *gin.Context) {
 	}
 
 	sanitizeImageGenerationTaskParams(task)
-	common.ApiSuccess(c, task)
+	detail := buildImageGenerationTaskDetail(task)
+	common.ApiSuccess(c, detail)
 }
 
 // GetImageGenerationSettings 获取用户侧图片生成设置
@@ -89,8 +347,13 @@ func GetImageGenerationSettings(c *gin.Context) {
 	if maxImageSize <= 0 {
 		maxImageSize = 10
 	}
+	pollingInterval := cfg.PollingInterval
+	if pollingInterval <= 0 {
+		pollingInterval = 5
+	}
 	common.ApiSuccess(c, gin.H{
 		"max_image_size":               maxImageSize,
+		"polling_interval":             pollingInterval,
 		"user_custom_key_enabled":      cfg.UserCustomKeyEnabled,
 		"user_custom_base_url_allowed": cfg.UserCustomBaseURLAllowed,
 	})
@@ -127,7 +390,35 @@ func GetImageGenerationTasks(c *gin.Context) {
 		SortOrder:       sortOrder,
 	}
 
-	tasks, total, err := model.GetImageTasksByUserID(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
+	cursor := c.Query("cursor")
+	if cursor != "" && model.ImageTaskCursorPaginationSupported(queryParams) {
+		cursorPage, err := model.GetImageTasksByUserCursor(userId, cursor, pageInfo.GetPageSize(), queryParams)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+
+		summaries := make([]*model.ImageGenerationTaskSummary, 0, len(cursorPage.Items))
+		for _, task := range cursorPage.Items {
+			summary := model.BuildImageGenerationTaskSummary(task)
+			if summary != nil {
+				summaries = append(summaries, summary)
+			}
+		}
+
+		common.ApiSuccess(c, gin.H{
+			"page":        pageInfo.GetPage(),
+			"page_size":   pageInfo.GetPageSize(),
+			"total":       int(cursorPage.Total),
+			"items":       summaries,
+			"next_cursor": cursorPage.NextCursor,
+			"has_more":    cursorPage.HasMore,
+		})
+		return
+	}
+
+	includeTotal := pageInfo.GetPage() <= 1
+	tasks, total, hasMore, err := model.GetImageTasksByUserID(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams, includeTotal)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -136,9 +427,63 @@ func GetImageGenerationTasks(c *gin.Context) {
 	for _, task := range tasks {
 		sanitizeImageGenerationTaskParams(task)
 	}
-	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(tasks)
-	common.ApiSuccess(c, pageInfo)
+	summaries := make([]*model.ImageGenerationTaskSummary, 0, len(tasks))
+	for _, task := range tasks {
+		summary := model.BuildImageGenerationTaskSummary(task)
+		if summary != nil {
+			summaries = append(summaries, summary)
+		}
+	}
+	if includeTotal {
+		pageInfo.SetTotal(int(total))
+	}
+	pageInfo.SetItems(summaries)
+	common.ApiSuccess(c, gin.H{
+		"page":      pageInfo.GetPage(),
+		"page_size": pageInfo.GetPageSize(),
+		"total":     pageInfo.Total,
+		"items":     pageInfo.Items,
+		"has_more":  hasMore,
+	})
+}
+
+// GetImageGenerationTaskUpdates 获取任务列表的轻量增量更新。
+func GetImageGenerationTaskUpdates(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "未授权",
+		})
+		return
+	}
+
+	completedSince, _ := strconv.ParseInt(c.Query("completed_since"), 10, 64)
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	tasks, err := model.GetImageTaskUpdatesByUserID(userId, completedSince, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	summaries := make([]*model.ImageGenerationTaskSummary, 0, len(tasks))
+	for _, task := range tasks {
+		summary := model.BuildImageGenerationTaskSummary(task)
+		if summary != nil {
+			summaries = append(summaries, summary)
+		}
+	}
+
+	common.ApiSuccess(c, gin.H{
+		"items": summaries,
+	})
 }
 
 // GetImageGenerationTaskDetail 获取任务详情
@@ -185,7 +530,8 @@ func GetImageGenerationTaskDetail(c *gin.Context) {
 	}
 
 	sanitizeImageGenerationTaskParams(task)
-	common.ApiSuccess(c, task)
+	detail := buildImageGenerationTaskDetail(task)
+	common.ApiSuccess(c, detail)
 }
 
 // GetImageGenerationAssets 获取当前用户的图片资产仓库列表。
@@ -307,18 +653,26 @@ func SubmitImageGenerationAssetToInspiration(c *gin.Context) {
 // GetInspirationAssets 获取公开灵感作品列表。
 func GetInspirationAssets(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	assets, total, err := model.GetApprovedInspirationAssets(pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	cursor := c.Query("cursor")
+	assets, total, nextCursor, hasMore, err := model.GetApprovedInspirationAssets(cursor, pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	for _, asset := range assets {
-		sanitizeImageCreativeAssetParams(asset)
+		sanitizeImageCreativeListItem(asset)
 	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(assets)
-	common.ApiSuccess(c, pageInfo)
+	common.ApiSuccess(c, gin.H{
+		"page":        pageInfo.GetPage(),
+		"page_size":   pageInfo.GetPageSize(),
+		"total":       int(total),
+		"items":       assets,
+		"next_cursor": nextCursor,
+		"has_more":    hasMore,
+	})
 }
 
 // GetInspirationAssetDetail 获取公开灵感作品详情。
@@ -592,6 +946,7 @@ func DeleteImageGenerationTask(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	service.InvalidateImageGenerationLocalAssetAccessCache()
 
 	common.ApiSuccess(c, gin.H{"message": "删除成功"})
 }
@@ -637,11 +992,35 @@ func GetImageGenerationModels(c *gin.Context) {
 func writeImageGenerationSSETaskUpdate(c *gin.Context, task *model.ImageGenerationTask) bool {
 	data, err := common.Marshal(gin.H{
 		"id":             task.Id,
+		"model_id":       task.ModelId,
+		"prompt":         task.Prompt,
 		"status":         task.Status,
 		"image_url":      task.ImageUrl,
 		"thumbnail_url":  task.ThumbnailUrl,
 		"error_message":  task.ErrorMessage,
+		"created_time":   task.CreatedTime,
 		"completed_time": task.CompletedTime,
+	})
+	if err != nil {
+		return false
+	}
+
+	fmt.Fprintf(c.Writer, "event: task_update\ndata: %s\n\n", string(data))
+	c.Writer.Flush()
+	return true
+}
+
+func writeImageGenerationSSETaskUpdatePayload(c *gin.Context, update service.ImageGenerationTaskUpdate) bool {
+	data, err := common.Marshal(gin.H{
+		"id":             update.Id,
+		"model_id":       update.ModelId,
+		"prompt":         update.Prompt,
+		"status":         update.Status,
+		"image_url":      update.ImageUrl,
+		"thumbnail_url":  update.ThumbnailUrl,
+		"error_message":  update.ErrorMessage,
+		"created_time":   update.CreatedTime,
+		"completed_time": update.CompletedTime,
 	})
 	if err != nil {
 		return false
@@ -676,53 +1055,35 @@ func ImageGenerationSSE(c *gin.Context) {
 	fmt.Fprintf(c.Writer, "event: connected\ndata: {\"message\":\"连接成功\"}\n\n")
 	c.Writer.Flush()
 
-	// 轮询任务状态变化
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
+	updateCh := service.SubscribeImageGenerationTaskUpdates(userId)
+	defer service.UnsubscribeImageGenerationTaskUpdates(userId, updateCh)
 
-	// 记录上次发送的任务状态，避免重复发送
-	lastTaskStates := make(map[int]string)
-	completedSince := common.GetTimestamp() - 60
+	initialTasks, err := model.GetImageTaskUpdatesByUserID(userId, common.GetTimestamp()-60, 100)
+	if err == nil {
+		for _, task := range initialTasks {
+			if task != nil {
+				_ = writeImageGenerationSSETaskUpdate(c, task)
+			}
+		}
+	}
+
+	heartbeatTicker := time.NewTicker(service.ImageGenerationTaskHeartbeatInterval())
+	defer heartbeatTicker.Stop()
 
 	for {
 		select {
 		case <-clientGone:
-			// 客户端断开连接
 			return
-		case <-ticker.C:
-			now := common.GetTimestamp()
-			tasks, err := model.GetImageTaskUpdatesByUserID(userId, completedSince, 100)
-			if err != nil {
-				continue
+		case update, ok := <-updateCh:
+			if !ok {
+				return
 			}
-			completedSince = now - 5
-			if completedSince < 0 {
-				completedSince = 0
+			if !writeImageGenerationSSETaskUpdatePayload(c, update) {
+				return
 			}
-
-			// 检查任务状态变化
-			currentTaskIds := make(map[int]struct{}, len(tasks))
-			for _, task := range tasks {
-				currentTaskIds[task.Id] = struct{}{}
-				lastState, exists := lastTaskStates[task.Id]
-				currentState := task.Status
-
-				// 如果状态发生变化，或者是新任务，发送更新
-				if !exists || lastState != currentState {
-					if writeImageGenerationSSETaskUpdate(c, task) {
-						lastTaskStates[task.Id] = currentState
-					}
-				}
-			}
-
-			// 清理已完成或失败的任务状态记录（避免内存泄漏）
-			for taskId, state := range lastTaskStates {
-				if state == model.ImageTaskStatusSuccess || state == model.ImageTaskStatusFailed {
-					if _, found := currentTaskIds[taskId]; !found {
-						delete(lastTaskStates, taskId)
-					}
-				}
-			}
+		case <-heartbeatTicker.C:
+			fmt.Fprintf(c.Writer, ": ping\n\n")
+			c.Writer.Flush()
 		}
 	}
 }

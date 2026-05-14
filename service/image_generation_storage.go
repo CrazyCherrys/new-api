@@ -42,9 +42,12 @@ const imageGenerationReferenceSubdir = "ref"
 const imageGenerationThumbnailSubdir = "thumb"
 const imageGenerationThumbnailMaxEdge = 384
 
+const imageGenerationLocalAssetAccessCacheNamespace = "new-api:image_generation_local_asset_access:v1"
 const inspirationLocalAssetAccessCacheNamespace = "new-api:inspiration_local_asset_access:v1"
 
 var (
+	imageGenerationLocalAssetAccessCacheOnce sync.Once
+	imageGenerationLocalAssetAccessCache     *cachex.HybridCache[int]
 	inspirationLocalAssetAccessCacheOnce sync.Once
 	inspirationLocalAssetAccessCache     *cachex.HybridCache[int]
 )
@@ -80,6 +83,43 @@ func inspirationLocalAssetAccessCacheCapacity() int {
 	return capacity
 }
 
+func imageGenerationLocalAssetAccessCacheTTL() time.Duration {
+	ttlSeconds := common.GetEnvOrDefault("IMAGE_GENERATION_LOCAL_ASSET_ACCESS_CACHE_TTL", 300)
+	if ttlSeconds <= 0 {
+		ttlSeconds = 300
+	}
+	return time.Duration(ttlSeconds) * time.Second
+}
+
+func imageGenerationLocalAssetAccessCacheCapacity() int {
+	capacity := common.GetEnvOrDefault("IMAGE_GENERATION_LOCAL_ASSET_ACCESS_CACHE_CAP", 20000)
+	if capacity <= 0 {
+		capacity = 20000
+	}
+	return capacity
+}
+
+func getImageGenerationLocalAssetAccessCache() *cachex.HybridCache[int] {
+	imageGenerationLocalAssetAccessCacheOnce.Do(func() {
+		ttl := imageGenerationLocalAssetAccessCacheTTL()
+		imageGenerationLocalAssetAccessCache = cachex.NewHybridCache[int](cachex.HybridCacheConfig[int]{
+			Namespace: cachex.Namespace(imageGenerationLocalAssetAccessCacheNamespace),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.IntCodec{},
+			Memory: func() *hot.HotCache[string, int] {
+				return hot.NewHotCache[string, int](hot.LRU, imageGenerationLocalAssetAccessCacheCapacity()).
+					WithTTL(ttl).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return imageGenerationLocalAssetAccessCache
+}
+
 func getInspirationLocalAssetAccessCache() *cachex.HybridCache[int] {
 	inspirationLocalAssetAccessCacheOnce.Do(func() {
 		ttl := inspirationLocalAssetAccessCacheTTL()
@@ -103,6 +143,10 @@ func getInspirationLocalAssetAccessCache() *cachex.HybridCache[int] {
 
 func InvalidateInspirationLocalAssetAccessCache() {
 	_ = getInspirationLocalAssetAccessCache().Purge()
+}
+
+func InvalidateImageGenerationLocalAssetAccessCache() {
+	_ = getImageGenerationLocalAssetAccessCache().Purge()
 }
 
 func storeImageGenerationResult(ctx context.Context, taskId int, imageUrl string) imageGenerationStoredResult {
@@ -895,6 +939,12 @@ func CanAccessImageGenerationLocalAsset(userId int, assetPath string) (bool, err
 		return false, nil
 	}
 
+	cacheKey := fmt.Sprintf("%d:%s", userId, clean)
+	cache := getImageGenerationLocalAssetAccessCache()
+	if cached, ok, err := cache.Get(cacheKey); err == nil && ok {
+		return cached == 1, nil
+	}
+
 	assetURL := buildImageGenerationLocalObjectURL(clean)
 	var count int64
 	if err := model.DB.Model(&model.ImageGenerationTask{}).
@@ -902,7 +952,11 @@ func CanAccessImageGenerationLocalAsset(userId int, assetPath string) (bool, err
 		Count(&count).Error; err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	allowed := count > 0
+	if allowed {
+		_ = cache.SetWithTTL(cacheKey, 1, imageGenerationLocalAssetAccessCacheTTL())
+	}
+	return allowed, nil
 }
 
 func CanAccessApprovedInspirationLocalAsset(assetPath string) (bool, error) {

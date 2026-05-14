@@ -166,6 +166,7 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 		ImageUrl:        "https://example.com/approved.png",
 		ThumbnailUrl:    "https://example.com/approved-thumb.jpg",
 		Params:          `{"size":"1024x1024"}`,
+		ImageMetadata:   `{"width":1024,"height":1024}`,
 		CreatedTime:     1000,
 		CompletedTime:   1100,
 	}
@@ -225,12 +226,18 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 		}
 	}
 
-	assets, total, err := GetApprovedInspirationAssets(0, 10)
+	assets, total, nextCursor, hasMore, err := GetApprovedInspirationAssets("", 10)
 	if err != nil {
 		t.Fatalf("failed to get creative assets: %v", err)
 	}
-	if total != 1 || len(assets) != 1 {
+	if len(assets) != 1 {
 		t.Fatalf("expected one approved asset, total=%d len=%d", total, len(assets))
+	}
+	if hasMore {
+		t.Fatal("expected single approved asset page to have no more cursor pages")
+	}
+	if nextCursor != "" {
+		t.Fatalf("expected empty next cursor for single-page result, got %q", nextCursor)
 	}
 	if assets[0].Id != approvedSubmission.Id || assets[0].Prompt != approvedTask.Prompt {
 		t.Fatalf("unexpected approved asset: %#v", assets[0])
@@ -240,6 +247,9 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	}
 	if assets[0].ThumbnailUrl != approvedTask.ThumbnailUrl {
 		t.Fatalf("expected thumbnail url %q, got %q", approvedTask.ThumbnailUrl, assets[0].ThumbnailUrl)
+	}
+	if assets[0].CardAspectRatio <= 0 {
+		t.Fatalf("expected positive card aspect ratio, got %v", assets[0].CardAspectRatio)
 	}
 
 	detail, err := GetApprovedInspirationAssetByID(approvedSubmission.Id)
@@ -252,6 +262,9 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	if detail.ThumbnailUrl != approvedTask.ThumbnailUrl {
 		t.Fatalf("expected detail thumbnail url %q, got %q", approvedTask.ThumbnailUrl, detail.ThumbnailUrl)
 	}
+	if detail.ImageMetadata != approvedTask.ImageMetadata {
+		t.Fatalf("expected detail image metadata %q, got %q", approvedTask.ImageMetadata, detail.ImageMetadata)
+	}
 
 	pendingDetail, err := GetApprovedInspirationAssetByID(submissions[1].Id)
 	if err != nil {
@@ -259,6 +272,82 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	}
 	if pendingDetail != nil {
 		t.Fatalf("expected pending submission to be hidden, got %#v", pendingDetail)
+	}
+}
+
+func TestGetApprovedInspirationAssetsUsesCursorPagination(t *testing.T) {
+	db := setupImageAssetTestDB(t)
+
+	taskA := &ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "asset-a",
+		Status:          ImageTaskStatusSuccess,
+		ImageUrl:        "https://example.com/a.png",
+		ThumbnailUrl:    "https://example.com/a-thumb.png",
+		RequestEndpoint: "openai",
+	}
+	taskB := &ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "asset-b",
+		Status:          ImageTaskStatusSuccess,
+		ImageUrl:        "https://example.com/b.png",
+		ThumbnailUrl:    "https://example.com/b-thumb.png",
+		RequestEndpoint: "openai",
+	}
+	for _, task := range []*ImageGenerationTask{taskA, taskB} {
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+	}
+
+	submissionA := &ImageCreativeSubmission{
+		TaskId:        taskA.Id,
+		UserId:        1,
+		Status:        CreativeSubmissionStatusApproved,
+		SubmittedTime: 100,
+		ReviewedTime:  200,
+	}
+	submissionB := &ImageCreativeSubmission{
+		TaskId:        taskB.Id,
+		UserId:        1,
+		Status:        CreativeSubmissionStatusApproved,
+		SubmittedTime: 90,
+		ReviewedTime:  190,
+	}
+	for _, submission := range []*ImageCreativeSubmission{submissionA, submissionB} {
+		if err := db.Create(submission).Error; err != nil {
+			t.Fatalf("failed to create submission: %v", err)
+		}
+	}
+
+	firstPage, _, nextCursor, hasMore, err := GetApprovedInspirationAssets("", 1)
+	if err != nil {
+		t.Fatalf("failed to fetch first cursor page: %v", err)
+	}
+	if len(firstPage) != 1 || firstPage[0].Id != submissionA.Id {
+		t.Fatalf("unexpected first cursor page: %#v", firstPage)
+	}
+	if !hasMore {
+		t.Fatal("expected first cursor page to report more results")
+	}
+	if nextCursor == "" {
+		t.Fatal("expected next cursor for truncated first page")
+	}
+
+	secondPage, _, secondCursor, secondHasMore, err := GetApprovedInspirationAssets(nextCursor, 1)
+	if err != nil {
+		t.Fatalf("failed to fetch second cursor page: %v", err)
+	}
+	if len(secondPage) != 1 || secondPage[0].Id != submissionB.Id {
+		t.Fatalf("unexpected second cursor page: %#v", secondPage)
+	}
+	if secondHasMore {
+		t.Fatal("expected second cursor page to be terminal")
+	}
+	if secondCursor != "" {
+		t.Fatalf("expected empty second cursor, got %q", secondCursor)
 	}
 }
 

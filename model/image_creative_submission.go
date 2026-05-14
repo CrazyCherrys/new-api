@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,14 +35,31 @@ const (
 )
 
 type ImageCreativeAsset struct {
-	Id           int    `json:"id"`
-	ModelId      string `json:"model_id"`
-	DisplayName  string `json:"display_name"`
-	ModelSeries  string `json:"model_series"`
-	Prompt       string `json:"prompt"`
-	Params       string `json:"params"`
-	ImageUrl     string `json:"image_url"`
-	ThumbnailUrl string `json:"thumbnail_url"`
+	Id              int     `json:"id"`
+	ModelId         string  `json:"model_id"`
+	DisplayName     string  `json:"display_name"`
+	ModelSeries     string  `json:"model_series"`
+	Prompt          string  `json:"prompt"`
+	Params          string  `json:"params"`
+	ImageUrl        string  `json:"image_url"`
+	ThumbnailUrl    string  `json:"thumbnail_url"`
+	ImageMetadata   string  `json:"image_metadata"`
+	CardAspectRatio float64 `json:"card_aspect_ratio"`
+	ReviewedTime    int64   `json:"-"`
+	SubmittedTime   int64   `json:"-"`
+}
+
+type ImageCreativeListItem struct {
+	Id              int     `json:"id"`
+	ModelId         string  `json:"model_id"`
+	DisplayName     string  `json:"display_name"`
+	ModelSeries     string  `json:"model_series"`
+	Prompt          string  `json:"prompt"`
+	ImageUrl        string  `json:"image_url"`
+	ThumbnailUrl    string  `json:"thumbnail_url"`
+	CardAspectRatio float64 `json:"card_aspect_ratio"`
+	ReviewedTime    int64   `json:"-"`
+	SubmittedTime   int64   `json:"-"`
 }
 
 type ImageCreativeAdminSubmission struct {
@@ -69,8 +87,10 @@ type ImageCreativeAdminSubmission struct {
 }
 
 type InspirationAssetPage struct {
-	Items []*ImageCreativeAsset `json:"items"`
-	Total int64                 `json:"total"`
+	Items      []*ImageCreativeListItem `json:"items"`
+	Total      int64                    `json:"total"`
+	NextCursor string                   `json:"next_cursor"`
+	HasMore    bool                     `json:"has_more"`
 }
 
 const (
@@ -84,6 +104,11 @@ var (
 
 	inspirationAssetListCache   *cachex.HybridCache[InspirationAssetPage]
 	inspirationAssetDetailCache *cachex.HybridCache[ImageCreativeAsset]
+)
+
+var (
+	imageCreativeAssetDimensionPattern   = regexp.MustCompile(`^(\d{2,5})\s*[xX×*]\s*(\d{2,5})$`)
+	imageCreativeAssetAspectRatioPattern = regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*(?::|x|X|/)\s*(\d+(?:\.\d+)?)$`)
 )
 
 func inspirationAssetListCacheTTL() time.Duration {
@@ -160,11 +185,11 @@ func getInspirationAssetDetailCache() *cachex.HybridCache[ImageCreativeAsset] {
 	return inspirationAssetDetailCache
 }
 
-func inspirationAssetListCacheKey(startIdx int, num int) string {
-	if startIdx < 0 || num <= 0 {
+func inspirationAssetListCacheKey(cursor string, num int) string {
+	if num <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("%d:%d", startIdx, num)
+	return fmt.Sprintf("%s:%d", strings.TrimSpace(cursor), num)
 }
 
 func inspirationAssetDetailCacheKey(id int) string {
@@ -191,6 +216,267 @@ func cloneImageCreativeAssets(assets []*ImageCreativeAsset) []*ImageCreativeAsse
 		next = append(next, cloneImageCreativeAsset(asset))
 	}
 	return next
+}
+
+func cloneImageCreativeListItem(item *ImageCreativeListItem) *ImageCreativeListItem {
+	if item == nil {
+		return nil
+	}
+	next := *item
+	return &next
+}
+
+func cloneImageCreativeListItems(items []*ImageCreativeListItem) []*ImageCreativeListItem {
+	if len(items) == 0 {
+		return items
+	}
+	next := make([]*ImageCreativeListItem, 0, len(items))
+	for _, item := range items {
+		next = append(next, cloneImageCreativeListItem(item))
+	}
+	return next
+}
+
+func parseImageCreativeAssetJSON(raw string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	var data map[string]any
+	if err := common.UnmarshalJsonStr(raw, &data); err != nil || len(data) == 0 {
+		return nil
+	}
+	return data
+}
+
+func parseImageCreativeAssetNestedJSON(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		if len(typed) == 0 {
+			return nil
+		}
+		return typed
+	case string:
+		return parseImageCreativeAssetJSON(typed)
+	default:
+		return nil
+	}
+}
+
+func readImageCreativeAssetValue(sources []map[string]any, keys []string) any {
+	for _, source := range sources {
+		if len(source) == 0 {
+			continue
+		}
+		for _, key := range keys {
+			value, ok := source[key]
+			if !ok || value == nil {
+				continue
+			}
+			switch typed := value.(type) {
+			case string:
+				if strings.TrimSpace(typed) == "" {
+					continue
+				}
+			}
+			return value
+		}
+	}
+	return nil
+}
+
+func readImageCreativeAssetStringValue(sources []map[string]any, keys []string) string {
+	value := readImageCreativeAssetValue(sources, keys)
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float32:
+		return strconv.FormatFloat(float64(typed), 'f', -1, 64)
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case uint:
+		return strconv.FormatUint(uint64(typed), 10)
+	case uint64:
+		return strconv.FormatUint(typed, 10)
+	default:
+		if value == nil {
+			return ""
+		}
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
+}
+
+func readImageCreativeAssetPositiveFloat(sources []map[string]any, keys []string) float64 {
+	value := readImageCreativeAssetValue(sources, keys)
+	switch typed := value.(type) {
+	case float64:
+		if typed > 0 {
+			return typed
+		}
+	case float32:
+		if typed > 0 {
+			return float64(typed)
+		}
+	case int:
+		if typed > 0 {
+			return float64(typed)
+		}
+	case int64:
+		if typed > 0 {
+			return float64(typed)
+		}
+	case uint:
+		if typed > 0 {
+			return float64(typed)
+		}
+	case uint64:
+		if typed > 0 {
+			return float64(typed)
+		}
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		if err == nil && parsed > 0 {
+			return parsed
+		}
+	default:
+		if value != nil {
+			parsed, err := strconv.ParseFloat(strings.TrimSpace(fmt.Sprint(value)), 64)
+			if err == nil && parsed > 0 {
+				return parsed
+			}
+		}
+	}
+	return 0
+}
+
+func parseImageCreativeAssetDimensionString(value string) (int, int) {
+	matches := imageCreativeAssetDimensionPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if len(matches) != 3 {
+		return 0, 0
+	}
+
+	width, err := strconv.Atoi(matches[1])
+	if err != nil || width <= 0 {
+		return 0, 0
+	}
+	height, err := strconv.Atoi(matches[2])
+	if err != nil || height <= 0 {
+		return 0, 0
+	}
+	return width, height
+}
+
+func parseImageCreativeAssetAspectRatio(value string) float64 {
+	matches := imageCreativeAssetAspectRatioPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if len(matches) != 3 {
+		return 0
+	}
+
+	width, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil || width <= 0 {
+		return 0
+	}
+	height, err := strconv.ParseFloat(matches[2], 64)
+	if err != nil || height <= 0 {
+		return 0
+	}
+	return width / height
+}
+
+func resolveImageCreativeAssetCardAspectRatio(imageMetadata, params string) float64 {
+	sources := make([]map[string]any, 0, 3)
+	if metadata := parseImageCreativeAssetJSON(imageMetadata); len(metadata) > 0 {
+		sources = append(sources, metadata)
+		if nested := parseImageCreativeAssetNestedJSON(metadata["metadata"]); len(nested) > 0 {
+			sources = append(sources, nested)
+		}
+	}
+	if paramsMap := parseImageCreativeAssetJSON(params); len(paramsMap) > 0 {
+		sources = append(sources, paramsMap)
+	}
+
+	width := readImageCreativeAssetPositiveFloat(sources, []string{
+		"width",
+		"output_width",
+		"image_width",
+		"outputWidth",
+		"imageWidth",
+	})
+	height := readImageCreativeAssetPositiveFloat(sources, []string{
+		"height",
+		"output_height",
+		"image_height",
+		"outputHeight",
+		"imageHeight",
+	})
+	if width > 0 && height > 0 {
+		return width / height
+	}
+
+	dimensionText := readImageCreativeAssetStringValue(sources, []string{
+		"size",
+		"output_size",
+		"dimensions",
+		"outputSize",
+	})
+	if dimensionWidth, dimensionHeight := parseImageCreativeAssetDimensionString(dimensionText); dimensionWidth > 0 && dimensionHeight > 0 {
+		return float64(dimensionWidth) / float64(dimensionHeight)
+	}
+
+	if ratio := parseImageCreativeAssetAspectRatio(readImageCreativeAssetStringValue(sources, []string{
+		"aspect_ratio",
+		"aspectRatio",
+	})); ratio > 0 {
+		return ratio
+	}
+
+	return 1
+}
+
+func populateImageCreativeAssetCardAspectRatio(asset *ImageCreativeAsset) {
+	if asset == nil {
+		return
+	}
+	asset.CardAspectRatio = resolveImageCreativeAssetCardAspectRatio(asset.ImageMetadata, asset.Params)
+	if asset.CardAspectRatio <= 0 {
+		asset.CardAspectRatio = 1
+	}
+}
+
+func buildImageCreativeListItem(asset *ImageCreativeAsset) *ImageCreativeListItem {
+	if asset == nil {
+		return nil
+	}
+	return &ImageCreativeListItem{
+		Id:              asset.Id,
+		ModelId:         asset.ModelId,
+		DisplayName:     asset.DisplayName,
+		ModelSeries:     asset.ModelSeries,
+		Prompt:          asset.Prompt,
+		ImageUrl:        asset.ImageUrl,
+		ThumbnailUrl:    asset.ThumbnailUrl,
+		CardAspectRatio: asset.CardAspectRatio,
+		ReviewedTime:    asset.ReviewedTime,
+		SubmittedTime:   asset.SubmittedTime,
+	}
+}
+
+func buildImageCreativeListItems(assets []*ImageCreativeAsset) []*ImageCreativeListItem {
+	if len(assets) == 0 {
+		return nil
+	}
+	items := make([]*ImageCreativeListItem, 0, len(assets))
+	for _, asset := range assets {
+		if item := buildImageCreativeListItem(asset); item != nil {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 func InvalidateInspirationAssetCache() {
@@ -280,48 +566,122 @@ func SubmitImageAssetToCreativeSpace(userId int, taskId int) (*ImageCreativeSubm
 
 func publicInspirationAssetsBaseQuery() *gorm.DB {
 	return DB.Table("image_creative_submissions AS s").
-		Select("s.id, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.params, t.image_url, t.thumbnail_url").
+		Select("s.id, s.reviewed_time, s.submitted_time, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.params, t.image_url, t.thumbnail_url, t.image_metadata").
 		Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
 		Joins("LEFT JOIN model_mappings AS m ON m.request_model = t.model_id").
 		Where("s.status = ? AND t.status = ? AND t.image_url <> ?", CreativeSubmissionStatusApproved, ImageTaskStatusSuccess, "")
 }
 
-func GetApprovedInspirationAssets(startIdx int, num int) ([]*ImageCreativeAsset, int64, error) {
-	cacheKey := inspirationAssetListCacheKey(startIdx, num)
+func encodeInspirationAssetCursor(reviewedTime int64, submittedTime int64, id int) string {
+	if reviewedTime <= 0 || submittedTime < 0 || id <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d:%d", reviewedTime, submittedTime, id)
+}
+
+func decodeInspirationAssetCursor(cursor string) (int64, int64, int, error) {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return 0, 0, 0, nil
+	}
+	parts := strings.Split(cursor, ":")
+	if len(parts) != 3 {
+		return 0, 0, 0, errors.New("invalid cursor")
+	}
+	reviewedTime, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, 0, 0, errors.New("invalid cursor")
+	}
+	submittedTime, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return 0, 0, 0, errors.New("invalid cursor")
+	}
+	id64, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || id64 <= 0 {
+		return 0, 0, 0, errors.New("invalid cursor")
+	}
+	return reviewedTime, submittedTime, int(id64), nil
+}
+
+func applyInspirationCursor(query *gorm.DB, cursor string) (*gorm.DB, error) {
+	reviewedTime, submittedTime, id, err := decodeInspirationAssetCursor(cursor)
+	if err != nil {
+		return nil, err
+	}
+	if reviewedTime == 0 && submittedTime == 0 && id == 0 {
+		return query, nil
+	}
+	return query.Where(
+		"(s.reviewed_time < ?) OR (s.reviewed_time = ? AND s.submitted_time < ?) OR (s.reviewed_time = ? AND s.submitted_time = ? AND s.id < ?)",
+		reviewedTime,
+		reviewedTime, submittedTime,
+		reviewedTime, submittedTime, id,
+	), nil
+}
+
+func GetApprovedInspirationAssets(cursor string, num int) ([]*ImageCreativeListItem, int64, string, bool, error) {
+	cacheKey := inspirationAssetListCacheKey(cursor, num)
 	if cacheKey != "" {
 		cached, ok, err := getInspirationAssetListCache().Get(cacheKey)
 		if err == nil && ok {
-			return cloneImageCreativeAssets(cached.Items), cached.Total, nil
+			return cloneImageCreativeListItems(cached.Items), cached.Total, cached.NextCursor, cached.HasMore, nil
 		}
 	}
 
 	var assets []*ImageCreativeAsset
 	var total int64
-
-	if err := publicInspirationAssetsBaseQuery().Count(&total).Error; err != nil {
-		return nil, 0, err
+	limit := num
+	if limit <= 0 {
+		limit = 24
 	}
 
-	if err := publicInspirationAssetsBaseQuery().
+	query, err := applyInspirationCursor(publicInspirationAssetsBaseQuery(), cursor)
+	if err != nil {
+		return nil, 0, "", false, err
+	}
+
+	if cursor == "" {
+		if err := query.Count(&total).Error; err != nil {
+			return nil, 0, "", false, err
+		}
+	}
+
+	if err := query.
 		Order("s.reviewed_time DESC, s.submitted_time DESC, s.id DESC").
-		Limit(num).
-		Offset(startIdx).
+		Limit(limit + 1).
 		Scan(&assets).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, "", false, err
+	}
+
+	for _, asset := range assets {
+		populateImageCreativeAssetCardAspectRatio(asset)
+	}
+
+	hasMore := len(assets) > limit
+	if hasMore {
+		assets = assets[:limit]
+	}
+	nextCursor := ""
+	if hasMore && len(assets) > 0 {
+		lastAsset := assets[len(assets)-1]
+		nextCursor = encodeInspirationAssetCursor(lastAsset.ReviewedTime, lastAsset.SubmittedTime, lastAsset.Id)
 	}
 
 	if cacheKey != "" {
+		items := buildImageCreativeListItems(assets)
 		_ = getInspirationAssetListCache().SetWithTTL(cacheKey, InspirationAssetPage{
-			Items: cloneImageCreativeAssets(assets),
-			Total: total,
+			Items:      cloneImageCreativeListItems(items),
+			Total:      total,
+			NextCursor: nextCursor,
+			HasMore:    hasMore,
 		}, inspirationAssetListCacheTTL())
 	}
 
-	return cloneImageCreativeAssets(assets), total, nil
+	return buildImageCreativeListItems(assets), total, nextCursor, hasMore, nil
 }
 
-func GetApprovedCreativeAssets(startIdx int, num int) ([]*ImageCreativeAsset, int64, error) {
-	return GetApprovedInspirationAssets(startIdx, num)
+func GetApprovedCreativeAssets(cursor string, num int) ([]*ImageCreativeListItem, int64, string, bool, error) {
+	return GetApprovedInspirationAssets(cursor, num)
 }
 
 func GetApprovedInspirationAssetByID(id int) (*ImageCreativeAsset, error) {
@@ -329,7 +689,9 @@ func GetApprovedInspirationAssetByID(id int) (*ImageCreativeAsset, error) {
 	if cacheKey != "" {
 		cached, ok, err := getInspirationAssetDetailCache().Get(cacheKey)
 		if err == nil && ok {
-			return cloneImageCreativeAsset(&cached), nil
+			asset := cloneImageCreativeAsset(&cached)
+			populateImageCreativeAssetCardAspectRatio(asset)
+			return asset, nil
 		}
 	}
 
@@ -341,6 +703,7 @@ func GetApprovedInspirationAssetByID(id int) (*ImageCreativeAsset, error) {
 	if asset.Id == 0 {
 		return nil, nil
 	}
+	populateImageCreativeAssetCardAspectRatio(&asset)
 	if cacheKey != "" {
 		_ = getInspirationAssetDetailCache().SetWithTTL(cacheKey, asset, inspirationAssetDetailCacheTTL())
 	}

@@ -115,6 +115,9 @@ func main() {
 	// Image cleanup task (daily)
 	service.StartImageCleanupTask()
 
+	// Image generation worker pool
+	service.StartImageGenerationWorkerPool()
+
 	// Wire task polling adaptor factory (breaks service -> relay import cycle)
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
 		a := relay.GetTaskAdaptor(platform)

@@ -44,83 +44,6 @@ import { useIsMobile } from '../hooks/common/useIsMobile';
 
 const { Text } = Typography;
 
-const parseJsonObject = (value, errorMessage) => {
-  if (!value) return {};
-  if (typeof value === 'object' && !Array.isArray(value)) {
-    return value;
-  }
-  if (typeof value !== 'string') {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed
-      : {};
-  } catch (e) {
-    if (errorMessage) {
-      console.error(errorMessage, e);
-    }
-    return {};
-  }
-};
-
-const readFirstValue = (sources, keys) => {
-  for (const source of sources) {
-    if (!source || typeof source !== 'object') continue;
-    for (const key of keys) {
-      if (source[key] !== undefined && source[key] !== null && source[key] !== '') {
-        return source[key];
-      }
-    }
-  }
-  return undefined;
-};
-
-const readStringValue = (sources, keys) => {
-  const value = readFirstValue(sources, keys);
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  return '';
-};
-
-const readNumberValue = (sources, keys) => {
-  const value = readFirstValue(sources, keys);
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-};
-
-const parseDimensionString = (value) => {
-  const match = String(value || '')
-    .trim()
-    .match(/^(\d{2,5})\s*[xX×*]\s*(\d{2,5})$/);
-  if (!match) {
-    return { width: 0, height: 0 };
-  }
-  return {
-    width: Number(match[1]) || 0,
-    height: Number(match[2]) || 0,
-  };
-};
-
-const joinUniqueTextParts = (parts) => {
-  const seen = new Set();
-  const result = [];
-  parts.forEach((part) => {
-    const normalized = String(part || '').trim();
-    if (!normalized || seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    result.push(normalized);
-  });
-  return result.join(' · ');
-};
-
 const ImageGenerationTaskModal = ({
   visible,
   onClose,
@@ -136,44 +59,20 @@ const ImageGenerationTaskModal = ({
     width: 0,
     height: 0,
   });
-  const metadata = parseJsonObject(
-    task?.image_metadata,
-    'Failed to parse image metadata:',
-  );
-  const metadataDetails = parseJsonObject(
-    metadata.metadata,
-    'Failed to parse nested image metadata:',
-  );
 
-  const params = parseJsonObject(task?.params, 'Failed to parse params:');
-  const metadataSources = [metadata, metadataDetails];
-  const paramSources = [params, metadata, metadataDetails];
+  const isSuccess = task?.status === 'success';
+  const isFailed = task?.status === 'failed';
+  const isPending = task?.status === 'pending';
+  const isGenerating = task?.status === 'generating';
 
-  const metadataWidth = readNumberValue(metadataSources, [
-    'width',
-    'output_width',
-    'image_width',
-    'outputWidth',
-    'imageWidth',
-  ]);
-  const metadataHeight = readNumberValue(metadataSources, [
-    'height',
-    'output_height',
-    'image_height',
-    'outputHeight',
-    'imageHeight',
-  ]);
-  const metadataSizeText = readStringValue(metadataSources, [
-    'size',
-    'output_size',
-    'dimensions',
-    'outputSize',
-  ]);
-  const parsedMetadataSize = parseDimensionString(metadataSizeText);
-  const resolvedOutputWidth =
-    metadataWidth || parsedMetadataSize.width || loadedOutputDimensions.width;
-  const resolvedOutputHeight =
-    metadataHeight || parsedMetadataSize.height || loadedOutputDimensions.height;
+  const resolvedOutputWidth = Number(task?.output_width) || 0;
+  const resolvedOutputHeight = Number(task?.output_height) || 0;
+  const effectiveOutputWidth = resolvedOutputWidth || loadedOutputDimensions.width;
+  const effectiveOutputHeight = resolvedOutputHeight || loadedOutputDimensions.height;
+  const imageAspectRatio =
+    effectiveOutputWidth > 0 && effectiveOutputHeight > 0
+      ? effectiveOutputWidth / effectiveOutputHeight
+      : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -182,8 +81,7 @@ const ImageGenerationTaskModal = ({
     if (
       !visible ||
       !task?.image_url ||
-      (metadataWidth > 0 && metadataHeight > 0) ||
-      (parsedMetadataSize.width > 0 && parsedMetadataSize.height > 0)
+      (resolvedOutputWidth > 0 && resolvedOutputHeight > 0)
     ) {
       return undefined;
     }
@@ -205,52 +103,9 @@ const ImageGenerationTaskModal = ({
     return () => {
       cancelled = true;
     };
-  }, [
-    metadataHeight,
-    metadataWidth,
-    parsedMetadataSize.height,
-    parsedMetadataSize.width,
-    task?.id,
-    task?.image_url,
-    visible,
-  ]);
+  }, [resolvedOutputHeight, resolvedOutputWidth, task?.id, task?.image_url, visible]);
 
   if (!task) return null;
-
-  const isSuccess = task.status === 'success';
-  const isFailed = task.status === 'failed';
-  const isPending = task.status === 'pending';
-  const isGenerating = task.status === 'generating';
-
-  const parseAspectRatio = (value) => {
-    if (!value) return null;
-    const match = String(value)
-      .trim()
-      .match(/^(\d+(?:\.\d+)?)\s*(?::|x|X|\/)\s*(\d+(?:\.\d+)?)$/);
-    if (!match) return null;
-    const width = Number(match[1]);
-    const height = Number(match[2]);
-    if (!Number.isFinite(width) || !Number.isFinite(height) || height <= 0) {
-      return null;
-    }
-    return width / height;
-  };
-
-  const imageAspectRatio = (() => {
-    if (
-      Number.isFinite(resolvedOutputWidth) &&
-      resolvedOutputWidth > 0 &&
-      Number.isFinite(resolvedOutputHeight) &&
-      resolvedOutputHeight > 0
-    ) {
-      return resolvedOutputWidth / resolvedOutputHeight;
-    }
-    return (
-      parseAspectRatio(readStringValue(paramSources, ['aspect_ratio', 'aspectRatio'])) ||
-      parseAspectRatio(readStringValue(paramSources, ['size'])) ||
-      null
-    );
-  })();
 
   const normalizedPreviewRatio = imageAspectRatio
     ? Math.min(Math.max(imageAspectRatio, 0.56), 1.91)
@@ -630,8 +485,7 @@ const ImageGenerationTaskModal = ({
     </div>
   );
 
-  const displayName =
-    task.display_name || metadata.display_name || task.model_id || '-';
+  const displayName = task.display_name || task.model_id || '-';
 
   const generationDuration = (() => {
     if (!task.created_time || !task.completed_time) return '-';
@@ -654,67 +508,16 @@ const ImageGenerationTaskModal = ({
   })();
 
   const outputSizeText =
-    Number.isFinite(resolvedOutputWidth) &&
-    resolvedOutputWidth > 0 &&
-    Number.isFinite(resolvedOutputHeight) &&
-    resolvedOutputHeight > 0
-      ? `${resolvedOutputWidth}x${resolvedOutputHeight}`
-      : metadataSizeText || '-';
-
-  const qualityValue = readStringValue(paramSources, ['quality', 'quality_level']);
-  const resolutionValue = readStringValue(paramSources, [
-    'resolution',
-    'image_size',
-    'imageSize',
-  ]);
-  const styleValue = readFirstValue(paramSources, ['style']);
-  const quantityValue = readNumberValue([params], ['n', 'quantity']);
+    effectiveOutputWidth > 0 && effectiveOutputHeight > 0
+      ? `${effectiveOutputWidth}x${effectiveOutputHeight}`
+      : task.output_size_text || '-';
   const qualityText =
-    joinUniqueTextParts([
-      qualityValue,
-      resolutionValue,
-      typeof styleValue === 'string'
-        ? styleValue
-        : styleValue
-          ? JSON.stringify(styleValue)
-          : '',
-      quantityValue > 0
-        ? t('数量 {{count}}', {
-            count: quantityValue,
-          })
-        : '',
-    ]) || '-';
-
-  // 构建尺寸文本：优先显示 aspect_ratio + resolution，回退到 size 或 width x height
-  const sizeText = (() => {
-    const parts = [];
-    const requestAspectRatio = readStringValue(paramSources, [
-      'aspect_ratio',
-      'aspectRatio',
-    ]);
-    const requestResolution = readStringValue([params], [
-      'resolution',
-      'image_size',
-      'imageSize',
-    ]);
-    const requestSize = readStringValue([params], ['size']);
-    if (requestAspectRatio) {
-      parts.push(requestAspectRatio);
-    }
-    if (requestResolution) {
-      parts.push(requestResolution);
-    }
-    if (parts.length > 0) {
-      return parts.join(' · ');
-    }
-    if (requestSize) {
-      return requestSize;
-    }
-    if (resolvedOutputWidth > 0 && resolvedOutputHeight > 0) {
-      return `${resolvedOutputWidth}x${resolvedOutputHeight}`;
-    }
-    return '';
-  })();
+    task.quantity > 0
+      ? [task.quality_text && task.quality_text !== '-' ? task.quality_text : '', t('数量 {{count}}', { count: task.quantity })]
+          .filter(Boolean)
+          .join(' · ')
+      : task.quality_text || '-';
+  const sizeText = task.size_text || '';
 
   return (
     <Modal

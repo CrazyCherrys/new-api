@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/worker_setting"
 )
@@ -127,6 +128,13 @@ func TestStoreTransparentImageGenerationThumbnailLocally(t *testing.T) {
 
 func TestCanAccessImageGenerationLocalAssetRequiresOwner(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
+	previousRedisEnabled := common.RedisEnabled
+	InvalidateImageGenerationLocalAssetAccessCache()
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		InvalidateImageGenerationLocalAssetAccessCache()
+	})
 	objectKey := "image-generation/20260428/123-test.png"
 	assetURL := buildImageGenerationLocalObjectURL(objectKey)
 	task := &model.ImageGenerationTask{
@@ -163,6 +171,60 @@ func TestCanAccessImageGenerationLocalAssetRequiresOwner(t *testing.T) {
 	}
 	if allowed {
 		t.Fatal("expected invalid path to be denied")
+	}
+}
+
+func TestCanAccessImageGenerationLocalAssetUsesCache(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+	previousRedisEnabled := common.RedisEnabled
+	InvalidateImageGenerationLocalAssetAccessCache()
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		InvalidateImageGenerationLocalAssetAccessCache()
+	})
+
+	objectKey := "image-generation/20260428/124-cache-test.png"
+	assetURL := buildImageGenerationLocalObjectURL(objectKey)
+	task := &model.ImageGenerationTask{
+		UserId:          7,
+		ModelId:         "gpt-image-1",
+		Prompt:          "cache prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusSuccess,
+		ImageUrl:        assetURL,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	allowed, err := CanAccessImageGenerationLocalAsset(7, objectKey)
+	if err != nil {
+		t.Fatalf("failed to check cached access first time: %v", err)
+	}
+	if !allowed {
+		t.Fatal("expected owner access to be allowed")
+	}
+
+	if err := db.Delete(&model.ImageGenerationTask{}, task.Id).Error; err != nil {
+		t.Fatalf("failed to delete task backing cached asset: %v", err)
+	}
+
+	allowed, err = CanAccessImageGenerationLocalAsset(7, objectKey)
+	if err != nil {
+		t.Fatalf("failed to check cached access second time: %v", err)
+	}
+	if !allowed {
+		t.Fatal("expected cached owner access to remain allowed until cache invalidation")
+	}
+
+	InvalidateImageGenerationLocalAssetAccessCache()
+	allowed, err = CanAccessImageGenerationLocalAsset(7, objectKey)
+	if err != nil {
+		t.Fatalf("failed to check access after cache invalidation: %v", err)
+	}
+	if allowed {
+		t.Fatal("expected access to be denied after cache invalidation")
 	}
 }
 

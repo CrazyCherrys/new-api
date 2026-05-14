@@ -20,26 +20,14 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect, useState } from 'react';
 import { Card, Spin } from '@douyinfe/semi-ui';
 import SettingsWorker from '../../pages/Setting/Worker/SettingsWorker';
-import { API, showError, toBoolean } from '../../helpers';
+import { API, showError } from '../../helpers';
+import {
+  buildWorkerSettingInputsFromOptionList,
+  WORKER_SETTING_DEFAULTS,
+} from '../../pages/Setting/Worker/workerSettingSchema';
 
 const WorkerSetting = () => {
-  let [inputs, setInputs] = useState({
-    'worker_setting.max_workers': 4,
-    'worker_setting.storage_type': 'local',
-    'worker_setting.local_storage_path': '',
-    'worker_setting.s3_endpoint': '',
-    'worker_setting.s3_bucket': '',
-    'worker_setting.s3_region': '',
-    'worker_setting.s3_access_key': '',
-    'worker_setting.s3_secret_key': '',
-    'worker_setting.s3_path_prefix': '',
-    'worker_setting.s3_url_mode': 'direct',
-    'worker_setting.s3_public_base_url': '',
-    'worker_setting.image_timeout': 120,
-    'worker_setting.video_timeout': 600,
-    'worker_setting.retry_delay': 5,
-    'worker_setting.max_retries': 3,
-  });
+  let [inputs, setInputs] = useState(WORKER_SETTING_DEFAULTS);
 
   let [loading, setLoading] = useState(false);
 
@@ -47,19 +35,7 @@ const WorkerSetting = () => {
     const res = await API.get('/api/option/');
     const { success, message, data } = res.data;
     if (success) {
-      // Keep the worker-setting shape stable even if the server omits some keys.
-      const newInputs = { ...inputs };
-      data.forEach((item) => {
-        if (!Object.prototype.hasOwnProperty.call(newInputs, item.key)) {
-          return;
-        }
-        if (typeof newInputs[item.key] === 'boolean') {
-          newInputs[item.key] = toBoolean(item.value);
-          return;
-        }
-        newInputs[item.key] = item.value;
-      });
-      setInputs(newInputs);
+      setInputs(buildWorkerSettingInputsFromOptionList(data));
     } else {
       showError(message);
     }

@@ -1,6 +1,8 @@
 package model
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -84,6 +86,13 @@ type ImageTaskQueryParams struct {
 	SortOrder       string // asc | desc
 }
 
+type ImageTaskCursorPage struct {
+	Items      []*ImageGenerationTask
+	Total      int64
+	NextCursor string
+	HasMore    bool
+}
+
 // ImageAssetQueryParams 资产仓库查询参数。
 type ImageAssetQueryParams struct {
 	Keyword     string
@@ -117,6 +126,44 @@ type ImageGenerationAsset struct {
 	InspirationRejectReason     string `json:"inspiration_reject_reason"`
 }
 
+type ImageGenerationTaskSummary struct {
+	Id            int    `json:"id"`
+	ModelId       string `json:"model_id"`
+	Prompt        string `json:"prompt"`
+	Status        string `json:"status"`
+	ImageUrl      string `json:"image_url"`
+	ThumbnailUrl  string `json:"thumbnail_url"`
+	ErrorMessage  string `json:"error_message"`
+	CreatedTime   int64  `json:"created_time"`
+	CompletedTime int64  `json:"completed_time"`
+}
+
+type ImageGenerationTaskDetail struct {
+	Id              int    `json:"id"`
+	ModelId         string `json:"model_id"`
+	DisplayName     string `json:"display_name"`
+	Prompt          string `json:"prompt"`
+	Status          string `json:"status"`
+	RequestEndpoint string `json:"request_endpoint"`
+	Params          string `json:"params"`
+	ImageUrl        string `json:"image_url"`
+	ThumbnailUrl    string `json:"thumbnail_url"`
+	ImageMetadata   string `json:"image_metadata"`
+	ErrorMessage    string `json:"error_message"`
+	Cost            int    `json:"cost"`
+	CreatedTime     int64  `json:"created_time"`
+	CompletedTime   int64  `json:"completed_time"`
+	RequestType     string `json:"request_type"`
+	ReferenceCount  int    `json:"reference_count"`
+	HasMask         bool   `json:"has_mask"`
+	OutputWidth     int    `json:"output_width"`
+	OutputHeight    int    `json:"output_height"`
+	OutputSizeText  string `json:"output_size_text"`
+	SizeText        string `json:"size_text"`
+	QualityText     string `json:"quality_text"`
+	Quantity        int    `json:"quantity"`
+}
+
 type ImageAssetStats struct {
 	TotalAssets       int64 `json:"total_assets"`
 	LatestCreatedTime int64 `json:"latest_created_time"`
@@ -138,7 +185,7 @@ type ImageAssetSeriesOption struct {
 }
 
 // GetImageTasksByUserID 根据用户ID获取任务列表（分页+筛选+排序）
-func GetImageTasksByUserID(userId int, startIdx int, num int, queryParams ImageTaskQueryParams) ([]*ImageGenerationTask, int64, error) {
+func GetImageTasksByUserID(userId int, startIdx int, num int, queryParams ImageTaskQueryParams, includeTotal bool) ([]*ImageGenerationTask, int64, bool, error) {
 	var tasks []*ImageGenerationTask
 	var total int64
 
@@ -160,9 +207,11 @@ func GetImageTasksByUserID(userId int, startIdx int, num int, queryParams ImageT
 		query = query.Where("created_time <= ?", queryParams.EndTime)
 	}
 
-	err := query.Count(&total).Error
-	if err != nil {
-		return nil, 0, err
+	if includeTotal {
+		err := query.Count(&total).Error
+		if err != nil {
+			return nil, 0, false, err
+		}
 	}
 
 	// 仅允许白名单字段，避免 SQL 注入
@@ -184,8 +233,175 @@ func GetImageTasksByUserID(userId int, startIdx int, num int, queryParams ImageT
 		orderClause += ", id " + sortOrder
 	}
 
-	err = query.Order(orderClause).Limit(num).Offset(startIdx).Find(&tasks).Error
-	return tasks, total, err
+	if num <= 0 {
+		num = 20
+	}
+	if num > 100 {
+		num = 100
+	}
+
+	findErr := query.Order(orderClause).Limit(num + 1).Offset(startIdx).Find(&tasks).Error
+	if findErr != nil {
+		return nil, 0, false, findErr
+	}
+
+	hasMore := len(tasks) > num
+	if hasMore {
+		tasks = tasks[:num]
+	}
+	return tasks, total, hasMore, nil
+}
+
+func imageTaskSortFieldAndOrder(queryParams ImageTaskQueryParams) (string, string) {
+	sortField := "id"
+	switch queryParams.SortBy {
+	case "created_time":
+		sortField = "created_time"
+	case "completed_time":
+		sortField = "completed_time"
+	case "status":
+		sortField = "status"
+	}
+
+	sortOrder := "DESC"
+	if queryParams.SortOrder == "asc" {
+		sortOrder = "ASC"
+	}
+	return sortField, sortOrder
+}
+
+func ImageTaskCursorPaginationSupported(queryParams ImageTaskQueryParams) bool {
+	sortField, _ := imageTaskSortFieldAndOrder(queryParams)
+	return sortField == "created_time" || sortField == "completed_time"
+}
+
+func encodeImageTaskCursor(sortValue int64, id int) string {
+	if id <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", sortValue, id)
+}
+
+func decodeImageTaskCursor(cursor string) (int64, int, error) {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return 0, 0, nil
+	}
+
+	parts := strings.Split(cursor, ":")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid cursor")
+	}
+
+	sortValue, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid cursor")
+	}
+	id64, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || id64 <= 0 {
+		return 0, 0, fmt.Errorf("invalid cursor")
+	}
+	return sortValue, int(id64), nil
+}
+
+func applyImageTaskFilters(query *gorm.DB, userId int, queryParams ImageTaskQueryParams) *gorm.DB {
+	query = query.Where("user_id = ?", userId)
+	if queryParams.Status != "" {
+		query = query.Where("status = ?", queryParams.Status)
+	}
+	if queryParams.ModelId != "" {
+		query = query.Where("model_id = ?", queryParams.ModelId)
+	}
+	if queryParams.RequestEndpoint != "" {
+		query = query.Where("request_endpoint = ?", queryParams.RequestEndpoint)
+	}
+	if queryParams.StartTime > 0 {
+		query = query.Where("created_time >= ?", queryParams.StartTime)
+	}
+	if queryParams.EndTime > 0 {
+		query = query.Where("created_time <= ?", queryParams.EndTime)
+	}
+	return query
+}
+
+func applyImageTaskCursor(query *gorm.DB, cursor string, sortField string, sortOrder string) (*gorm.DB, error) {
+	sortValue, id, err := decodeImageTaskCursor(cursor)
+	if err != nil {
+		return nil, err
+	}
+	if id == 0 {
+		return query, nil
+	}
+
+	operator := "<"
+	if sortOrder == "ASC" {
+		operator = ">"
+	}
+
+	condition := fmt.Sprintf("(%s %s ?) OR (%s = ? AND id %s ?)", sortField, operator, sortField, operator)
+	return query.Where(condition, sortValue, sortValue, id), nil
+}
+
+func GetImageTasksByUserCursor(userId int, cursor string, num int, queryParams ImageTaskQueryParams) (*ImageTaskCursorPage, error) {
+	if num <= 0 {
+		num = 20
+	}
+	if num > 100 {
+		num = 100
+	}
+
+	sortField, sortOrder := imageTaskSortFieldAndOrder(queryParams)
+	if !ImageTaskCursorPaginationSupported(queryParams) {
+		return nil, fmt.Errorf("cursor pagination is not supported for sort field %s", sortField)
+	}
+
+	baseQuery := applyImageTaskFilters(DB.Model(&ImageGenerationTask{}), userId, queryParams)
+
+	var total int64
+	if strings.TrimSpace(cursor) == "" {
+		if err := baseQuery.Count(&total).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	cursorQuery, err := applyImageTaskCursor(baseQuery, cursor, sortField, sortOrder)
+	if err != nil {
+		return nil, err
+	}
+
+	orderClause := sortField + " " + sortOrder + ", id " + sortOrder
+	var tasks []*ImageGenerationTask
+	if err := cursorQuery.
+		Order(orderClause).
+		Limit(num + 1).
+		Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+
+	hasMore := len(tasks) > num
+	if hasMore {
+		tasks = tasks[:num]
+	}
+
+	nextCursor := ""
+	if hasMore && len(tasks) > 0 {
+		lastTask := tasks[len(tasks)-1]
+		var cursorValue int64
+		switch sortField {
+		case "completed_time":
+			cursorValue = lastTask.CompletedTime
+		default:
+			cursorValue = lastTask.CreatedTime
+		}
+		nextCursor = encodeImageTaskCursor(cursorValue, lastTask.Id)
+	}
+
+	return &ImageTaskCursorPage{
+		Items:      tasks,
+		Total:      total,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
 }
 
 // GetImageTaskUpdatesByUserID 获取 SSE 所需的轻量任务更新，不执行分页统计。
@@ -200,7 +416,7 @@ func GetImageTaskUpdatesByUserID(userId int, completedSince int64, limit int) ([
 	var tasks []*ImageGenerationTask
 	activeStatuses := []string{ImageTaskStatusPending, ImageTaskStatusGenerating}
 	query := DB.Model(&ImageGenerationTask{}).
-		Select("id, user_id, status, image_url, thumbnail_url, error_message, completed_time").
+		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, error_message, created_time, completed_time").
 		Where("user_id = ? AND status IN ?", userId, activeStatuses).
 		Order("id DESC").
 		Limit(limit)
@@ -215,7 +431,7 @@ func GetImageTaskUpdatesByUserID(userId int, completedSince int64, limit int) ([
 	var terminalTasks []*ImageGenerationTask
 	remaining := limit - len(tasks)
 	err := DB.Model(&ImageGenerationTask{}).
-		Select("id, user_id, status, image_url, thumbnail_url, error_message, completed_time").
+		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, error_message, created_time, completed_time").
 		Where("user_id = ? AND status NOT IN ? AND completed_time >= ?", userId, activeStatuses, completedSince).
 		Order("id DESC").
 		Limit(remaining).
@@ -226,6 +442,60 @@ func GetImageTaskUpdatesByUserID(userId int, completedSince int64, limit int) ([
 
 	tasks = append(tasks, terminalTasks...)
 	return tasks, nil
+}
+
+func BuildImageGenerationTaskSummary(task *ImageGenerationTask) *ImageGenerationTaskSummary {
+	if task == nil {
+		return nil
+	}
+	return &ImageGenerationTaskSummary{
+		Id:            task.Id,
+		ModelId:       task.ModelId,
+		Prompt:        task.Prompt,
+		Status:        task.Status,
+		ImageUrl:      task.ImageUrl,
+		ThumbnailUrl:  task.ThumbnailUrl,
+		ErrorMessage:  task.ErrorMessage,
+		CreatedTime:   task.CreatedTime,
+		CompletedTime: task.CompletedTime,
+	}
+}
+
+func BuildImageGenerationTaskDetail(task *ImageGenerationTask, displayName string) *ImageGenerationTaskDetail {
+	if task == nil {
+		return nil
+	}
+	return &ImageGenerationTaskDetail{
+		Id:              task.Id,
+		ModelId:         task.ModelId,
+		DisplayName:     displayName,
+		Prompt:          task.Prompt,
+		Status:          task.Status,
+		RequestEndpoint: task.RequestEndpoint,
+		Params:          task.Params,
+		ImageUrl:        task.ImageUrl,
+		ThumbnailUrl:    task.ThumbnailUrl,
+		ImageMetadata:   task.ImageMetadata,
+		ErrorMessage:    task.ErrorMessage,
+		Cost:            task.Cost,
+		CreatedTime:     task.CreatedTime,
+		CompletedTime:   task.CompletedTime,
+		RequestType:     task.RequestType,
+		ReferenceCount:  task.ReferenceCount,
+		HasMask:         task.HasMask,
+	}
+}
+
+func CountImageTasksByUserAndStatuses(userId int, statuses []string) (int64, error) {
+	if userId <= 0 || len(statuses) == 0 {
+		return 0, nil
+	}
+
+	var total int64
+	err := DB.Model(&ImageGenerationTask{}).
+		Where("user_id = ? AND status IN ?", userId, statuses).
+		Count(&total).Error
+	return total, err
 }
 
 func imageAssetsBaseQuery(userId int) *gorm.DB {
@@ -356,6 +626,30 @@ func GetPendingImageTasks(limit int) ([]*ImageGenerationTask, error) {
 		Limit(limit).
 		Find(&tasks).Error
 	return tasks, err
+}
+
+func ClaimNextPendingImageTask() (*ImageGenerationTask, error) {
+	tasks, err := GetPendingImageTasks(1)
+	if err != nil || len(tasks) == 0 || tasks[0] == nil {
+		return nil, err
+	}
+
+	task := tasks[0]
+	result := DB.Model(&ImageGenerationTask{}).
+		Where("id = ? AND status = ?", task.Id, ImageTaskStatusPending).
+		Updates(map[string]interface{}{
+			"status": ImageTaskStatusGenerating,
+		})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+
+	task.Status = ImageTaskStatusGenerating
+	task.ErrorMessage = ""
+	return task, nil
 }
 
 // UpdateImageTaskStatus 更新任务状态

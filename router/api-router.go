@@ -76,6 +76,7 @@ func SetApiRouter(router *gin.Engine) {
 			imageGenRoute.DELETE("/creative-submissions/:id", middleware.AdminAuth(), controller.DeleteImageInspirationSubmission)
 			imageGenRoute.POST("/tasks", controller.CreateImageGenerationTask)
 			imageGenRoute.GET("/tasks", controller.GetImageGenerationTasks)
+			imageGenRoute.GET("/tasks/updates", controller.GetImageGenerationTaskUpdates)
 			imageGenRoute.GET("/tasks/:id", controller.GetImageGenerationTaskDetail)
 			imageGenRoute.POST("/tasks/:id/retry", controller.RetryImageGenerationTask)
 			imageGenRoute.DELETE("/tasks/:id", controller.DeleteImageGenerationTask)

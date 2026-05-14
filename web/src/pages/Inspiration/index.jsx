@@ -33,27 +33,48 @@ import { useContainerWidth } from '../../hooks/common/useContainerWidth';
 
 const { Paragraph } = Typography;
 const PAGE_SIZE = 24;
+const MAX_RENDERED_PAGES = 5;
+const FIRST_PAGE_KEY = '__first__';
 
 const Inspiration = () => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [shellRef, shellWidth] = useContainerWidth();
-  const [assets, setAssets] = useState([]);
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
+  const [pageChunks, setPageChunks] = useState([]);
+  const [renderStart, setRenderStart] = useState(0);
+  const [nextCursor, setNextCursor] = useState('');
+  const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [detailVisible, setDetailVisible] = useState(false);
-  const sentinelRef = useRef(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const topSentinelRef = useRef(null);
+  const bottomSentinelRef = useRef(null);
   const loadingPagesRef = useRef(new Set());
   const loadSeqRef = useRef(0);
+  const detailSeqRef = useRef(0);
+  const appendJustHappenedRef = useRef(false);
+  const sectionObserversRef = useRef(new Map());
+  const sectionHeightsRef = useRef(new Map());
+  const [layoutVersion, setLayoutVersion] = useState(0);
 
-  const hasMore = assets.length < total;
+  const renderEnd = Math.min(pageChunks.length, renderStart + MAX_RENDERED_PAGES);
+  const visiblePages = useMemo(
+    () => pageChunks.slice(renderStart, renderEnd),
+    [pageChunks, renderEnd, renderStart],
+  );
+
+  const renderedAssetCount = useMemo(
+    () => visiblePages.reduce((sum, page) => sum + page.items.length, 0),
+    [visiblePages],
+  );
 
   const parseJsonObject = (raw) => {
     if (!raw) return {};
+    if (typeof raw === 'object') {
+      return raw;
+    }
     try {
       const parsed = JSON.parse(raw);
       return parsed && typeof parsed === 'object' ? parsed : {};
@@ -70,8 +91,71 @@ const Inspiration = () => {
   const masonryColumnCount = useMemo(() => {
     if (!shellWidth) return 1;
     const maxColumns = Math.max(1, Math.min(6, Math.floor(shellWidth / 320)));
-    return Math.max(1, Math.min(assets.length || 1, maxColumns));
-  }, [assets.length, shellWidth]);
+    return Math.max(1, Math.min(renderedAssetCount || 1, maxColumns));
+  }, [renderedAssetCount, shellWidth]);
+
+  const estimatePageHeight = useCallback(
+    (page) => {
+      const itemCount = page?.items?.length || 0;
+      if (itemCount === 0) return 0;
+      const columns = Math.max(1, masonryColumnCount);
+      return Math.max(420, Math.ceil(itemCount / columns) * 320);
+    },
+    [masonryColumnCount],
+  );
+
+  const topSpacerHeight = useMemo(() => {
+    return pageChunks
+      .slice(0, renderStart)
+      .reduce(
+        (sum, page) =>
+          sum +
+          (sectionHeightsRef.current.get(page.key) ?? estimatePageHeight(page)),
+        0,
+      );
+  }, [estimatePageHeight, layoutVersion, pageChunks, renderStart]);
+
+  const bottomSpacerHeight = useMemo(() => {
+    return pageChunks
+      .slice(renderEnd)
+      .reduce(
+        (sum, page) =>
+          sum +
+          (sectionHeightsRef.current.get(page.key) ?? estimatePageHeight(page)),
+        0,
+      );
+  }, [estimatePageHeight, layoutVersion, pageChunks, renderEnd]);
+
+  const registerSectionElement = useCallback((pageKey, element) => {
+    const existingObserver = sectionObserversRef.current.get(pageKey);
+    if (!element) {
+      if (existingObserver) {
+        existingObserver.disconnect();
+        sectionObserversRef.current.delete(pageKey);
+      }
+      return;
+    }
+
+    if (existingObserver) {
+      existingObserver.disconnect();
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const height = Math.ceil(entries[0]?.contentRect?.height || 0);
+      if (height <= 0) {
+        return;
+      }
+      const previous = sectionHeightsRef.current.get(pageKey);
+      if (previous === height) {
+        return;
+      }
+      sectionHeightsRef.current.set(pageKey, height);
+      setLayoutVersion((version) => version + 1);
+    });
+
+    observer.observe(element);
+    sectionObserversRef.current.set(pageKey, observer);
+  }, []);
 
   const formatSeries = useCallback(
     (series) => {
@@ -93,8 +177,9 @@ const Inspiration = () => {
   );
 
   const loadAssets = useCallback(
-    async (nextPage = 1, append = false) => {
+    async (cursor = '', append = false) => {
       const requestSeq = ++loadSeqRef.current;
+      const pageKey = cursor || FIRST_PAGE_KEY;
       if (append) {
         setLoadingMore(true);
       } else {
@@ -102,20 +187,31 @@ const Inspiration = () => {
       }
       try {
         const res = await API.get('/api/inspiration/assets', {
-          params: { p: nextPage, page_size: PAGE_SIZE },
+          params: { cursor, page_size: PAGE_SIZE },
         });
         if (requestSeq !== loadSeqRef.current) return;
         if (res.data.success) {
           const data = res.data.data || {};
           const items = data.items || [];
-          setAssets((prev) => {
-            if (!append) return items;
-            const seen = new Set(prev.map((asset) => asset.id));
+          appendJustHappenedRef.current = append;
+          setPageChunks((prev) => {
+            if (!append) {
+              return items.length > 0 ? [{ key: FIRST_PAGE_KEY, items }] : [];
+            }
+            if (prev.some((page) => page.key === pageKey)) {
+              return prev;
+            }
+            const seen = new Set(
+              prev.flatMap((page) => page.items.map((asset) => asset.id)),
+            );
             const nextItems = items.filter((asset) => !seen.has(asset.id));
-            return [...prev, ...nextItems];
+            if (nextItems.length === 0) {
+              return prev;
+            }
+            return [...prev, { key: pageKey, items: nextItems }];
           });
-          setTotal(data.total || 0);
-          setPage(data.page || nextPage);
+          setNextCursor(data.next_cursor || '');
+          setHasMore(data.has_more === true);
         } else {
           showError(res.data.message || t('加载灵感失败'));
         }
@@ -124,7 +220,7 @@ const Inspiration = () => {
         showError(error.message || t('加载灵感失败'));
       } finally {
         if (requestSeq !== loadSeqRef.current) return;
-        loadingPagesRef.current.delete(nextPage);
+        loadingPagesRef.current.delete(pageKey);
         if (append) {
           setLoadingMore(false);
         } else {
@@ -136,22 +232,69 @@ const Inspiration = () => {
   );
 
   useEffect(() => {
-    loadAssets(1, false);
+    loadAssets('', false);
   }, [loadAssets]);
 
   useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || !hasMore || loading || loadingMore) return;
+    if (pageChunks.length <= MAX_RENDERED_PAGES) {
+      if (renderStart !== 0) {
+        setRenderStart(0);
+      }
+      appendJustHappenedRef.current = false;
+      return;
+    }
+
+    if (appendJustHappenedRef.current) {
+      appendJustHappenedRef.current = false;
+      setRenderStart(Math.max(0, pageChunks.length - MAX_RENDERED_PAGES));
+      return;
+    }
+
+    const maxStart = Math.max(0, pageChunks.length - MAX_RENDERED_PAGES);
+    if (renderStart > maxStart) {
+      setRenderStart(maxStart);
+    }
+  }, [pageChunks.length, renderStart]);
+
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    if (!sentinel || renderStart === 0 || loading || loadingMore) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        const nextPage = page + 1;
-        if (
-          entries[0]?.isIntersecting &&
-          !loadingPagesRef.current.has(nextPage)
-        ) {
-          loadingPagesRef.current.add(nextPage);
-          loadAssets(nextPage, true);
+        if (entries[0]?.isIntersecting) {
+          setRenderStart((current) => Math.max(0, current - 1));
+        }
+      },
+      { rootMargin: '240px 0px' },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loading, loadingMore, renderStart]);
+
+  useEffect(() => {
+    const sentinel = bottomSentinelRef.current;
+    if (!sentinel || loading || loadingMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) {
+          return;
+        }
+
+        if (renderEnd < pageChunks.length) {
+          setRenderStart((current) => {
+            const maxStart = Math.max(0, pageChunks.length - MAX_RENDERED_PAGES);
+            return Math.min(maxStart, current + 1);
+          });
+          return;
+        }
+
+        const cursor = nextCursor;
+        if (hasMore && cursor && !loadingPagesRef.current.has(cursor)) {
+          loadingPagesRef.current.add(cursor);
+          loadAssets(cursor, true);
         }
       },
       { rootMargin: '360px 0px' },
@@ -159,23 +302,40 @@ const Inspiration = () => {
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, loadAssets, loading, loadingMore, page]);
+  }, [hasMore, loadAssets, loading, loadingMore, nextCursor, pageChunks.length, renderEnd]);
+
+  useEffect(() => {
+    return () => {
+      sectionObserversRef.current.forEach((observer) => observer.disconnect());
+      sectionObserversRef.current.clear();
+    };
+  }, []);
 
   const openDetail = async (asset) => {
+    const requestSeq = detailSeqRef.current + 1;
+    detailSeqRef.current = requestSeq;
     setSelectedAsset(asset);
     setDetailVisible(true);
     setDetailLoading(true);
     try {
       const res = await API.get(`/api/inspiration/assets/${asset.id}`);
+      if (requestSeq !== detailSeqRef.current) {
+        return;
+      }
       if (res.data.success) {
         setSelectedAsset(res.data.data);
       } else {
         showError(res.data.message || t('加载作品详情失败'));
       }
     } catch (error) {
+      if (requestSeq !== detailSeqRef.current) {
+        return;
+      }
       showError(error.message || t('加载作品详情失败'));
     } finally {
-      setDetailLoading(false);
+      if (requestSeq === detailSeqRef.current) {
+        setDetailLoading(false);
+      }
     }
   };
 
@@ -207,6 +367,7 @@ const Inspiration = () => {
       type='button'
       key={asset.id}
       className='inspiration-card'
+      style={{ '--inspiration-card-ratio': asset.card_aspect_ratio || 1 }}
       onClick={() => openDetail(asset)}
       aria-label={t('查看详情')}
     >
@@ -214,6 +375,7 @@ const Inspiration = () => {
         src={asset.thumbnail_url || asset.image_url}
         alt={asset.prompt || 'Generated'}
         loading='lazy'
+        decoding='async'
       />
     </button>
   );
@@ -239,8 +401,20 @@ const Inspiration = () => {
           column-gap: 4px;
           width: 100%;
         }
+        .inspiration-masonry-section {
+          width: 100%;
+        }
+        .inspiration-spacer {
+          width: 100%;
+          flex-shrink: 0;
+        }
+        .inspiration-window-sentinel {
+          width: 100%;
+          height: 1px;
+        }
         .inspiration-card {
-          display: inline-block;
+          position: relative;
+          display: block;
           width: 100%;
           break-inside: avoid;
           margin: 0 0 4px;
@@ -252,6 +426,7 @@ const Inspiration = () => {
           color: inherit;
           text-align: left;
           cursor: pointer;
+          aspect-ratio: var(--inspiration-card-ratio, 1);
           transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
         }
         .inspiration-card:hover {
@@ -260,9 +435,13 @@ const Inspiration = () => {
           box-shadow: 0 18px 42px -30px rgba(15, 23, 42, 0.5);
         }
         .inspiration-card img {
+          position: absolute;
+          inset: 0;
           display: block;
           width: 100%;
-          height: auto;
+          height: 100%;
+          object-fit: cover;
+          background: linear-gradient(135deg, rgba(148, 163, 184, 0.1), rgba(148, 163, 184, 0.04));
         }
         .inspiration-load-more {
           display: flex;
@@ -337,13 +516,38 @@ const Inspiration = () => {
 
       <div className='inspiration-shell' ref={shellRef}>
         <Spin spinning={loading}>
+          {topSpacerHeight > 0 && (
+            <div
+              className='inspiration-spacer'
+              style={{ height: topSpacerHeight }}
+            />
+          )}
+          <div ref={topSentinelRef} className='inspiration-window-sentinel' />
+          {visiblePages.map((page) => (
+            <div
+              key={page.key}
+              className='inspiration-masonry-section'
+              ref={(element) => registerSectionElement(page.key, element)}
+            >
+              <div
+                className='inspiration-masonry'
+                style={{ columnCount: masonryColumnCount }}
+              >
+                {page.items.map(renderAssetCard)}
+              </div>
+            </div>
+          ))}
           <div
-            className='inspiration-masonry'
-            style={{ columnCount: masonryColumnCount }}
-          >
-            {assets.map(renderAssetCard)}
-          </div>
-          <div ref={sentinelRef} className='inspiration-load-more'>
+            ref={bottomSentinelRef}
+            className='inspiration-window-sentinel'
+          />
+          {bottomSpacerHeight > 0 && (
+            <div
+              className='inspiration-spacer'
+              style={{ height: bottomSpacerHeight }}
+            />
+          )}
+          <div className='inspiration-load-more'>
             {loadingMore && <Spin size='small' />}
           </div>
         </Spin>
@@ -354,7 +558,11 @@ const Inspiration = () => {
         visible={detailVisible}
         width={isMobile ? '100%' : 520}
         title={t('作品详情')}
-        onCancel={() => setDetailVisible(false)}
+        onCancel={() => {
+          detailSeqRef.current += 1;
+          setDetailVisible(false);
+          setDetailLoading(false);
+        }}
         bodyStyle={{ padding: 0 }}
       >
         <Spin spinning={detailLoading}>

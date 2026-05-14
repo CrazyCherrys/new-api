@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -25,17 +26,27 @@ import (
 
 const (
 	imageGenerationContextUseUserCustomChannel = "image_generation_use_user_custom_channel"
+	imageCleanupSchedulerInterval              = 1 * time.Minute
+	defaultImageGenerationTaskQueueLimit       = 20
+	imageGenerationQueuePollInterval           = 2 * time.Second
 )
 
 var (
-	imageWorkerLimiter         imageGenerationWorkerLimiter
-	enqueueImageGenerationTask = func(taskId int) {
-		go processTaskAsync(taskId)
-	}
+	imageWorkerLimiter                imageGenerationWorkerLimiter
+	imageGenerationTaskCreateMu       sync.Mutex
+	enqueueImageGenerationTask        = signalImageGenerationQueue
 	processImageGenerationTaskFn      = ProcessImageGenerationTask
 	generateImageFn                   = generateImage
 	imageGenerationTimeoutOverride    func() time.Duration
 	imageGenerationRetryDelayOverride func() time.Duration
+	imageCleanupTaskOnce              sync.Once
+	imageCleanupTaskRunning           atomic.Bool
+	imageCleanupLastRun               atomic.Int64
+	imageGenerationTaskUpdates        = newImageGenerationTaskBroadcaster()
+	imageGenerationWorkerPoolOnce     sync.Once
+	imageGenerationWorkerLoopMu       sync.Mutex
+	imageGenerationWorkerLoopCount    int
+	imageGenerationQueueSignalCh      = make(chan struct{}, 1)
 )
 
 type imageGenerationWorkerLimiter struct {
@@ -239,6 +250,37 @@ func imageGenerationMaxRetries() int {
 	return cfg.MaxRetries
 }
 
+func imageGenerationTaskQueueLimit() int {
+	cfg := worker_setting.GetWorkerSetting()
+	limit := cfg.MaxWorkers * 5
+	if limit <= 0 {
+		limit = defaultImageGenerationTaskQueueLimit
+	}
+	if limit < defaultImageGenerationTaskQueueLimit {
+		return defaultImageGenerationTaskQueueLimit
+	}
+	return limit
+}
+
+func imageGenerationPendingStatuses() []string {
+	return []string{model.ImageTaskStatusPending, model.ImageTaskStatusGenerating}
+}
+
+func enforceImageGenerationTaskQueueLimit(userId int, requestedCount int) error {
+	if userId <= 0 || requestedCount <= 0 {
+		return nil
+	}
+	limit := imageGenerationTaskQueueLimit()
+	queuedCount, err := model.CountImageTasksByUserAndStatuses(userId, imageGenerationPendingStatuses())
+	if err != nil {
+		return fmt.Errorf("failed to check queued image tasks: %w", err)
+	}
+	if queuedCount+int64(requestedCount) > int64(limit) {
+		return fmt.Errorf("too many queued image generation tasks: limit %d", limit)
+	}
+	return nil
+}
+
 func imageGenerationRetryDelay() time.Duration {
 	if imageGenerationRetryDelayOverride != nil {
 		return imageGenerationRetryDelayOverride()
@@ -304,9 +346,81 @@ func (l *imageGenerationWorkerLimiter) release() {
 	l.mutex.Unlock()
 }
 
+func signalImageGenerationQueue(taskId int) {
+	ensureImageGenerationWorkerLoops(imageGenerationMaxWorkers())
+	select {
+	case imageGenerationQueueSignalCh <- struct{}{}:
+	default:
+	}
+}
+
+func ensureImageGenerationWorkerLoops(desired int) {
+	if desired <= 0 {
+		desired = 1
+	}
+
+	imageGenerationWorkerLoopMu.Lock()
+	missing := desired - imageGenerationWorkerLoopCount
+	if missing <= 0 {
+		imageGenerationWorkerLoopMu.Unlock()
+		return
+	}
+	imageGenerationWorkerLoopCount = desired
+	imageGenerationWorkerLoopMu.Unlock()
+
+	for i := 0; i < missing; i++ {
+		go runImageGenerationWorkerLoop()
+	}
+}
+
+func StartImageGenerationWorkerPool() {
+	imageGenerationWorkerPoolOnce.Do(func() {
+		ensureImageGenerationWorkerLoops(imageGenerationMaxWorkers())
+		signalImageGenerationQueue(0)
+	})
+}
+
+func runImageGenerationWorkerLoop() {
+	ticker := time.NewTicker(imageGenerationQueuePollInterval)
+	defer ticker.Stop()
+
+	for {
+		ensureImageGenerationWorkerLoops(imageGenerationMaxWorkers())
+		if !processNextPendingImageGenerationTask() {
+			select {
+			case <-imageGenerationQueueSignalCh:
+			case <-ticker.C:
+			}
+		}
+	}
+}
+
+func processNextPendingImageGenerationTask() bool {
+	if err := imageWorkerLimiter.acquire(context.Background()); err != nil {
+		return false
+	}
+	defer imageWorkerLimiter.release()
+
+	task, err := model.ClaimNextPendingImageTask()
+	if err != nil || task == nil {
+		return false
+	}
+	publishImageGenerationTaskUpdate(task)
+	if err := processImageGenerationTaskFn(task.Id); err != nil {
+		common.SysLog(fmt.Sprintf("Failed to process queued image generation task %d: %v", task.Id, err))
+	}
+	return true
+}
+
 // CreateImageGenerationTask 创建图片生成任务
 func CreateImageGenerationTask(userId int, modelId string, prompt string, requestEndpoint string, params string) (*model.ImageGenerationTask, error) {
+	imageGenerationTaskCreateMu.Lock()
+	defer imageGenerationTaskCreateMu.Unlock()
+
 	requestEndpoint = normalizeImageEndpoint(requestEndpoint)
+	if err := enforceImageGenerationTaskQueueLimit(userId, 1); err != nil {
+		return nil, err
+	}
 	if err := validateImageGenerationReferenceImages(params); err != nil {
 		return nil, err
 	}
@@ -411,6 +525,8 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 		}
 	}
 
+	publishImageGenerationTaskUpdate(task)
+
 	// 启动异步处理
 	enqueueImageGenerationTask(task.Id)
 
@@ -453,6 +569,7 @@ func RetryImageGenerationTask(taskId int) error {
 		return fmt.Errorf("task %d is not failed", taskId)
 	}
 
+	publishImageGenerationTaskUpdateByID(taskId)
 	enqueueImageGenerationTask(taskId)
 	return nil
 }
@@ -469,13 +586,15 @@ func ProcessImageGenerationTask(taskId int) error {
 	}
 
 	// 检查任务状态
-	if task.Status != model.ImageTaskStatusPending {
-		return fmt.Errorf("task %d is not pending (status: %s)", taskId, task.Status)
+	if task.Status != model.ImageTaskStatusPending && task.Status != model.ImageTaskStatusGenerating {
+		return fmt.Errorf("task %d is not pending/generating (status: %s)", taskId, task.Status)
 	}
 
-	// 更新状态为处理中
-	if err := model.UpdateImageTaskStatus(taskId, model.ImageTaskStatusGenerating, ""); err != nil {
-		return fmt.Errorf("failed to update task status: %w", err)
+	if task.Status == model.ImageTaskStatusPending {
+		if err := model.UpdateImageTaskStatus(taskId, model.ImageTaskStatusGenerating, ""); err != nil {
+			return fmt.Errorf("failed to update task status: %w", err)
+		}
+		publishImageGenerationTaskUpdateByID(taskId)
 	}
 
 	// 重试逻辑
@@ -500,6 +619,7 @@ func ProcessImageGenerationTask(taskId int) error {
 			if err := model.UpdateImageTaskResult(taskId, imageUrl, thumbnailUrl, metadata, cost); err != nil {
 				return fmt.Errorf("failed to update task result: %w", err)
 			}
+			publishImageGenerationTaskUpdateByID(taskId)
 
 			// 扣除用户额度
 			if err := deductUserQuota(task.UserId, cost); err != nil {
@@ -519,6 +639,7 @@ func ProcessImageGenerationTask(taskId int) error {
 	if err := model.UpdateImageTaskStatus(taskId, model.ImageTaskStatusFailed, errorMsg); err != nil {
 		return fmt.Errorf("failed to update task status: %w", err)
 	}
+	publishImageGenerationTaskUpdateByID(taskId)
 
 	return fmt.Errorf("task %d failed: %s", taskId, errorMsg)
 }
@@ -1242,6 +1363,35 @@ func CleanupExpiredImageTasks() error {
 	return nil
 }
 
+func shouldRunImageCleanup(now time.Time) bool {
+	lastRunUnix := imageCleanupLastRun.Load()
+	if lastRunUnix == 0 {
+		return true
+	}
+	lastRun := time.Unix(lastRunUnix, 0)
+	return now.Sub(lastRun) >= 24*time.Hour
+}
+
+func runImageCleanupTaskOnce(now time.Time) {
+	cfg := worker_setting.GetWorkerSetting()
+	if cfg == nil || !cfg.AutoCleanupEnabled {
+		return
+	}
+	if !shouldRunImageCleanup(now) {
+		return
+	}
+	if !imageCleanupTaskRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer imageCleanupTaskRunning.Store(false)
+
+	if err := CleanupExpiredImageTasks(); err != nil {
+		common.SysLog(fmt.Sprintf("Image cleanup error: %v", err))
+		return
+	}
+	imageCleanupLastRun.Store(now.Unix())
+}
+
 // DeleteImageGenerationTaskAssets 删除任务关联的图片资产（结果图 + 参考图）。
 func DeleteImageGenerationTaskAssets(task *model.ImageGenerationTask, cfg *worker_setting.WorkerSetting) {
 	if task == nil || cfg == nil {
@@ -1370,31 +1520,16 @@ func collectStoredReferenceImages(params string) ([]string, error) {
 
 // StartImageCleanupTask 启动图片清理定时任务
 func StartImageCleanupTask() {
-	cfg := worker_setting.GetWorkerSetting()
+	imageCleanupTaskOnce.Do(func() {
+		common.SysLog(fmt.Sprintf("Image cleanup scheduler started: tick=%s", imageCleanupSchedulerInterval))
+		go func() {
+			ticker := time.NewTicker(imageCleanupSchedulerInterval)
+			defer ticker.Stop()
 
-	if !cfg.AutoCleanupEnabled {
-		common.SysLog("Image auto cleanup is disabled")
-		return
-	}
-
-	common.SysLog(fmt.Sprintf("Starting image cleanup task: retention_days=%d", cfg.RetentionDays))
-
-	// 使用 time.Ticker 每天执行一次
-	ticker := time.NewTicker(24 * time.Hour)
-
-	// 立即执行一次
-	go func() {
-		if err := CleanupExpiredImageTasks(); err != nil {
-			common.SysLog(fmt.Sprintf("Image cleanup error: %v", err))
-		}
-	}()
-
-	// 定时执行
-	go func() {
-		for range ticker.C {
-			if err := CleanupExpiredImageTasks(); err != nil {
-				common.SysLog(fmt.Sprintf("Image cleanup error: %v", err))
+			runImageCleanupTaskOnce(time.Now())
+			for now := range ticker.C {
+				runImageCleanupTaskOnce(now)
 			}
-		}
-	}()
+		}()
+	})
 }
