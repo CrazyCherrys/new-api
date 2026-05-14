@@ -78,6 +78,10 @@ const modelSupportsCapability = (model, capability) =>
   !!model &&
   normalizeImageCapabilities(model.image_capabilities).includes(capability);
 
+const taskCursorPaginationSupported = (state) =>
+  !!state &&
+  (state.sortBy === 'created_time' || state.sortBy === 'completed_time');
+
 const isDefaultTaskViewState = (state) =>
   !!state &&
   state.page === 1 &&
@@ -160,6 +164,7 @@ const ImageGeneration = () => {
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState(20);
   const [taskHasMore, setTaskHasMore] = useState(false);
+  const [taskNextCursor, setTaskNextCursor] = useState('');
   const [taskStatusFilter, setTaskStatusFilter] = useState(''); // '' | 'pending' | 'generating' | 'success' | 'failed'
   const [taskModelFilter, setTaskModelFilter] = useState(''); // '' | model_id
   const [taskTimeFilter, setTaskTimeFilter] = useState(''); // '' | 'today' | 'last7d' | 'last30d' | 'thisMonth'
@@ -176,10 +181,10 @@ const ImageGeneration = () => {
   const taskListStateRef = useRef(null);
   const taskListRequestSeqRef = useRef(0);
   const taskDetailRequestSeqRef = useRef(0);
-  const tasksRef = useRef([]);
   const taskUpdatesCompletedSinceRef = useRef(
     Math.floor(Date.now() / 1000) - 60,
   );
+  const taskCursorHistoryRef = useRef(['']);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
   const [userCustomWorkerKeyEnabled, setUserCustomWorkerKeyEnabled] =
     useState(false);
@@ -196,7 +201,12 @@ const ImageGeneration = () => {
   const hasActiveTasks = tasks.some(
     (task) => task.status === 'pending' || task.status === 'generating',
   );
-  const showsReliableTaskTotal = taskPage <= 1;
+  const canUseTaskCursorPagination = taskCursorPaginationSupported(
+    taskListStateRef.current || {
+      sortBy: taskSortBy,
+    },
+  );
+  const showsReliableTaskTotal = !canUseTaskCursorPagination;
   const hasNextTaskPage = taskHasMore;
 
   taskListStateRef.current = {
@@ -209,8 +219,6 @@ const ImageGeneration = () => {
     sortOrder: taskSortOrder,
   };
   pollingIntervalRef.current = pollingIntervalSeconds;
-  tasksRef.current = tasks;
-
   useEffect(() => {
     const latestCompletedTime = tasks.reduce((latest, task) => {
       const completedAt = Number(task?.completed_time) || 0;
@@ -344,6 +352,8 @@ const ImageGeneration = () => {
   useEffect(() => {
     setTaskPage(1);
     setTaskHasMore(false);
+    setTaskNextCursor('');
+    taskCursorHistoryRef.current = [''];
   }, [
     taskStatusFilter,
     taskModelFilter,
@@ -452,6 +462,7 @@ const ImageGeneration = () => {
       sortBy: taskSortBy,
       sortOrder: taskSortOrder,
     };
+    const useCursorPagination = taskCursorPaginationSupported(queryState);
     const requestSeq = silent
       ? taskListRequestSeqRef.current
       : taskListRequestSeqRef.current + 1;
@@ -464,6 +475,10 @@ const ImageGeneration = () => {
         p: queryState.page,
         page_size: queryState.pageSize,
       };
+      if (useCursorPagination) {
+        const cursorHistory = taskCursorHistoryRef.current;
+        params.cursor = cursorHistory[queryState.page - 1] || '';
+      }
       if (queryState.statusFilter) {
         params.status = queryState.statusFilter;
       }
@@ -513,6 +528,20 @@ const ImageGeneration = () => {
         if (hasTotal) {
           setTaskTotal(newTotal);
         }
+        if (useCursorPagination) {
+          const nextCursor = res.data.data.next_cursor || '';
+          const cursorHistory = taskCursorHistoryRef.current.slice(
+            0,
+            queryState.page,
+          );
+          if (nextCursor) {
+            cursorHistory[queryState.page] = nextCursor;
+          }
+          taskCursorHistoryRef.current = cursorHistory;
+          setTaskNextCursor(nextCursor);
+        } else {
+          setTaskNextCursor('');
+        }
         setTaskHasMore(res.data.data.has_more === true);
       } else if (!silent) {
         showError(res.data.message || t('加载任务列表失败'));
@@ -560,6 +589,9 @@ const ImageGeneration = () => {
   };
 
   const loadTaskUpdates = async () => {
+    if (!isDefaultTaskViewState(taskListStateRef.current)) {
+      return;
+    }
     const completedSince = Math.max(
       1,
       Number(taskUpdatesCompletedSinceRef.current) || 0,
@@ -629,6 +661,14 @@ const ImageGeneration = () => {
       }
       return newSet;
     });
+  };
+
+  const handleTaskPageSizeChange = (nextPageSize) => {
+    setTaskPage(1);
+    setTaskPageSize(nextPageSize);
+    setTaskHasMore(false);
+    setTaskNextCursor('');
+    taskCursorHistoryRef.current = [''];
   };
 
   // 全选/取消全选
@@ -1635,7 +1675,11 @@ const ImageGeneration = () => {
                 selected={selectedTaskIds.has(task.id)}
                 onSelectChange={handleTaskSelect}
                 onClick={() => handleTaskCardClick(task)}
-                clockTick={clockTick}
+                clockTick={
+                  task.status === 'pending' || task.status === 'generating'
+                    ? clockTick
+                    : null
+                }
               />
             ))}
           </div>
@@ -1655,10 +1699,7 @@ const ImageGeneration = () => {
                   pageSize={taskPageSize}
                   onPageChange={setTaskPage}
                   showSizeChanger
-                  onPageSizeChange={(nextPageSize) => {
-                    setTaskPage(1);
-                    setTaskPageSize(nextPageSize);
-                  }}
+                  onPageSizeChange={handleTaskPageSizeChange}
                   pageSizeOpts={[10, 20, 50, 100]}
                 />
               ) : (
@@ -1669,7 +1710,19 @@ const ImageGeneration = () => {
                     justifyContent: 'center',
                     gap: 12,
                   }}
-                >
+                  >
+                  <Select
+                    size='small'
+                    value={taskPageSize}
+                    onChange={handleTaskPageSizeChange}
+                    style={{ width: 92 }}
+                  >
+                    {[10, 20, 50, 100].map((size) => (
+                      <Select.Option key={size} value={size}>
+                        {size} / {t('页')}
+                      </Select.Option>
+                    ))}
+                  </Select>
                   <Button
                     size='small'
                     type='tertiary'
@@ -1684,7 +1737,7 @@ const ImageGeneration = () => {
                   <Button
                     size='small'
                     type='tertiary'
-                    disabled={!hasNextTaskPage}
+                    disabled={!hasNextTaskPage || !taskNextCursor}
                     onClick={() => setTaskPage((prev) => prev + 1)}
                   >
                     {t('下一步')}
@@ -1742,7 +1795,7 @@ const ImageGeneration = () => {
 
           {tasks.length > 0 && (
             <>
-              {showsReliableTaskTotal ? (
+              {taskPage === 1 && taskTotal > 0 ? (
                 <Text type='tertiary' size='small'>
                   {t('共')} {taskTotal} {t('个任务')}
                 </Text>

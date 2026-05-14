@@ -663,7 +663,6 @@ func GetInspirationAssets(c *gin.Context) {
 	for _, asset := range assets {
 		sanitizeImageCreativeListItem(asset)
 	}
-	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(assets)
 	common.ApiSuccess(c, gin.H{
 		"page":        pageInfo.GetPage(),

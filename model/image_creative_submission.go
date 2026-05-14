@@ -640,12 +640,6 @@ func GetApprovedInspirationAssets(cursor string, num int) ([]*ImageCreativeListI
 		return nil, 0, "", false, err
 	}
 
-	if cursor == "" {
-		if err := query.Count(&total).Error; err != nil {
-			return nil, 0, "", false, err
-		}
-	}
-
 	if err := query.
 		Order("s.reviewed_time DESC, s.submitted_time DESC, s.id DESC").
 		Limit(limit + 1).
