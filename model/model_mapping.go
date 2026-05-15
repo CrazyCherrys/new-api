@@ -202,17 +202,12 @@ func SearchModelMappings(keyword string, modelType int, startIdx int, num int) (
 
 func GetActiveImageModelMappings(startIdx int, num int) ([]*ModelMapping, int64, error) {
 	var mappings []*ModelMapping
-	var total int64
 
 	query := DB.Model(&ModelMapping{}).
 		Where("model_type = ? AND status = ? AND request_endpoint <> ''", 2, 1)
 
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
 	err := query.Order("priority DESC, id DESC").Limit(num).Offset(startIdx).Find(&mappings).Error
-	return mappings, total, err
+	return mappings, int64(len(mappings)), err
 }
 
 func DeleteModelMapping(id int) error {

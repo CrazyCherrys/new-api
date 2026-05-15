@@ -566,6 +566,15 @@ func SubmitImageAssetToCreativeSpace(userId int, taskId int) (*ImageCreativeSubm
 
 func publicInspirationAssetsBaseQuery() *gorm.DB {
 	return DB.Table("image_creative_submissions AS s").
+		// Keep the feed payload small; full params belong to the detail endpoint.
+		Select("s.id, s.reviewed_time, s.submitted_time, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.image_url, t.thumbnail_url, t.image_metadata").
+		Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
+		Joins("LEFT JOIN model_mappings AS m ON m.request_model = t.model_id").
+		Where("s.status = ? AND t.status = ? AND t.image_url <> ?", CreativeSubmissionStatusApproved, ImageTaskStatusSuccess, "")
+}
+
+func publicInspirationAssetDetailQuery() *gorm.DB {
+	return DB.Table("image_creative_submissions AS s").
 		Select("s.id, s.reviewed_time, s.submitted_time, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.params, t.image_url, t.thumbnail_url, t.image_metadata").
 		Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
 		Joins("LEFT JOIN model_mappings AS m ON m.request_model = t.model_id").
@@ -690,7 +699,7 @@ func GetApprovedInspirationAssetByID(id int) (*ImageCreativeAsset, error) {
 	}
 
 	var asset ImageCreativeAsset
-	err := publicInspirationAssetsBaseQuery().Where("s.id = ?", id).Scan(&asset).Error
+	err := publicInspirationAssetDetailQuery().Where("s.id = ?", id).Scan(&asset).Error
 	if err != nil {
 		return nil, err
 	}

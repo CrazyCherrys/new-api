@@ -57,6 +57,7 @@ const Inspiration = () => {
   const appendJustHappenedRef = useRef(false);
   const sectionObserversRef = useRef(new Map());
   const sectionHeightsRef = useRef(new Map());
+  const layoutUpdateFrameRef = useRef(0);
   const [layoutVersion, setLayoutVersion] = useState(0);
 
   const renderEnd = Math.min(pageChunks.length, renderStart + MAX_RENDERED_PAGES);
@@ -126,6 +127,16 @@ const Inspiration = () => {
       );
   }, [estimatePageHeight, layoutVersion, pageChunks, renderEnd]);
 
+  const queueLayoutRefresh = useCallback(() => {
+    if (layoutUpdateFrameRef.current) {
+      return;
+    }
+    layoutUpdateFrameRef.current = window.requestAnimationFrame(() => {
+      layoutUpdateFrameRef.current = 0;
+      setLayoutVersion((version) => version + 1);
+    });
+  }, []);
+
   const registerSectionElement = useCallback((pageKey, element) => {
     const existingObserver = sectionObserversRef.current.get(pageKey);
     if (!element) {
@@ -150,12 +161,12 @@ const Inspiration = () => {
         return;
       }
       sectionHeightsRef.current.set(pageKey, height);
-      setLayoutVersion((version) => version + 1);
+      queueLayoutRefresh();
     });
 
     observer.observe(element);
     sectionObserversRef.current.set(pageKey, observer);
-  }, []);
+  }, [queueLayoutRefresh]);
 
   const formatSeries = useCallback(
     (series) => {
@@ -306,6 +317,10 @@ const Inspiration = () => {
 
   useEffect(() => {
     return () => {
+      if (layoutUpdateFrameRef.current) {
+        window.cancelAnimationFrame(layoutUpdateFrameRef.current);
+        layoutUpdateFrameRef.current = 0;
+      }
       sectionObserversRef.current.forEach((observer) => observer.disconnect());
       sectionObserversRef.current.clear();
     };
