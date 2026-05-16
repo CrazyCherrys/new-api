@@ -35,6 +35,8 @@ const { Paragraph } = Typography;
 const PAGE_SIZE = 24;
 const MAX_RENDERED_PAGES = 5;
 const FIRST_PAGE_KEY = '__first__';
+const FIRST_PAGE_TIMEOUT_MS = 20_000;
+const PLACEHOLDER_COUNT = 12;
 
 const Inspiration = () => {
   const { t } = useTranslation();
@@ -46,6 +48,7 @@ const Inspiration = () => {
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -59,6 +62,7 @@ const Inspiration = () => {
   const sectionHeightsRef = useRef(new Map());
   const layoutUpdateFrameRef = useRef(0);
   const [layoutVersion, setLayoutVersion] = useState(0);
+  const firstPageAbortRef = useRef(null);
 
   const renderEnd = Math.min(pageChunks.length, renderStart + MAX_RENDERED_PAGES);
   const visiblePages = useMemo(
@@ -69,6 +73,10 @@ const Inspiration = () => {
   const renderedAssetCount = useMemo(
     () => visiblePages.reduce((sum, page) => sum + page.items.length, 0),
     [visiblePages],
+  );
+  const placeholderCards = useMemo(
+    () => Array.from({ length: PLACEHOLDER_COUNT }, (_, index) => index),
+    [],
   );
 
   const parseJsonObject = (raw) => {
@@ -191,14 +199,36 @@ const Inspiration = () => {
     async (cursor = '', append = false) => {
       const requestSeq = ++loadSeqRef.current;
       const pageKey = cursor || FIRST_PAGE_KEY;
+      let timeoutTriggered = false;
+
+      if (!append) {
+        if (firstPageAbortRef.current) {
+          firstPageAbortRef.current.abort();
+        }
+        firstPageAbortRef.current = new AbortController();
+      }
+
+      const controller = append
+        ? new AbortController()
+        : firstPageAbortRef.current;
+      let timeoutId = 0;
+      if (!append) {
+        timeoutId = window.setTimeout(() => {
+          timeoutTriggered = true;
+          controller.abort();
+        }, FIRST_PAGE_TIMEOUT_MS);
+      }
+
       if (append) {
         setLoadingMore(true);
       } else {
         setLoading(true);
+        setLoadError('');
       }
       try {
         const res = await API.get('/api/inspiration/assets', {
           params: { cursor, page_size: PAGE_SIZE },
+          signal: controller.signal,
         });
         if (requestSeq !== loadSeqRef.current) return;
         if (res.data.success) {
@@ -224,12 +254,39 @@ const Inspiration = () => {
           setNextCursor(data.next_cursor || '');
           setHasMore(data.has_more === true);
         } else {
-          showError(res.data.message || t('加载灵感失败'));
+          const message = res.data.message || t('加载灵感失败');
+          if (!append) {
+            setLoadError(message);
+          }
+          showError(message);
         }
       } catch (error) {
         if (requestSeq !== loadSeqRef.current) return;
-        showError(error.message || t('加载灵感失败'));
+        const isAbort =
+          error?.name === 'CanceledError' ||
+          error?.code === 'ERR_CANCELED' ||
+          error?.name === 'AbortError';
+        if (isAbort) {
+          if (!append && timeoutTriggered) {
+            const message = t('加载超时，请重试');
+            setLoadError(message);
+            showError(message);
+          }
+          return;
+        }
+
+        const message = error.message || t('加载灵感失败');
+        if (!append) {
+          setLoadError(message);
+        }
+        showError(message);
       } finally {
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
+        if (!append && firstPageAbortRef.current === controller) {
+          firstPageAbortRef.current = null;
+        }
         if (requestSeq !== loadSeqRef.current) return;
         loadingPagesRef.current.delete(pageKey);
         if (append) {
@@ -244,6 +301,11 @@ const Inspiration = () => {
 
   useEffect(() => {
     loadAssets('', false);
+    return () => {
+      if (firstPageAbortRef.current) {
+        firstPageAbortRef.current.abort();
+      }
+    };
   }, [loadAssets]);
 
   useEffect(() => {
@@ -388,7 +450,7 @@ const Inspiration = () => {
     >
       <img
         src={asset.thumbnail_url || asset.image_url}
-        alt={asset.prompt || 'Generated'}
+        alt='Generated'
         loading='lazy'
         decoding='async'
       />
@@ -458,6 +520,45 @@ const Inspiration = () => {
           object-fit: cover;
           background: linear-gradient(135deg, rgba(148, 163, 184, 0.1), rgba(148, 163, 184, 0.04));
         }
+        .inspiration-placeholder-grid {
+          column-gap: 4px;
+          width: 100%;
+        }
+        .inspiration-placeholder-card {
+          break-inside: avoid;
+          margin: 0 0 4px;
+          border-radius: 10px;
+          background: linear-gradient(
+            90deg,
+            rgba(148, 163, 184, 0.12) 0%,
+            rgba(148, 163, 184, 0.22) 50%,
+            rgba(148, 163, 184, 0.12) 100%
+          );
+          background-size: 200% 100%;
+          animation: inspirationPulse 1.5s ease-in-out infinite;
+        }
+        .inspiration-error-state {
+          padding: 24px;
+          min-height: 260px;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          gap: 12px;
+          text-align: center;
+          border: 1px solid var(--semi-color-border);
+          border-radius: 12px;
+          background: var(--semi-color-bg-0);
+        }
+        .inspiration-error-title {
+          color: var(--semi-color-text-0);
+          font-size: 18px;
+          font-weight: 600;
+        }
+        .inspiration-error-message {
+          color: var(--semi-color-text-2);
+          max-width: 520px;
+        }
         .inspiration-load-more {
           display: flex;
           justify-content: center;
@@ -515,6 +616,14 @@ const Inspiration = () => {
           white-space: pre-wrap;
           overflow-wrap: anywhere;
         }
+        @keyframes inspirationPulse {
+          0% {
+            background-position: 200% 0;
+          }
+          100% {
+            background-position: -200% 0;
+          }
+        }
         @media (max-width: 720px) {
           .inspiration-page {
             padding: 12px 10px 22px;
@@ -530,42 +639,65 @@ const Inspiration = () => {
       `}</style>
 
       <div className='inspiration-shell' ref={shellRef}>
-        <Spin spinning={loading}>
-          {topSpacerHeight > 0 && (
-            <div
-              className='inspiration-spacer'
-              style={{ height: topSpacerHeight }}
-            />
-          )}
-          <div ref={topSentinelRef} className='inspiration-window-sentinel' />
-          {visiblePages.map((page) => (
-            <div
-              key={page.key}
-              className='inspiration-masonry-section'
-              ref={(element) => registerSectionElement(page.key, element)}
-            >
-              <div
-                className='inspiration-masonry'
-                style={{ columnCount: masonryColumnCount }}
-              >
-                {page.items.map(renderAssetCard)}
-              </div>
-            </div>
-          ))}
-          <div
-            ref={bottomSentinelRef}
-            className='inspiration-window-sentinel'
-          />
-          {bottomSpacerHeight > 0 && (
-            <div
-              className='inspiration-spacer'
-              style={{ height: bottomSpacerHeight }}
-            />
-          )}
-          <div className='inspiration-load-more'>
-            {loadingMore && <Spin size='small' />}
+        {loadError && pageChunks.length === 0 && !loading ? (
+          <div className='inspiration-error-state'>
+            <div className='inspiration-error-title'>{t('加载失败')}</div>
+            <div className='inspiration-error-message'>{loadError}</div>
+            <Button theme='solid' type='primary' onClick={() => loadAssets('', false)}>
+              {t('重试')}
+            </Button>
           </div>
-        </Spin>
+        ) : loading && pageChunks.length === 0 ? (
+          <div
+            className='inspiration-placeholder-grid'
+            style={{ columnCount: masonryColumnCount }}
+          >
+            {placeholderCards.map((index) => (
+              <div
+                key={index}
+                className='inspiration-placeholder-card'
+                style={{ height: 220 + ((index % 4) * 56) }}
+              />
+            ))}
+          </div>
+        ) : (
+          <Spin spinning={loading && pageChunks.length > 0}>
+            {topSpacerHeight > 0 && (
+              <div
+                className='inspiration-spacer'
+                style={{ height: topSpacerHeight }}
+              />
+            )}
+            <div ref={topSentinelRef} className='inspiration-window-sentinel' />
+            {visiblePages.map((page) => (
+              <div
+                key={page.key}
+                className='inspiration-masonry-section'
+                ref={(element) => registerSectionElement(page.key, element)}
+              >
+                <div
+                  className='inspiration-masonry'
+                  style={{ columnCount: masonryColumnCount }}
+                >
+                  {page.items.map(renderAssetCard)}
+                </div>
+              </div>
+            ))}
+            <div
+              ref={bottomSentinelRef}
+              className='inspiration-window-sentinel'
+            />
+            {bottomSpacerHeight > 0 && (
+              <div
+                className='inspiration-spacer'
+                style={{ height: bottomSpacerHeight }}
+              />
+            )}
+            <div className='inspiration-load-more'>
+              {loadingMore && <Spin size='small' />}
+            </div>
+          </Spin>
+        )}
       </div>
 
       <SideSheet

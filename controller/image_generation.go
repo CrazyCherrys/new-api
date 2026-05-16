@@ -652,10 +652,18 @@ func SubmitImageGenerationAssetToInspiration(c *gin.Context) {
 
 // GetInspirationAssets 获取公开灵感作品列表。
 func GetInspirationAssets(c *gin.Context) {
+	startedAt := time.Now()
 	pageInfo := common.GetPageQuery(c)
 	cursor := c.Query("cursor")
 	assets, total, nextCursor, hasMore, err := model.GetApprovedInspirationAssets(cursor, pageInfo.GetPageSize())
 	if err != nil {
+		common.SysLog(fmt.Sprintf(
+			"inspiration assets handler failed: cursor=%q page_size=%d elapsed_ms=%d err=%v",
+			strings.TrimSpace(cursor),
+			pageInfo.GetPageSize(),
+			time.Since(startedAt).Milliseconds(),
+			err,
+		))
 		common.ApiError(c, err)
 		return
 	}
@@ -664,6 +672,15 @@ func GetInspirationAssets(c *gin.Context) {
 		sanitizeImageCreativeListItem(asset)
 	}
 	pageInfo.SetItems(assets)
+	common.SysLog(fmt.Sprintf(
+		"inspiration assets handler: cursor=%q page_size=%d items=%d total=%d has_more=%t elapsed_ms=%d",
+		strings.TrimSpace(cursor),
+		pageInfo.GetPageSize(),
+		len(assets),
+		total,
+		hasMore,
+		time.Since(startedAt).Milliseconds(),
+	))
 	common.ApiSuccess(c, gin.H{
 		"page":        pageInfo.GetPage(),
 		"page_size":   pageInfo.GetPageSize(),

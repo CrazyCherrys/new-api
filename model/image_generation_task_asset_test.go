@@ -239,11 +239,8 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	if nextCursor != "" {
 		t.Fatalf("expected empty next cursor for single-page result, got %q", nextCursor)
 	}
-	if assets[0].Id != approvedSubmission.Id || assets[0].Prompt != approvedTask.Prompt {
+	if assets[0].Id != approvedSubmission.Id {
 		t.Fatalf("unexpected approved asset: %#v", assets[0])
-	}
-	if assets[0].DisplayName != "GPT Image" || assets[0].ModelSeries != "openai" {
-		t.Fatalf("expected model mapping metadata, got display=%q series=%q", assets[0].DisplayName, assets[0].ModelSeries)
 	}
 	if assets[0].ThumbnailUrl != approvedTask.ThumbnailUrl {
 		t.Fatalf("expected thumbnail url %q, got %q", approvedTask.ThumbnailUrl, assets[0].ThumbnailUrl)

@@ -51,10 +51,6 @@ type ImageCreativeAsset struct {
 
 type ImageCreativeListItem struct {
 	Id              int     `json:"id"`
-	ModelId         string  `json:"model_id"`
-	DisplayName     string  `json:"display_name"`
-	ModelSeries     string  `json:"model_series"`
-	Prompt          string  `json:"prompt"`
 	ImageUrl        string  `json:"image_url"`
 	ThumbnailUrl    string  `json:"thumbnail_url"`
 	CardAspectRatio float64 `json:"card_aspect_ratio"`
@@ -454,10 +450,6 @@ func buildImageCreativeListItem(asset *ImageCreativeAsset) *ImageCreativeListIte
 	}
 	return &ImageCreativeListItem{
 		Id:              asset.Id,
-		ModelId:         asset.ModelId,
-		DisplayName:     asset.DisplayName,
-		ModelSeries:     asset.ModelSeries,
-		Prompt:          asset.Prompt,
 		ImageUrl:        asset.ImageUrl,
 		ThumbnailUrl:    asset.ThumbnailUrl,
 		CardAspectRatio: asset.CardAspectRatio,
@@ -567,9 +559,8 @@ func SubmitImageAssetToCreativeSpace(userId int, taskId int) (*ImageCreativeSubm
 func publicInspirationAssetsBaseQuery() *gorm.DB {
 	return DB.Table("image_creative_submissions AS s").
 		// Keep the feed payload small; full params belong to the detail endpoint.
-		Select("s.id, s.reviewed_time, s.submitted_time, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.image_url, t.thumbnail_url, t.image_metadata").
+		Select("s.id, s.reviewed_time, s.submitted_time, t.image_url, t.thumbnail_url, t.image_metadata").
 		Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
-		Joins("LEFT JOIN model_mappings AS m ON m.request_model = t.model_id").
 		Where("s.status = ? AND t.status = ? AND t.image_url <> ?", CreativeSubmissionStatusApproved, ImageTaskStatusSuccess, "")
 }
 
@@ -629,10 +620,19 @@ func applyInspirationCursor(query *gorm.DB, cursor string) (*gorm.DB, error) {
 }
 
 func GetApprovedInspirationAssets(cursor string, num int) ([]*ImageCreativeListItem, int64, string, bool, error) {
+	queryStart := time.Now()
 	cacheKey := inspirationAssetListCacheKey(cursor, num)
 	if cacheKey != "" {
 		cached, ok, err := getInspirationAssetListCache().Get(cacheKey)
 		if err == nil && ok {
+			common.SysLog(fmt.Sprintf(
+				"inspiration assets query: cache=hit cursor=%q page_size=%d items=%d has_more=%t elapsed_ms=%d",
+				strings.TrimSpace(cursor),
+				num,
+				len(cached.Items),
+				cached.HasMore,
+				time.Since(queryStart).Milliseconds(),
+			))
 			return cloneImageCreativeListItems(cached.Items), cached.Total, cached.NextCursor, cached.HasMore, nil
 		}
 	}
@@ -679,6 +679,15 @@ func GetApprovedInspirationAssets(cursor string, num int) ([]*ImageCreativeListI
 			HasMore:    hasMore,
 		}, inspirationAssetListCacheTTL())
 	}
+
+	common.SysLog(fmt.Sprintf(
+		"inspiration assets query: cache=miss cursor=%q page_size=%d items=%d has_more=%t elapsed_ms=%d",
+		strings.TrimSpace(cursor),
+		num,
+		len(assets),
+		hasMore,
+		time.Since(queryStart).Milliseconds(),
+	))
 
 	return buildImageCreativeListItems(assets), total, nextCursor, hasMore, nil
 }
