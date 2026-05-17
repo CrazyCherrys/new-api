@@ -114,6 +114,14 @@ func inspirationAssetListCacheTTL() time.Duration {
 	return time.Duration(ttlSeconds) * time.Second
 }
 
+func inspirationAssetFirstPageCacheTTL() time.Duration {
+	ttlSeconds := common.GetEnvOrDefault("INSPIRATION_ASSET_FIRST_PAGE_CACHE_TTL", 300)
+	if ttlSeconds <= 0 {
+		ttlSeconds = 300
+	}
+	return time.Duration(ttlSeconds) * time.Second
+}
+
 func inspirationAssetDetailCacheTTL() time.Duration {
 	ttlSeconds := common.GetEnvOrDefault("INSPIRATION_ASSET_DETAIL_CACHE_TTL", 300)
 	if ttlSeconds <= 0 {
@@ -185,6 +193,13 @@ func inspirationAssetListCacheKey(cursor string, num int) string {
 		return ""
 	}
 	return fmt.Sprintf("%s:%d", strings.TrimSpace(cursor), num)
+}
+
+func inspirationAssetListCacheTTLForCursor(cursor string) time.Duration {
+	if strings.TrimSpace(cursor) == "" {
+		return inspirationAssetFirstPageCacheTTL()
+	}
+	return inspirationAssetListCacheTTL()
 }
 
 func inspirationAssetDetailCacheKey(id int) string {
@@ -685,7 +700,7 @@ func GetApprovedInspirationAssets(cursor string, num int) ([]*ImageCreativeListI
 			Total:      total,
 			NextCursor: nextCursor,
 			HasMore:    hasMore,
-		}, inspirationAssetListCacheTTL())
+		}, inspirationAssetListCacheTTLForCursor(cursor))
 	}
 
 	common.SysLog(fmt.Sprintf(
