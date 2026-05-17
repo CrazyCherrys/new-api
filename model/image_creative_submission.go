@@ -642,14 +642,24 @@ func GetApprovedInspirationAssets(cursor string, num int) ([]*ImageCreativeListI
 		limit = 24
 	}
 
-	query, err := applyInspirationCursor(publicInspirationAssetsBaseQuery(), cursor)
+	subQuery, err := applyInspirationCursor(
+		DB.Table("image_creative_submissions AS s").
+			Select("s.id, s.task_id, s.reviewed_time, s.submitted_time").
+			Where("s.status = ?", CreativeSubmissionStatusApproved),
+		cursor,
+	)
 	if err != nil {
 		return nil, 0, "", false, err
 	}
 
-	if err := query.
+	subQuery = subQuery.
 		Order("s.reviewed_time DESC, s.submitted_time DESC, s.id DESC").
-		Limit(limit + 1).
+		Limit(limit + 1)
+
+	if err := DB.Table("(?) AS feed", subQuery).
+		Select("feed.id, feed.reviewed_time, feed.submitted_time, COALESCE(NULLIF(t.thumbnail_url, ''), t.image_url) AS thumbnail_url, t.image_metadata").
+		Joins("JOIN image_generation_tasks AS t ON t.id = feed.task_id").
+		Where("t.status = ? AND t.image_url <> ?", ImageTaskStatusSuccess, "").
 		Scan(&assets).Error; err != nil {
 		return nil, 0, "", false, err
 	}
