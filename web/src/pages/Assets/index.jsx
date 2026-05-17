@@ -164,7 +164,8 @@ const Assets = () => {
   );
 
   const selectedInspirationStatusMeta = useMemo(
-    () => getInspirationStatusMeta(selectedAsset?.inspiration_submission_status),
+    () =>
+      getInspirationStatusMeta(selectedAsset?.inspiration_submission_status),
     [getInspirationStatusMeta, selectedAsset?.inspiration_submission_status],
   );
 
@@ -174,11 +175,26 @@ const Assets = () => {
     [assets, selectedAssetIds],
   );
 
+  const visibleAssetIds = useMemo(
+    () => assets.map((asset) => asset.task_id || asset.id),
+    [assets],
+  );
+
   const selectedCount = selectedAssetIds.size;
   const hasSelectedAssets = selectedCount > 0;
+  const visibleSelectedCount = useMemo(
+    () =>
+      visibleAssetIds.reduce(
+        (count, id) => count + (selectedAssetIds.has(id) ? 1 : 0),
+        0,
+      ),
+    [selectedAssetIds, visibleAssetIds],
+  );
   const allVisibleSelected =
-    assets.length > 0 &&
-    assets.every((asset) => selectedAssetIds.has(asset.task_id || asset.id));
+    visibleAssetIds.length > 0 &&
+    visibleSelectedCount === visibleAssetIds.length;
+  const partiallyVisibleSelected =
+    visibleSelectedCount > 0 && !allVisibleSelected;
 
   const masonryColumnCount = useMemo(() => {
     if (!shellWidth) return 1;
@@ -383,11 +399,16 @@ const Assets = () => {
     });
   };
 
-  const selectAllVisibleAssets = () => {
+  const toggleAllVisibleAssets = () => {
     setSelectedAssetIds((prev) => {
       const next = new Set(prev);
-      assets.forEach((asset) => {
-        next.add(asset.task_id || asset.id);
+      const shouldSelect = visibleAssetIds.some((id) => !next.has(id));
+      visibleAssetIds.forEach((id) => {
+        if (shouldSelect) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
       });
       return next;
     });
@@ -433,20 +454,26 @@ const Assets = () => {
     try {
       const results = await Promise.allSettled(
         selectedAssets.map((asset) =>
-          API.delete(`/api/image-generation/tasks/${asset.task_id || asset.id}`),
+          API.delete(
+            `/api/image-generation/tasks/${asset.task_id || asset.id}`,
+          ),
         ),
       );
       const successIds = [];
       const failedCount = results.reduce((count, result, index) => {
         if (result.status === 'fulfilled' && result.value?.data?.success) {
-          successIds.push(selectedAssets[index].task_id || selectedAssets[index].id);
+          successIds.push(
+            selectedAssets[index].task_id || selectedAssets[index].id,
+          );
           return count;
         }
         return count + 1;
       }, 0);
       if (successIds.length > 0) {
         setAssets((prev) =>
-          prev.filter((asset) => !successIds.includes(asset.task_id || asset.id)),
+          prev.filter(
+            (asset) => !successIds.includes(asset.task_id || asset.id),
+          ),
         );
         setTotal((prev) => Math.max(0, prev - successIds.length));
         setSelectedAssetIds((prev) => {
@@ -456,7 +483,9 @@ const Assets = () => {
         });
       }
       if (successIds.length > 0) {
-        showSuccess(t('删除成功 {{count}} 个任务', { count: successIds.length }));
+        showSuccess(
+          t('删除成功 {{count}} 个任务', { count: successIds.length }),
+        );
       }
       if (failedCount > 0) {
         showError(t('删除失败 {{count}} 个任务', { count: failedCount }));
@@ -538,7 +567,10 @@ const Assets = () => {
   };
 
   const submitToInspiration = async () => {
-    if (!selectedAsset?.task_id || selectedAsset.inspiration_submission_status) {
+    if (
+      !selectedAsset?.task_id ||
+      selectedAsset.inspiration_submission_status
+    ) {
       return;
     }
     const taskId = selectedAsset.task_id;
@@ -781,6 +813,17 @@ const Assets = () => {
           align-items: center;
           gap: 8px;
           flex-wrap: wrap;
+        }
+        .assets-selection-actions {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+          min-height: 32px;
+          padding: 0 2px;
+        }
+        .assets-selection-checkbox {
+          white-space: nowrap;
         }
         .assets-masonry {
           column-gap: 4px;
@@ -1033,8 +1076,13 @@ const Assets = () => {
             flex: 1 1 100%;
           }
           .assets-filter-actions,
-          .assets-filter-actions .semi-button {
+          .assets-filter-actions .semi-button,
+          .assets-selection-actions {
             width: 100%;
+          }
+          .assets-selection-actions .semi-button,
+          .assets-selection-actions .semi-tag {
+            width: auto;
           }
           .assets-masonry {
             column-gap: 4px;
@@ -1067,18 +1115,10 @@ const Assets = () => {
             <Button
               type={hasSelectedAssets ? 'primary' : 'tertiary'}
               icon={<IconTick />}
-              onClick={() => {
-                if (allVisibleSelected) {
-                  clearSelectedAssets();
-                } else {
-                  selectAllVisibleAssets();
-                }
-              }}
+              onClick={toggleAllVisibleAssets}
               disabled={assets.length === 0}
             >
-              {allVisibleSelected
-                ? t('取消全选')
-                : t('全选')}
+              {allVisibleSelected ? t('取消全选') : t('全选')}
             </Button>
             <Button icon={<IconRefresh />} onClick={refreshAssets}>
               {t('刷新')}
@@ -1173,6 +1213,28 @@ const Assets = () => {
               {t('重置')}
             </Button>
           </div>
+          <div className='assets-selection-actions'>
+            <Checkbox
+              className='assets-selection-checkbox'
+              checked={allVisibleSelected}
+              indeterminate={partiallyVisibleSelected}
+              disabled={assets.length === 0}
+              onChange={toggleAllVisibleAssets}
+            >
+              {allVisibleSelected ? t('取消全选') : t('全选当前页')}
+            </Checkbox>
+            <Button
+              size='small'
+              type='tertiary'
+              disabled={!hasSelectedAssets}
+              onClick={clearSelectedAssets}
+            >
+              {t('清空已选')}
+            </Button>
+            <Tag color={hasSelectedAssets ? 'blue' : 'grey'}>
+              {t('已选 {{count}} 项', { count: selectedCount })}
+            </Tag>
+          </div>
         </div>
 
         {hasSelectedAssets && (
@@ -1181,7 +1243,11 @@ const Assets = () => {
               <span>
                 {t('已选择')} <strong>{selectedCount}</strong> {t('个')}
               </span>
-              <Button size='small' type='tertiary' onClick={clearSelectedAssets}>
+              <Button
+                size='small'
+                type='tertiary'
+                onClick={clearSelectedAssets}
+              >
                 {t('取消选择')}
               </Button>
             </div>
@@ -1304,7 +1370,9 @@ const Assets = () => {
                   type='primary'
                   icon={<IconImage />}
                   loading={inspirationSubmitting}
-                  disabled={Boolean(selectedAsset.inspiration_submission_status)}
+                  disabled={Boolean(
+                    selectedAsset.inspiration_submission_status,
+                  )}
                   onClick={submitToInspiration}
                 >
                   {t('提交到灵感')}
