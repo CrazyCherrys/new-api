@@ -163,6 +163,7 @@ type SyncTaskQueryParams struct {
 	TaskID         string
 	UserID         string
 	Action         string
+	ActionIn       []string
 	Status         string
 	StartTimestamp int64
 	EndTimestamp   int64
@@ -221,6 +222,9 @@ func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQ
 	if queryParams.Action != "" {
 		query = query.Where("action = ?", queryParams.Action)
 	}
+	if len(queryParams.ActionIn) > 0 {
+		query = query.Where("action IN ?", queryParams.ActionIn)
+	}
 	if queryParams.Status != "" {
 		query = query.Where("status = ?", queryParams.Status)
 	}
@@ -269,6 +273,9 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	}
 	if queryParams.Action != "" {
 		query = query.Where("action = ?", queryParams.Action)
+	}
+	if len(queryParams.ActionIn) > 0 {
+		query = query.Where("action IN ?", queryParams.ActionIn)
 	}
 	if queryParams.Status != "" {
 		query = query.Where("status = ?", queryParams.Status)
@@ -457,6 +464,9 @@ func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 	if queryParams.Action != "" {
 		query = query.Where("action = ?", queryParams.Action)
 	}
+	if len(queryParams.ActionIn) > 0 {
+		query = query.Where("action IN ?", queryParams.ActionIn)
+	}
 	if queryParams.Status != "" {
 		query = query.Where("status = ?", queryParams.Status)
 	}
@@ -479,6 +489,9 @@ func TaskCountAllUserTask(userId int, queryParams SyncTaskQueryParams) int64 {
 	}
 	if queryParams.Action != "" {
 		query = query.Where("action = ?", queryParams.Action)
+	}
+	if len(queryParams.ActionIn) > 0 {
+		query = query.Where("action IN ?", queryParams.ActionIn)
 	}
 	if queryParams.Status != "" {
 		query = query.Where("status = ?", queryParams.Status)

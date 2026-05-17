@@ -172,6 +172,14 @@ const ModelMappingTable = ({
       return endpointMap[endpoint] || endpoint || '-';
     }
 
+    if (modelType === 3) {
+      const endpointMap = {
+        'openai-video-generation': 'OpenAI Video Generations (/v1/video/generations)',
+        'openai-video': 'OpenAI Videos (Sora, /v1/videos)',
+      };
+      return endpointMap[endpoint] || endpoint || '-';
+    }
+
     const endpointMap = {
       openai: 'OpenAI',
       dalle: 'OpenAI',

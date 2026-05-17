@@ -26,11 +26,9 @@ import {
   Upload,
   Spin,
   Typography,
-  Image,
   InputNumber,
   TextArea,
   Pagination,
-  Empty,
 } from '@douyinfe/semi-ui';
 import {
   IconPlus,
@@ -45,6 +43,7 @@ import {
 import { API, showError, showSuccess } from '../../helpers';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
 import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
+import VideoGenerationTaskModal from '../../components/VideoGenerationTaskModal';
 
 const { Text } = Typography;
 
@@ -56,6 +55,8 @@ const DEFAULT_IMAGE_CAPABILITIES = [
 ];
 const DEFAULT_POLLING_INTERVAL_SECONDS = 5;
 const DEFAULT_MAX_BATCH_TASKS = 10;
+const GENERATION_MODE_IMAGE = 'image';
+const GENERATION_MODE_VIDEO = 'video';
 
 const normalizeImageCapabilities = (raw) => {
   if (Array.isArray(raw)) {
@@ -98,6 +99,7 @@ const ImageGeneration = () => {
 
   // LocalStorage keys
   const STORAGE_KEYS = {
+    MODE: 'imageGen_generationMode',
     SERIES: 'imageGen_selectedSeries',
     MODEL: 'imageGen_selectedModel',
     ASPECT_RATIO: 'imageGen_aspectRatio',
@@ -129,6 +131,9 @@ const ImageGeneration = () => {
   };
 
   const [loading, setLoading] = useState(false);
+  const [generationMode, setGenerationMode] = useState(() =>
+    getStoredValue(STORAGE_KEYS.MODE, GENERATION_MODE_IMAGE),
+  );
   const [modelSeries, setModelSeries] = useState([]);
   const [models, setModels] = useState([]);
   const [filteredModels, setFilteredModels] = useState([]);
@@ -152,7 +157,6 @@ const ImageGeneration = () => {
   const [quantity, setQuantity] = useState(() =>
     getStoredNumber(STORAGE_KEYS.QUANTITY, 1),
   );
-  const [generatedImages, setGeneratedImages] = useState([]);
   const [generating, setGenerating] = useState(false);
 
   const [availableAspectRatios, setAvailableAspectRatios] = useState([]);
@@ -201,13 +205,18 @@ const ImageGeneration = () => {
   const hasActiveTasks = tasks.some(
     (task) => task.status === 'pending' || task.status === 'generating',
   );
+  const isVideoMode = generationMode === GENERATION_MODE_VIDEO;
   const canUseTaskCursorPagination = taskCursorPaginationSupported(
-    taskListStateRef.current || {
-      sortBy: taskSortBy,
-    },
+    !isVideoMode
+      ? taskListStateRef.current || {
+          sortBy: taskSortBy,
+        }
+      : null,
   );
   const showsReliableTaskTotal = !canUseTaskCursorPagination;
-  const hasNextTaskPage = taskHasMore;
+  const hasNextTaskPage = isVideoMode
+    ? taskPage * taskPageSize < taskTotal
+    : taskHasMore;
 
   taskListStateRef.current = {
     page: taskPage,
@@ -273,10 +282,7 @@ const ImageGeneration = () => {
   };
 
   useEffect(() => {
-    loadDrawingModels();
     loadWorkerSettings();
-    connectSSE();
-
     return () => {
       disconnectSSE();
       stopPolling();
@@ -284,12 +290,51 @@ const ImageGeneration = () => {
   }, []);
 
   useEffect(() => {
+    loadModelsByMode();
+    const queryTaskId = new URLSearchParams(location.search).get('task_id');
+    if (!queryTaskId) {
+      setSelectedTask(null);
+      setTaskModalVisible(false);
+    }
+    setSelectedTaskIds(new Set());
+    setTaskPage(1);
+    setTaskTotal(0);
+    setTaskStatusFilter('');
+    setTaskModelFilter('');
+    setTaskTimeFilter('');
+    setTaskSortBy('created_time');
+    setTaskSortOrder('desc');
+    setTaskHasMore(false);
+    setTaskNextCursor('');
+    taskCursorHistoryRef.current = [''];
+    disconnectSSE();
+    stopPolling();
+    if (!isVideoMode) {
+      connectSSE();
+    } else {
+      startPolling();
+    }
+    return () => {
+      disconnectSSE();
+      stopPolling();
+    };
+  }, [generationMode, location.search]);
+
+  useEffect(() => {
     if (!pollingTimerRef.current) {
       return;
     }
     stopPolling();
     startPolling();
-  }, [pollingIntervalSeconds]);
+  }, [pollingIntervalSeconds, generationMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.MODE, generationMode);
+    } catch (e) {
+      console.error('Failed to save generationMode to localStorage:', e);
+    }
+  }, [generationMode]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -321,12 +366,30 @@ const ImageGeneration = () => {
 
     const loadTaskDetail = async () => {
       try {
-        const res = await API.get(`/api/image-generation/tasks/${taskId}`);
-        if (res.data.success) {
-          setSelectedTask(res.data.data);
-          setTaskModalVisible(true);
-        } else {
-          showError(res.data.message || t('加载任务详情失败'));
+        const tryVideoFirst = async () => {
+          const videoRes = await API.get(`/api/video-generation/tasks/${taskId}`);
+          if (videoRes.data.success) {
+            setGenerationMode(GENERATION_MODE_VIDEO);
+            setSelectedTask(videoRes.data.data);
+            setTaskModalVisible(true);
+            return true;
+          }
+          return false;
+        };
+
+        const tryImage = async () => {
+          const imageRes = await API.get(`/api/image-generation/tasks/${taskId}`);
+          if (imageRes.data.success) {
+            setGenerationMode(GENERATION_MODE_IMAGE);
+            setSelectedTask(imageRes.data.data);
+            setTaskModalVisible(true);
+            return true;
+          }
+          return false;
+        };
+
+        if (!(await tryVideoFirst()) && !(await tryImage())) {
+          showError(t('加载任务详情失败'));
         }
       } catch (error) {
         showError(error.message || t('加载任务详情失败'));
@@ -362,21 +425,23 @@ const ImageGeneration = () => {
     taskSortOrder,
   ]);
 
-  const loadDrawingModels = async () => {
+  const loadModelsByMode = async () => {
     setLoading(true);
     try {
-      const res = await API.get('/api/image-generation/models');
+      const res = await API.get(
+        isVideoMode ? '/api/video-generation/models' : '/api/image-generation/models',
+      );
       if (res.data.success) {
-        const drawingModels = (res.data.data || []).map((model) => ({
+        const nextModels = (res.data.data || []).map((model) => ({
           ...model,
           image_capabilities: normalizeImageCapabilities(
             model.image_capabilities,
           ),
         }));
-        setModels(drawingModels);
+        setModels(nextModels);
 
         const seriesSet = new Set();
-        drawingModels.forEach((model) => {
+        nextModels.forEach((model) => {
           if (model.model_series) {
             seriesSet.add(model.model_series);
           }
@@ -497,7 +562,10 @@ const ImageGeneration = () => {
         params.sort_order = queryState.sortOrder;
       }
 
-      const res = await API.get('/api/image-generation/tasks', { params });
+      const res = await API.get(
+        isVideoMode ? '/api/video-generation/tasks' : '/api/image-generation/tasks',
+        { params },
+      );
       if (requestSeq !== taskListRequestSeqRef.current) {
         return;
       }
@@ -598,6 +666,9 @@ const ImageGeneration = () => {
     );
 
     try {
+      if (isVideoMode) {
+        return;
+      }
       const res = await API.get('/api/image-generation/tasks/updates', {
         params: {
           completed_since: completedSince,
@@ -633,11 +704,15 @@ const ImageGeneration = () => {
     setTaskModalVisible(true);
 
     try {
-      const res = await API.get(`/api/image-generation/tasks/${task.id}`);
+      const detailUrl = isVideoMode
+        ? `/api/video-generation/tasks/${task.task_id || task.id}`
+        : `/api/image-generation/tasks/${task.id}`;
+      const res = await API.get(detailUrl);
       if (requestSeq !== taskDetailRequestSeqRef.current) {
         return;
       }
       if (res.data.success) {
+        setSelectedTask(res.data.data);
         updateTaskInList(res.data.data);
       } else {
         showError(res.data.message || t('加载任务详情失败'));
@@ -689,6 +764,10 @@ const ImageGeneration = () => {
 
     setDeletingTasks(true);
     try {
+      if (isVideoMode) {
+        showError(t('视频任务当前不支持批量删除'));
+        return;
+      }
       const deletePromises = Array.from(selectedTaskIds).map((taskId) =>
         API.delete(`/api/image-generation/tasks/${taskId}`),
       );
@@ -730,6 +809,9 @@ const ImageGeneration = () => {
 
   // 连接 SSE
   const connectSSE = () => {
+    if (isVideoMode) {
+      return;
+    }
     try {
       const eventSource = new EventSource('/api/image-generation/sse');
 
@@ -1020,6 +1102,65 @@ const ImageGeneration = () => {
   };
 
   const handleGenerate = async () => {
+    if (isVideoMode) {
+      if (!selectedModel) {
+        showError(t('请选择模型'));
+        return;
+      }
+      if (referenceImages.length === 0) {
+        showError(t('请上传参考图'));
+        return;
+      }
+      setGenerating(true);
+      try {
+        const imagePromises = referenceImages.map((file) => {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file.fileInstance);
+          });
+        });
+        const base64Images = await Promise.all(imagePromises);
+        const normalizedReferenceImages =
+          selectedModelData?.request_endpoint === 'openai-video'
+            ? base64Images.slice(0, 1)
+            : base64Images;
+        const taskPayload = {
+          model_id: selectedModel,
+          prompt: inspiration.trim(),
+          request_endpoint: selectedModelData?.request_endpoint,
+          reference_images: normalizedReferenceImages,
+          duration: 5,
+          size:
+            aspectRatio === '16:9'
+              ? '1280x720'
+              : aspectRatio === '9:16'
+                ? '720x1280'
+                : '1024x1024',
+        };
+        const res = await API.post('/api/video-generation/tasks', taskPayload);
+        if (!res.data.success) {
+          showError(res.data.message || t('创建视频任务失败'));
+          return;
+        }
+        const createdTask = res.data.data;
+        showSuccess(t('视频任务已创建'));
+        setTasks((prevTasks) => [createdTask, ...prevTasks].slice(0, taskPageSize));
+        setTaskTotal((prev) => prev + 1);
+        return;
+      } catch (error) {
+        if (error.response?.data?.message) {
+          showError(error.response.data.message);
+        } else {
+          showError(error.message || t('创建视频任务失败'));
+        }
+        return;
+      } finally {
+        setGenerating(false);
+      }
+    }
+
     const supportsImageGeneration = modelSupportsCapability(
       selectedModelData,
       IMAGE_CAPABILITY_GENERATION,
@@ -1384,13 +1525,29 @@ const ImageGeneration = () => {
   const canGenerate =
     !!selectedModel &&
     !!selectedModelData &&
-    !!inspiration.trim() &&
-    (!requiresReferenceImage || referenceImages.length > 0);
+    (isVideoMode
+      ? referenceImages.length > 0
+      : !!inspiration.trim() && (!requiresReferenceImage || referenceImages.length > 0));
 
   const renderLeftPanel = () => (
     <div style={styles.leftPanel}>
       <div style={styles.leftContent}>
         <Spin spinning={loading}>
+          <div style={styles.fieldGroup}>
+            <span style={styles.label}>{t('生成模式')}</span>
+            <Select
+              style={{ width: '100%' }}
+              value={generationMode}
+              onChange={setGenerationMode}
+            >
+              <Select.Option value={GENERATION_MODE_IMAGE}>
+                {t('图片')}
+              </Select.Option>
+              <Select.Option value={GENERATION_MODE_VIDEO}>
+                {t('视频')}
+              </Select.Option>
+            </Select>
+          </div>
           <div style={styles.fieldGroup}>
             <span style={styles.label}>{t('模型系列')}</span>
             <Select
@@ -1470,9 +1627,11 @@ const ImageGeneration = () => {
             </div>
           </div>
 
-          {selectedModelSupportsEditing && (
+          {(isVideoMode || selectedModelSupportsEditing) && (
             <div style={styles.fieldGroup}>
-              <span style={styles.label}>{t('参考图像')}</span>
+              <span style={styles.label}>
+                {isVideoMode ? t('参考图') : t('参考图像')}
+              </span>
               <div
                 style={{
                   display: 'flex',
@@ -1520,7 +1679,7 @@ const ImageGeneration = () => {
             </div>
           )}
 
-          {selectedModelSupportsMaskEditing && (
+          {!isVideoMode && selectedModelSupportsMaskEditing && (
             <div style={styles.fieldGroup}>
               <span style={styles.label}>{t('遮罩图像')}</span>
               <div
@@ -1606,7 +1765,9 @@ const ImageGeneration = () => {
             </Select>
           </div>
           <div style={styles.paramItem}>
-            <span style={styles.paramLabel}>{t('分辨率')}</span>
+            <span style={styles.paramLabel}>
+              {isVideoMode ? t('输出尺寸') : t('分辨率')}
+            </span>
             <Select
               style={{ width: '100%' }}
               value={resolution}
@@ -1623,12 +1784,17 @@ const ImageGeneration = () => {
             </Select>
           </div>
           <div style={styles.paramItem}>
-            <span style={styles.paramLabel}>{t('生成数量')}</span>
+            <span style={styles.paramLabel}>
+              {isVideoMode ? t('任务数') : t('生成数量')}
+            </span>
             <InputNumber
               min={1}
-              max={DEFAULT_MAX_BATCH_TASKS}
-              value={quantity}
-              onChange={(val) => setQuantity(normalizeTaskCount(val))}
+              max={isVideoMode ? 1 : DEFAULT_MAX_BATCH_TASKS}
+              value={isVideoMode ? 1 : quantity}
+              onChange={(val) =>
+                setQuantity(isVideoMode ? 1 : normalizeTaskCount(val))
+              }
+              disabled={isVideoMode}
               style={{ width: '100%' }}
             />
           </div>
@@ -1648,7 +1814,7 @@ const ImageGeneration = () => {
           ) : (
             <>
               <IconImage size='small' />
-              {t('生成')}
+              {isVideoMode ? t('生成视频') : t('生成')}
             </>
           )}
         </button>
@@ -1919,27 +2085,40 @@ const ImageGeneration = () => {
 
       <div style={styles.rightContent}>{renderHistoryContent()}</div>
 
-      <ImageGenerationTaskModal
-        visible={taskModalVisible}
-        onClose={() => {
-          taskDetailRequestSeqRef.current += 1;
-          setTaskModalVisible(false);
-          setSelectedTask(null);
-        }}
-        task={selectedTask}
-        onRetrySuccess={(newTask) => {
-          updateTaskInList(newTask);
-        }}
-        onDeleted={(deletedId) => {
-          setTasks((prev) => prev.filter((t) => t.id !== deletedId));
-          setTaskTotal((prev) => Math.max(0, prev - 1));
-          setSelectedTaskIds((prev) => {
-            const next = new Set(prev);
-            next.delete(deletedId);
-            return next;
-          });
-        }}
-      />
+      {!isVideoMode && (
+        <ImageGenerationTaskModal
+          visible={taskModalVisible}
+          onClose={() => {
+            taskDetailRequestSeqRef.current += 1;
+            setTaskModalVisible(false);
+            setSelectedTask(null);
+          }}
+          task={selectedTask}
+          onRetrySuccess={(newTask) => {
+            updateTaskInList(newTask);
+          }}
+          onDeleted={(deletedId) => {
+            setTasks((prev) => prev.filter((t) => t.id !== deletedId));
+            setTaskTotal((prev) => Math.max(0, prev - 1));
+            setSelectedTaskIds((prev) => {
+              const next = new Set(prev);
+              next.delete(deletedId);
+              return next;
+            });
+          }}
+        />
+      )}
+      {isVideoMode && (
+        <VideoGenerationTaskModal
+          visible={taskModalVisible}
+          onClose={() => {
+            taskDetailRequestSeqRef.current += 1;
+            setTaskModalVisible(false);
+            setSelectedTask(null);
+          }}
+          task={selectedTask}
+        />
+      )}
     </div>
   );
 

@@ -30,6 +30,12 @@ import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../../../helpers';
 
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
+const DEFAULT_MODEL_ENDPOINTS = {
+  1: 'openai',
+  2: 'openai',
+  3: 'openai-video-generation',
+  4: 'openai',
+};
 
 const EditModelMappingModal = ({
   visible,
@@ -79,7 +85,18 @@ const EditModelMappingModal = ({
           { value: 'gemini', label: 'Gemini' },
           { value: 'openai_mod', label: 'OpenAI魔改' },
         ]
-      : [
+      : selectedModelType === 3
+        ? [
+            {
+              value: 'openai-video-generation',
+              label: 'OpenAI Video Generations (/v1/video/generations)',
+            },
+            {
+              value: 'openai-video',
+              label: 'OpenAI Videos (Sora, /v1/videos)',
+            },
+          ]
+        : [
           { value: 'openai', label: 'OpenAI (/v1/images)' },
           { value: 'gemini', label: 'Gemini' },
           { value: 'openai_mod', label: 'OpenAI魔改' },
@@ -166,7 +183,7 @@ const EditModelMappingModal = ({
           description: '',
           status: true,
           priority: 0,
-          request_endpoint: 'openai',
+          request_endpoint: DEFAULT_MODEL_ENDPOINTS[1],
           resolutions: [],
           aspect_ratios: [],
           image_capabilities: [],
@@ -320,8 +337,12 @@ const EditModelMappingModal = ({
             setSelectedModelType(Number(value) || 1);
             const currentEndpoint = formApi?.getValue('request_endpoint');
             if (Number(value) === 2) {
-              if (!currentEndpoint) {
-                formApi?.setValue('request_endpoint', 'openai');
+              if (
+                !['openai', 'openai-response', 'gemini', 'openai_mod'].includes(
+                  currentEndpoint,
+                )
+              ) {
+                formApi?.setValue('request_endpoint', DEFAULT_MODEL_ENDPOINTS[2]);
               }
               const currentCapabilities =
                 formApi?.getValue('image_capabilities');
@@ -334,9 +355,22 @@ const EditModelMappingModal = ({
                   DEFAULT_IMAGE_CAPABILITIES,
                 );
               }
+            } else if (Number(value) === 3) {
+              if (
+                !['openai-video-generation', 'openai-video'].includes(
+                  currentEndpoint,
+                )
+              ) {
+                formApi?.setValue('request_endpoint', DEFAULT_MODEL_ENDPOINTS[3]);
+              }
             } else {
-              if (currentEndpoint === 'openai-response') {
-                formApi?.setValue('request_endpoint', 'openai');
+              if (
+                !['openai', 'gemini', 'openai_mod'].includes(currentEndpoint)
+              ) {
+                formApi?.setValue(
+                  'request_endpoint',
+                  DEFAULT_MODEL_ENDPOINTS[Number(value)] || 'openai',
+                );
               }
               formApi?.setValue('image_capabilities', []);
             }

@@ -83,6 +83,15 @@ func SetApiRouter(router *gin.Engine) {
 			imageGenRoute.GET("/sse", controller.ImageGenerationSSE)
 		}
 
+		videoGenRoute := apiRouter.Group("/video-generation")
+		videoGenRoute.Use(middleware.UserAuth())
+		{
+			videoGenRoute.GET("/models", controller.GetVideoGenerationModels)
+			videoGenRoute.POST("/tasks", controller.CreateVideoGenerationTask)
+			videoGenRoute.GET("/tasks", controller.GetVideoGenerationTasks)
+			videoGenRoute.GET("/tasks/:id", controller.GetVideoGenerationTaskDetail)
+		}
+
 		userRoute := apiRouter.Group("/user")
 		{
 			userRoute.POST("/register", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.Register)

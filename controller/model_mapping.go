@@ -6,25 +6,32 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
 
-func normalizeImageModelEndpoint(endpoint string) string {
+func normalizeModelMappingEndpoint(endpoint string) string {
 	switch strings.ToLower(strings.TrimSpace(endpoint)) {
 	case "dalle":
 		return "openai"
+	case "openai-video-generations", "video-generation", "video-generations":
+		return string(constant.EndpointTypeOpenAIVideoGeneration)
+	case "openai-videos", "sora", "video":
+		return string(constant.EndpointTypeOpenAIVideo)
 	default:
 		return strings.ToLower(strings.TrimSpace(endpoint))
 	}
 }
 
-// validateImageModelEndpoint 校验绘画模型的请求端点
-func validateImageModelEndpoint(modelType int, endpoint string) error {
-	if modelType == 2 {
-		if endpoint == "" {
-			return errors.New("绘画模型必须指定请求端点")
-		}
+// validateModelMappingEndpoint 校验模型映射的请求端点
+func validateModelMappingEndpoint(modelType int, endpoint string) error {
+	if endpoint == "" {
+		return errors.New("请求端点不能为空")
+	}
+
+	switch modelType {
+	case 2:
 		validEndpoints := []string{"openai", "openai-response", "gemini", "openai_mod"}
 		for _, valid := range validEndpoints {
 			if endpoint == valid {
@@ -32,8 +39,37 @@ func validateImageModelEndpoint(modelType int, endpoint string) error {
 			}
 		}
 		return errors.New("请求端点必须是 openai、openai-response、gemini 或 openai_mod 之一")
+	case 3:
+		validEndpoints := []string{string(constant.EndpointTypeOpenAIVideoGeneration), string(constant.EndpointTypeOpenAIVideo)}
+		for _, valid := range validEndpoints {
+			if endpoint == valid {
+				return nil
+			}
+		}
+		return errors.New("请求端点必须是 openai-video-generation 或 openai-video 之一")
+	default:
+		return nil
 	}
-	return nil
+}
+
+func defaultModelMappingEndpoint(modelType int) string {
+	switch modelType {
+	case 3:
+		return string(constant.EndpointTypeOpenAIVideoGeneration)
+	default:
+		return "openai"
+	}
+}
+
+func normalizeOrDefaultModelMappingEndpoint(modelType int, endpoint string) string {
+	normalized := normalizeModelMappingEndpoint(endpoint)
+	if normalized == "" {
+		return defaultModelMappingEndpoint(modelType)
+	}
+	if err := validateModelMappingEndpoint(modelType, normalized); err == nil {
+		return normalized
+	}
+	return defaultModelMappingEndpoint(modelType)
 }
 
 func validateImageModelCapabilities(modelType int, raw string) (string, error) {
@@ -125,14 +161,10 @@ func CreateModelMapping(c *gin.Context) {
 		return
 	}
 
-	if mm.RequestEndpoint == "" {
-		common.ApiErrorMsg(c, "请求端点不能为空")
-		return
-	}
-	mm.RequestEndpoint = normalizeImageModelEndpoint(mm.RequestEndpoint)
+	mm.RequestEndpoint = normalizeOrDefaultModelMappingEndpoint(mm.ModelType, mm.RequestEndpoint)
 
-	// 校验绘画模型的请求端点
-	if err := validateImageModelEndpoint(mm.ModelType, mm.RequestEndpoint); err != nil {
+	// 校验模型的请求端点
+	if err := validateModelMappingEndpoint(mm.ModelType, mm.RequestEndpoint); err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
@@ -186,14 +218,10 @@ func UpdateModelMapping(c *gin.Context) {
 		return
 	}
 
-	if mm.RequestEndpoint == "" {
-		common.ApiErrorMsg(c, "请求端点不能为空")
-		return
-	}
-	mm.RequestEndpoint = normalizeImageModelEndpoint(mm.RequestEndpoint)
+	mm.RequestEndpoint = normalizeOrDefaultModelMappingEndpoint(mm.ModelType, mm.RequestEndpoint)
 
-	// 校验绘画模型的请求端点
-	if err := validateImageModelEndpoint(mm.ModelType, mm.RequestEndpoint); err != nil {
+	// 校验模型的请求端点
+	if err := validateModelMappingEndpoint(mm.ModelType, mm.RequestEndpoint); err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
