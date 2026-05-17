@@ -91,6 +91,51 @@ const isDefaultTaskViewState = (state) =>
   state.sortBy === 'created_time' &&
   state.sortOrder === 'desc';
 
+const areTasksVisuallyEquivalent = (oldTask, newTask) =>
+  !!oldTask &&
+  !!newTask &&
+  oldTask.id === newTask.id &&
+  oldTask.status === newTask.status &&
+  oldTask.image_url === newTask.image_url &&
+  oldTask.thumbnail_url === newTask.thumbnail_url &&
+  oldTask.completed_time === newTask.completed_time &&
+  oldTask.started_time === newTask.started_time &&
+  oldTask.progress === newTask.progress &&
+  oldTask.error_message === newTask.error_message;
+
+const mergeTaskCollections = (baseTasks, incomingTasks, maxItems) => {
+  const mergedById = new Map((baseTasks || []).map((task) => [task.id, task]));
+  const newFrontIds = [];
+
+  (incomingTasks || []).forEach((task) => {
+    if (!task?.id) {
+      return;
+    }
+    const existing = mergedById.get(task.id);
+    mergedById.set(task.id, existing ? { ...existing, ...task } : task);
+    if (!existing) {
+      newFrontIds.push(task.id);
+    }
+  });
+
+  const frontIdSet = new Set(newFrontIds);
+  const mergedTasks = [
+    ...newFrontIds.map((id) => mergedById.get(id)),
+    ...(baseTasks || [])
+      .map((task) => {
+        if (!task?.id || frontIdSet.has(task.id)) {
+          return null;
+        }
+        return mergedById.get(task.id) || task;
+      })
+      .filter(Boolean),
+  ];
+  if (Number.isFinite(maxItems) && maxItems > 0) {
+    return mergedTasks.slice(0, maxItems);
+  }
+  return mergedTasks;
+};
+
 const ImageGeneration = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -497,16 +542,7 @@ const ImageGeneration = () => {
           if (prev.length === newItems.length) {
             const unchanged = newItems.every((newTask, i) => {
               const old = prev[i];
-              return (
-                old &&
-                old.id === newTask.id &&
-                old.status === newTask.status &&
-                old.image_url === newTask.image_url &&
-                old.thumbnail_url === newTask.thumbnail_url &&
-                old.completed_time === newTask.completed_time &&
-                old.progress === newTask.progress &&
-                old.error_message === newTask.error_message
-              );
+              return areTasksVisuallyEquivalent(old, newTask);
             });
             if (unchanged) return prev;
           }
@@ -548,31 +584,7 @@ const ImageGeneration = () => {
     if (!Array.isArray(updates) || updates.length === 0) {
       return;
     }
-    setTasks((prevTasks) => {
-      const existingById = new Map(prevTasks.map((task) => [task.id, task]));
-      const nextTasks = [...prevTasks];
-
-      updates.forEach((update) => {
-        if (!update?.id) {
-          return;
-        }
-        const existing = existingById.get(update.id);
-        if (!existing) {
-          nextTasks.unshift(update);
-          existingById.set(update.id, update);
-          return;
-        }
-        const merged = {
-          ...existing,
-          ...update,
-        };
-        existingById.set(update.id, merged);
-      });
-
-      return nextTasks
-        .map((task) => existingById.get(task.id) || task)
-        .slice(0, taskPageSize);
-    });
+    setTasks((prevTasks) => mergeTaskCollections(prevTasks, updates, taskPageSize));
   };
 
   const loadTaskUpdates = async () => {
@@ -804,8 +816,7 @@ const ImageGeneration = () => {
       if (!isDefaultTaskViewState(taskListStateRef.current)) {
         return prevTasks;
       }
-      // 默认首页视图才把未知任务插入到列表开头
-      return [updatedTask, ...prevTasks];
+      return mergeTaskCollections(prevTasks, [updatedTask], taskPageSize);
     });
     setSelectedTask((prevTask) => {
       if (!prevTask || prevTask.id !== updatedTask.id) {
@@ -1138,7 +1149,7 @@ const ImageGeneration = () => {
         // 默认首页视图直接本地插入，避免一次整页回刷
         if (isDefaultTaskView) {
           setTasks((prevTasks) =>
-            [...createdTasks, ...prevTasks].slice(0, taskPageSize),
+            mergeTaskCollections(prevTasks, createdTasks, taskPageSize),
           );
           if (selectedTask && createdTasks.some((task) => task.id === selectedTask.id)) {
             setSelectedTask(

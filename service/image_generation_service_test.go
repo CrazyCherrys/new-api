@@ -107,6 +107,9 @@ func TestRetryImageGenerationTaskResetsAndEnqueuesFailedTask(t *testing.T) {
 	if reloaded.CompletedTime != 0 {
 		t.Fatalf("expected completed time to be reset, got %d", reloaded.CompletedTime)
 	}
+	if reloaded.StartedTime == 0 {
+		t.Fatal("expected started time to be reset for retry")
+	}
 	if len(enqueuedTaskIds) != 1 || enqueuedTaskIds[0] != task.Id {
 		t.Fatalf("expected task %d to be enqueued once, got %v", task.Id, enqueuedTaskIds)
 	}

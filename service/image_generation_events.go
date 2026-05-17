@@ -23,6 +23,7 @@ type ImageGenerationTaskUpdate struct {
 	ThumbnailUrl  string `json:"thumbnail_url"`
 	ErrorMessage  string `json:"error_message"`
 	CreatedTime   int64  `json:"created_time"`
+	StartedTime   int64  `json:"started_time"`
 	CompletedTime int64  `json:"completed_time"`
 }
 
@@ -172,6 +173,7 @@ func buildImageGenerationTaskUpdate(task *model.ImageGenerationTask) ImageGenera
 		ThumbnailUrl:  task.ThumbnailUrl,
 		ErrorMessage:  task.ErrorMessage,
 		CreatedTime:   task.CreatedTime,
+		StartedTime:   task.EffectiveStartedTime(),
 		CompletedTime: task.CompletedTime,
 	}
 }

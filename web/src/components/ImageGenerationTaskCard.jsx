@@ -79,7 +79,7 @@ const ImageGenerationTaskCard = ({
       ? Math.max(
           0,
           Math.floor(
-            (waitNow - task.created_time * 1000) / 1000,
+            (waitNow - (task.started_time || task.created_time) * 1000) / 1000,
           ),
         )
       : 0;
@@ -374,6 +374,7 @@ ImageGenerationTaskCard.propTypes = {
     progress: PropTypes.number,
     error_message: PropTypes.string,
     created_time: PropTypes.number.isRequired,
+    started_time: PropTypes.number,
   }).isRequired,
   onClick: PropTypes.func,
   selected: PropTypes.bool,

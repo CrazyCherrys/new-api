@@ -24,10 +24,21 @@ type ImageGenerationTask struct {
 	ErrorMessage    string `json:"error_message" gorm:"type:text"`                                                 // 错误信息
 	Cost            int    `json:"cost" gorm:"default:0"`                                                          // 消耗的配额
 	CreatedTime     int64  `json:"created_time" gorm:"bigint;index;index:idx_image_tasks_user_created,priority:2"` // 创建时间戳
+	StartedTime     int64  `json:"started_time" gorm:"bigint"`                                                     // 当前轮次开始时间戳（首次创建或最近一次重试）
 	CompletedTime   int64  `json:"completed_time" gorm:"bigint;index:idx_image_tasks_user_completed,priority:2"`   // 完成时间戳
 	RequestType     string `json:"request_type" gorm:"-"`
 	ReferenceCount  int    `json:"reference_count" gorm:"-"`
 	HasMask         bool   `json:"has_mask" gorm:"-"`
+}
+
+func (task *ImageGenerationTask) EffectiveStartedTime() int64 {
+	if task == nil {
+		return 0
+	}
+	if task.StartedTime > 0 {
+		return task.StartedTime
+	}
+	return task.CreatedTime
 }
 
 // 任务状态常量
@@ -41,6 +52,9 @@ const (
 // Insert 插入新任务
 func (task *ImageGenerationTask) Insert() error {
 	task.CreatedTime = common.GetTimestamp()
+	if task.StartedTime == 0 {
+		task.StartedTime = task.CreatedTime
+	}
 	if task.Status == "" {
 		task.Status = ImageTaskStatusPending
 	}
@@ -57,6 +71,7 @@ func ResetImageTaskForRetry(id int) (bool, error) {
 	updates := map[string]interface{}{
 		"status":         ImageTaskStatusPending,
 		"error_message":  "",
+		"started_time":   common.GetTimestamp(),
 		"completed_time": 0,
 	}
 	result := DB.Model(&ImageGenerationTask{}).
@@ -135,6 +150,7 @@ type ImageGenerationTaskSummary struct {
 	ThumbnailUrl  string `json:"thumbnail_url"`
 	ErrorMessage  string `json:"error_message"`
 	CreatedTime   int64  `json:"created_time"`
+	StartedTime   int64  `json:"started_time"`
 	CompletedTime int64  `json:"completed_time"`
 }
 
@@ -152,6 +168,7 @@ type ImageGenerationTaskDetail struct {
 	ErrorMessage    string `json:"error_message"`
 	Cost            int    `json:"cost"`
 	CreatedTime     int64  `json:"created_time"`
+	StartedTime     int64  `json:"started_time"`
 	CompletedTime   int64  `json:"completed_time"`
 	RequestType     string `json:"request_type"`
 	ReferenceCount  int    `json:"reference_count"`
@@ -416,7 +433,7 @@ func GetImageTaskUpdatesByUserID(userId int, completedSince int64, limit int) ([
 	var tasks []*ImageGenerationTask
 	activeStatuses := []string{ImageTaskStatusPending, ImageTaskStatusGenerating}
 	query := DB.Model(&ImageGenerationTask{}).
-		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, error_message, created_time, completed_time").
+		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, error_message, created_time, started_time, completed_time").
 		Where("user_id = ? AND status IN ?", userId, activeStatuses).
 		Order("id DESC").
 		Limit(limit)
@@ -431,7 +448,7 @@ func GetImageTaskUpdatesByUserID(userId int, completedSince int64, limit int) ([
 	var terminalTasks []*ImageGenerationTask
 	remaining := limit - len(tasks)
 	err := DB.Model(&ImageGenerationTask{}).
-		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, error_message, created_time, completed_time").
+		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, error_message, created_time, started_time, completed_time").
 		Where("user_id = ? AND status NOT IN ? AND completed_time >= ?", userId, activeStatuses, completedSince).
 		Order("id DESC").
 		Limit(remaining).
@@ -457,6 +474,7 @@ func BuildImageGenerationTaskSummary(task *ImageGenerationTask) *ImageGeneration
 		ThumbnailUrl:  task.ThumbnailUrl,
 		ErrorMessage:  task.ErrorMessage,
 		CreatedTime:   task.CreatedTime,
+		StartedTime:   task.EffectiveStartedTime(),
 		CompletedTime: task.CompletedTime,
 	}
 }
@@ -479,6 +497,7 @@ func BuildImageGenerationTaskDetail(task *ImageGenerationTask, displayName strin
 		ErrorMessage:    task.ErrorMessage,
 		Cost:            task.Cost,
 		CreatedTime:     task.CreatedTime,
+		StartedTime:     task.EffectiveStartedTime(),
 		CompletedTime:   task.CompletedTime,
 		RequestType:     task.RequestType,
 		ReferenceCount:  task.ReferenceCount,

@@ -1015,6 +1015,7 @@ func writeImageGenerationSSETaskUpdate(c *gin.Context, task *model.ImageGenerati
 		"thumbnail_url":  task.ThumbnailUrl,
 		"error_message":  task.ErrorMessage,
 		"created_time":   task.CreatedTime,
+		"started_time":   task.EffectiveStartedTime(),
 		"completed_time": task.CompletedTime,
 	})
 	if err != nil {
@@ -1036,6 +1037,7 @@ func writeImageGenerationSSETaskUpdatePayload(c *gin.Context, update service.Ima
 		"thumbnail_url":  update.ThumbnailUrl,
 		"error_message":  update.ErrorMessage,
 		"created_time":   update.CreatedTime,
+		"started_time":   update.StartedTime,
 		"completed_time": update.CompletedTime,
 	})
 	if err != nil {

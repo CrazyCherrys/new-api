@@ -17,6 +17,7 @@ type imageTaskDetailResponse struct {
 	ID             int    `json:"id"`
 	ModelID        string `json:"model_id"`
 	DisplayName    string `json:"display_name"`
+	StartedTime    int64  `json:"started_time"`
 	OutputWidth    int    `json:"output_width"`
 	OutputHeight   int    `json:"output_height"`
 	OutputSizeText string `json:"output_size_text"`
@@ -106,6 +107,9 @@ func TestGetImageGenerationTaskDetailReturnsComputedDetailFields(t *testing.T) {
 
 	if detail.DisplayName != mapping.DisplayName {
 		t.Fatalf("expected display name %q, got %q", mapping.DisplayName, detail.DisplayName)
+	}
+	if detail.StartedTime != task.CreatedTime {
+		t.Fatalf("expected started time %d, got %d", task.CreatedTime, detail.StartedTime)
 	}
 	if detail.OutputWidth != 2048 || detail.OutputHeight != 1152 {
 		t.Fatalf("expected output size 2048x1152, got %dx%d", detail.OutputWidth, detail.OutputHeight)

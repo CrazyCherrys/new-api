@@ -488,8 +488,9 @@ const ImageGenerationTaskModal = ({
   const displayName = task.display_name || task.model_id || '-';
 
   const generationDuration = (() => {
-    if (!task.created_time || !task.completed_time) return '-';
-    const duration = task.completed_time - task.created_time;
+    const startedAt = task.started_time || task.created_time;
+    if (!startedAt || !task.completed_time) return '-';
+    const duration = task.completed_time - startedAt;
     return formatDuration(duration);
   })();
 
