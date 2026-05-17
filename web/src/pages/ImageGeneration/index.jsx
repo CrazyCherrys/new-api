@@ -197,7 +197,6 @@ const ImageGeneration = () => {
   const [isPageVisible, setIsPageVisible] = useState(() =>
     typeof document === 'undefined' ? true : !document.hidden,
   );
-  const [clockTick, setClockTick] = useState(() => Date.now());
   const hasActiveTasks = tasks.some(
     (task) => task.status === 'pending' || task.status === 'generating',
   );
@@ -302,18 +301,6 @@ const ImageGeneration = () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
-
-  useEffect(() => {
-    if (!hasActiveTasks || !isPageVisible) {
-      return undefined;
-    }
-
-    const timer = setInterval(() => {
-      setClockTick(Date.now());
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [hasActiveTasks, isPageVisible]);
 
   useEffect(() => {
     const taskId = new URLSearchParams(location.search).get('task_id');
@@ -1675,11 +1662,6 @@ const ImageGeneration = () => {
                 selected={selectedTaskIds.has(task.id)}
                 onSelectChange={handleTaskSelect}
                 onClick={() => handleTaskCardClick(task)}
-                clockTick={
-                  task.status === 'pending' || task.status === 'generating'
-                    ? clockTick
-                    : null
-                }
               />
             ))}
           </div>

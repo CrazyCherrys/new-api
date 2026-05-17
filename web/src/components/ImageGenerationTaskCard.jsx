@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, memo } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import { Spin, Typography, Checkbox, Progress } from '@douyinfe/semi-ui';
 import {
   IconImage,
@@ -44,10 +44,10 @@ const ImageGenerationTaskCard = ({
   onClick,
   selected,
   onSelectChange,
-  clockTick,
 }) => {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
+  const [waitNow, setWaitNow] = useState(() => Date.now());
 
   const formatWaitTime = (seconds) => {
     if (seconds < 60) return `${seconds}${t('秒')}`;
@@ -60,12 +60,26 @@ const ImageGenerationTaskCard = ({
   const isFailed = task.status === 'failed';
   const isPending = task.status === 'pending';
   const isGenerating = task.status === 'generating';
+  const isActive = isPending || isGenerating;
+
+  useEffect(() => {
+    if (!isActive) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setWaitNow(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [isActive]);
+
   const waitTime =
-    isPending || isGenerating
+    isActive
       ? Math.max(
           0,
           Math.floor(
-            ((clockTick || Date.now()) - task.created_time * 1000) / 1000,
+            (waitNow - task.created_time * 1000) / 1000,
           ),
         )
       : 0;
@@ -364,14 +378,12 @@ ImageGenerationTaskCard.propTypes = {
   onClick: PropTypes.func,
   selected: PropTypes.bool,
   onSelectChange: PropTypes.func,
-  clockTick: PropTypes.number,
 };
 
 ImageGenerationTaskCard.defaultProps = {
   onClick: () => {},
   selected: false,
   onSelectChange: () => {},
-  clockTick: null,
 };
 
 // 仅当影响视觉的 task 字段或 selected 发生变化时才重新渲染，
@@ -379,7 +391,6 @@ ImageGenerationTaskCard.defaultProps = {
 export default memo(ImageGenerationTaskCard, (prev, next) => {
   return (
     prev.selected === next.selected &&
-    prev.clockTick === next.clockTick &&
     prev.task.id === next.task.id &&
     prev.task.status === next.task.status &&
     prev.task.image_url === next.task.image_url &&
