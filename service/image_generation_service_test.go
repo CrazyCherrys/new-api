@@ -158,6 +158,57 @@ func TestImageGenerationMaxRetriesPreservesZero(t *testing.T) {
 	}
 }
 
+func TestProcessImageGenerationTaskDoesNotDoubleDeductUserQuota(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	user := &model.User{
+		Username: "quota-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    700000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	task := &model.ImageGenerationTask{
+		UserId:          user.Id,
+		ModelId:         "gpt-image-1",
+		Prompt:          "test prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusPending,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	previousGenerateFn := generateImageFn
+	generateImageFn = func(ctx context.Context, task *model.ImageGenerationTask) (string, string, string, int, error) {
+		return "https://example.com/image.png", "", `{"size":"1024x1024"}`, 4800, nil
+	}
+	t.Cleanup(func() {
+		generateImageFn = previousGenerateFn
+	})
+
+	var before model.User
+	if err := db.Select("quota").Where("id = ?", user.Id).First(&before).Error; err != nil {
+		t.Fatalf("failed to read quota before processing: %v", err)
+	}
+
+	if err := ProcessImageGenerationTask(task.Id); err != nil {
+		t.Fatalf("process task failed: %v", err)
+	}
+
+	var after model.User
+	if err := db.Select("quota").Where("id = ?", user.Id).First(&after).Error; err != nil {
+		t.Fatalf("failed to read quota after processing: %v", err)
+	}
+	if before.Quota != after.Quota {
+		t.Fatalf("expected quota unchanged after task success, before=%d after=%d", before.Quota, after.Quota)
+	}
+}
+
 func TestImageGenerationTaskQueueLimitUsesWorkerSetting(t *testing.T) {
 	cfg := worker_setting.GetWorkerSetting()
 	previousMaxWorkers := cfg.MaxWorkers

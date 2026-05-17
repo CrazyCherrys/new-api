@@ -621,11 +621,7 @@ func ProcessImageGenerationTask(taskId int) error {
 			}
 			publishImageGenerationTaskUpdateByID(taskId)
 
-			// 扣除用户额度
-			if err := deductUserQuota(task.UserId, cost); err != nil {
-				common.SysLog(fmt.Sprintf("Failed to deduct quota for task %d: %v", taskId, err))
-			}
-
+			// relay 入口已经完成计费，这里只落库任务结果，避免重复扣费。
 			common.SysLog(fmt.Sprintf("Task %d completed successfully, cost: %s", taskId, logger.FormatQuota(cost)))
 			return nil
 		}
@@ -1246,11 +1242,6 @@ func calculateImageCost(modelId string, imageReq *dto.ImageRequest) int {
 	}
 
 	return int(cost)
-}
-
-// deductUserQuota 扣除用户额度
-func deductUserQuota(userId int, quota int) error {
-	return model.DecreaseUserQuota(userId, quota)
 }
 
 // channelTypesForImageEndpoint 根据 endpoint 返回对应的渠道类型列表
