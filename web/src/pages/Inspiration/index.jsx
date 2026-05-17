@@ -449,7 +449,7 @@ const Inspiration = () => {
       aria-label={t('查看详情')}
     >
       <img
-        src={asset.thumbnail_url || asset.image_url}
+        src={asset.thumbnail_url}
         alt='Generated'
         loading='lazy'
         decoding='async'

@@ -51,7 +51,6 @@ type ImageCreativeAsset struct {
 
 type ImageCreativeListItem struct {
 	Id              int     `json:"id"`
-	ImageUrl        string  `json:"image_url"`
 	ThumbnailUrl    string  `json:"thumbnail_url"`
 	CardAspectRatio float64 `json:"card_aspect_ratio"`
 	ReviewedTime    int64   `json:"-"`
@@ -450,7 +449,6 @@ func buildImageCreativeListItem(asset *ImageCreativeAsset) *ImageCreativeListIte
 	}
 	return &ImageCreativeListItem{
 		Id:              asset.Id,
-		ImageUrl:        asset.ImageUrl,
 		ThumbnailUrl:    asset.ThumbnailUrl,
 		CardAspectRatio: asset.CardAspectRatio,
 		ReviewedTime:    asset.ReviewedTime,
@@ -559,7 +557,7 @@ func SubmitImageAssetToCreativeSpace(userId int, taskId int) (*ImageCreativeSubm
 func publicInspirationAssetsBaseQuery() *gorm.DB {
 	return DB.Table("image_creative_submissions AS s").
 		// Keep the feed payload small; full params belong to the detail endpoint.
-		Select("s.id, s.reviewed_time, s.submitted_time, t.image_url, t.thumbnail_url, t.image_metadata").
+		Select("s.id, s.reviewed_time, s.submitted_time, COALESCE(NULLIF(t.thumbnail_url, ''), t.image_url) AS thumbnail_url, t.image_metadata").
 		Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
 		Where("s.status = ? AND t.status = ? AND t.image_url <> ?", CreativeSubmissionStatusApproved, ImageTaskStatusSuccess, "")
 }
