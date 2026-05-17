@@ -731,7 +731,7 @@ const ImageGeneration = () => {
   // 连接 SSE
   const connectSSE = () => {
     try {
-      const eventSource = new EventSource('/api/image-generation/sse');
+      const eventSource = new EventSource('/api/image-generation/sse', { withCredentials: true });
 
       eventSource.onopen = () => {
         setSseConnected(true);

@@ -19,6 +19,7 @@ func SetApiRouter(router *gin.Engine) {
 		gzip.WithExcludedPaths([]string{
 			"/api/inspiration/assets",
 			"/api/creative-space/assets",
+			"/api/image-generation/sse",
 		}),
 	))
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
@@ -65,6 +66,7 @@ func SetApiRouter(router *gin.Engine) {
 
 		// Image generation task routes
 		apiRouter.GET("/image-generation/files/*path", middleware.TryUserAuth(), controller.GetImageGenerationFile)
+		apiRouter.GET("/image-generation/sse", middleware.TokenOrUserAuth(), controller.ImageGenerationSSE)
 		imageGenRoute := apiRouter.Group("/image-generation")
 		imageGenRoute.Use(middleware.UserAuth())
 		{
@@ -86,7 +88,6 @@ func SetApiRouter(router *gin.Engine) {
 			imageGenRoute.GET("/tasks/:id", controller.GetImageGenerationTaskDetail)
 			imageGenRoute.POST("/tasks/:id/retry", controller.RetryImageGenerationTask)
 			imageGenRoute.DELETE("/tasks/:id", controller.DeleteImageGenerationTask)
-			imageGenRoute.GET("/sse", controller.ImageGenerationSSE)
 		}
 
 		userRoute := apiRouter.Group("/user")
