@@ -45,7 +45,7 @@ func setupImageGenerationServiceTestDB(t *testing.T) *gorm.DB {
 	model.DB = db
 	model.LOG_DB = db
 
-	if err := db.AutoMigrate(&model.User{}, &model.ModelMapping{}, &model.ImageGenerationTask{}, &model.ImageCreativeSubmission{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Token{}, &model.ModelMapping{}, &model.ImageGenerationTask{}, &model.ImageCreativeSubmission{}); err != nil {
 		t.Fatalf("failed to migrate image generation task table: %v", err)
 	}
 
@@ -66,8 +66,36 @@ func setupImageGenerationServiceTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func seedUserToken(t *testing.T, db *gorm.DB, userId int, key string) *model.Token {
+	t.Helper()
+
+	token := &model.Token{
+		UserId:      userId,
+		Key:         key,
+		Name:        "image-task-token",
+		Status:      common.TokenStatusEnabled,
+		ExpiredTime: -1,
+	}
+	if err := db.Create(token).Error; err != nil {
+		t.Fatalf("failed to create user token: %v", err)
+	}
+	return token
+}
+
 func TestRetryImageGenerationTaskResetsAndEnqueuesFailedTask(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
+	user := &model.User{
+		Id:       1,
+		Username: "retry-task-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+		AffCode:  "aff-retry-task-user",
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
 	task := &model.ImageGenerationTask{
 		UserId:          1,
 		ModelId:         "gpt-image-1",
@@ -109,6 +137,13 @@ func TestRetryImageGenerationTaskResetsAndEnqueuesFailedTask(t *testing.T) {
 	}
 	if reloaded.StartedTime == 0 {
 		t.Fatal("expected started time to be reset for retry")
+	}
+	activeCount, err := model.GetUserImageGenerationActiveTaskCount(user.Id)
+	if err != nil {
+		t.Fatalf("failed to read active queue count after retry: %v", err)
+	}
+	if activeCount != 1 {
+		t.Fatalf("expected active queue count 1 after retry reserve, got %d", activeCount)
 	}
 	if len(enqueuedTaskIds) != 1 || enqueuedTaskIds[0] != task.Id {
 		t.Fatalf("expected task %d to be enqueued once, got %v", task.Id, enqueuedTaskIds)
@@ -171,6 +206,7 @@ func TestProcessImageGenerationTaskDoesNotDoubleDeductUserQuota(t *testing.T) {
 	if err := db.Create(user).Error; err != nil {
 		t.Fatalf("failed to create user: %v", err)
 	}
+	seedUserToken(t, db, user.Id, "sk-image-serialized")
 
 	task := &model.ImageGenerationTask{
 		UserId:          user.Id,
@@ -209,6 +245,45 @@ func TestProcessImageGenerationTaskDoesNotDoubleDeductUserQuota(t *testing.T) {
 	}
 }
 
+func TestProcessImageGenerationTaskResetsStartedTimeWhenClaimed(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	task := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-claim",
+		Prompt:          "claim prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusPending,
+		StartedTime:     123,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	previousGenerateFn := generateImageFn
+	generateImageFn = func(ctx context.Context, task *model.ImageGenerationTask) (string, string, string, int, error) {
+		return "https://example.com/image.png", "", `{}`, 1, nil
+	}
+	t.Cleanup(func() {
+		generateImageFn = previousGenerateFn
+	})
+
+	if err := ProcessImageGenerationTask(task.Id); err != nil {
+		t.Fatalf("process task failed: %v", err)
+	}
+
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("expected task to exist")
+	}
+	if reloaded.StartedTime <= task.StartedTime {
+		t.Fatalf("expected started time to move forward, old=%d new=%d", task.StartedTime, reloaded.StartedTime)
+	}
+}
+
 func TestImageGenerationTaskQueueLimitUsesWorkerSetting(t *testing.T) {
 	cfg := worker_setting.GetWorkerSetting()
 	previousMaxWorkers := cfg.MaxWorkers
@@ -242,6 +317,21 @@ func TestEnforceImageGenerationTaskQueueLimitRejectsExcessQueuedTasks(t *testing
 	})
 	cfg.MaxWorkers = 1
 
+	for _, userId := range []int{1, 2} {
+		user := &model.User{
+			Id:       userId,
+			Username: fmt.Sprintf("queue-limit-user-%d", userId),
+			Password: "hashed-password",
+			Status:   1,
+			Group:    "default",
+			Quota:    1000000,
+			AffCode:  fmt.Sprintf("aff-queue-limit-%d", userId),
+		}
+		if err := db.Create(user).Error; err != nil {
+			t.Fatalf("failed to create user %d: %v", userId, err)
+		}
+	}
+
 	for i := 0; i < defaultImageGenerationTaskQueueLimit; i++ {
 		task := &model.ImageGenerationTask{
 			UserId:          1,
@@ -253,6 +343,9 @@ func TestEnforceImageGenerationTaskQueueLimitRejectsExcessQueuedTasks(t *testing
 		if err := db.Create(task).Error; err != nil {
 			t.Fatalf("failed to create queued task %d: %v", i, err)
 		}
+	}
+	if _, err := model.ReconcileUserImageGenerationActiveTaskCount(1); err != nil {
+		t.Fatalf("failed to reconcile active task count: %v", err)
 	}
 
 	if err := enforceImageGenerationTaskQueueLimit(1, 1); err == nil {
@@ -283,6 +376,7 @@ func TestCreateImageGenerationTaskQueueLimitIsSerializedWithinProcess(t *testing
 	if err := db.Create(user).Error; err != nil {
 		t.Fatalf("failed to create user: %v", err)
 	}
+	seedUserToken(t, db, user.Id, "sk-image-capability")
 
 	mapping := &model.ModelMapping{
 		RequestModel:      "gpt-image-serialized",
@@ -695,6 +789,322 @@ func TestProcessTaskAsyncUsesFreshTimeoutPerRetry(t *testing.T) {
 	}
 }
 
+func TestRecoverExpiredImageGenerationTasksMarksOnlyExpiredGeneratingTasks(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	now := common.GetTimestamp()
+	expiredTask := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-expired",
+		Prompt:          "expired",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusGenerating,
+		StartedTime:     now - 1000,
+		WorkerNode:      "worker-a",
+		LeaseExpiresAt:  now - 1000,
+	}
+	freshTask := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-fresh",
+		Prompt:          "fresh",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusGenerating,
+		StartedTime:     now - 10,
+		WorkerNode:      "worker-a",
+		LeaseExpiresAt:  now + 100,
+	}
+	pendingTask := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-pending",
+		Prompt:          "pending",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusPending,
+		StartedTime:     now - 1000,
+	}
+	for _, task := range []*model.ImageGenerationTask{expiredTask, freshTask, pendingTask} {
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create task %s: %v", task.ModelId, err)
+		}
+	}
+
+	recovered, err := model.FailExpiredGeneratingImageTasks(now-100, "expired", 100)
+	if err != nil {
+		t.Fatalf("failed to recover expired tasks: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("expected 1 recovered task, got %d", recovered)
+	}
+
+	expiredReloaded, _ := model.GetImageTaskByID(expiredTask.Id)
+	freshReloaded, _ := model.GetImageTaskByID(freshTask.Id)
+	pendingReloaded, _ := model.GetImageTaskByID(pendingTask.Id)
+
+	if expiredReloaded.Status != model.ImageTaskStatusFailed {
+		t.Fatalf("expected expired generating task to fail, got %s", expiredReloaded.Status)
+	}
+	if expiredReloaded.CompletedTime == 0 {
+		t.Fatal("expected expired generating task completed time to be set")
+	}
+	if freshReloaded.Status != model.ImageTaskStatusGenerating {
+		t.Fatalf("expected fresh generating task to stay generating, got %s", freshReloaded.Status)
+	}
+	if pendingReloaded.Status != model.ImageTaskStatusPending {
+		t.Fatalf("expected pending task to stay pending, got %s", pendingReloaded.Status)
+	}
+}
+
+func TestRecoverExpiredImageGenerationTasksUsesConfiguredTimeoutWindow(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousTimeout := cfg.ImageTimeout
+	previousRetries := cfg.MaxRetries
+	previousDelay := cfg.RetryDelay
+	t.Cleanup(func() {
+		cfg.ImageTimeout = previousTimeout
+		cfg.MaxRetries = previousRetries
+		cfg.RetryDelay = previousDelay
+	})
+
+	cfg.ImageTimeout = 10
+	cfg.MaxRetries = 1
+	cfg.RetryDelay = 5
+
+	now := common.GetTimestamp()
+	expiryWindowSeconds := int64(imageGenerationTaskExpiryWindow() / time.Second)
+	expiredTask := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-expired-window",
+		Prompt:          "expired-window",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusGenerating,
+		StartedTime:     now - expiryWindowSeconds - 1,
+		WorkerNode:      "worker-a",
+		LeaseExpiresAt:  now - 1,
+	}
+	freshTask := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-fresh-window",
+		Prompt:          "fresh-window",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusGenerating,
+		StartedTime:     now - expiryWindowSeconds + 1,
+		WorkerNode:      "worker-a",
+		LeaseExpiresAt:  now + expiryWindowSeconds,
+	}
+	for _, task := range []*model.ImageGenerationTask{expiredTask, freshTask} {
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create task %s: %v", task.ModelId, err)
+		}
+	}
+
+	recovered := recoverExpiredImageGenerationTasks()
+	if recovered != 1 {
+		t.Fatalf("expected 1 recovered task, got %d", recovered)
+	}
+
+	expiredReloaded, _ := model.GetImageTaskByID(expiredTask.Id)
+	freshReloaded, _ := model.GetImageTaskByID(freshTask.Id)
+	if expiredReloaded.Status != model.ImageTaskStatusFailed {
+		t.Fatalf("expected expired task to fail, got %s", expiredReloaded.Status)
+	}
+	if freshReloaded.Status != model.ImageTaskStatusGenerating {
+		t.Fatalf("expected fresh task to remain generating, got %s", freshReloaded.Status)
+	}
+}
+
+func TestProcessNextPendingImageGenerationTaskClaimsLease(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	task := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-lease",
+		Prompt:          "lease prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusPending,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	previousProcessFn := processImageGenerationTaskFn
+	processImageGenerationTaskFn = func(taskId int) error {
+		return nil
+	}
+	t.Cleanup(func() {
+		processImageGenerationTaskFn = previousProcessFn
+	})
+
+	if !processNextPendingImageGenerationTask() {
+		t.Fatal("expected pending task to be claimed")
+	}
+
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded.Status != model.ImageTaskStatusGenerating {
+		t.Fatalf("expected task status generating, got %s", reloaded.Status)
+	}
+	if reloaded.WorkerNode != imageGenerationWorkerNodeID {
+		t.Fatalf("expected worker node %q, got %q", imageGenerationWorkerNodeID, reloaded.WorkerNode)
+	}
+	if reloaded.LeaseExpiresAt <= reloaded.StartedTime {
+		t.Fatalf("expected lease expiry after start time, start=%d lease=%d", reloaded.StartedTime, reloaded.LeaseExpiresAt)
+	}
+}
+
+func TestClaimedResultUpdateRejectsWrongWorkerNode(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	task := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-claimed",
+		Prompt:          "claimed prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusGenerating,
+		StartedTime:     common.GetTimestamp(),
+		WorkerNode:      "worker-a",
+		LeaseExpiresAt:  common.GetTimestamp() + 300,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	won, err := model.UpdateImageTaskResultClaimed(task.Id, "worker-b", "url", "", "{}", 1)
+	if err != nil {
+		t.Fatalf("unexpected result update error: %v", err)
+	}
+	if won {
+		t.Fatal("expected mismatched worker node to lose claimed result update")
+	}
+
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded.Status != model.ImageTaskStatusGenerating {
+		t.Fatalf("expected task to remain generating, got %s", reloaded.Status)
+	}
+}
+
+func TestProcessImageGenerationTaskRenewsLeaseWhileRunning(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	user := &model.User{
+		Username: "image-lease-renew-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	seedUserToken(t, db, user.Id, "sk-image-lease-renew")
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-lease-renew",
+		ActualModel:       "gpt-image-lease-renew",
+		DisplayName:       "GPT Image Lease Renew",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+
+	task := &model.ImageGenerationTask{
+		UserId:          user.Id,
+		ModelId:         "gpt-image-lease-renew",
+		Prompt:          "prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusPending,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousTimeout := cfg.ImageTimeout
+	previousRenewOverride := imageGenerationLeaseRenewIntervalOverride
+	previousGenerateFn := generateImageFn
+	t.Cleanup(func() {
+		cfg.ImageTimeout = previousTimeout
+		imageGenerationLeaseRenewIntervalOverride = previousRenewOverride
+		generateImageFn = previousGenerateFn
+	})
+
+	cfg.ImageTimeout = 3
+	imageGenerationLeaseRenewIntervalOverride = func() time.Duration {
+		return 200 * time.Millisecond
+	}
+
+	leaseObservations := make(chan [2]int64, 1)
+	generateImageFn = func(ctx context.Context, task *model.ImageGenerationTask) (string, string, string, int, error) {
+		reloaded, err := model.GetImageTaskByID(task.Id)
+		if err != nil {
+			return "", "", "", 0, err
+		}
+		firstLease := reloaded.LeaseExpiresAt
+		time.Sleep(1300 * time.Millisecond)
+		reloadedAgain, err := model.GetImageTaskByID(task.Id)
+		if err != nil {
+			return "", "", "", 0, err
+		}
+		leaseObservations <- [2]int64{firstLease, reloadedAgain.LeaseExpiresAt}
+		time.Sleep(20 * time.Millisecond)
+		return "https://example.com/image.png", "", `{}`, 1, nil
+	}
+
+	if err := ProcessImageGenerationTask(task.Id); err != nil {
+		t.Fatalf("process task failed: %v", err)
+	}
+
+	leases := <-leaseObservations
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded == nil || reloaded.Status != model.ImageTaskStatusSuccess {
+		t.Fatalf("expected successful task, got %#v", reloaded)
+	}
+	if leases[0] == 0 {
+		t.Fatal("expected initial lease to be recorded")
+	}
+	if leases[1] <= leases[0] {
+		t.Fatalf("expected renewed lease to grow, before=%d after=%d", leases[0], leases[1])
+	}
+}
+
+func TestRenewImageTaskLeaseRejectsWrongWorkerNode(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	task := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-renew-guard",
+		Prompt:          "prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusGenerating,
+		WorkerNode:      "worker-a",
+		LeaseExpiresAt:  common.GetTimestamp() + 10,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	renewed, err := model.RenewImageTaskLease(task.Id, "worker-b", common.GetTimestamp()+100)
+	if err != nil {
+		t.Fatalf("unexpected renew error: %v", err)
+	}
+	if renewed {
+		t.Fatal("expected wrong worker node lease renew to fail")
+	}
+}
+
 func TestValidateImageGenerationReferenceImagesUsesWorkerSetting(t *testing.T) {
 	cfg := worker_setting.GetWorkerSetting()
 	previousMaxImageSize := cfg.MaxImageSize
@@ -762,6 +1172,7 @@ func TestImageGenerationModelCapabilitiesValidation(t *testing.T) {
 	if err := db.Create(user).Error; err != nil {
 		t.Fatalf("failed to create user: %v", err)
 	}
+	seedUserToken(t, db, user.Id, "sk-image-capability")
 
 	mapping := &model.ModelMapping{
 		RequestModel:      "gpt-image-1",
@@ -810,6 +1221,55 @@ func TestImageGenerationModelCapabilitiesValidation(t *testing.T) {
 	}
 }
 
+func TestCreateImageGenerationTaskRequiresValidUserToken(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	user := &model.User{
+		Username: "image-no-token-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-no-token",
+		ActualModel:       "gpt-image-no-token",
+		DisplayName:       "GPT Image No Token",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+	})
+
+	if _, err := CreateImageGenerationTask(user.Id, "gpt-image-no-token", "prompt", "openai", `{}`); err == nil {
+		t.Fatal("expected task creation to fail without valid user token")
+	} else if !strings.Contains(err.Error(), "valid user token") {
+		t.Fatalf("expected valid user token error, got %v", err)
+	}
+
+	activeCount, err := model.GetUserImageGenerationActiveTaskCount(user.Id)
+	if err != nil {
+		t.Fatalf("failed to read active queue count: %v", err)
+	}
+	if activeCount != 0 {
+		t.Fatalf("expected no leaked active queue count, got %d", activeCount)
+	}
+}
+
 func TestCreateImageGenerationTaskStoresReferenceImagesOutsideDatabase(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
 
@@ -833,6 +1293,7 @@ func TestCreateImageGenerationTaskStoresReferenceImagesOutsideDatabase(t *testin
 	if err := db.Create(user).Error; err != nil {
 		t.Fatalf("failed to create user: %v", err)
 	}
+	seedUserToken(t, db, user.Id, "sk-image-storage")
 
 	mapping := &model.ModelMapping{
 		RequestModel:      "gpt-image-edit",
@@ -901,6 +1362,116 @@ func TestCreateImageGenerationTaskStoresReferenceImagesOutsideDatabase(t *testin
 	}
 }
 
+func TestCreateImageGenerationTaskReservesAndSuccessReleasesQueueSlot(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	user := &model.User{
+		Username: "image-queue-counter-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	seedUserToken(t, db, user.Id, "sk-image-queue-counter")
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-queue-counter",
+		ActualModel:       "gpt-image-queue-counter",
+		DisplayName:       "GPT Image Queue Counter",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	previousGenerateFn := generateImageFn
+	generateImageFn = func(ctx context.Context, task *model.ImageGenerationTask) (string, string, string, int, error) {
+		return "https://example.com/image.png", "", `{}`, 1, nil
+	}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+		generateImageFn = previousGenerateFn
+	})
+
+	task, err := CreateImageGenerationTask(user.Id, "gpt-image-queue-counter", "prompt", "openai", `{}`)
+	if err != nil {
+		t.Fatalf("expected task creation to succeed: %v", err)
+	}
+
+	activeCount, err := model.GetUserImageGenerationActiveTaskCount(user.Id)
+	if err != nil {
+		t.Fatalf("failed to read active queue count after reserve: %v", err)
+	}
+	if activeCount != 1 {
+		t.Fatalf("expected active queue count 1 after create, got %d", activeCount)
+	}
+
+	if err := ProcessImageGenerationTask(task.Id); err != nil {
+		t.Fatalf("expected task processing to succeed: %v", err)
+	}
+
+	activeCount, err = model.GetUserImageGenerationActiveTaskCount(user.Id)
+	if err != nil {
+		t.Fatalf("failed to read active queue count after success: %v", err)
+	}
+	if activeCount != 0 {
+		t.Fatalf("expected active queue count 0 after success, got %d", activeCount)
+	}
+}
+
+func TestRecoverExpiredImageGenerationTasksReconcilesQueueCount(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	user := &model.User{
+		Username:                  "image-recover-counter-user",
+		Password:                  "hashed-password",
+		Status:                    1,
+		Group:                     "default",
+		Quota:                     1000000,
+		ImageGenerationActiveTasks: 1,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	task := &model.ImageGenerationTask{
+		UserId:          user.Id,
+		ModelId:         "gpt-image-recover-counter",
+		Prompt:          "prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusGenerating,
+		StartedTime:     now - 1000,
+		WorkerNode:      "worker-a",
+		LeaseExpiresAt:  now - 1,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	recovered := recoverExpiredImageGenerationTasks()
+	if recovered != 1 {
+		t.Fatalf("expected 1 recovered task, got %d", recovered)
+	}
+
+	activeCount, err := model.GetUserImageGenerationActiveTaskCount(user.Id)
+	if err != nil {
+		t.Fatalf("failed to read active queue count after recovery: %v", err)
+	}
+	if activeCount != 0 {
+		t.Fatalf("expected active queue count 0 after recovery reconcile, got %d", activeCount)
+	}
+}
+
 func TestCreateImageGenerationTaskStoresMaskOutsideDatabase(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
 
@@ -924,6 +1495,7 @@ func TestCreateImageGenerationTaskStoresMaskOutsideDatabase(t *testing.T) {
 	if err := db.Create(user).Error; err != nil {
 		t.Fatalf("failed to create user: %v", err)
 	}
+	seedUserToken(t, db, user.Id, "sk-image-mask")
 
 	mapping := &model.ModelMapping{
 		RequestModel:      "gpt-image-mask",

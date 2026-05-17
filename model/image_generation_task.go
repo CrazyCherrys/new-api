@@ -26,6 +26,8 @@ type ImageGenerationTask struct {
 	CreatedTime     int64  `json:"created_time" gorm:"bigint;index;index:idx_image_tasks_user_created,priority:2"` // 创建时间戳
 	StartedTime     int64  `json:"started_time" gorm:"bigint"`                                                     // 当前轮次开始时间戳（首次创建或最近一次重试）
 	CompletedTime   int64  `json:"completed_time" gorm:"bigint;index:idx_image_tasks_user_completed,priority:2"`   // 完成时间戳
+	WorkerNode      string `json:"-" gorm:"size:128;index"`                                                        // 当前持有租约的 worker 节点
+	LeaseExpiresAt  int64  `json:"-" gorm:"bigint;index"`                                                          // 当前租约过期时间戳
 	RequestType     string `json:"request_type" gorm:"-"`
 	ReferenceCount  int    `json:"reference_count" gorm:"-"`
 	HasMask         bool   `json:"has_mask" gorm:"-"`
@@ -73,6 +75,8 @@ func ResetImageTaskForRetry(id int) (bool, error) {
 		"error_message":  "",
 		"started_time":   common.GetTimestamp(),
 		"completed_time": 0,
+		"worker_node":    "",
+		"lease_expires_at": 0,
 	}
 	result := DB.Model(&ImageGenerationTask{}).
 		Where("id = ? AND status = ?", id, ImageTaskStatusFailed).
@@ -647,7 +651,7 @@ func GetPendingImageTasks(limit int) ([]*ImageGenerationTask, error) {
 	return tasks, err
 }
 
-func ClaimNextPendingImageTask() (*ImageGenerationTask, error) {
+func ClaimNextPendingImageTask(workerNode string, startedTime int64, leaseExpiresAt int64) (*ImageGenerationTask, error) {
 	tasks, err := GetPendingImageTasks(1)
 	if err != nil || len(tasks) == 0 || tasks[0] == nil {
 		return nil, err
@@ -657,7 +661,11 @@ func ClaimNextPendingImageTask() (*ImageGenerationTask, error) {
 	result := DB.Model(&ImageGenerationTask{}).
 		Where("id = ? AND status = ?", task.Id, ImageTaskStatusPending).
 		Updates(map[string]interface{}{
-			"status": ImageTaskStatusGenerating,
+			"status":           ImageTaskStatusGenerating,
+			"started_time":     startedTime,
+			"worker_node":      workerNode,
+			"lease_expires_at": leaseExpiresAt,
+			"error_message":    "",
 		})
 	if result.Error != nil {
 		return nil, result.Error
@@ -668,7 +676,26 @@ func ClaimNextPendingImageTask() (*ImageGenerationTask, error) {
 
 	task.Status = ImageTaskStatusGenerating
 	task.ErrorMessage = ""
+	task.StartedTime = startedTime
+	task.WorkerNode = workerNode
+	task.LeaseExpiresAt = leaseExpiresAt
 	return task, nil
+}
+
+func MarkImageTaskGenerating(id int, workerNode string, startedTime int64, leaseExpiresAt int64) (bool, error) {
+	result := DB.Model(&ImageGenerationTask{}).
+		Where("id = ? AND status = ?", id, ImageTaskStatusPending).
+		Updates(map[string]interface{}{
+			"status":           ImageTaskStatusGenerating,
+			"started_time":     startedTime,
+			"worker_node":      workerNode,
+			"lease_expires_at": leaseExpiresAt,
+			"error_message":    "",
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
 }
 
 // UpdateImageTaskStatus 更新任务状态
@@ -678,6 +705,9 @@ func UpdateImageTaskStatus(id int, status string, errorMessage string) error {
 	}
 	if errorMessage != "" {
 		updates["error_message"] = errorMessage
+	}
+	if status == ImageTaskStatusGenerating {
+		updates["started_time"] = common.GetTimestamp()
 	}
 	if status == ImageTaskStatusSuccess || status == ImageTaskStatusFailed {
 		updates["completed_time"] = common.GetTimestamp()
@@ -696,4 +726,113 @@ func UpdateImageTaskResult(id int, imageUrl string, thumbnailUrl string, imageMe
 		"completed_time": common.GetTimestamp(),
 	}
 	return DB.Model(&ImageGenerationTask{}).Where("id = ?", id).Updates(updates).Error
+}
+
+func UpdateImageTaskResultClaimed(id int, workerNode string, imageUrl string, thumbnailUrl string, imageMetadata string, cost int) (bool, error) {
+	updates := map[string]interface{}{
+		"status":           ImageTaskStatusSuccess,
+		"image_url":        imageUrl,
+		"thumbnail_url":    thumbnailUrl,
+		"image_metadata":   imageMetadata,
+		"cost":             cost,
+		"completed_time":   common.GetTimestamp(),
+		"worker_node":      "",
+		"lease_expires_at": 0,
+	}
+	result := DB.Model(&ImageGenerationTask{}).
+		Where("id = ? AND worker_node = ? AND status = ?", id, workerNode, ImageTaskStatusGenerating).
+		Updates(updates)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func UpdateImageTaskTerminalStatusClaimed(id int, workerNode string, status string, errorMessage string) (bool, error) {
+	updates := map[string]interface{}{
+		"status":           status,
+		"completed_time":   common.GetTimestamp(),
+		"worker_node":      "",
+		"lease_expires_at": 0,
+	}
+	if strings.TrimSpace(errorMessage) != "" {
+		updates["error_message"] = errorMessage
+	}
+	result := DB.Model(&ImageGenerationTask{}).
+		Where("id = ? AND worker_node = ? AND status = ?", id, workerNode, ImageTaskStatusGenerating).
+		Updates(updates)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func RenewImageTaskLease(id int, workerNode string, leaseExpiresAt int64) (bool, error) {
+	if leaseExpiresAt <= 0 {
+		return false, nil
+	}
+	result := DB.Model(&ImageGenerationTask{}).
+		Where("id = ? AND worker_node = ? AND status = ?", id, workerNode, ImageTaskStatusGenerating).
+		Update("lease_expires_at", leaseExpiresAt)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func FailExpiredGeneratingImageTasks(expiredBefore int64, errorMessage string, limit int) (int64, error) {
+	if expiredBefore <= 0 {
+		return 0, nil
+	}
+	if strings.TrimSpace(errorMessage) == "" {
+		errorMessage = "task expired"
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	var ids []int
+	if err := DB.Model(&ImageGenerationTask{}).
+		Where("status = ? AND lease_expires_at > 0 AND lease_expires_at <= ?", ImageTaskStatusGenerating, expiredBefore).
+		Order("lease_expires_at ASC, id ASC").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	result := DB.Model(&ImageGenerationTask{}).
+		Where("id IN ? AND status = ?", ids, ImageTaskStatusGenerating).
+		Updates(map[string]interface{}{
+			"status":           ImageTaskStatusFailed,
+			"error_message":    errorMessage,
+			"completed_time":   common.GetTimestamp(),
+			"worker_node":      "",
+			"lease_expires_at": 0,
+		})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+func GetExpiredGeneratingImageTaskUserIDs(expiredBefore int64, limit int) ([]int, error) {
+	if expiredBefore <= 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	var ids []int
+	if err := DB.Model(&ImageGenerationTask{}).
+		Distinct("user_id").
+		Where("status = ? AND lease_expires_at > 0 AND lease_expires_at <= ?", ImageTaskStatusGenerating, expiredBefore).
+		Limit(limit).
+		Pluck("user_id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
 }

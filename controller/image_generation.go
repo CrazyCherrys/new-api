@@ -568,6 +568,19 @@ func GetImageGenerationAssets(c *gin.Context) {
 	for _, asset := range assets {
 		sanitizeImageGenerationAssetParams(asset)
 	}
+	localAssetPaths := make([]string, 0, len(assets)*2)
+	for _, asset := range assets {
+		if asset == nil {
+			continue
+		}
+		if clean, ok := service.ImageGenerationLocalAssetPathFromURLForCache(asset.ImageUrl); ok {
+			localAssetPaths = append(localAssetPaths, clean)
+		}
+		if clean, ok := service.ImageGenerationLocalAssetPathFromURLForCache(asset.ThumbnailUrl); ok {
+			localAssetPaths = append(localAssetPaths, clean)
+		}
+	}
+	service.WarmImageGenerationLocalAssetAccessCacheForUser(userId, localAssetPaths)
 	filterOptions, err := model.GetImageAssetFilterOptions(userId)
 	if err != nil {
 		common.ApiError(c, err)
@@ -671,6 +684,16 @@ func GetInspirationAssets(c *gin.Context) {
 	for _, asset := range assets {
 		sanitizeImageCreativeListItem(asset)
 	}
+	localAssetPaths := make([]string, 0, len(assets))
+	for _, asset := range assets {
+		if asset == nil {
+			continue
+		}
+		if clean, ok := service.ImageGenerationLocalAssetPathFromURLForCache(asset.ThumbnailUrl); ok {
+			localAssetPaths = append(localAssetPaths, clean)
+		}
+	}
+	service.WarmApprovedInspirationLocalAssetAccessCache(localAssetPaths)
 	pageInfo.SetItems(assets)
 	common.SysLog(fmt.Sprintf(
 		"inspiration assets handler: cursor=%q page_size=%d items=%d total=%d has_more=%t elapsed_ms=%d",
@@ -953,6 +976,14 @@ func DeleteImageGenerationTask(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{
 			"success": false,
 			"message": "无权访问此任务",
+		})
+		return
+	}
+
+	if task.Status == model.ImageTaskStatusPending || task.Status == model.ImageTaskStatusGenerating {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "运行中的任务暂不支持删除，请等待完成后再删除",
 		})
 		return
 	}

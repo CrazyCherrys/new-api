@@ -64,6 +64,7 @@ const ImageGenerationTaskModal = ({
   const isFailed = task?.status === 'failed';
   const isPending = task?.status === 'pending';
   const isGenerating = task?.status === 'generating';
+  const canDelete = isSuccess || isFailed;
 
   const resolvedOutputWidth = Number(task?.output_width) || 0;
   const resolvedOutputHeight = Number(task?.output_height) || 0;
@@ -210,6 +211,10 @@ const ImageGenerationTaskModal = ({
   };
 
   const handleDelete = async () => {
+    if (!canDelete) {
+      showError(t('运行中的任务暂不支持删除，请等待完成后再删除'));
+      return;
+    }
     setDeleting(true);
     try {
       const res = await API.delete(`/api/image-generation/tasks/${task.id}`);
@@ -700,6 +705,7 @@ const ImageGenerationTaskModal = ({
               okType='danger'
               onConfirm={handleDelete}
               position='top'
+              disabled={!canDelete}
             >
               <Button
                 theme='outline'
@@ -707,6 +713,7 @@ const ImageGenerationTaskModal = ({
                 icon={<IconDelete />}
                 style={styles.sideActionBtn}
                 loading={deleting}
+                disabled={!canDelete}
               >
                 {t('删除记录')}
               </Button>

@@ -29,6 +29,8 @@ const (
 	imageCleanupSchedulerInterval              = 1 * time.Minute
 	defaultImageGenerationTaskQueueLimit       = 20
 	imageGenerationQueuePollInterval           = 2 * time.Second
+	imageGenerationRecoveryBatchLimit          = 100
+	imageGenerationRecoveryGracePeriod         = 15 * time.Second
 )
 
 var (
@@ -39,6 +41,7 @@ var (
 	generateImageFn                   = generateImage
 	imageGenerationTimeoutOverride    func() time.Duration
 	imageGenerationRetryDelayOverride func() time.Duration
+	imageGenerationLeaseRenewIntervalOverride func() time.Duration
 	imageCleanupTaskOnce              sync.Once
 	imageCleanupTaskRunning           atomic.Bool
 	imageCleanupLastRun               atomic.Int64
@@ -47,6 +50,7 @@ var (
 	imageGenerationWorkerLoopMu       sync.Mutex
 	imageGenerationWorkerLoopCount    int
 	imageGenerationQueueSignalCh      = make(chan struct{}, 1)
+	imageGenerationWorkerNodeID       = initImageGenerationWorkerNodeID()
 )
 
 type imageGenerationWorkerLimiter struct {
@@ -271,11 +275,11 @@ func enforceImageGenerationTaskQueueLimit(userId int, requestedCount int) error 
 		return nil
 	}
 	limit := imageGenerationTaskQueueLimit()
-	queuedCount, err := model.CountImageTasksByUserAndStatuses(userId, imageGenerationPendingStatuses())
+	reserved, err := model.ReserveUserImageGenerationQueueSlots(userId, requestedCount, limit)
 	if err != nil {
-		return fmt.Errorf("failed to check queued image tasks: %w", err)
+		return fmt.Errorf("failed to reserve queued image tasks: %w", err)
 	}
-	if queuedCount+int64(requestedCount) > int64(limit) {
+	if !reserved {
 		return fmt.Errorf("too many queued image generation tasks: limit %d", limit)
 	}
 	return nil
@@ -354,6 +358,14 @@ func signalImageGenerationQueue(taskId int) {
 	}
 }
 
+func initImageGenerationWorkerNodeID() string {
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		host = "unknown-host"
+	}
+	return fmt.Sprintf("%s:%d", host, os.Getpid())
+}
+
 func ensureImageGenerationWorkerLoops(desired int) {
 	if desired <= 0 {
 		desired = 1
@@ -386,6 +398,10 @@ func runImageGenerationWorkerLoop() {
 
 	for {
 		ensureImageGenerationWorkerLoops(imageGenerationMaxWorkers())
+		recovered := recoverExpiredImageGenerationTasks()
+		if recovered > 0 {
+			continue
+		}
 		if !processNextPendingImageGenerationTask() {
 			select {
 			case <-imageGenerationQueueSignalCh:
@@ -395,13 +411,119 @@ func runImageGenerationWorkerLoop() {
 	}
 }
 
+func imageGenerationTaskExpiryWindow() time.Duration {
+	cfg := worker_setting.GetWorkerSetting()
+	timeout := time.Duration(cfg.ImageTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	maxRetries := cfg.MaxRetries
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
+	retryDelay := time.Duration(cfg.RetryDelay) * time.Second
+	if retryDelay <= 0 {
+		retryDelay = 5 * time.Second
+	}
+	window := timeout * time.Duration(maxRetries+1)
+	window += retryDelay * time.Duration(maxRetries)
+	window += imageGenerationRecoveryGracePeriod
+	return window
+}
+
+func imageGenerationLeaseRenewInterval() time.Duration {
+	if imageGenerationLeaseRenewIntervalOverride != nil {
+		return imageGenerationLeaseRenewIntervalOverride()
+	}
+	interval := imageGenerationTaskExpiryWindow() / 3
+	if interval <= 0 {
+		return 30 * time.Second
+	}
+	if interval > time.Minute {
+		return time.Minute
+	}
+	return interval
+}
+
+func imageGenerationLeaseExpiryFromNow(now time.Time) int64 {
+	return now.Unix() + int64(imageGenerationTaskExpiryWindow()/time.Second)
+}
+
+func startImageTaskLeaseRenewer(taskId int, workerNode string) func() {
+	interval := imageGenerationLeaseRenewInterval()
+	if interval <= 0 {
+		return func() {}
+	}
+
+	stopCh := make(chan struct{})
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				return
+			case now := <-ticker.C:
+				leaseExpiresAt := imageGenerationLeaseExpiryFromNow(now)
+				renewed, err := model.RenewImageTaskLease(taskId, workerNode, leaseExpiresAt)
+				if err != nil {
+					common.SysLog(fmt.Sprintf("Failed to renew image generation task lease %d: %v", taskId, err))
+					continue
+				}
+				if !renewed {
+					return
+				}
+			}
+		}
+	}()
+
+	return func() {
+		close(stopCh)
+		<-doneCh
+	}
+}
+
+func recoverExpiredImageGenerationTasks() int64 {
+	expiredBefore := common.GetTimestamp()
+	if expiredBefore <= 0 {
+		return 0
+	}
+	usersBefore, err := model.GetExpiredGeneratingImageTaskUserIDs(expiredBefore, imageGenerationRecoveryBatchLimit)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("Failed to read expired image generation task owners: %v", err))
+		return 0
+	}
+	recovered, err := model.FailExpiredGeneratingImageTasks(
+		expiredBefore,
+		"task expired while generating, please retry",
+		imageGenerationRecoveryBatchLimit,
+	)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("Failed to recover expired image generation tasks: %v", err))
+		return 0
+	}
+	if recovered > 0 {
+		common.SysLog(fmt.Sprintf("Recovered %d expired image generation tasks", recovered))
+		for _, userId := range usersBefore {
+			if _, err := model.ReconcileUserImageGenerationActiveTaskCount(userId); err != nil {
+				common.SysLog(fmt.Sprintf("Failed to reconcile recovered image task count for user %d: %v", userId, err))
+			}
+		}
+	}
+	return recovered
+}
+
 func processNextPendingImageGenerationTask() bool {
 	if err := imageWorkerLimiter.acquire(context.Background()); err != nil {
 		return false
 	}
 	defer imageWorkerLimiter.release()
 
-	task, err := model.ClaimNextPendingImageTask()
+	startedTime := common.GetTimestamp()
+	leaseExpiresAt := imageGenerationLeaseExpiryFromNow(time.Unix(startedTime, 0))
+	task, err := model.ClaimNextPendingImageTask(imageGenerationWorkerNodeID, startedTime, leaseExpiresAt)
 	if err != nil || task == nil {
 		return false
 	}
@@ -417,40 +539,64 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 	imageGenerationTaskCreateMu.Lock()
 	defer imageGenerationTaskCreateMu.Unlock()
 
+	queueSlotReserved := false
+	releaseReservedQueueSlot := func() {
+		if !queueSlotReserved {
+			return
+		}
+		if err := model.ReleaseUserImageGenerationQueueSlots(userId, 1); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to rollback reserved image generation queue slot for user %d: %v", userId, err))
+		}
+		queueSlotReserved = false
+	}
+
 	requestEndpoint = normalizeImageEndpoint(requestEndpoint)
 	if err := enforceImageGenerationTaskQueueLimit(userId, 1); err != nil {
 		return nil, err
 	}
+	queueSlotReserved = true
 	if err := validateImageGenerationReferenceImages(params); err != nil {
+		releaseReservedQueueSlot()
 		return nil, err
 	}
 	mapping, err := model.GetActiveModelMappingByRequestModel(modelId)
 	if err != nil {
+		releaseReservedQueueSlot()
 		return nil, fmt.Errorf("failed to get model mapping: %w", err)
 	}
 	if mapping == nil {
+		releaseReservedQueueSlot()
 		return nil, fmt.Errorf("model mapping not found for: %s", modelId)
 	}
 	mappingEndpoint := normalizeImageEndpoint(mapping.RequestEndpoint)
 	if mappingEndpoint != requestEndpoint {
+		releaseReservedQueueSlot()
 		return nil, fmt.Errorf("request endpoint mismatch: expected %s, got %s", mappingEndpoint, requestEndpoint)
 	}
 	if err := validateImageGenerationModelCapabilities(mapping, params); err != nil {
+		releaseReservedQueueSlot()
 		return nil, err
 	}
 
 	// 检查用户余额
 	userQuota, err := model.GetUserQuota(userId, false)
 	if err != nil {
+		releaseReservedQueueSlot()
 		return nil, fmt.Errorf("failed to get user quota: %w", err)
 	}
 
 	// 预估费用（使用模型价格或倍率）
 	estimatedCost := estimateImageGenerationCost(modelId)
 	if userQuota < estimatedCost {
+		releaseReservedQueueSlot()
 		return nil, fmt.Errorf("insufficient quota: required %s, available %s",
 			logger.FormatQuota(estimatedCost),
 			logger.FormatQuota(userQuota))
+	}
+
+	if _, err := getUserValidToken(userId); err != nil {
+		releaseReservedQueueSlot()
+		return nil, fmt.Errorf("image generation requires a valid user token: %w", err)
 	}
 
 	var (
@@ -463,6 +609,7 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 	)
 	if strings.TrimSpace(params) != "" {
 		if err := common.UnmarshalJsonStr(params, &paramMap); err != nil {
+			releaseReservedQueueSlot()
 			return nil, fmt.Errorf("failed to parse params: %w", err)
 		}
 		referenceInputs, hadLegacyReferenceImage = collectImageGenerationReferenceImagesFromParamsMap(paramMap)
@@ -472,6 +619,7 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 			setImageGenerationMaskInParamsMap(paramMap, "")
 			storedParamsBytes, err := common.Marshal(paramMap)
 			if err != nil {
+				releaseReservedQueueSlot()
 				return nil, fmt.Errorf("failed to marshal stored params: %w", err)
 			}
 			storedParams = string(storedParamsBytes)
@@ -491,41 +639,47 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 	}
 
 	if err := task.Insert(); err != nil {
+		releaseReservedQueueSlot()
 		return nil, fmt.Errorf("failed to insert task: %w", err)
 	}
 
-	if len(referenceInputs) > 0 || strings.TrimSpace(maskInput) != "" {
-		storedRefs, err := storeImageGenerationReferenceImages(context.Background(), task.Id, referenceInputs)
-		if err != nil {
-			_ = model.DeleteImageTask(task.Id)
-			return nil, fmt.Errorf("failed to store reference images: %w", err)
-		}
-		storedMask := ""
-		if strings.TrimSpace(maskInput) != "" {
-			storedMask, err = storeImageGenerationReferenceImage(context.Background(), task.Id, maskInput)
+		if len(referenceInputs) > 0 || strings.TrimSpace(maskInput) != "" {
+			storedRefs, err := storeImageGenerationReferenceImages(context.Background(), task.Id, referenceInputs)
 			if err != nil {
-				cleanupStoredImageGenerationAssets(storedRefs)
 				_ = model.DeleteImageTask(task.Id)
-				return nil, fmt.Errorf("failed to store mask image: %w", err)
+				releaseReservedQueueSlot()
+				return nil, fmt.Errorf("failed to store reference images: %w", err)
 			}
-		}
+		storedMask := ""
+			if strings.TrimSpace(maskInput) != "" {
+				storedMask, err = storeImageGenerationReferenceImage(context.Background(), task.Id, maskInput)
+				if err != nil {
+					cleanupStoredImageGenerationAssets(storedRefs)
+					_ = model.DeleteImageTask(task.Id)
+					releaseReservedQueueSlot()
+					return nil, fmt.Errorf("failed to store mask image: %w", err)
+				}
+			}
 		setImageGenerationReferenceImagesInParamsMap(paramMap, storedRefs, hadLegacyReferenceImage)
 		setImageGenerationMaskInParamsMap(paramMap, storedMask)
-		storedParamsBytes, err := common.Marshal(paramMap)
-		if err != nil {
-			cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
-			_ = model.DeleteImageTask(task.Id)
-			return nil, fmt.Errorf("failed to marshal stored params: %w", err)
+			storedParamsBytes, err := common.Marshal(paramMap)
+			if err != nil {
+				cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
+				_ = model.DeleteImageTask(task.Id)
+				releaseReservedQueueSlot()
+				return nil, fmt.Errorf("failed to marshal stored params: %w", err)
+			}
+			task.Params = string(storedParamsBytes)
+			if err := task.Update(); err != nil {
+				cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
+				_ = model.DeleteImageTask(task.Id)
+				releaseReservedQueueSlot()
+				return nil, fmt.Errorf("failed to update stored params: %w", err)
+			}
 		}
-		task.Params = string(storedParamsBytes)
-		if err := task.Update(); err != nil {
-			cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
-			_ = model.DeleteImageTask(task.Id)
-			return nil, fmt.Errorf("failed to update stored params: %w", err)
-		}
-	}
 
 	publishImageGenerationTaskUpdate(task)
+	queueSlotReserved = false
 
 	// 启动异步处理
 	enqueueImageGenerationTask(task.Id)
@@ -561,15 +715,32 @@ func RetryImageGenerationTask(taskId int) error {
 		return fmt.Errorf("task %d is not failed (status: %s)", taskId, task.Status)
 	}
 
+	if err := enforceImageGenerationTaskQueueLimit(task.UserId, 1); err != nil {
+		return err
+	}
+	queueSlotReserved := true
+	releaseReservedQueueSlot := func() {
+		if !queueSlotReserved {
+			return
+		}
+		if err := model.ReleaseUserImageGenerationQueueSlots(task.UserId, 1); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to rollback retried image generation queue slot for user %d: %v", task.UserId, err))
+		}
+		queueSlotReserved = false
+	}
+
 	updated, err := model.ResetImageTaskForRetry(taskId)
 	if err != nil {
+		releaseReservedQueueSlot()
 		return fmt.Errorf("failed to reset task for retry: %w", err)
 	}
 	if !updated {
+		releaseReservedQueueSlot()
 		return fmt.Errorf("task %d is not failed", taskId)
 	}
 
 	publishImageGenerationTaskUpdateByID(taskId)
+	queueSlotReserved = false
 	enqueueImageGenerationTask(taskId)
 	return nil
 }
@@ -591,11 +762,24 @@ func ProcessImageGenerationTask(taskId int) error {
 	}
 
 	if task.Status == model.ImageTaskStatusPending {
-		if err := model.UpdateImageTaskStatus(taskId, model.ImageTaskStatusGenerating, ""); err != nil {
-			return fmt.Errorf("failed to update task status: %w", err)
+		startedTime := common.GetTimestamp()
+		leaseExpiresAt := imageGenerationLeaseExpiryFromNow(time.Unix(startedTime, 0))
+		won, err := model.MarkImageTaskGenerating(taskId, imageGenerationWorkerNodeID, startedTime, leaseExpiresAt)
+		if err != nil {
+			return fmt.Errorf("failed to claim task for generation: %w", err)
+		}
+		if !won {
+			return fmt.Errorf("task %d was claimed by another worker", taskId)
 		}
 		publishImageGenerationTaskUpdateByID(taskId)
+		task.Status = model.ImageTaskStatusGenerating
+		task.StartedTime = startedTime
+		task.WorkerNode = imageGenerationWorkerNodeID
+		task.LeaseExpiresAt = leaseExpiresAt
 	}
+
+	stopLeaseRenewer := startImageTaskLeaseRenewer(taskId, imageGenerationWorkerNodeID)
+	defer stopLeaseRenewer()
 
 	// 重试逻辑
 	maxRetries := imageGenerationMaxRetries()
@@ -616,8 +800,15 @@ func ProcessImageGenerationTask(taskId int) error {
 		cancel()
 		if err == nil {
 			// 成功：更新任务结果
-			if err := model.UpdateImageTaskResult(taskId, imageUrl, thumbnailUrl, metadata, cost); err != nil {
+			won, err := model.UpdateImageTaskResultClaimed(taskId, imageGenerationWorkerNodeID, imageUrl, thumbnailUrl, metadata, cost)
+			if err != nil {
 				return fmt.Errorf("failed to update task result: %w", err)
+			}
+			if !won {
+				return fmt.Errorf("task %d lease lost before result update", taskId)
+			}
+			if err := model.ReleaseUserImageGenerationQueueSlots(task.UserId, 1); err != nil {
+				common.SysLog(fmt.Sprintf("Failed to release image generation queue slot for user %d after success: %v", task.UserId, err))
 			}
 			publishImageGenerationTaskUpdateByID(taskId)
 
@@ -632,8 +823,15 @@ func ProcessImageGenerationTask(taskId int) error {
 
 	// 所有重试都失败
 	errorMsg := fmt.Sprintf("failed after %d attempts: %v", maxRetries+1, lastErr)
-	if err := model.UpdateImageTaskStatus(taskId, model.ImageTaskStatusFailed, errorMsg); err != nil {
+	won, err := model.UpdateImageTaskTerminalStatusClaimed(taskId, imageGenerationWorkerNodeID, model.ImageTaskStatusFailed, errorMsg)
+	if err != nil {
 		return fmt.Errorf("failed to update task status: %w", err)
+	}
+	if !won {
+		return fmt.Errorf("task %d lease lost before failure update", taskId)
+	}
+	if err := model.ReleaseUserImageGenerationQueueSlots(task.UserId, 1); err != nil {
+		common.SysLog(fmt.Sprintf("Failed to release image generation queue slot for user %d after failure: %v", task.UserId, err))
 	}
 	publishImageGenerationTaskUpdateByID(taskId)
 
@@ -1425,7 +1623,15 @@ func DeleteImageGenerationTask(task *model.ImageGenerationTask) error {
 	if task == nil {
 		return nil
 	}
-	return cleanupSingleTask(task, worker_setting.GetWorkerSetting())
+	if err := cleanupSingleTask(task, worker_setting.GetWorkerSetting()); err != nil {
+		return err
+	}
+	if task.Status == model.ImageTaskStatusPending || task.Status == model.ImageTaskStatusGenerating {
+		if err := model.ReleaseUserImageGenerationQueueSlots(task.UserId, 1); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to release image generation queue slot for user %d after delete: %v", task.UserId, err))
+		}
+	}
+	return nil
 }
 
 // deleteImageFile 删除图片文件（本地或S3）

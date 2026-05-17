@@ -233,6 +233,9 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	if len(assets) != 1 {
 		t.Fatalf("expected one approved asset, total=%d len=%d", total, len(assets))
 	}
+	if total != 1 {
+		t.Fatalf("expected visible approved asset total 1, got %d", total)
+	}
 	if hasMore {
 		t.Fatal("expected single approved asset page to have no more cursor pages")
 	}
@@ -319,7 +322,7 @@ func TestGetApprovedInspirationAssetsUsesCursorPagination(t *testing.T) {
 		}
 	}
 
-	firstPage, _, nextCursor, hasMore, err := GetApprovedInspirationAssets("", 1)
+	firstPage, firstTotal, nextCursor, hasMore, err := GetApprovedInspirationAssets("", 1)
 	if err != nil {
 		t.Fatalf("failed to fetch first cursor page: %v", err)
 	}
@@ -332,8 +335,11 @@ func TestGetApprovedInspirationAssetsUsesCursorPagination(t *testing.T) {
 	if nextCursor == "" {
 		t.Fatal("expected next cursor for truncated first page")
 	}
+	if firstTotal != 2 {
+		t.Fatalf("expected first cursor page total 2, got %d", firstTotal)
+	}
 
-	secondPage, _, secondCursor, secondHasMore, err := GetApprovedInspirationAssets(nextCursor, 1)
+	secondPage, secondTotal, secondCursor, secondHasMore, err := GetApprovedInspirationAssets(nextCursor, 1)
 	if err != nil {
 		t.Fatalf("failed to fetch second cursor page: %v", err)
 	}
@@ -345,6 +351,9 @@ func TestGetApprovedInspirationAssetsUsesCursorPagination(t *testing.T) {
 	}
 	if secondCursor != "" {
 		t.Fatalf("expected empty second cursor, got %q", secondCursor)
+	}
+	if secondTotal != 0 {
+		t.Fatalf("expected follow-up cursor page total 0 (not computed), got %d", secondTotal)
 	}
 }
 

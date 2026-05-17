@@ -103,6 +103,9 @@ const areTasksVisuallyEquivalent = (oldTask, newTask) =>
   oldTask.progress === newTask.progress &&
   oldTask.error_message === newTask.error_message;
 
+const taskIsDeletable = (task) =>
+  task?.status === 'success' || task?.status === 'failed';
+
 const mergeTaskCollections = (baseTasks, incomingTasks, maxItems) => {
   const mergedById = new Map((baseTasks || []).map((task) => [task.id, task]));
   const newFrontIds = [];
@@ -681,8 +684,14 @@ const ImageGeneration = () => {
 
   // 批量删除任务
   const handleBatchDelete = async () => {
+    const selectedTasks = tasks.filter((task) => selectedTaskIds.has(task.id));
+    const undeletableTasks = selectedTasks.filter((task) => !taskIsDeletable(task));
     if (selectedTaskIds.size === 0) {
       showError(t('请先选择要删除的任务'));
+      return;
+    }
+    if (undeletableTasks.length > 0) {
+      showError(t('运行中的任务暂不支持删除，请等待完成后再删除'));
       return;
     }
 
@@ -1174,7 +1183,14 @@ const ImageGeneration = () => {
         );
       }
     } catch (error) {
-      if (error.response?.data?.message) {
+      const serverMessage = error.response?.data?.message || error.message || '';
+      if (serverMessage.includes('valid user token') || serverMessage.includes('no valid token')) {
+        showError(
+          userCustomWorkerKeyEnabled
+            ? t('请先创建可用令牌，或检查你的自定义 Worker Key 是否可用')
+            : t('请先创建一个可用令牌后再使用 /canvas'),
+        );
+      } else if (error.response?.data?.message) {
         showError(error.response.data.message);
       } else {
         showError(error.message || t('创建任务失败'));
@@ -1816,6 +1832,9 @@ const ImageGeneration = () => {
                     type='danger'
                     icon={<IconDelete />}
                     loading={deletingTasks}
+                    disabled={tasks
+                      .filter((task) => selectedTaskIds.has(task.id))
+                      .some((task) => !taskIsDeletable(task))}
                     onClick={handleBatchDelete}
                   >
                     {t('删除选中')}

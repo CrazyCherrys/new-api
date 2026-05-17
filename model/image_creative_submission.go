@@ -656,6 +656,15 @@ func GetApprovedInspirationAssets(cursor string, num int) ([]*ImageCreativeListI
 	if limit <= 0 {
 		limit = 24
 	}
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		if err := DB.Table("image_creative_submissions AS s").
+			Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
+			Where("s.status = ? AND t.status = ? AND t.image_url <> ?", CreativeSubmissionStatusApproved, ImageTaskStatusSuccess, "").
+			Count(&total).Error; err != nil {
+			return nil, 0, "", false, err
+		}
+	}
 
 	subQuery, err := applyInspirationCursor(
 		DB.Table("image_creative_submissions AS s").

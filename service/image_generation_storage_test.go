@@ -285,6 +285,70 @@ func TestCanAccessApprovedInspirationLocalAssetRequiresApprovedSubmission(t *tes
 	}
 }
 
+func TestWarmImageGenerationLocalAssetAccessCacheForUser(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+	previousRedisEnabled := common.RedisEnabled
+	InvalidateImageGenerationLocalAssetAccessCache()
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		InvalidateImageGenerationLocalAssetAccessCache()
+	})
+
+	objectKey := "image-generation/20260428/777-warm.png"
+	assetURL := buildImageGenerationLocalObjectURL(objectKey)
+	task := &model.ImageGenerationTask{
+		UserId:          99,
+		ModelId:         "gpt-image-1",
+		Prompt:          "warm prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusSuccess,
+		ImageUrl:        assetURL,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	clean, ok := ImageGenerationLocalAssetPathFromURLForCache(assetURL)
+	if !ok {
+		t.Fatalf("expected clean local asset path from %q", assetURL)
+	}
+	WarmImageGenerationLocalAssetAccessCacheForUser(task.UserId, []string{clean})
+
+	if err := db.Delete(&model.ImageGenerationTask{}, task.Id).Error; err != nil {
+		t.Fatalf("failed to delete task backing warmed asset: %v", err)
+	}
+
+	allowed, err := CanAccessImageGenerationLocalAsset(task.UserId, clean)
+	if err != nil {
+		t.Fatalf("failed to check warmed owner access: %v", err)
+	}
+	if !allowed {
+		t.Fatal("expected warmed owner access to remain allowed until invalidation")
+	}
+}
+
+func TestWarmApprovedInspirationLocalAssetAccessCache(t *testing.T) {
+	previousRedisEnabled := common.RedisEnabled
+	InvalidateInspirationLocalAssetAccessCache()
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		InvalidateInspirationLocalAssetAccessCache()
+	})
+
+	objectKey := "image-generation/20260428/778-warm-approved.png"
+	WarmApprovedInspirationLocalAssetAccessCache([]string{objectKey})
+
+	allowed, err := CanAccessApprovedInspirationLocalAsset(objectKey)
+	if err != nil {
+		t.Fatalf("failed to check warmed inspiration access: %v", err)
+	}
+	if !allowed {
+		t.Fatal("expected warmed inspiration access to remain allowed until invalidation")
+	}
+}
+
 func TestDeleteImageGenerationTaskRemovesStoredReferenceImages(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
 

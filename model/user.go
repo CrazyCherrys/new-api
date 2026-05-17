@@ -38,6 +38,7 @@ type User struct {
 	Quota            int            `json:"quota" gorm:"type:int;default:0"`
 	UsedQuota        int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
 	RequestCount     int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
+	ImageGenerationActiveTasks int   `json:"-" gorm:"type:int;default:0;column:image_generation_active_tasks"`
 	Group            string         `json:"group" gorm:"type:varchar(64);default:'default'"`
 	AffCode          string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
 	AffCount         int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
@@ -988,6 +989,98 @@ func updateUserRequestCount(id int, count int) {
 	if err != nil {
 		common.SysLog("failed to update user request count: " + err.Error())
 	}
+}
+
+func ReserveUserImageGenerationQueueSlots(id int, requestedCount int, limit int) (bool, error) {
+	if id <= 0 || requestedCount <= 0 || limit <= 0 {
+		return false, nil
+	}
+	result := DB.Model(&User{}).
+		Where("id = ?", id).
+		Where("image_generation_active_tasks + ? <= ?", requestedCount, limit).
+		Update("image_generation_active_tasks", gorm.Expr("image_generation_active_tasks + ?", requestedCount))
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func ReleaseUserImageGenerationQueueSlots(id int, count int) error {
+	if id <= 0 || count <= 0 {
+		return nil
+	}
+	return DB.Model(&User{}).
+		Where("id = ?", id).
+		Update(
+			"image_generation_active_tasks",
+			gorm.Expr(
+				"CASE WHEN image_generation_active_tasks >= ? THEN image_generation_active_tasks - ? ELSE 0 END",
+				count,
+				count,
+			),
+		).Error
+}
+
+func GetUserImageGenerationActiveTaskCount(id int) (int, error) {
+	if id <= 0 {
+		return 0, nil
+	}
+	var count int
+	err := DB.Model(&User{}).Where("id = ?", id).Select("image_generation_active_tasks").Scan(&count).Error
+	return count, err
+}
+
+func ReconcileUserImageGenerationActiveTaskCount(id int) (int64, error) {
+	if id <= 0 {
+		return 0, nil
+	}
+	activeStatuses := []string{"pending", "generating"}
+	var actual int64
+	if err := DB.Model(&ImageGenerationTask{}).
+		Where("user_id = ? AND status IN ?", id, activeStatuses).
+		Count(&actual).Error; err != nil {
+		return 0, err
+	}
+	if err := DB.Model(&User{}).
+		Where("id = ?", id).
+		Update("image_generation_active_tasks", actual).Error; err != nil {
+		return 0, err
+	}
+	return actual, nil
+}
+
+func ReconcileAllUserImageGenerationActiveTaskCounts() (int, error) {
+	type userTaskCount struct {
+		UserId int   `gorm:"column:user_id"`
+		Count  int64 `gorm:"column:count"`
+	}
+
+	if err := DB.Model(&User{}).
+		Where("image_generation_active_tasks <> 0").
+		Update("image_generation_active_tasks", 0).Error; err != nil {
+		return 0, err
+	}
+
+	rows := make([]userTaskCount, 0)
+	activeStatuses := []string{"pending", "generating"}
+	if err := DB.Model(&ImageGenerationTask{}).
+		Select("user_id, COUNT(*) AS count").
+		Where("status IN ?", activeStatuses).
+		Group("user_id").
+		Scan(&rows).Error; err != nil {
+		return 0, err
+	}
+
+	corrected := 0
+	for _, row := range rows {
+		if err := DB.Model(&User{}).
+			Where("id = ?", row.UserId).
+			Update("image_generation_active_tasks", row.Count).Error; err != nil {
+			return corrected, err
+		}
+		corrected++
+	}
+	return corrected, nil
 }
 
 // GetUsernameById gets username from Redis first, falls back to DB if needed

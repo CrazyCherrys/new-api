@@ -149,6 +149,45 @@ func InvalidateImageGenerationLocalAssetAccessCache() {
 	_ = getImageGenerationLocalAssetAccessCache().Purge()
 }
 
+func warmImageGenerationLocalAssetAccessCache(userId int, assetPaths []string) {
+	if userId <= 0 || len(assetPaths) == 0 {
+		return
+	}
+	cache := getImageGenerationLocalAssetAccessCache()
+	ttl := imageGenerationLocalAssetAccessCacheTTL()
+	for _, assetPath := range assetPaths {
+		clean, err := sanitizeImageGenerationLocalAssetPath(assetPath)
+		if err != nil {
+			continue
+		}
+		cacheKey := fmt.Sprintf("%d:%s", userId, clean)
+		_ = cache.SetWithTTL(cacheKey, 1, ttl)
+	}
+}
+
+func warmApprovedInspirationLocalAssetAccessCache(assetPaths []string) {
+	if len(assetPaths) == 0 {
+		return
+	}
+	cache := getInspirationLocalAssetAccessCache()
+	ttl := inspirationLocalAssetAccessCacheTTL()
+	for _, assetPath := range assetPaths {
+		clean, err := sanitizeImageGenerationLocalAssetPath(assetPath)
+		if err != nil {
+			continue
+		}
+		_ = cache.SetWithTTL(clean, 1, ttl)
+	}
+}
+
+func WarmImageGenerationLocalAssetAccessCacheForUser(userId int, assetPaths []string) {
+	warmImageGenerationLocalAssetAccessCache(userId, assetPaths)
+}
+
+func WarmApprovedInspirationLocalAssetAccessCache(assetPaths []string) {
+	warmApprovedInspirationLocalAssetAccessCache(assetPaths)
+}
+
 func storeImageGenerationResult(ctx context.Context, taskId int, imageUrl string) imageGenerationStoredResult {
 	result := imageGenerationStoredResult{
 		imageURL: imageUrl,
@@ -1012,4 +1051,20 @@ func pathEscapeObjectKey(objectKey string) string {
 		parts[i] = url.PathEscape(part)
 	}
 	return strings.Join(parts, "/")
+}
+
+func imageGenerationLocalAssetPathFromURL(imageURL string) (string, bool) {
+	objectKey, ok := imageGenerationLocalAssetKeyFromURL(imageURL)
+	if !ok {
+		return "", false
+	}
+	clean, err := sanitizeImageGenerationLocalAssetPath(objectKey)
+	if err != nil {
+		return "", false
+	}
+	return clean, true
+}
+
+func ImageGenerationLocalAssetPathFromURLForCache(imageURL string) (string, bool) {
+	return imageGenerationLocalAssetPathFromURL(imageURL)
 }

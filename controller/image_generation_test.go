@@ -127,3 +127,43 @@ func TestGetImageGenerationTaskDetailReturnsComputedDetailFields(t *testing.T) {
 		t.Fatalf("expected quantity 3, got %d", detail.Quantity)
 	}
 }
+
+func TestDeleteImageGenerationTaskRejectsActiveTask(t *testing.T) {
+	db := setupImageGenerationControllerTestDB(t)
+
+	task := &model.ImageGenerationTask{
+		UserId:          7,
+		ModelId:         "gpt-image-active",
+		Prompt:          "active prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusGenerating,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodDelete, fmt.Sprintf("/api/image-generation/tasks/%d", task.Id), nil, task.UserId)
+	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", task.Id)}}
+
+	DeleteImageGenerationTask(ctx)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+
+	response := decodeAPIResponse(t, recorder)
+	if response.Success {
+		t.Fatalf("expected delete active task to fail")
+	}
+	if !strings.Contains(response.Message, "暂不支持删除") {
+		t.Fatalf("expected active-task delete message, got %q", response.Message)
+	}
+
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("expected active task to remain in database")
+	}
+}
