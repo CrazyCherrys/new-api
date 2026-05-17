@@ -18,7 +18,7 @@ import (
 
 // ImageCreativeSubmission records user-submitted image assets awaiting or passing review.
 type ImageCreativeSubmission struct {
-	Id            int    `json:"id" gorm:"primaryKey"`
+	Id            int    `json:"id" gorm:"primaryKey;index:idx_image_creative_public_order,priority:4"`
 	TaskId        int    `json:"task_id" gorm:"uniqueIndex;not null"`
 	UserId        int    `json:"user_id" gorm:"index;not null"`
 	Status        string `json:"status" gorm:"size:20;not null;index;index:idx_image_creative_public_order,priority:1;default:'pending'"`
