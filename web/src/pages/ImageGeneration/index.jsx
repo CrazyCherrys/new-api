@@ -56,6 +56,7 @@ const DEFAULT_IMAGE_CAPABILITIES = [
 ];
 const DEFAULT_POLLING_INTERVAL_SECONDS = 5;
 const DEFAULT_MAX_BATCH_TASKS = 10;
+const TASK_LIST_REQUEST_TIMEOUT_MS = 20000;
 
 const normalizeImageCapabilities = (raw) => {
   if (Array.isArray(raw)) {
@@ -486,8 +487,10 @@ const ImageGeneration = () => {
     return { start: Math.floor(startDate.getTime() / 1000), end };
   };
 
-  // silent=true 时静默刷新（轮询），不触发 loadingTasks，不显示 Spin 遮罩
-  const loadTasks = async (silent = false) => {
+  // silent=true 时静默刷新（轮询），不会触发全局阻塞遮罩。
+  // disableDuplicate=true 用于强制绕过 API 层的 in-flight GET 去重。
+  const loadTasks = async (silent = false, options = {}) => {
+    const { disableDuplicate = false, forceRefresh = false } = options;
     const queryState = taskListStateRef.current || {
       page: taskPage,
       pageSize: taskPageSize,
@@ -498,10 +501,11 @@ const ImageGeneration = () => {
       sortOrder: taskSortOrder,
     };
     const useCursorPagination = taskCursorPaginationSupported(queryState);
-    const requestSeq = silent
-      ? taskListRequestSeqRef.current
-      : taskListRequestSeqRef.current + 1;
-    if (!silent) {
+    const shouldAdvanceSeq = !silent || forceRefresh;
+    const requestSeq = shouldAdvanceSeq
+      ? taskListRequestSeqRef.current + 1
+      : taskListRequestSeqRef.current;
+    if (shouldAdvanceSeq) {
       taskListRequestSeqRef.current = requestSeq;
     }
     if (!silent) setLoadingTasks(true);
@@ -532,7 +536,12 @@ const ImageGeneration = () => {
         params.sort_order = queryState.sortOrder;
       }
 
-      const res = await API.get('/api/image-generation/tasks', { params });
+      const res = await API.get('/api/image-generation/tasks', {
+        params,
+        timeout: TASK_LIST_REQUEST_TIMEOUT_MS,
+        skipErrorHandler: true,
+        disableDuplicate,
+      });
       if (requestSeq !== taskListRequestSeqRef.current) {
         return;
       }
@@ -577,7 +586,7 @@ const ImageGeneration = () => {
         showError(error.message || t('加载任务列表失败'));
       }
     } finally {
-      if (!silent) {
+      if (!silent && requestSeq === taskListRequestSeqRef.current) {
         setLoadingTasks(false);
       }
     }
@@ -605,6 +614,8 @@ const ImageGeneration = () => {
           completed_since: completedSince,
           limit: Math.max((taskListStateRef.current?.pageSize || taskPageSize) * 2, 50),
         },
+        timeout: TASK_LIST_REQUEST_TIMEOUT_MS,
+        skipErrorHandler: true,
       });
       if (!res.data.success) {
         return;
@@ -1167,9 +1178,10 @@ const ImageGeneration = () => {
           }
         }
         setTaskTotal((prev) => prev + createdTasks.length);
-        if (!isDefaultTaskView) {
-          loadTasks();
-        }
+        loadTasks(false, {
+          disableDuplicate: true,
+          forceRefresh: true,
+        });
       }
 
       if (createdTasks.length === 0) {
@@ -1671,7 +1683,10 @@ const ImageGeneration = () => {
   );
 
   const renderHistoryContent = () => (
-    <Spin spinning={loadingTasks} style={{ width: '100%', height: '100%' }}>
+    <Spin
+      spinning={loadingTasks && tasks.length === 0}
+      style={{ width: '100%', height: '100%' }}
+    >
       {tasks.length > 0 ? (
         <div
           style={{

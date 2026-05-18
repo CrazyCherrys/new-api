@@ -416,6 +416,30 @@ export default function SettingsWorker(props) {
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'worker_setting.inspiration_page_cache_ttl'}
+                  label={t('灵感后续页缓存（秒）')}
+                  extraText={t('控制 /inspiration 非首页游标页缓存时长，0 表示关闭缓存')}
+                  min={0}
+                  max={86400}
+                  onChange={handleFieldChange(
+                    'worker_setting.inspiration_page_cache_ttl',
+                  )}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'worker_setting.inspiration_first_page_cache_ttl'}
+                  label={t('灵感首页缓存（秒）')}
+                  extraText={t('控制 /inspiration 首页缓存时长，0 表示关闭缓存')}
+                  min={0}
+                  max={86400}
+                  onChange={handleFieldChange(
+                    'worker_setting.inspiration_first_page_cache_ttl',
+                  )}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Switch
                   field={'worker_setting.auto_cleanup_enabled'}
                   label={t('自动清理开关')}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/cachex"
+	"github.com/QuantumNous/new-api/setting/worker_setting"
 	"github.com/samber/hot"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -86,6 +87,7 @@ type InspirationAssetPage struct {
 	Total      int64                    `json:"total"`
 	NextCursor string                   `json:"next_cursor"`
 	HasMore    bool                     `json:"has_more"`
+	CachedAt   int64                    `json:"cached_at"`
 }
 
 const (
@@ -99,6 +101,9 @@ var (
 
 	inspirationAssetListCache   *cachex.HybridCache[InspirationAssetPage]
 	inspirationAssetDetailCache *cachex.HybridCache[ImageCreativeAsset]
+
+	inspirationAssetRefreshMu       sync.Mutex
+	inspirationAssetRefreshInFlight = make(map[string]struct{})
 )
 
 var (
@@ -107,19 +112,27 @@ var (
 )
 
 func inspirationAssetListCacheTTL() time.Duration {
-	ttlSeconds := common.GetEnvOrDefault("INSPIRATION_ASSET_LIST_CACHE_TTL", 60)
-	if ttlSeconds <= 0 {
-		ttlSeconds = 60
+	ttlSeconds := worker_setting.GetWorkerSetting().InspirationPageCacheTTL
+	if ttlSeconds < 0 {
+		ttlSeconds = 0
 	}
 	return time.Duration(ttlSeconds) * time.Second
 }
 
 func inspirationAssetFirstPageCacheTTL() time.Duration {
-	ttlSeconds := common.GetEnvOrDefault("INSPIRATION_ASSET_FIRST_PAGE_CACHE_TTL", 300)
-	if ttlSeconds <= 0 {
-		ttlSeconds = 300
+	ttlSeconds := worker_setting.GetWorkerSetting().InspirationFirstPageCacheTTL
+	if ttlSeconds < 0 {
+		ttlSeconds = 0
 	}
 	return time.Duration(ttlSeconds) * time.Second
+}
+
+func inspirationAssetFirstPageStorageTTL() time.Duration {
+	freshTTL := inspirationAssetFirstPageCacheTTL()
+	if freshTTL <= 0 {
+		return 0
+	}
+	return freshTTL * 2
 }
 
 func inspirationAssetDetailCacheTTL() time.Duration {
@@ -188,16 +201,26 @@ func getInspirationAssetDetailCache() *cachex.HybridCache[ImageCreativeAsset] {
 	return inspirationAssetDetailCache
 }
 
-func inspirationAssetListCacheKey(cursor string, num int) string {
+func inspirationAssetListCacheKey(cursor string, num int, includeTotal bool) string {
 	if num <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s:%d", strings.TrimSpace(cursor), num)
+	if includeTotal {
+		return fmt.Sprintf("%s:%d:with_total", strings.TrimSpace(cursor), num)
+	}
+	return fmt.Sprintf("%s:%d:no_total", strings.TrimSpace(cursor), num)
 }
 
 func inspirationAssetListCacheTTLForCursor(cursor string) time.Duration {
 	if strings.TrimSpace(cursor) == "" {
 		return inspirationAssetFirstPageCacheTTL()
+	}
+	return inspirationAssetListCacheTTL()
+}
+
+func inspirationAssetListStorageTTLForCursor(cursor string) time.Duration {
+	if strings.TrimSpace(cursor) == "" {
+		return inspirationAssetFirstPageStorageTTL()
 	}
 	return inspirationAssetListCacheTTL()
 }
@@ -245,6 +268,16 @@ func cloneImageCreativeListItems(items []*ImageCreativeListItem) []*ImageCreativ
 		next = append(next, cloneImageCreativeListItem(item))
 	}
 	return next
+}
+
+func cloneInspirationAssetPage(page InspirationAssetPage) InspirationAssetPage {
+	return InspirationAssetPage{
+		Items:      cloneImageCreativeListItems(page.Items),
+		Total:      page.Total,
+		NextCursor: page.NextCursor,
+		HasMore:    page.HasMore,
+		CachedAt:   page.CachedAt,
+	}
 }
 
 func parseImageCreativeAssetJSON(raw string) map[string]any {
@@ -632,37 +665,20 @@ func applyInspirationCursor(query *gorm.DB, cursor string) (*gorm.DB, error) {
 	), nil
 }
 
-func GetApprovedInspirationAssets(cursor string, num int) ([]*ImageCreativeListItem, int64, string, bool, error) {
-	queryStart := time.Now()
-	cacheKey := inspirationAssetListCacheKey(cursor, num)
-	if cacheKey != "" {
-		cached, ok, err := getInspirationAssetListCache().Get(cacheKey)
-		if err == nil && ok {
-			common.SysLog(fmt.Sprintf(
-				"inspiration assets query: cache=hit cursor=%q page_size=%d items=%d has_more=%t elapsed_ms=%d",
-				strings.TrimSpace(cursor),
-				num,
-				len(cached.Items),
-				cached.HasMore,
-				time.Since(queryStart).Milliseconds(),
-			))
-			return cloneImageCreativeListItems(cached.Items), cached.Total, cached.NextCursor, cached.HasMore, nil
-		}
-	}
-
+func getApprovedInspirationAssetsFromStore(cursor string, num int, includeTotal bool) (InspirationAssetPage, error) {
+	cursor = strings.TrimSpace(cursor)
 	var assets []*ImageCreativeAsset
 	var total int64
 	limit := num
 	if limit <= 0 {
 		limit = 24
 	}
-	cursor = strings.TrimSpace(cursor)
-	if cursor == "" {
+	if includeTotal && cursor == "" {
 		if err := DB.Table("image_creative_submissions AS s").
 			Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
 			Where("s.status = ? AND t.status = ? AND t.image_url <> ?", CreativeSubmissionStatusApproved, ImageTaskStatusSuccess, "").
 			Count(&total).Error; err != nil {
-			return nil, 0, "", false, err
+			return InspirationAssetPage{}, err
 		}
 	}
 
@@ -673,7 +689,7 @@ func GetApprovedInspirationAssets(cursor string, num int) ([]*ImageCreativeListI
 		cursor,
 	)
 	if err != nil {
-		return nil, 0, "", false, err
+		return InspirationAssetPage{}, err
 	}
 
 	subQuery = subQuery.
@@ -685,7 +701,7 @@ func GetApprovedInspirationAssets(cursor string, num int) ([]*ImageCreativeListI
 		Joins("JOIN image_generation_tasks AS t ON t.id = feed.task_id").
 		Where("t.status = ? AND t.image_url <> ?", ImageTaskStatusSuccess, "").
 		Scan(&assets).Error; err != nil {
-		return nil, 0, "", false, err
+		return InspirationAssetPage{}, err
 	}
 
 	for _, asset := range assets {
@@ -702,30 +718,124 @@ func GetApprovedInspirationAssets(cursor string, num int) ([]*ImageCreativeListI
 		nextCursor = encodeInspirationAssetCursor(lastAsset.ReviewedTime, lastAsset.SubmittedTime, lastAsset.Id)
 	}
 
-	if cacheKey != "" {
-		items := buildImageCreativeListItems(assets)
-		_ = getInspirationAssetListCache().SetWithTTL(cacheKey, InspirationAssetPage{
-			Items:      cloneImageCreativeListItems(items),
-			Total:      total,
-			NextCursor: nextCursor,
-			HasMore:    hasMore,
-		}, inspirationAssetListCacheTTLForCursor(cursor))
+	return InspirationAssetPage{
+		Items:      buildImageCreativeListItems(assets),
+		Total:      total,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
+}
+
+func refreshApprovedInspirationAssetsCache(cacheKey, cursor string, num int, includeTotal bool, cacheTTL time.Duration) error {
+	if strings.TrimSpace(cacheKey) == "" || cacheTTL <= 0 {
+		return nil
+	}
+	page, err := getApprovedInspirationAssetsFromStore(cursor, num, includeTotal)
+	if err != nil {
+		return err
+	}
+	page.CachedAt = common.GetTimestamp()
+	return getInspirationAssetListCache().SetWithTTL(cacheKey, cloneInspirationAssetPage(page), cacheTTL)
+}
+
+func triggerApprovedInspirationAssetsRefresh(cacheKey, cursor string, num int, includeTotal bool, cacheTTL time.Duration) {
+	if strings.TrimSpace(cacheKey) == "" || cacheTTL <= 0 {
+		return
+	}
+
+	inspirationAssetRefreshMu.Lock()
+	if _, exists := inspirationAssetRefreshInFlight[cacheKey]; exists {
+		inspirationAssetRefreshMu.Unlock()
+		return
+	}
+	inspirationAssetRefreshInFlight[cacheKey] = struct{}{}
+	inspirationAssetRefreshMu.Unlock()
+
+	go func() {
+		defer func() {
+			inspirationAssetRefreshMu.Lock()
+			delete(inspirationAssetRefreshInFlight, cacheKey)
+			inspirationAssetRefreshMu.Unlock()
+		}()
+
+		if err := refreshApprovedInspirationAssetsCache(cacheKey, cursor, num, includeTotal, cacheTTL); err != nil {
+			common.SysLog(fmt.Sprintf(
+				"inspiration assets async refresh failed: cursor=%q page_size=%d include_total=%t err=%v",
+				strings.TrimSpace(cursor),
+				num,
+				includeTotal,
+				err,
+			))
+		}
+	}()
+}
+
+func GetApprovedInspirationAssets(cursor string, num int, includeTotal bool) ([]*ImageCreativeListItem, int64, string, bool, error) {
+	queryStart := time.Now()
+	cursor = strings.TrimSpace(cursor)
+	cacheTTL := inspirationAssetListStorageTTLForCursor(cursor)
+	cacheKey := inspirationAssetListCacheKey(cursor, num, includeTotal)
+	cacheEnabled := cacheKey != "" && cacheTTL > 0
+	isFirstPage := cursor == ""
+	freshTTL := inspirationAssetListCacheTTLForCursor(cursor)
+
+	if cacheEnabled {
+		cached, ok, err := getInspirationAssetListCache().Get(cacheKey)
+		if err == nil && ok {
+			isStaleFirstPage := false
+			if isFirstPage && freshTTL > 0 {
+				cachedAt := time.Unix(cached.CachedAt, 0)
+				isStaleFirstPage = cached.CachedAt <= 0 || time.Since(cachedAt) > freshTTL
+			}
+			if isStaleFirstPage {
+				triggerApprovedInspirationAssetsRefresh(cacheKey, cursor, num, includeTotal, cacheTTL)
+				common.SysLog(fmt.Sprintf(
+					"inspiration assets query: cache=stale cursor=%q page_size=%d items=%d has_more=%t elapsed_ms=%d",
+					strings.TrimSpace(cursor),
+					num,
+					len(cached.Items),
+					cached.HasMore,
+					time.Since(queryStart).Milliseconds(),
+				))
+				return cloneImageCreativeListItems(cached.Items), cached.Total, cached.NextCursor, cached.HasMore, nil
+			}
+
+			common.SysLog(fmt.Sprintf(
+				"inspiration assets query: cache=hit cursor=%q page_size=%d items=%d has_more=%t elapsed_ms=%d",
+				strings.TrimSpace(cursor),
+				num,
+				len(cached.Items),
+				cached.HasMore,
+				time.Since(queryStart).Milliseconds(),
+			))
+			return cloneImageCreativeListItems(cached.Items), cached.Total, cached.NextCursor, cached.HasMore, nil
+		}
+	}
+
+	page, err := getApprovedInspirationAssetsFromStore(cursor, num, includeTotal)
+	if err != nil {
+		return nil, 0, "", false, err
+	}
+
+	if cacheEnabled {
+		page.CachedAt = common.GetTimestamp()
+		_ = getInspirationAssetListCache().SetWithTTL(cacheKey, cloneInspirationAssetPage(page), cacheTTL)
 	}
 
 	common.SysLog(fmt.Sprintf(
 		"inspiration assets query: cache=miss cursor=%q page_size=%d items=%d has_more=%t elapsed_ms=%d",
 		strings.TrimSpace(cursor),
 		num,
-		len(assets),
-		hasMore,
+		len(page.Items),
+		page.HasMore,
 		time.Since(queryStart).Milliseconds(),
 	))
 
-	return buildImageCreativeListItems(assets), total, nextCursor, hasMore, nil
+	return cloneImageCreativeListItems(page.Items), page.Total, page.NextCursor, page.HasMore, nil
 }
 
-func GetApprovedCreativeAssets(cursor string, num int) ([]*ImageCreativeListItem, int64, string, bool, error) {
-	return GetApprovedInspirationAssets(cursor, num)
+func GetApprovedCreativeAssets(cursor string, num int, includeTotal bool) ([]*ImageCreativeListItem, int64, string, bool, error) {
+	return GetApprovedInspirationAssets(cursor, num, includeTotal)
 }
 
 func GetApprovedInspirationAssetByID(id int) (*ImageCreativeAsset, error) {

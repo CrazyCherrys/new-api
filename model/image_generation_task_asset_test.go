@@ -226,7 +226,7 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 		}
 	}
 
-	assets, total, nextCursor, hasMore, err := GetApprovedInspirationAssets("", 10)
+	assets, total, nextCursor, hasMore, err := GetApprovedInspirationAssets("", 10, true)
 	if err != nil {
 		t.Fatalf("failed to get creative assets: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestGetApprovedInspirationAssetsUsesCursorPagination(t *testing.T) {
 		}
 	}
 
-	firstPage, firstTotal, nextCursor, hasMore, err := GetApprovedInspirationAssets("", 1)
+	firstPage, firstTotal, nextCursor, hasMore, err := GetApprovedInspirationAssets("", 1, true)
 	if err != nil {
 		t.Fatalf("failed to fetch first cursor page: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestGetApprovedInspirationAssetsUsesCursorPagination(t *testing.T) {
 		t.Fatalf("expected first cursor page total 2, got %d", firstTotal)
 	}
 
-	secondPage, secondTotal, secondCursor, secondHasMore, err := GetApprovedInspirationAssets(nextCursor, 1)
+	secondPage, secondTotal, secondCursor, secondHasMore, err := GetApprovedInspirationAssets(nextCursor, 1, false)
 	if err != nil {
 		t.Fatalf("failed to fetch second cursor page: %v", err)
 	}

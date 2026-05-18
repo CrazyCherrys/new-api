@@ -38,6 +38,8 @@ export const WORKER_SETTING_DEFAULTS = Object.freeze({
   'worker_setting.retry_delay': 5,
   'worker_setting.max_retries': 3,
   'worker_setting.polling_interval': 5,
+  'worker_setting.inspiration_page_cache_ttl': 60,
+  'worker_setting.inspiration_first_page_cache_ttl': 300,
   'worker_setting.auto_cleanup_enabled': false,
   'worker_setting.retention_days': 30,
   'worker_setting.max_image_size': 10,

@@ -1,6 +1,7 @@
 package worker_setting
 
 import (
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
 )
 
@@ -41,6 +42,10 @@ type WorkerSetting struct {
 
 	// PollingInterval 轮询间隔（秒）
 	PollingInterval int `json:"polling_interval"`
+	// InspirationPageCacheTTL /inspiration 后续游标页缓存时长（秒）
+	InspirationPageCacheTTL int `json:"inspiration_page_cache_ttl"`
+	// InspirationFirstPageCacheTTL /inspiration 首页缓存时长（秒）
+	InspirationFirstPageCacheTTL int `json:"inspiration_first_page_cache_ttl"`
 	// AutoCleanupEnabled 自动清理开关
 	AutoCleanupEnabled bool `json:"auto_cleanup_enabled"`
 	// RetentionDays 保留天数
@@ -52,27 +57,29 @@ type WorkerSetting struct {
 
 // 默认配置
 var workerSetting = WorkerSetting{
-	MaxWorkers:               4,
-	UserCustomKeyEnabled:     false,
-	UserCustomBaseURLAllowed: false,
-	StorageType:              "local",
-	LocalStoragePath:         "",
-	S3Endpoint:               "",
-	S3Bucket:                 "",
-	S3Region:                 "",
-	S3AccessKey:              "",
-	S3SecretKey:              "",
-	S3PathPrefix:             "",
-	S3URLMode:                "direct",
-	S3PublicBaseURL:          "",
-	ImageTimeout:             120,
-	VideoTimeout:             600,
-	RetryDelay:               5,
-	MaxRetries:               3,
-	PollingInterval:          5,
-	AutoCleanupEnabled:       false,
-	RetentionDays:            30,
-	MaxImageSize:             10,
+	MaxWorkers:                   4,
+	UserCustomKeyEnabled:         false,
+	UserCustomBaseURLAllowed:     false,
+	StorageType:                  "local",
+	LocalStoragePath:             "",
+	S3Endpoint:                   "",
+	S3Bucket:                     "",
+	S3Region:                     "",
+	S3AccessKey:                  "",
+	S3SecretKey:                  "",
+	S3PathPrefix:                 "",
+	S3URLMode:                    "direct",
+	S3PublicBaseURL:              "",
+	ImageTimeout:                 120,
+	VideoTimeout:                 600,
+	RetryDelay:                   5,
+	MaxRetries:                   3,
+	PollingInterval:              5,
+	InspirationPageCacheTTL:      common.GetEnvOrDefault("INSPIRATION_ASSET_LIST_CACHE_TTL", 60),
+	InspirationFirstPageCacheTTL: common.GetEnvOrDefault("INSPIRATION_ASSET_FIRST_PAGE_CACHE_TTL", 300),
+	AutoCleanupEnabled:           false,
+	RetentionDays:                30,
+	MaxImageSize:                 10,
 }
 
 func init() {

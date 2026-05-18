@@ -17,8 +17,6 @@ func SetApiRouter(router *gin.Engine) {
 	apiRouter.Use(gzip.Gzip(
 		gzip.DefaultCompression,
 		gzip.WithExcludedPaths([]string{
-			"/api/inspiration/assets",
-			"/api/creative-space/assets",
 			"/api/image-generation/sse",
 		}),
 	))
