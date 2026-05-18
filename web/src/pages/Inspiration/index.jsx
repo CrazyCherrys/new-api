@@ -227,7 +227,7 @@ const Inspiration = () => {
       }
       try {
         const res = await API.get('/api/inspiration/assets', {
-          params: { cursor, page_size: PAGE_SIZE },
+          params: { cursor, page_size: PAGE_SIZE, include_total: 0 },
           signal: controller.signal,
         });
         if (requestSeq !== loadSeqRef.current) return;

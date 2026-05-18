@@ -668,7 +668,13 @@ func GetInspirationAssets(c *gin.Context) {
 	startedAt := time.Now()
 	pageInfo := common.GetPageQuery(c)
 	cursor := c.Query("cursor")
-	includeTotal := c.Query("include_total") == "true" || c.Query("include_total") == "1"
+	includeTotal := true
+	switch strings.ToLower(strings.TrimSpace(c.Query("include_total"))) {
+	case "0", "false", "no", "off":
+		includeTotal = false
+	case "1", "true", "yes", "on", "":
+		includeTotal = true
+	}
 	assets, total, nextCursor, hasMore, err := model.GetApprovedInspirationAssets(cursor, pageInfo.GetPageSize(), includeTotal)
 	if err != nil {
 		common.SysLog(fmt.Sprintf(
@@ -694,9 +700,7 @@ func GetInspirationAssets(c *gin.Context) {
 			localAssetPaths = append(localAssetPaths, clean)
 		}
 	}
-	if len(localAssetPaths) > 0 {
-		go service.WarmApprovedInspirationLocalAssetAccessCache(localAssetPaths)
-	}
+	service.WarmApprovedInspirationLocalAssetAccessCache(localAssetPaths)
 	pageInfo.SetItems(assets)
 	common.SysLog(fmt.Sprintf(
 		"inspiration assets handler: cursor=%q page_size=%d items=%d total=%d has_more=%t elapsed_ms=%d",
