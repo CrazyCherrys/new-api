@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - image-worker
+      - video
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -36,11 +37,20 @@ jobs:
           REPO="${{ github.repository }}"
           REPO_LOWER="${REPO,,}"
           BRANCH="${GITHUB_REF#refs/heads/}"
-          if [ "$BRANCH" = "main" ]; then
-            TAG="latest"
-          else
-            TAG="${BRANCH}"
-          fi
+          case "$BRANCH" in
+            main)
+              TAG="latest"
+              ;;
+            image-worker)
+              TAG="image-worker"
+              ;;
+            video)
+              TAG="video-worker"
+              ;;
+            *)
+              TAG="${BRANCH}"
+              ;;
+          esac
           echo "image=ghcr.io/${REPO_LOWER}:${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker image
