@@ -56,6 +56,8 @@ const DEFAULT_IMAGE_CAPABILITIES = [
 ];
 const DEFAULT_POLLING_INTERVAL_SECONDS = 5;
 const DEFAULT_MAX_BATCH_TASKS = 10;
+const DEFAULT_TASK_PAGE_SIZE = 21;
+const TASK_PAGE_SIZE_OPTIONS = [10, 21, 50, 100];
 const TASK_LIST_REQUEST_TIMEOUT_MS = 20000;
 
 const normalizeImageCapabilities = (raw) => {
@@ -211,7 +213,7 @@ const ImageGeneration = () => {
   const [tasks, setTasks] = useState([]);
   const [taskTotal, setTaskTotal] = useState(0);
   const [taskPage, setTaskPage] = useState(1);
-  const [taskPageSize, setTaskPageSize] = useState(20);
+  const [taskPageSize, setTaskPageSize] = useState(DEFAULT_TASK_PAGE_SIZE);
   const [taskHasMore, setTaskHasMore] = useState(false);
   const [taskNextCursor, setTaskNextCursor] = useState('');
   const [taskStatusFilter, setTaskStatusFilter] = useState(''); // '' | 'pending' | 'generating' | 'success' | 'failed'
@@ -1255,10 +1257,11 @@ const ImageGeneration = () => {
     },
     rightContent: {
       flex: 1,
-      overflow: 'auto',
+      minHeight: 0,
+      overflow: 'hidden',
       display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
+      alignItems: 'stretch',
+      justifyContent: 'stretch',
     },
     label: {
       display: 'block',
@@ -1312,7 +1315,10 @@ const ImageGeneration = () => {
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
+      justifyContent: 'center',
       gap: 12,
+      width: '100%',
+      height: '100%',
     },
     emptyIcon: {
       width: 64,
@@ -1390,6 +1396,7 @@ const ImageGeneration = () => {
       padding: 20,
       width: '100%',
       flex: 1,
+      minHeight: 0,
       alignContent: 'start',
       overflowY: 'auto',
     },
@@ -1692,6 +1699,7 @@ const ImageGeneration = () => {
           style={{
             width: '100%',
             height: '100%',
+            minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -1714,6 +1722,7 @@ const ImageGeneration = () => {
                 padding: '16px',
                 textAlign: 'center',
                 borderTop: '1px solid var(--semi-color-border)',
+                flexShrink: 0,
               }}
             >
               {showsReliableTaskTotal ? (
@@ -1724,7 +1733,7 @@ const ImageGeneration = () => {
                   onPageChange={setTaskPage}
                   showSizeChanger
                   onPageSizeChange={handleTaskPageSizeChange}
-                  pageSizeOpts={[10, 20, 50, 100]}
+                  pageSizeOpts={TASK_PAGE_SIZE_OPTIONS}
                 />
               ) : (
                 <div
@@ -1741,7 +1750,7 @@ const ImageGeneration = () => {
                     onChange={handleTaskPageSizeChange}
                     style={{ width: 92 }}
                   >
-                    {[10, 20, 50, 100].map((size) => (
+                    {TASK_PAGE_SIZE_OPTIONS.map((size) => (
                       <Select.Option key={size} value={size}>
                         {size} / {t('页')}
                       </Select.Option>
@@ -1753,7 +1762,7 @@ const ImageGeneration = () => {
                     disabled={taskPage <= 1}
                     onClick={() => setTaskPage((prev) => Math.max(1, prev - 1))}
                   >
-                    {t('上一步')}
+                    {t('上一页')}
                   </Button>
                   <Text type='tertiary' size='small'>
                     {taskPage}
@@ -1764,7 +1773,7 @@ const ImageGeneration = () => {
                     disabled={!hasNextTaskPage || !taskNextCursor}
                     onClick={() => setTaskPage((prev) => prev + 1)}
                   >
-                    {t('下一步')}
+                    {t('下一页')}
                   </Button>
                 </div>
               )}
@@ -1825,7 +1834,7 @@ const ImageGeneration = () => {
                 </Text>
               ) : (
                 <Text type='tertiary' size='small'>
-                  {t('上一步')} / {t('下一步')}
+                  {t('上一页')} / {t('下一页')}
                 </Text>
               )}
               {selectedTaskIds.size > 0 && (
