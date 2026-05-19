@@ -1395,10 +1395,8 @@ const ImageGeneration = () => {
       gap: 20,
       padding: 20,
       width: '100%',
-      flex: 1,
-      minHeight: 0,
       alignContent: 'start',
-      overflowY: 'auto',
+      flexShrink: 0,
     },
   };
 
@@ -1692,7 +1690,18 @@ const ImageGeneration = () => {
   const renderHistoryContent = () => (
     <Spin
       spinning={loadingTasks && tasks.length === 0}
-      style={{ width: '100%', height: '100%' }}
+      style={{
+        width: '100%',
+        height: '100%',
+        minHeight: 0,
+        display: 'flex',
+      }}
+      childStyle={{
+        width: '100%',
+        minHeight: 0,
+        flex: 1,
+        display: 'flex',
+      }}
     >
       {tasks.length > 0 ? (
         <div
@@ -1702,6 +1711,7 @@ const ImageGeneration = () => {
             minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
+            overflowY: 'auto',
           }}
         >
           <div style={styles.tasksGrid}>
