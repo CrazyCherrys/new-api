@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,23 +35,23 @@ const (
 )
 
 var (
-	imageWorkerLimiter                imageGenerationWorkerLimiter
-	imageGenerationTaskCreateMu       sync.Mutex
-	enqueueImageGenerationTask        = signalImageGenerationQueue
-	processImageGenerationTaskFn      = ProcessImageGenerationTask
-	generateImageFn                   = generateImage
-	imageGenerationTimeoutOverride    func() time.Duration
-	imageGenerationRetryDelayOverride func() time.Duration
+	imageWorkerLimiter                        imageGenerationWorkerLimiter
+	imageGenerationTaskCreateMu               sync.Mutex
+	enqueueImageGenerationTask                = signalImageGenerationQueue
+	processImageGenerationTaskFn              = ProcessImageGenerationTask
+	generateImageFn                           = generateImage
+	imageGenerationTimeoutOverride            func() time.Duration
+	imageGenerationRetryDelayOverride         func() time.Duration
 	imageGenerationLeaseRenewIntervalOverride func() time.Duration
-	imageCleanupTaskOnce              sync.Once
-	imageCleanupTaskRunning           atomic.Bool
-	imageCleanupLastRun               atomic.Int64
-	imageGenerationTaskUpdates        = newImageGenerationTaskBroadcaster()
-	imageGenerationWorkerPoolOnce     sync.Once
-	imageGenerationWorkerLoopMu       sync.Mutex
-	imageGenerationWorkerLoopCount    int
-	imageGenerationQueueSignalCh      = make(chan struct{}, 1)
-	imageGenerationWorkerNodeID       = initImageGenerationWorkerNodeID()
+	imageCleanupTaskOnce                      sync.Once
+	imageCleanupTaskRunning                   atomic.Bool
+	imageCleanupLastRun                       atomic.Int64
+	imageGenerationTaskUpdates                = newImageGenerationTaskBroadcaster()
+	imageGenerationWorkerPoolOnce             sync.Once
+	imageGenerationWorkerLoopMu               sync.Mutex
+	imageGenerationWorkerLoopCount            int
+	imageGenerationQueueSignalCh              = make(chan struct{}, 1)
+	imageGenerationWorkerNodeID               = initImageGenerationWorkerNodeID()
 )
 
 type imageGenerationWorkerLimiter struct {
@@ -139,6 +140,26 @@ func buildOpenAIResponsesImageRequest(imageReq *dto.ImageRequest) (*dto.OpenAIRe
 	if strings.TrimSpace(imageReq.Quality) != "" {
 		tool["quality"] = strings.TrimSpace(imageReq.Quality)
 	}
+	if value, ok, err := rawJSONMessageToAny(imageReq.OutputFormat); err != nil {
+		return nil, fmt.Errorf("failed to parse responses output_format: %w", err)
+	} else if ok {
+		tool["output_format"] = value
+	}
+	if value, ok, err := rawJSONMessageToAny(imageReq.OutputCompression); err != nil {
+		return nil, fmt.Errorf("failed to parse responses output_compression: %w", err)
+	} else if ok {
+		tool["output_compression"] = value
+	}
+	if value, ok, err := rawJSONMessageToAny(imageReq.Background); err != nil {
+		return nil, fmt.Errorf("failed to parse responses background: %w", err)
+	} else if ok {
+		tool["background"] = value
+	}
+	if value, ok, err := rawJSONMessageToAny(imageReq.PartialImages); err != nil {
+		return nil, fmt.Errorf("failed to parse responses partial_images: %w", err)
+	} else if ok {
+		tool["partial_images"] = value
+	}
 	if strings.TrimSpace(imageReq.Mask) != "" {
 		tool["input_image_mask"] = map[string]any{
 			"image_url": imageReq.Mask,
@@ -198,6 +219,17 @@ func normalizeOpenAIResponsesImageResult(result string) string {
 	}
 
 	return trimmed
+}
+
+func rawJSONMessageToAny(raw json.RawMessage) (any, bool, error) {
+	if len(raw) == 0 {
+		return nil, false, nil
+	}
+	var value any
+	if err := common.Unmarshal(raw, &value); err != nil {
+		return nil, false, err
+	}
+	return value, true, nil
 }
 
 func mergeImageGenerationOutputMetadata(metadata string, width int, height int) string {
@@ -643,40 +675,40 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 		return nil, fmt.Errorf("failed to insert task: %w", err)
 	}
 
-		if len(referenceInputs) > 0 || strings.TrimSpace(maskInput) != "" {
-			storedRefs, err := storeImageGenerationReferenceImages(context.Background(), task.Id, referenceInputs)
-			if err != nil {
-				_ = model.DeleteImageTask(task.Id)
-				releaseReservedQueueSlot()
-				return nil, fmt.Errorf("failed to store reference images: %w", err)
-			}
+	if len(referenceInputs) > 0 || strings.TrimSpace(maskInput) != "" {
+		storedRefs, err := storeImageGenerationReferenceImages(context.Background(), task.Id, referenceInputs)
+		if err != nil {
+			_ = model.DeleteImageTask(task.Id)
+			releaseReservedQueueSlot()
+			return nil, fmt.Errorf("failed to store reference images: %w", err)
+		}
 		storedMask := ""
-			if strings.TrimSpace(maskInput) != "" {
-				storedMask, err = storeImageGenerationReferenceImage(context.Background(), task.Id, maskInput)
-				if err != nil {
-					cleanupStoredImageGenerationAssets(storedRefs)
-					_ = model.DeleteImageTask(task.Id)
-					releaseReservedQueueSlot()
-					return nil, fmt.Errorf("failed to store mask image: %w", err)
-				}
-			}
-		setImageGenerationReferenceImagesInParamsMap(paramMap, storedRefs, hadLegacyReferenceImage)
-		setImageGenerationMaskInParamsMap(paramMap, storedMask)
-			storedParamsBytes, err := common.Marshal(paramMap)
+		if strings.TrimSpace(maskInput) != "" {
+			storedMask, err = storeImageGenerationReferenceImage(context.Background(), task.Id, maskInput)
 			if err != nil {
-				cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
+				cleanupStoredImageGenerationAssets(storedRefs)
 				_ = model.DeleteImageTask(task.Id)
 				releaseReservedQueueSlot()
-				return nil, fmt.Errorf("failed to marshal stored params: %w", err)
-			}
-			task.Params = string(storedParamsBytes)
-			if err := task.Update(); err != nil {
-				cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
-				_ = model.DeleteImageTask(task.Id)
-				releaseReservedQueueSlot()
-				return nil, fmt.Errorf("failed to update stored params: %w", err)
+				return nil, fmt.Errorf("failed to store mask image: %w", err)
 			}
 		}
+		setImageGenerationReferenceImagesInParamsMap(paramMap, storedRefs, hadLegacyReferenceImage)
+		setImageGenerationMaskInParamsMap(paramMap, storedMask)
+		storedParamsBytes, err := common.Marshal(paramMap)
+		if err != nil {
+			cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
+			_ = model.DeleteImageTask(task.Id)
+			releaseReservedQueueSlot()
+			return nil, fmt.Errorf("failed to marshal stored params: %w", err)
+		}
+		task.Params = string(storedParamsBytes)
+		if err := task.Update(); err != nil {
+			cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
+			_ = model.DeleteImageTask(task.Id)
+			releaseReservedQueueSlot()
+			return nil, fmt.Errorf("failed to update stored params: %w", err)
+		}
+	}
 
 	publishImageGenerationTaskUpdate(task)
 	queueSlotReserved = false

@@ -88,10 +88,63 @@ func TestConvertImageRequestOpenAIEditUsesMultipartForReferenceImagesAndMask(t *
 	if got := parts["size"]; len(got) != 1 || got[0] != "1024x1024" {
 		t.Fatalf("unexpected size fields: %#v", got)
 	}
-	if fileCounts["image"] != 1 {
-		t.Fatalf("expected 1 image file part, got %d", fileCounts["image"])
+	if fileCounts["image[]"] != 1 {
+		t.Fatalf("expected 1 image[] file part, got %d", fileCounts["image[]"])
 	}
 	if fileCounts["mask"] != 1 {
 		t.Fatalf("expected 1 mask file part, got %d", fileCounts["mask"])
+	}
+}
+
+func TestConvertImageRequestOpenAIEditUsesImageArrayForSingleReferenceImage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/images/edits", nil)
+
+	adaptor := &Adaptor{}
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeImagesEdits,
+	}
+	request := dto.ImageRequest{
+		RequestEndpoint: "openai",
+		Model:           "gpt-image-1",
+		Prompt:          "edit prompt",
+		Size:            "1024x1024",
+		ReferenceImages: []string{"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/e+m+7wAAAABJRU5ErkJggg=="},
+	}
+
+	converted, err := adaptor.ConvertImageRequest(ctx, info, request)
+	if err != nil {
+		t.Fatalf("ConvertImageRequest returned error: %v", err)
+	}
+
+	bodyBuffer, ok := converted.(*bytes.Buffer)
+	if !ok {
+		t.Fatalf("expected multipart buffer, got %T", converted)
+	}
+
+	_, params, err := mime.ParseMediaType(ctx.Request.Header.Get("Content-Type"))
+	if err != nil {
+		t.Fatalf("failed to parse content type: %v", err)
+	}
+	reader := multipart.NewReader(bytes.NewReader(bodyBuffer.Bytes()), params["boundary"])
+
+	imageArrayCount := 0
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("failed to read multipart body: %v", err)
+		}
+		if part.FileName() != "" && part.FormName() == "image[]" {
+			imageArrayCount++
+		}
+	}
+
+	if imageArrayCount != 1 {
+		t.Fatalf("expected 1 image[] file part, got %d", imageArrayCount)
 	}
 }

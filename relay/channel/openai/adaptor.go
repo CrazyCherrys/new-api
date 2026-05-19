@@ -443,11 +443,11 @@ func calculateOpenAIPixelSize(resolution, aspectRatio string) string {
 // StandardOpenAIImageRequest 是「openai」标准端点（经 /console/model-mapping 配置）
 // 发往上游的精简 JSON 结构，仅包含 4 个字段：
 //
-//	{ prompt, model, size, image[] }
+//		{ prompt, model, size, image[] }
 //
-//   - size：从合法预设中选取（1024x1024 / 1536x1024 / 1024x1536 / 2048x2048 /
-//     2048x1152 / 3840x2160 / 2160x3840 / auto），由 calculateOpenAIPixelSize 映射。
-//   - image：参考图数组（URL 或 base64 data URL）。无参考图时省略整个字段。
+//	  - size：从合法预设中选取（1024x1024 / 1536x1024 / 1024x1536 / 2048x2048 /
+//	    2048x1152 / 3840x2160 / 2160x3840 / auto），由 calculateOpenAIPixelSize 映射。
+//	  - image：参考图数组（URL 或 base64 data URL）。无参考图时省略整个字段。
 //
 // 该结构与 openai_mod / gemini 端点的请求体完全独立，互不影响。
 type StandardOpenAIImageRequest struct {
@@ -843,7 +843,9 @@ func (a *Adaptor) convertStandardOpenAIImageRequest(c *gin.Context, info *relayc
 			}
 
 			if mf.File != nil {
-				// Check if "image" field exists in any form, including array notation
+				// Check if "image" field exists in any form, including array notation.
+				// OpenAI GPT Image edits expect repeated `image[]` parts even when a
+				// single reference image is provided.
 				var imageFiles []*multipart.FileHeader
 				var exists bool
 
@@ -874,11 +876,8 @@ func (a *Adaptor) convertStandardOpenAIImageRequest(c *gin.Context, info *relayc
 						return nil, fmt.Errorf("failed to open image file %d: %w", i, err)
 					}
 
-					// If multiple images, use image[] as the field name
-					fieldName := "image"
-					if len(imageFiles) > 1 {
-						fieldName = "image[]"
-					}
+					// Use image[] for all reference images to match the OpenAI edit API.
+					fieldName := "image[]"
 
 					// Determine MIME type based on file extension
 					mimeType := detectImageMimeType(fileHeader.Filename)
@@ -953,10 +952,7 @@ func (a *Adaptor) convertStandardOpenAIImageRequest(c *gin.Context, info *relayc
 				writer.WriteField("background", s)
 			}
 
-			fieldName := "image"
-			if len(request.ReferenceImages) > 1 {
-				fieldName = "image[]"
-			}
+			fieldName := "image[]"
 			for i, dataURL := range request.ReferenceImages {
 				imgBytes, mimeType, err := parseDataURLToBytes(dataURL)
 				if err != nil {

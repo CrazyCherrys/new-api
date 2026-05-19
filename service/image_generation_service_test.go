@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -1432,11 +1433,11 @@ func TestRecoverExpiredImageGenerationTasksReconcilesQueueCount(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
 
 	user := &model.User{
-		Username:                  "image-recover-counter-user",
-		Password:                  "hashed-password",
-		Status:                    1,
-		Group:                     "default",
-		Quota:                     1000000,
+		Username:                   "image-recover-counter-user",
+		Password:                   "hashed-password",
+		Status:                     1,
+		Group:                      "default",
+		Quota:                      1000000,
 		ImageGenerationActiveTasks: 1,
 	}
 	if err := db.Create(user).Error; err != nil {
@@ -1577,11 +1578,15 @@ func TestModelMappingImageCapabilitiesNormalizeAndDefault(t *testing.T) {
 
 func TestBuildOpenAIResponsesImageRequest(t *testing.T) {
 	req, err := buildOpenAIResponsesImageRequest(&dto.ImageRequest{
-		Model:       "gpt-image-1",
-		Prompt:      "generate a skyline",
-		Resolution:  "2K",
-		AspectRatio: "16:9",
-		Quality:     "high",
+		Model:             "gpt-image-1",
+		Prompt:            "generate a skyline",
+		Resolution:        "2K",
+		AspectRatio:       "16:9",
+		Quality:           "high",
+		OutputFormat:      json.RawMessage(`"webp"`),
+		OutputCompression: json.RawMessage(`85`),
+		Background:        json.RawMessage(`"transparent"`),
+		PartialImages:     json.RawMessage(`2`),
 	})
 	if err != nil {
 		t.Fatalf("unexpected build error: %v", err)
@@ -1617,6 +1622,18 @@ func TestBuildOpenAIResponsesImageRequest(t *testing.T) {
 	}
 	if got := tools[0]["quality"]; got != "high" {
 		t.Fatalf("unexpected tool quality: %#v", got)
+	}
+	if got := tools[0]["output_format"]; got != "webp" {
+		t.Fatalf("unexpected tool output_format: %#v", got)
+	}
+	if got := tools[0]["output_compression"]; got != float64(85) {
+		t.Fatalf("unexpected tool output_compression: %#v", got)
+	}
+	if got := tools[0]["background"]; got != "transparent" {
+		t.Fatalf("unexpected tool background: %#v", got)
+	}
+	if got := tools[0]["partial_images"]; got != float64(2) {
+		t.Fatalf("unexpected tool partial_images: %#v", got)
 	}
 }
 
