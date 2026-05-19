@@ -69,6 +69,7 @@ func SetApiRouter(router *gin.Engine) {
 		imageGenRoute.Use(middleware.UserAuth())
 		{
 			imageGenRoute.GET("/settings", controller.GetImageGenerationSettings)
+			imageGenRoute.GET("/groups", controller.GetImageGenerationGroups)
 			imageGenRoute.GET("/models", controller.GetImageGenerationModels)
 			imageGenRoute.GET("/assets", controller.GetImageGenerationAssets)
 			imageGenRoute.GET("/assets/:id", controller.GetImageGenerationAssetDetail)

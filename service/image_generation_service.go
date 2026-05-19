@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/worker_setting"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -64,6 +66,15 @@ type imageGenerationUserChannelOverride struct {
 	BaseURL string
 }
 
+type ImageGenerationGroupOption struct {
+	Group               string `json:"group"`
+	Description         string `json:"description"`
+	Ratio               any    `json:"ratio"`
+	HasAvailableToken   bool   `json:"has_available_token"`
+	AvailableTokenCount int    `json:"available_token_count"`
+	IsDefault           bool   `json:"is_default"`
+}
+
 func normalizeImageEndpoint(endpoint string) string {
 	switch strings.ToLower(strings.TrimSpace(endpoint)) {
 	case "dalle":
@@ -80,6 +91,200 @@ func imageEndpointIsResponses(endpoint string) bool {
 	default:
 		return false
 	}
+}
+
+func resolveRequestedImageGenerationGroup(userGroup string, requestedGroup string) string {
+	requestedGroup = strings.TrimSpace(requestedGroup)
+	if requestedGroup == "" {
+		return ""
+	}
+	return requestedGroup
+}
+
+func getUserDefaultAvailableToken(userId int) (*model.Token, error) {
+	tokens, err := model.GetUserAvailableTokens(userId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user tokens: %w", err)
+	}
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("no valid token found for user %d", userId)
+	}
+	return tokens[0], nil
+}
+
+func resolveDefaultImageGenerationGroup(userId int, userGroup string) (string, error) {
+	token, err := getUserDefaultAvailableToken(userId)
+	if err != nil {
+		return "", err
+	}
+	tokenGroup := strings.TrimSpace(token.Group)
+	if tokenGroup != "" {
+		return tokenGroup, nil
+	}
+	return strings.TrimSpace(userGroup), nil
+}
+
+func getUserAvailableTokensByGroup(userId int, userGroup string, selectedGroup string) ([]*model.Token, error) {
+	tokens, err := model.GetUserAvailableTokens(userId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user tokens: %w", err)
+	}
+	selectedGroup = strings.TrimSpace(selectedGroup)
+	userGroup = strings.TrimSpace(userGroup)
+	matched := make([]*model.Token, 0, len(tokens))
+	for _, token := range tokens {
+		if token == nil {
+			continue
+		}
+		tokenGroup := strings.TrimSpace(token.Group)
+		switch {
+		case selectedGroup == "":
+			if tokenGroup == "" || tokenGroup == userGroup {
+				matched = append(matched, token)
+			}
+		case selectedGroup == "auto":
+			if tokenGroup == "auto" {
+				matched = append(matched, token)
+			}
+		default:
+			if tokenGroup == selectedGroup || (selectedGroup == userGroup && tokenGroup == "") {
+				matched = append(matched, token)
+			}
+		}
+	}
+	if len(matched) == 0 && selectedGroup == userGroup {
+		for _, token := range tokens {
+			if token == nil {
+				continue
+			}
+			if strings.TrimSpace(token.Group) == "" {
+				matched = append(matched, token)
+			}
+		}
+	}
+	return matched, nil
+}
+
+func getUserValidTokenByGroup(userId int, userGroup string, selectedGroup string) (string, error) {
+	tokens, err := getUserAvailableTokensByGroup(userId, userGroup, selectedGroup)
+	if err != nil {
+		return "", err
+	}
+	if len(tokens) == 0 {
+		if strings.TrimSpace(selectedGroup) == "" {
+			return "", fmt.Errorf("no valid token found for user %d", userId)
+		}
+		return "", fmt.Errorf("no valid token found for user %d in group %s", userId, selectedGroup)
+	}
+	return tokens[0].Key, nil
+}
+
+func ResolveUserImageGenerationGroups(userId int) ([]ImageGenerationGroupOption, string, error) {
+	user, err := model.GetUserById(userId, false)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get user: %w", err)
+	}
+	if user == nil {
+		return nil, "", fmt.Errorf("user not found")
+	}
+	userGroup := strings.TrimSpace(user.Group)
+	usableGroups := GetUserUsableGroups(userGroup)
+	defaultGroup, err := resolveDefaultImageGenerationGroup(userId, userGroup)
+	if err != nil {
+		defaultGroup = userGroup
+	}
+	options := make([]ImageGenerationGroupOption, 0, len(usableGroups)+1)
+	for groupName, desc := range usableGroups {
+		groupName = strings.TrimSpace(groupName)
+		if groupName == "" {
+			continue
+		}
+		tokens, err := getUserAvailableTokensByGroup(userId, userGroup, groupName)
+		if err != nil {
+			return nil, "", err
+		}
+		ratioValue := any(GetUserGroupRatio(userGroup, groupName))
+		if groupName == "auto" {
+			ratioValue = "自动"
+		}
+		options = append(options, ImageGenerationGroupOption{
+			Group:               groupName,
+			Description:         desc,
+			Ratio:               ratioValue,
+			HasAvailableToken:   len(tokens) > 0,
+			AvailableTokenCount: len(tokens),
+			IsDefault:           groupName == defaultGroup,
+		})
+	}
+	if len(options) == 0 {
+		tokens, err := getUserAvailableTokensByGroup(userId, userGroup, defaultGroup)
+		if err != nil {
+			return nil, "", err
+		}
+		options = append(options, ImageGenerationGroupOption{
+			Group:               defaultGroup,
+			Description:         "用户分组",
+			Ratio:               GetUserGroupRatio(userGroup, defaultGroup),
+			HasAvailableToken:   len(tokens) > 0,
+			AvailableTokenCount: len(tokens),
+			IsDefault:           true,
+		})
+	}
+	validGroupSet := make(map[string]struct{}, len(options))
+	for _, option := range options {
+		validGroupSet[option.Group] = struct{}{}
+	}
+	if _, ok := validGroupSet[defaultGroup]; !ok {
+		defaultGroup = ""
+		for _, option := range options {
+			if option.HasAvailableToken {
+				defaultGroup = option.Group
+				break
+			}
+		}
+		if defaultGroup == "" && len(options) > 0 {
+			defaultGroup = options[0].Group
+		}
+	}
+	for i := range options {
+		options[i].IsDefault = options[i].Group == defaultGroup
+	}
+	sort.Slice(options, func(i, j int) bool {
+		if options[i].IsDefault != options[j].IsDefault {
+			return options[i].IsDefault
+		}
+		return options[i].Group < options[j].Group
+	})
+	return options, defaultGroup, nil
+}
+
+func getImageGenerationEnabledModelsByGroup(group string) ([]string, error) {
+	var abilities []model.Ability
+	err := model.DB.Model(&model.Ability{}).
+		Where(clause.Eq{Column: clause.Column{Name: "group"}, Value: group}).
+		Where(clause.Eq{Column: clause.Column{Name: "enabled"}, Value: true}).
+		Find(&abilities).Error
+	if err != nil {
+		return nil, err
+	}
+	models := make([]string, 0, len(abilities))
+	seen := make(map[string]struct{}, len(abilities))
+	for _, ability := range abilities {
+		modelName := strings.TrimSpace(ability.Model)
+		if modelName == "" {
+			continue
+		}
+		if _, ok := seen[modelName]; ok {
+			continue
+		}
+		seen[modelName] = struct{}{}
+		models = append(models, modelName)
+	}
+	return models, nil
+}
+
+func GetImageGenerationEnabledModelsByGroupForAPI(group string) ([]string, error) {
+	return getImageGenerationEnabledModelsByGroup(group)
 }
 
 func resolveOpenAIImageSize(resolution, aspectRatio string) string {
@@ -567,7 +772,7 @@ func processNextPendingImageGenerationTask() bool {
 }
 
 // CreateImageGenerationTask 创建图片生成任务
-func CreateImageGenerationTask(userId int, modelId string, prompt string, requestEndpoint string, params string) (*model.ImageGenerationTask, error) {
+func CreateImageGenerationTask(userId int, modelId string, selectedGroup string, prompt string, requestEndpoint string, params string) (*model.ImageGenerationTask, error) {
 	imageGenerationTaskCreateMu.Lock()
 	defer imageGenerationTaskCreateMu.Unlock()
 
@@ -610,6 +815,59 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 		return nil, err
 	}
 
+	user, err := model.GetUserById(userId, false)
+	if err != nil {
+		releaseReservedQueueSlot()
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+	if user == nil {
+		releaseReservedQueueSlot()
+		return nil, fmt.Errorf("user not found")
+	}
+	userGroup := strings.TrimSpace(user.Group)
+	selectedGroup = resolveRequestedImageGenerationGroup(userGroup, selectedGroup)
+	if selectedGroup == "" {
+		selectedGroup, err = resolveDefaultImageGenerationGroup(userId, userGroup)
+		if err != nil {
+			releaseReservedQueueSlot()
+			return nil, fmt.Errorf("image generation requires a valid user token: %w", err)
+		}
+	}
+	if !GroupInUserUsableGroups(userGroup, selectedGroup) && selectedGroup != userGroup {
+		releaseReservedQueueSlot()
+		return nil, fmt.Errorf("selected group %s is not available for current user", selectedGroup)
+	}
+	if _, err := getUserValidTokenByGroup(userId, userGroup, selectedGroup); err != nil {
+		releaseReservedQueueSlot()
+		return nil, fmt.Errorf("current group has no valid token, please create or enable a token for group %s", selectedGroup)
+	}
+	groupModels := make(map[string]struct{})
+	if selectedGroup == "auto" {
+		for _, autoGroup := range GetUserAutoGroup(userGroup) {
+			enabledModels, err := getImageGenerationEnabledModelsByGroup(autoGroup)
+			if err != nil {
+				releaseReservedQueueSlot()
+				return nil, fmt.Errorf("failed to get models for group %s: %w", autoGroup, err)
+			}
+			for _, groupModel := range enabledModels {
+				groupModels[groupModel] = struct{}{}
+			}
+		}
+	} else {
+		enabledModels, err := getImageGenerationEnabledModelsByGroup(selectedGroup)
+		if err != nil {
+			releaseReservedQueueSlot()
+			return nil, fmt.Errorf("failed to get models for group %s: %w", selectedGroup, err)
+		}
+		for _, groupModel := range enabledModels {
+			groupModels[groupModel] = struct{}{}
+		}
+	}
+	if _, ok := groupModels[modelId]; !ok {
+		releaseReservedQueueSlot()
+		return nil, fmt.Errorf("selected model %s is not available in group %s", modelId, selectedGroup)
+	}
+
 	// 检查用户余额
 	userQuota, err := model.GetUserQuota(userId, false)
 	if err != nil {
@@ -624,11 +882,6 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 		return nil, fmt.Errorf("insufficient quota: required %s, available %s",
 			logger.FormatQuota(estimatedCost),
 			logger.FormatQuota(userQuota))
-	}
-
-	if _, err := getUserValidToken(userId); err != nil {
-		releaseReservedQueueSlot()
-		return nil, fmt.Errorf("image generation requires a valid user token: %w", err)
 	}
 
 	var (
@@ -662,6 +915,7 @@ func CreateImageGenerationTask(userId int, modelId string, prompt string, reques
 	task := &model.ImageGenerationTask{
 		UserId:          userId,
 		ModelId:         modelId,
+		SelectedGroup:   selectedGroup,
 		Prompt:          prompt,
 		RequestEndpoint: requestEndpoint,
 		Status:          model.ImageTaskStatusPending,
@@ -1279,8 +1533,16 @@ func generateImage(ctx context.Context, task *model.ImageGenerationTask) (imageU
 
 // callUpstreamImageAPIViaRelay 通过内部 API 调用 relay 层处理图片生成
 func callUpstreamImageAPIViaRelay(ctx context.Context, task *model.ImageGenerationTask, imageReq *dto.ImageRequest) (*http.Response, error) {
-	// 获取用户的有效 Token
-	userToken, err := getUserValidToken(task.UserId)
+	user, err := model.GetUserById(task.UserId, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	// 获取任务对应分组的有效 Token
+	userToken, err := getUserValidTokenByGroup(task.UserId, user.Group, task.SelectedGroup)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user token: %w", err)
 	}
@@ -1517,23 +1779,18 @@ func getStringValue(s *string) string {
 
 // getUserValidToken 获取用户的有效 Token
 func getUserValidToken(userId int) (string, error) {
-	tokens, err := model.GetAllUserTokens(userId, 0, 10)
+	user, err := model.GetUserById(userId, false)
 	if err != nil {
-		return "", fmt.Errorf("failed to get user tokens: %w", err)
+		return "", fmt.Errorf("failed to get user: %w", err)
 	}
-
-	// 查找第一个启用且未过期的 token
-	now := time.Now().Unix()
-	for _, token := range tokens {
-		if token.Status == common.TokenStatusEnabled {
-			// 检查是否过期（-1 表示永不过期）
-			if token.ExpiredTime == -1 || token.ExpiredTime > now {
-				return token.Key, nil
-			}
-		}
+	if user == nil {
+		return "", fmt.Errorf("user not found")
 	}
-
-	return "", fmt.Errorf("no valid token found for user %d", userId)
+	selectedGroup, err := resolveDefaultImageGenerationGroup(userId, user.Group)
+	if err != nil {
+		return "", err
+	}
+	return getUserValidTokenByGroup(userId, user.Group, selectedGroup)
 }
 
 // CleanupExpiredImageTasks 清理过期的图片任务

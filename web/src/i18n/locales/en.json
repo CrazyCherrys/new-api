@@ -3930,6 +3930,10 @@
     "画质参数": "Quality settings",
     "消耗配额": "Quota cost",
     "生成耗时": "Generation time",
-    "数量 {{count}}": "Quantity {{count}}"
+    "数量 {{count}}": "Quantity {{count}}",
+    "无可用令牌": "No available token",
+    "当前分组没有可用令牌，请前往 /console/token 创建或启用该分组令牌": "The current group has no available token. Please create or enable a token for this group in /console/token.",
+    "当前分组暂无可用令牌，生成时会被拦截": "This group currently has no available token and generation will be blocked.",
+    "当前分组可用令牌数：{{count}}": "Available tokens in current group: {{count}}"
   }
 }

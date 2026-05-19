@@ -149,6 +149,7 @@ const ImageGeneration = () => {
 
   // LocalStorage keys
   const STORAGE_KEYS = {
+    GROUP: 'imageGen_selectedGroup',
     SERIES: 'imageGen_selectedSeries',
     MODEL: 'imageGen_selectedModel',
     ASPECT_RATIO: 'imageGen_aspectRatio',
@@ -180,6 +181,11 @@ const ImageGeneration = () => {
   };
 
   const [loading, setLoading] = useState(false);
+  const [groupLoading, setGroupLoading] = useState(false);
+  const [groupOptions, setGroupOptions] = useState([]);
+  const [selectedGroup, setSelectedGroup] = useState(() =>
+    getStoredValue(STORAGE_KEYS.GROUP, ''),
+  );
   const [modelSeries, setModelSeries] = useState([]);
   const [models, setModels] = useState([]);
   const [filteredModels, setFilteredModels] = useState([]);
@@ -232,6 +238,7 @@ const ImageGeneration = () => {
   const taskListStateRef = useRef(null);
   const taskListRequestSeqRef = useRef(0);
   const taskDetailRequestSeqRef = useRef(0);
+  const drawingModelsRequestSeqRef = useRef(0);
   const taskUpdatesCompletedSinceRef = useRef(
     Math.floor(Date.now() / 1000) - 60,
   );
@@ -323,7 +330,7 @@ const ImageGeneration = () => {
   };
 
   useEffect(() => {
-    loadDrawingModels();
+    loadImageGenerationGroups();
     loadWorkerSettings();
     connectSSE();
 
@@ -400,10 +407,43 @@ const ImageGeneration = () => {
     taskSortOrder,
   ]);
 
-  const loadDrawingModels = async () => {
+  const loadImageGenerationGroups = async () => {
+    setGroupLoading(true);
+    try {
+      const res = await API.get('/api/image-generation/groups');
+      if (res.data.success) {
+        const payload = res.data.data || {};
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        const defaultGroup = payload.default_group || '';
+        setGroupOptions(items);
+        const availableGroups = items.map((item) => item.group).filter(Boolean);
+        let nextGroup = getStoredValue(STORAGE_KEYS.GROUP, '');
+        if (!nextGroup || !availableGroups.includes(nextGroup)) {
+          const explicitDefault = items.find((item) => item.is_default)?.group;
+          nextGroup = explicitDefault || defaultGroup || availableGroups[0] || '';
+        }
+        setSelectedGroup(nextGroup);
+      } else {
+        showError(res.data.message || t('加载分组失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('加载分组失败'));
+    } finally {
+      setGroupLoading(false);
+    }
+  };
+
+  const loadDrawingModels = async (group) => {
+    drawingModelsRequestSeqRef.current += 1;
+    const requestSeq = drawingModelsRequestSeqRef.current;
     setLoading(true);
     try {
-      const res = await API.get('/api/image-generation/models');
+      const res = await API.get('/api/image-generation/models', {
+        params: group ? { group } : undefined,
+      });
+      if (requestSeq !== drawingModelsRequestSeqRef.current) {
+        return;
+      }
       if (res.data.success) {
         const drawingModels = (res.data.data || []).map((model) => ({
           ...model,
@@ -431,11 +471,23 @@ const ImageGeneration = () => {
         showError(res.data.message || t('加载模型失败'));
       }
     } catch (error) {
+      if (requestSeq !== drawingModelsRequestSeqRef.current) {
+        return;
+      }
       showError(error.message || t('加载模型失败'));
     } finally {
-      setLoading(false);
+      if (requestSeq === drawingModelsRequestSeqRef.current) {
+        setLoading(false);
+      }
     }
   };
+
+  useEffect(() => {
+    if (!selectedGroup) {
+      return;
+    }
+    loadDrawingModels(selectedGroup);
+  }, [selectedGroup]);
 
   const loadWorkerSettings = async () => {
     try {
@@ -880,6 +932,16 @@ const ImageGeneration = () => {
 
   // 保存用户选择到 localStorage
   useEffect(() => {
+    if (selectedGroup) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.GROUP, selectedGroup);
+      } catch (e) {
+        console.error('Failed to save selectedGroup to localStorage:', e);
+      }
+    }
+  }, [selectedGroup]);
+
+  useEffect(() => {
     if (selectedSeries) {
       try {
         localStorage.setItem(STORAGE_KEYS.SERIES, selectedSeries);
@@ -1053,6 +1115,19 @@ const ImageGeneration = () => {
       showError(t('请选择模型'));
       return;
     }
+    if (!selectedGroup) {
+      showError(t('请选择分组'));
+      return;
+    }
+    const selectedGroupOption = groupOptions.find(
+      (item) => item.group === selectedGroup,
+    );
+    if (selectedGroupOption && selectedGroupOption.has_available_token === false) {
+      showError(
+        t('当前分组没有可用令牌，请前往 /console/token 创建或启用该分组令牌'),
+      );
+      return;
+    }
     if (!inspiration.trim()) {
       showError(t('请输入灵感'));
       return;
@@ -1121,6 +1196,7 @@ const ImageGeneration = () => {
       // UI uses inspiration wording; backend task DTO still expects prompt.
       const taskPayload = {
         model_id: selectedModel,
+        group: selectedGroup,
         prompt: inspiration.trim(),
         request_endpoint: selectedModelData.request_endpoint,
         params: JSON.stringify(params),
@@ -1198,11 +1274,17 @@ const ImageGeneration = () => {
       }
     } catch (error) {
       const serverMessage = error.response?.data?.message || error.message || '';
-      if (serverMessage.includes('valid user token') || serverMessage.includes('no valid token')) {
+      if (
+        serverMessage.includes('valid user token') ||
+        serverMessage.includes('no valid token') ||
+        serverMessage.includes('current group has no valid token')
+      ) {
         showError(
-          userCustomWorkerKeyEnabled
-            ? t('请先创建可用令牌，或检查你的自定义 Worker Key 是否可用')
-            : t('请先创建一个可用令牌后再使用 /canvas'),
+          serverMessage.includes('current group has no valid token')
+            ? t('当前分组没有可用令牌，请前往 /console/token 创建或启用该分组令牌')
+            : userCustomWorkerKeyEnabled
+              ? t('请先创建可用令牌，或检查你的自定义 Worker Key 是否可用')
+              : t('请先创建一个可用令牌后再使用 /canvas'),
         );
       } else if (error.response?.data?.message) {
         showError(error.response.data.message);
@@ -1423,12 +1505,52 @@ const ImageGeneration = () => {
       <div style={styles.leftContent}>
         <Spin spinning={loading}>
           <div style={styles.fieldGroup}>
+            <span style={styles.label}>{t('分组')}</span>
+            <Select
+              style={{ width: '100%' }}
+              value={selectedGroup}
+              onChange={setSelectedGroup}
+              disabled={groupLoading || groupOptions.length === 0}
+              placeholder={t('请选择分组')}
+            >
+              {groupOptions.map((group) => (
+                <Select.Option key={group.group} value={group.group}>
+                  {group.group}
+                  {group.has_available_token === false
+                    ? ` (${t('无可用令牌')})`
+                    : ''}
+                </Select.Option>
+              ))}
+            </Select>
+            {selectedGroup && (
+              <Text
+                type='tertiary'
+                size='small'
+                style={{ display: 'block', marginTop: 8 }}
+              >
+                {(() => {
+                  const option = groupOptions.find((item) => item.group === selectedGroup);
+                  if (!option) {
+                    return '';
+                  }
+                  if (option.has_available_token === false) {
+                    return t('当前分组暂无可用令牌，生成时会被拦截');
+                  }
+                  return t('当前分组可用令牌数：{{count}}', {
+                    count: option.available_token_count || 0,
+                  });
+                })()}
+              </Text>
+            )}
+          </div>
+
+          <div style={styles.fieldGroup}>
             <span style={styles.label}>{t('模型系列')}</span>
             <Select
               style={{ width: '100%' }}
               value={selectedSeries}
               onChange={setSelectedSeries}
-              disabled={modelSeries.length === 0}
+              disabled={groupLoading || modelSeries.length === 0}
             >
               <Select.Option value='all'>{t('全部系列')}</Select.Option>
               {modelSeries.map((series) => (
@@ -1445,7 +1567,7 @@ const ImageGeneration = () => {
               style={{ width: '100%' }}
               value={selectedModel}
               onChange={setSelectedModel}
-              disabled={filteredModels.length === 0}
+              disabled={groupLoading || filteredModels.length === 0}
               filter
               placeholder={t('请选择模型')}
             >

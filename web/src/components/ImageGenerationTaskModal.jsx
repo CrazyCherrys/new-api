@@ -608,6 +608,14 @@ const ImageGenerationTaskModal = ({
                 <span style={styles.infoValue}>{displayName}</span>
               </div>
             </div>
+            {task.selected_group && (
+              <div style={styles.metaCard}>
+                <div style={styles.infoBlock}>
+                  <span style={styles.infoLabel}>{t('使用分组')}</span>
+                  <span style={styles.infoValue}>{task.selected_group}</span>
+                </div>
+              </div>
+            )}
             {sizeText && (
               <div style={styles.metaCard}>
                 <div style={styles.infoBlock}>

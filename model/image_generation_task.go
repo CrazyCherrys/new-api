@@ -14,6 +14,7 @@ type ImageGenerationTask struct {
 	Id              int    `json:"id" gorm:"primaryKey;index:idx_image_tasks_user_id,priority:2;index:idx_image_tasks_user_status_id,priority:3;index:idx_image_tasks_status_id,priority:2"`
 	UserId          int    `json:"user_id" gorm:"index;index:idx_image_tasks_user_id,priority:1;index:idx_image_tasks_user_created,priority:1;index:idx_image_tasks_user_status_id,priority:1;index:idx_image_tasks_user_completed,priority:1;not null"`
 	ModelId         string `json:"model_id" gorm:"size:128;not null;index"`
+	SelectedGroup   string `json:"selected_group" gorm:"size:64;default:'';index"`
 	Prompt          string `json:"prompt" gorm:"type:text;not null"`
 	RequestEndpoint string `json:"request_endpoint" gorm:"size:32;not null;index"` // openai, openai-response, gemini, openai_mod
 	Status          string `json:"status" gorm:"size:20;not null;index;index:idx_image_tasks_user_status_id,priority:2;index:idx_image_tasks_status_id,priority:1;default:'pending'"`
@@ -71,11 +72,11 @@ func (task *ImageGenerationTask) Update() error {
 // ResetImageTaskForRetry 将失败任务重置为待处理状态，返回是否实际更新。
 func ResetImageTaskForRetry(id int) (bool, error) {
 	updates := map[string]interface{}{
-		"status":         ImageTaskStatusPending,
-		"error_message":  "",
-		"started_time":   common.GetTimestamp(),
-		"completed_time": 0,
-		"worker_node":    "",
+		"status":           ImageTaskStatusPending,
+		"error_message":    "",
+		"started_time":     common.GetTimestamp(),
+		"completed_time":   0,
+		"worker_node":      "",
 		"lease_expires_at": 0,
 	}
 	result := DB.Model(&ImageGenerationTask{}).
@@ -148,6 +149,7 @@ type ImageGenerationAsset struct {
 type ImageGenerationTaskSummary struct {
 	Id            int    `json:"id"`
 	ModelId       string `json:"model_id"`
+	SelectedGroup string `json:"selected_group"`
 	Prompt        string `json:"prompt"`
 	Status        string `json:"status"`
 	ImageUrl      string `json:"image_url"`
@@ -162,6 +164,7 @@ type ImageGenerationTaskDetail struct {
 	Id              int    `json:"id"`
 	ModelId         string `json:"model_id"`
 	DisplayName     string `json:"display_name"`
+	SelectedGroup   string `json:"selected_group"`
 	Prompt          string `json:"prompt"`
 	Status          string `json:"status"`
 	RequestEndpoint string `json:"request_endpoint"`
@@ -472,6 +475,7 @@ func BuildImageGenerationTaskSummary(task *ImageGenerationTask) *ImageGeneration
 	return &ImageGenerationTaskSummary{
 		Id:            task.Id,
 		ModelId:       task.ModelId,
+		SelectedGroup: task.SelectedGroup,
 		Prompt:        task.Prompt,
 		Status:        task.Status,
 		ImageUrl:      task.ImageUrl,
@@ -491,6 +495,7 @@ func BuildImageGenerationTaskDetail(task *ImageGenerationTask, displayName strin
 		Id:              task.Id,
 		ModelId:         task.ModelId,
 		DisplayName:     displayName,
+		SelectedGroup:   task.SelectedGroup,
 		Prompt:          task.Prompt,
 		Status:          task.Status,
 		RequestEndpoint: task.RequestEndpoint,

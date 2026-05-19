@@ -315,6 +315,7 @@ func CreateImageGenerationTask(c *gin.Context) {
 
 	var req struct {
 		ModelId         string `json:"model_id" binding:"required"`
+		Group           string `json:"group"`
 		Prompt          string `json:"prompt" binding:"required"`
 		RequestEndpoint string `json:"request_endpoint" binding:"required"`
 		Params          string `json:"params"`
@@ -329,7 +330,7 @@ func CreateImageGenerationTask(c *gin.Context) {
 	}
 
 	// 调用服务层创建任务（会自动启动异步处理）
-	task, err := service.CreateImageGenerationTask(userId, req.ModelId, req.Prompt, req.RequestEndpoint, req.Params)
+	task, err := service.CreateImageGenerationTask(userId, req.ModelId, req.Group, req.Prompt, req.RequestEndpoint, req.Params)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -338,6 +339,27 @@ func CreateImageGenerationTask(c *gin.Context) {
 	sanitizeImageGenerationTaskParams(task)
 	detail := buildImageGenerationTaskDetail(task)
 	common.ApiSuccess(c, detail)
+}
+
+// GetImageGenerationGroups 获取 /canvas 可选分组及 token 可用性
+func GetImageGenerationGroups(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "未授权",
+		})
+		return
+	}
+	options, defaultGroup, err := service.ResolveUserImageGenerationGroups(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"items":         options,
+		"default_group": defaultGroup,
+	})
 }
 
 // GetImageGenerationSettings 获取用户侧图片生成设置
@@ -1016,6 +1038,29 @@ func GetImageGenerationModels(c *gin.Context) {
 		return
 	}
 
+	selectedGroup := strings.TrimSpace(c.Query("group"))
+	if selectedGroup == "" {
+		userGroup, err := model.GetUserGroup(userId, false)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		selectedGroup = strings.TrimSpace(userGroup)
+	} else {
+		userGroup, err := model.GetUserGroup(userId, false)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if !service.GroupInUserUsableGroups(userGroup, selectedGroup) && selectedGroup != userGroup {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "无权访问该分组",
+			})
+			return
+		}
+	}
+
 	// 获取所有启用的绘画模型
 	mappings, _, err := model.GetActiveImageModelMappings(0, 1000)
 	if err != nil {
@@ -1023,8 +1068,39 @@ func GetImageGenerationModels(c *gin.Context) {
 		return
 	}
 
+	allowedModels := make(map[string]struct{})
+	if selectedGroup == "auto" {
+		userGroup, err := model.GetUserGroup(userId, false)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		for _, autoGroup := range service.GetUserAutoGroup(userGroup) {
+			enabledModels, err := service.GetImageGenerationEnabledModelsByGroupForAPI(autoGroup)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			for _, modelName := range enabledModels {
+				allowedModels[modelName] = struct{}{}
+			}
+		}
+	} else {
+		enabledModels, err := service.GetImageGenerationEnabledModelsByGroupForAPI(selectedGroup)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		for _, modelName := range enabledModels {
+			allowedModels[modelName] = struct{}{}
+		}
+	}
+
 	var models []gin.H
 	for _, mapping := range mappings {
+		if _, ok := allowedModels[mapping.RequestModel]; !ok {
+			continue
+		}
 		imageCapabilities, err := model.EffectiveImageCapabilities(mapping.ImageCapabilities)
 		if err != nil {
 			imageCapabilities = model.DefaultImageCapabilities()

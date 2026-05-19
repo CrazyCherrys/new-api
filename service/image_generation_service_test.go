@@ -46,7 +46,7 @@ func setupImageGenerationServiceTestDB(t *testing.T) *gorm.DB {
 	model.DB = db
 	model.LOG_DB = db
 
-	if err := db.AutoMigrate(&model.User{}, &model.Token{}, &model.ModelMapping{}, &model.ImageGenerationTask{}, &model.ImageCreativeSubmission{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Token{}, &model.Ability{}, &model.ModelMapping{}, &model.ImageGenerationTask{}, &model.ImageCreativeSubmission{}); err != nil {
 		t.Fatalf("failed to migrate image generation task table: %v", err)
 	}
 
@@ -71,16 +71,48 @@ func seedUserToken(t *testing.T, db *gorm.DB, userId int, key string) *model.Tok
 	t.Helper()
 
 	token := &model.Token{
-		UserId:      userId,
-		Key:         key,
-		Name:        "image-task-token",
-		Status:      common.TokenStatusEnabled,
-		ExpiredTime: -1,
+		UserId:         userId,
+		Key:            key,
+		Name:           "image-task-token",
+		Status:         common.TokenStatusEnabled,
+		ExpiredTime:    -1,
+		UnlimitedQuota: true,
 	}
 	if err := db.Create(token).Error; err != nil {
 		t.Fatalf("failed to create user token: %v", err)
 	}
 	return token
+}
+
+func seedUserTokenWithGroup(t *testing.T, db *gorm.DB, userId int, key string, group string) *model.Token {
+	t.Helper()
+
+	token := &model.Token{
+		UserId:         userId,
+		Key:            key,
+		Name:           "image-task-token",
+		Status:         common.TokenStatusEnabled,
+		ExpiredTime:    -1,
+		UnlimitedQuota: true,
+		Group:          group,
+	}
+	if err := db.Create(token).Error; err != nil {
+		t.Fatalf("failed to create grouped user token: %v", err)
+	}
+	return token
+}
+
+func seedImageAbility(t *testing.T, db *gorm.DB, group string, requestModel string) {
+	t.Helper()
+	ability := &model.Ability{
+		Group:     group,
+		Model:     requestModel,
+		ChannelId: 1,
+		Enabled:   true,
+	}
+	if err := db.Create(ability).Error; err != nil {
+		t.Fatalf("failed to create ability: %v", err)
+	}
 }
 
 func TestRetryImageGenerationTaskResetsAndEnqueuesFailedTask(t *testing.T) {
@@ -148,6 +180,49 @@ func TestRetryImageGenerationTaskResetsAndEnqueuesFailedTask(t *testing.T) {
 	}
 	if len(enqueuedTaskIds) != 1 || enqueuedTaskIds[0] != task.Id {
 		t.Fatalf("expected task %d to be enqueued once, got %v", task.Id, enqueuedTaskIds)
+	}
+}
+
+func TestCreateImageGenerationTaskRequiresSelectedGroupToken(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+	user := &model.User{
+		Id:       11,
+		Username: "group-task-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+		AffCode:  "aff-group-task-user",
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-grouped",
+		ActualModel:       "gpt-image-grouped",
+		DisplayName:       "GPT Image Grouped",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create model mapping: %v", err)
+	}
+	seedImageAbility(t, db, "default", "gpt-image-grouped")
+
+	if _, err := CreateImageGenerationTask(user.Id, "gpt-image-grouped", "default", "hello", "openai", "{}"); err == nil {
+		t.Fatal("expected task creation to fail when selected group token is missing")
+	}
+
+	seedUserTokenWithGroup(t, db, user.Id, "sk-default-image-token", "default")
+	task, err := CreateImageGenerationTask(user.Id, "gpt-image-grouped", "default", "hello", "openai", "{}")
+	if err != nil {
+		t.Fatalf("expected task creation to succeed with grouped token: %v", err)
+	}
+	if task.SelectedGroup != "default" {
+		t.Fatalf("expected selected group default, got %q", task.SelectedGroup)
 	}
 }
 
@@ -392,6 +467,7 @@ func TestCreateImageGenerationTaskQueueLimitIsSerializedWithinProcess(t *testing
 	if err := db.Create(mapping).Error; err != nil {
 		t.Fatalf("failed to create image mapping: %v", err)
 	}
+	seedImageAbility(t, db, "default", "gpt-image-1")
 
 	previousEnqueue := enqueueImageGenerationTask
 	enqueueImageGenerationTask = func(taskId int) {}
@@ -409,6 +485,7 @@ func TestCreateImageGenerationTaskQueueLimitIsSerializedWithinProcess(t *testing
 			if _, err := CreateImageGenerationTask(
 				user.Id,
 				"gpt-image-serialized",
+				"default",
 				fmt.Sprintf("prompt-%d", i),
 				"openai",
 				`{}`,
@@ -602,6 +679,7 @@ func TestProcessTaskAsyncWaitsForWorkerWithoutTimingOut(t *testing.T) {
 	if err := db.Create(mapping).Error; err != nil {
 		t.Fatalf("failed to create image mapping: %v", err)
 	}
+	seedImageAbility(t, db, "default", "gpt-image-no-token")
 
 	task := &model.ImageGenerationTask{
 		UserId:          user.Id,
@@ -684,6 +762,7 @@ func TestProcessTaskAsyncUsesFreshTimeoutPerRetry(t *testing.T) {
 	if err := db.Create(mapping).Error; err != nil {
 		t.Fatalf("failed to create image mapping: %v", err)
 	}
+	seedImageAbility(t, db, "default", "gpt-image-retry")
 
 	task := &model.ImageGenerationTask{
 		UserId:          user.Id,
@@ -1017,6 +1096,7 @@ func TestProcessImageGenerationTaskRenewsLeaseWhileRunning(t *testing.T) {
 	if err := db.Create(mapping).Error; err != nil {
 		t.Fatalf("failed to create image mapping: %v", err)
 	}
+	seedImageAbility(t, db, "default", "gpt-image-lease-renew")
 
 	task := &model.ImageGenerationTask{
 		UserId:          user.Id,
@@ -1188,6 +1268,7 @@ func TestImageGenerationModelCapabilitiesValidation(t *testing.T) {
 	if err := db.Create(mapping).Error; err != nil {
 		t.Fatalf("failed to create image mapping: %v", err)
 	}
+	seedImageAbility(t, db, "default", "gpt-image-1")
 
 	previousEnqueue := enqueueImageGenerationTask
 	enqueueImageGenerationTask = func(taskId int) {}
@@ -1195,15 +1276,15 @@ func TestImageGenerationModelCapabilitiesValidation(t *testing.T) {
 		enqueueImageGenerationTask = previousEnqueue
 	})
 
-	if _, err := CreateImageGenerationTask(user.Id, "gpt-image-1", "prompt", "openai", `{"reference_images":["data:image/png;base64,AAAA"]}`); err == nil {
+	if _, err := CreateImageGenerationTask(user.Id, "gpt-image-1", "default", "prompt", "openai", `{"reference_images":["data:image/png;base64,AAAA"]}`); err == nil {
 		t.Fatal("expected image editing to be rejected when capability is missing")
 	}
 
-	if _, err := CreateImageGenerationTask(user.Id, "gpt-image-1", "prompt", "openai", `{"mask":"data:image/png;base64,AAAA"}`); err == nil {
+	if _, err := CreateImageGenerationTask(user.Id, "gpt-image-1", "default", "prompt", "openai", `{"mask":"data:image/png;base64,AAAA"}`); err == nil {
 		t.Fatal("expected mask-only edit request to be rejected")
 	}
 
-	task, err := CreateImageGenerationTask(user.Id, "gpt-image-1", "prompt", "openai", `{}`)
+	task, err := CreateImageGenerationTask(user.Id, "gpt-image-1", "default", "prompt", "openai", `{}`)
 	if err != nil {
 		t.Fatalf("expected generation without reference image to succeed: %v", err)
 	}
@@ -1249,6 +1330,7 @@ func TestCreateImageGenerationTaskRequiresValidUserToken(t *testing.T) {
 	if err := db.Create(mapping).Error; err != nil {
 		t.Fatalf("failed to create image mapping: %v", err)
 	}
+	seedImageAbility(t, db, "default", "gpt-image-no-token")
 
 	previousEnqueue := enqueueImageGenerationTask
 	enqueueImageGenerationTask = func(taskId int) {}
@@ -1256,10 +1338,10 @@ func TestCreateImageGenerationTaskRequiresValidUserToken(t *testing.T) {
 		enqueueImageGenerationTask = previousEnqueue
 	})
 
-	if _, err := CreateImageGenerationTask(user.Id, "gpt-image-no-token", "prompt", "openai", `{}`); err == nil {
+	if _, err := CreateImageGenerationTask(user.Id, "gpt-image-no-token", "default", "prompt", "openai", `{}`); err == nil {
 		t.Fatal("expected task creation to fail without valid user token")
-	} else if !strings.Contains(err.Error(), "valid user token") {
-		t.Fatalf("expected valid user token error, got %v", err)
+	} else if !strings.Contains(err.Error(), "no valid token") && !strings.Contains(err.Error(), "current group has no valid token") {
+		t.Fatalf("expected no valid token error, got %v", err)
 	}
 
 	activeCount, err := model.GetUserImageGenerationActiveTaskCount(user.Id)
@@ -1309,6 +1391,7 @@ func TestCreateImageGenerationTaskStoresReferenceImagesOutsideDatabase(t *testin
 	if err := db.Create(mapping).Error; err != nil {
 		t.Fatalf("failed to create image mapping: %v", err)
 	}
+	seedImageAbility(t, db, "default", "gpt-image-edit")
 
 	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	img.Set(0, 0, color.RGBA{R: 255, A: 255})
@@ -1324,7 +1407,7 @@ func TestCreateImageGenerationTaskStoresReferenceImagesOutsideDatabase(t *testin
 		enqueueImageGenerationTask = previousEnqueue
 	})
 
-	task, err := CreateImageGenerationTask(user.Id, "gpt-image-edit", "prompt", "openai", `{"reference_images":["`+source+`"],"resolution":"2K"}`)
+	task, err := CreateImageGenerationTask(user.Id, "gpt-image-edit", "default", "prompt", "openai", `{"reference_images":["`+source+`"],"resolution":"2K"}`)
 	if err != nil {
 		t.Fatalf("expected task creation to succeed: %v", err)
 	}
@@ -1391,6 +1474,7 @@ func TestCreateImageGenerationTaskReservesAndSuccessReleasesQueueSlot(t *testing
 	if err := db.Create(mapping).Error; err != nil {
 		t.Fatalf("failed to create image mapping: %v", err)
 	}
+	seedImageAbility(t, db, "default", "gpt-image-queue-counter")
 
 	previousEnqueue := enqueueImageGenerationTask
 	enqueueImageGenerationTask = func(taskId int) {}
@@ -1403,7 +1487,7 @@ func TestCreateImageGenerationTaskReservesAndSuccessReleasesQueueSlot(t *testing
 		generateImageFn = previousGenerateFn
 	})
 
-	task, err := CreateImageGenerationTask(user.Id, "gpt-image-queue-counter", "prompt", "openai", `{}`)
+	task, err := CreateImageGenerationTask(user.Id, "gpt-image-queue-counter", "default", "prompt", "openai", `{}`)
 	if err != nil {
 		t.Fatalf("expected task creation to succeed: %v", err)
 	}
@@ -1511,6 +1595,7 @@ func TestCreateImageGenerationTaskStoresMaskOutsideDatabase(t *testing.T) {
 	if err := db.Create(mapping).Error; err != nil {
 		t.Fatalf("failed to create image mapping: %v", err)
 	}
+	seedImageAbility(t, db, "default", "gpt-image-mask")
 
 	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	img.Set(0, 0, color.RGBA{R: 255, A: 255})
@@ -1526,7 +1611,7 @@ func TestCreateImageGenerationTaskStoresMaskOutsideDatabase(t *testing.T) {
 		enqueueImageGenerationTask = previousEnqueue
 	})
 
-	task, err := CreateImageGenerationTask(user.Id, "gpt-image-mask", "prompt", "openai", `{"reference_images":["`+source+`"],"mask":"`+source+`","resolution":"2K"}`)
+	task, err := CreateImageGenerationTask(user.Id, "gpt-image-mask", "default", "prompt", "openai", `{"reference_images":["`+source+`"],"mask":"`+source+`","resolution":"2K"}`)
 	if err != nil {
 		t.Fatalf("expected task creation to succeed: %v", err)
 	}

@@ -17,6 +17,7 @@ type imageTaskDetailResponse struct {
 	ID             int    `json:"id"`
 	ModelID        string `json:"model_id"`
 	DisplayName    string `json:"display_name"`
+	SelectedGroup  string `json:"selected_group"`
 	StartedTime    int64  `json:"started_time"`
 	OutputWidth    int    `json:"output_width"`
 	OutputHeight   int    `json:"output_height"`
@@ -76,6 +77,7 @@ func TestGetImageGenerationTaskDetailReturnsComputedDetailFields(t *testing.T) {
 	task := &model.ImageGenerationTask{
 		UserId:          42,
 		ModelId:         "gpt-image-detail",
+		SelectedGroup:   "vip",
 		Prompt:          "detail prompt",
 		RequestEndpoint: "openai",
 		Status:          model.ImageTaskStatusSuccess,
@@ -107,6 +109,9 @@ func TestGetImageGenerationTaskDetailReturnsComputedDetailFields(t *testing.T) {
 
 	if detail.DisplayName != mapping.DisplayName {
 		t.Fatalf("expected display name %q, got %q", mapping.DisplayName, detail.DisplayName)
+	}
+	if detail.SelectedGroup != "vip" {
+		t.Fatalf("expected selected group vip, got %q", detail.SelectedGroup)
 	}
 	if detail.StartedTime != task.CreatedTime {
 		t.Fatalf("expected started time %d, got %d", task.CreatedTime, detail.StartedTime)
