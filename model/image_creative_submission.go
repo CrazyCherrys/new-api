@@ -38,6 +38,7 @@ const (
 type ImageCreativeAsset struct {
 	Id              int     `json:"id"`
 	ModelId         string  `json:"model_id"`
+	SelectedGroup   string  `json:"selected_group"`
 	DisplayName     string  `json:"display_name"`
 	ModelSeries     string  `json:"model_series"`
 	Prompt          string  `json:"prompt"`
@@ -612,7 +613,7 @@ func publicInspirationAssetsBaseQuery() *gorm.DB {
 
 func publicInspirationAssetDetailQuery() *gorm.DB {
 	return DB.Table("image_creative_submissions AS s").
-		Select("s.id, s.reviewed_time, s.submitted_time, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.params, t.image_url, t.thumbnail_url, t.image_metadata").
+		Select("s.id, s.reviewed_time, s.submitted_time, t.model_id, t.selected_group, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.params, t.image_url, t.thumbnail_url, t.image_metadata").
 		Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
 		Joins("LEFT JOIN model_mappings AS m ON m.request_model = t.model_id").
 		Where("s.status = ? AND t.status = ? AND t.image_url <> ?", CreativeSubmissionStatusApproved, ImageTaskStatusSuccess, "")

@@ -59,6 +59,7 @@ const DEFAULT_MAX_BATCH_TASKS = 10;
 const DEFAULT_TASK_PAGE_SIZE = 21;
 const TASK_PAGE_SIZE_OPTIONS = [10, 21, 50, 100];
 const TASK_LIST_REQUEST_TIMEOUT_MS = 20000;
+const CANVAS_PREFILL_STORAGE_KEY = 'imageGen_canvasPrefill_v1';
 
 const normalizeImageCapabilities = (raw) => {
   if (Array.isArray(raw)) {
@@ -239,10 +240,13 @@ const ImageGeneration = () => {
   const taskListRequestSeqRef = useRef(0);
   const taskDetailRequestSeqRef = useRef(0);
   const drawingModelsRequestSeqRef = useRef(0);
+  const loadedModelsGroupRef = useRef('');
   const taskUpdatesCompletedSinceRef = useRef(
     Math.floor(Date.now() / 1000) - 60,
   );
   const taskCursorHistoryRef = useRef(['']);
+  const pendingCanvasPrefillRef = useRef(null);
+  const prefillGroupFallbackNoticeShownRef = useRef(false);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
   const [userCustomWorkerKeyEnabled, setUserCustomWorkerKeyEnabled] =
     useState(false);
@@ -329,6 +333,19 @@ const ImageGeneration = () => {
     );
   };
 
+  const buildRemoteReferenceFile = (imageUrl) => {
+    if (!imageUrl) {
+      return null;
+    }
+    return {
+      uid: `remote-${Date.now()}`,
+      name: 'reference-image',
+      status: 'done',
+      url: imageUrl,
+      isRemote: true,
+    };
+  };
+
   useEffect(() => {
     loadImageGenerationGroups();
     loadWorkerSettings();
@@ -359,6 +376,41 @@ const ImageGeneration = () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
+
+  useEffect(() => {
+    const prefillFromState = location.state?.canvasPrefill;
+    if (prefillFromState) {
+      pendingCanvasPrefillRef.current = prefillFromState;
+      prefillGroupFallbackNoticeShownRef.current = false;
+      try {
+        sessionStorage.setItem(
+          CANVAS_PREFILL_STORAGE_KEY,
+          JSON.stringify({
+            source: 'inspiration',
+            payload: prefillFromState,
+          }),
+        );
+      } catch (error) {
+        console.error('Failed to persist canvas prefill state:', error);
+      }
+      navigate(location.pathname, { replace: true, state: null });
+      return;
+    }
+    try {
+      const storedPrefill = sessionStorage.getItem(CANVAS_PREFILL_STORAGE_KEY);
+      if (storedPrefill) {
+        const parsed = JSON.parse(storedPrefill);
+        if (parsed?.source === 'inspiration' && parsed?.payload) {
+          pendingCanvasPrefillRef.current = parsed.payload;
+          prefillGroupFallbackNoticeShownRef.current = false;
+        } else {
+          sessionStorage.removeItem(CANVAS_PREFILL_STORAGE_KEY);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to restore canvas prefill state:', error);
+    }
+  }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
     const taskId = new URLSearchParams(location.search).get('task_id');
@@ -416,11 +468,19 @@ const ImageGeneration = () => {
         const items = Array.isArray(payload.items) ? payload.items : [];
         const defaultGroup = payload.default_group || '';
         setGroupOptions(items);
-        const availableGroups = items.map((item) => item.group).filter(Boolean);
+        const availableGroups = items
+          .filter((item) => item.group && item.has_available_token !== false)
+          .map((item) => item.group);
         let nextGroup = getStoredValue(STORAGE_KEYS.GROUP, '');
         if (!nextGroup || !availableGroups.includes(nextGroup)) {
-          const explicitDefault = items.find((item) => item.is_default)?.group;
-          nextGroup = explicitDefault || defaultGroup || availableGroups[0] || '';
+          const explicitDefault = items.find(
+            (item) => item.is_default && item.has_available_token !== false,
+          )?.group;
+          nextGroup =
+            explicitDefault ||
+            (availableGroups.includes(defaultGroup) ? defaultGroup : '') ||
+            availableGroups[0] ||
+            '';
         }
         setSelectedGroup(nextGroup);
       } else {
@@ -451,6 +511,7 @@ const ImageGeneration = () => {
             model.image_capabilities,
           ),
         }));
+        loadedModelsGroupRef.current = group || '';
         setModels(drawingModels);
 
         const seriesSet = new Set();
@@ -930,6 +991,118 @@ const ImageGeneration = () => {
     }
   }, [selectedSeries, models]);
 
+  useEffect(() => {
+    const prefill = pendingCanvasPrefillRef.current;
+    if (!prefill || groupLoading) {
+      return;
+    }
+
+    if (prefill.selected_group && prefill.selected_group !== selectedGroup) {
+      const canUsePrefillGroup = groupOptions.some(
+        (group) =>
+          group.group === prefill.selected_group &&
+          group.has_available_token !== false,
+      );
+      if (canUsePrefillGroup) {
+        setSelectedGroup(prefill.selected_group);
+        return;
+      }
+      if (prefill.selected_group && !prefillGroupFallbackNoticeShownRef.current) {
+        showSuccess(t('原作品分组当前不可用，已切换到默认可用分组'));
+        prefillGroupFallbackNoticeShownRef.current = true;
+      }
+    }
+
+    if (models.length === 0) {
+      return;
+    }
+    if (loadedModelsGroupRef.current !== selectedGroup) {
+      return;
+    }
+
+    const params = (() => {
+      if (!prefill.params) {
+        return {};
+      }
+      if (typeof prefill.params === 'object') {
+        return prefill.params;
+      }
+      try {
+        return JSON.parse(prefill.params);
+      } catch (error) {
+        return {};
+      }
+    })();
+
+    if (prefill.prompt) {
+      setInspiration(prefill.prompt);
+    }
+    if (params.aspect_ratio) {
+      setAspectRatio(params.aspect_ratio);
+    }
+    if (params.resolution || params.image_size || params.imageSize) {
+      setResolution(params.resolution || params.image_size || params.imageSize);
+    }
+    if (params.n || params.quantity) {
+      setQuantity(normalizeTaskCount(params.n || params.quantity));
+    }
+    if (prefill.mode === 'reference' && prefill.image_url) {
+      const remoteReference = buildRemoteReferenceFile(prefill.image_url);
+      if (remoteReference) {
+        setReferenceImages([remoteReference]);
+      }
+    }
+
+    const syncSeriesForModel = (model) => {
+      if (model?.model_series) {
+        setSelectedSeries(model.model_series);
+      }
+    };
+
+    const supportsGeneration = (model) =>
+      !!model && modelSupportsCapability(model, IMAGE_CAPABILITY_GENERATION);
+    const supportsEditing = (model) =>
+      !!model && modelSupportsCapability(model, IMAGE_CAPABILITY_EDITING);
+    const exactModel = models.find((model) => model.request_model === prefill.model_id);
+    if (prefill.mode === 'reference') {
+      if (exactModel && supportsEditing(exactModel)) {
+        setSelectedModel(exactModel.request_model);
+        syncSeriesForModel(exactModel);
+      } else {
+        const fallbackEditModel = models.find((model) => supportsEditing(model));
+        if (fallbackEditModel) {
+          setSelectedModel(fallbackEditModel.request_model);
+          syncSeriesForModel(fallbackEditModel);
+          showSuccess(t('原作品模型当前不可用于参考图继续创作，已切换到可编辑模型'));
+        } else {
+          showError(t('当前分组下没有支持参考图编辑的模型，请切换分组或模型'));
+        }
+      }
+    } else if (exactModel && supportsGeneration(exactModel)) {
+      setSelectedModel(exactModel.request_model);
+      syncSeriesForModel(exactModel);
+    } else {
+      const fallbackGenerationModel = models.find((model) =>
+        supportsGeneration(model),
+      );
+      if (fallbackGenerationModel) {
+        setSelectedModel(fallbackGenerationModel.request_model);
+        syncSeriesForModel(fallbackGenerationModel);
+        showSuccess(t('原作品模型当前不可用，已切换到当前分组的可用模型'));
+      } else {
+        showError(t('当前分组下没有支持生图的模型，请切换分组或模型'));
+      }
+    }
+
+    pendingCanvasPrefillRef.current = null;
+    prefillGroupFallbackNoticeShownRef.current = false;
+    try {
+      sessionStorage.removeItem(CANVAS_PREFILL_STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to clear canvas prefill state:', error);
+    }
+  }, [groupLoading, groupOptions, models, selectedGroup, t]);
+
   // 保存用户选择到 localStorage
   useEffect(() => {
     if (selectedGroup) {
@@ -1174,6 +1347,9 @@ const ImageGeneration = () => {
       // 处理参考图片
       if (referenceImages.length > 0) {
         const imagePromises = referenceImages.map((file) => {
+          if (!file.fileInstance && file.url) {
+            return Promise.resolve(file.url);
+          }
           return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => resolve(e.target.result);
@@ -1498,7 +1674,10 @@ const ImageGeneration = () => {
     !!selectedModel &&
     !!selectedModelData &&
     !!inspiration.trim() &&
-    (!requiresReferenceImage || referenceImages.length > 0);
+    (!requiresReferenceImage || referenceImages.length > 0) &&
+    !!groupOptions.find(
+      (group) => group.group === selectedGroup && group.has_available_token !== false,
+    );
 
   const renderLeftPanel = () => (
     <div style={styles.leftPanel}>
@@ -1514,7 +1693,11 @@ const ImageGeneration = () => {
               placeholder={t('请选择分组')}
             >
               {groupOptions.map((group) => (
-                <Select.Option key={group.group} value={group.group}>
+                <Select.Option
+                  key={group.group}
+                  value={group.group}
+                  disabled={group.has_available_token === false}
+                >
                   {group.group}
                   {group.has_available_token === false
                     ? ` (${t('无可用令牌')})`
@@ -1534,7 +1717,7 @@ const ImageGeneration = () => {
                     return '';
                   }
                   if (option.has_available_token === false) {
-                    return t('当前分组暂无可用令牌，生成时会被拦截');
+                    return t('当前分组暂无可用令牌，请前往令牌管理创建或启用');
                   }
                   return t('当前分组可用令牌数：{{count}}', {
                     count: option.available_token_count || 0,
@@ -1542,6 +1725,20 @@ const ImageGeneration = () => {
                 })()}
               </Text>
             )}
+            {selectedGroup &&
+              groupOptions.find(
+                (item) => item.group === selectedGroup && item.has_available_token === false,
+              ) && (
+                <Button
+                  size='small'
+                  type='primary'
+                  theme='outline'
+                  style={{ marginTop: 8 }}
+                  onClick={() => navigate('/console/token')}
+                >
+                  {t('前往令牌管理')}
+                </Button>
+              )}
           </div>
 
           <div style={styles.fieldGroup}>

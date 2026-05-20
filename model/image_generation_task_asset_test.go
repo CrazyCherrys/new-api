@@ -160,6 +160,7 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	approvedTask := &ImageGenerationTask{
 		UserId:          1,
 		ModelId:         "gpt-image-1",
+		SelectedGroup:   "vip",
 		Prompt:          "approved prompt",
 		RequestEndpoint: "openai",
 		Status:          ImageTaskStatusSuccess,
@@ -258,6 +259,9 @@ func TestApprovedCreativeAssetsOnlyExposeReviewedSubmissions(t *testing.T) {
 	}
 	if detail == nil || detail.Params != approvedTask.Params {
 		t.Fatalf("expected approved asset detail, got %#v", detail)
+	}
+	if detail.SelectedGroup != approvedTask.SelectedGroup {
+		t.Fatalf("expected selected group %q, got %q", approvedTask.SelectedGroup, detail.SelectedGroup)
 	}
 	if detail.ThumbnailUrl != approvedTask.ThumbnailUrl {
 		t.Fatalf("expected detail thumbnail url %q, got %q", approvedTask.ThumbnailUrl, detail.ThumbnailUrl)

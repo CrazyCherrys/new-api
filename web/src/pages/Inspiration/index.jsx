@@ -24,6 +24,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button, SideSheet, Spin, Typography } from '@douyinfe/semi-ui';
 import { IconCopy, IconDownload } from '@douyinfe/semi-icons';
@@ -40,6 +41,7 @@ const PLACEHOLDER_COUNT = 12;
 
 const Inspiration = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [shellRef, shellWidth] = useContainerWidth();
   const [pageChunks, setPageChunks] = useState([]);
@@ -52,6 +54,7 @@ const Inspiration = () => {
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [showRawParams, setShowRawParams] = useState(false);
   const topSentinelRef = useRef(null);
   const bottomSentinelRef = useRef(null);
   const loadingPagesRef = useRef(new Set());
@@ -95,6 +98,67 @@ const Inspiration = () => {
   const selectedParams = useMemo(
     () => parseJsonObject(selectedAsset?.params),
     [selectedAsset?.params],
+  );
+  const selectedMetadata = useMemo(
+    () => parseJsonObject(selectedAsset?.image_metadata),
+    [selectedAsset?.image_metadata],
+  );
+
+  const selectedParamSummary = useMemo(() => {
+    const summary = [];
+    if (selectedAsset?.selected_group) {
+      summary.push({ label: t('使用分组'), value: selectedAsset.selected_group });
+    }
+    if (selectedParams.aspect_ratio) {
+      summary.push({ label: t('生成比例'), value: selectedParams.aspect_ratio });
+    } else if (selectedMetadata.size) {
+      summary.push({ label: t('实际输出尺寸'), value: selectedMetadata.size });
+    }
+    if (selectedParams.resolution || selectedParams.image_size || selectedParams.imageSize) {
+      summary.push({
+        label: t('分辨率'),
+        value:
+          selectedParams.resolution ||
+          selectedParams.image_size ||
+          selectedParams.imageSize,
+      });
+    } else if (selectedMetadata.quality) {
+      summary.push({
+        label: t('画质参数'),
+        value: selectedMetadata.quality,
+      });
+    }
+    if (selectedParams.n || selectedParams.quantity) {
+      summary.push({
+        label: t('生成数量'),
+        value: String(selectedParams.n || selectedParams.quantity),
+      });
+    }
+    if (Array.isArray(selectedParams.reference_images) && selectedParams.reference_images.length > 0) {
+      summary.push({
+        label: t('参考图像'),
+        value: t('{{count}} 张', { count: selectedParams.reference_images.length }),
+      });
+    }
+    if (selectedParams.mask) {
+      summary.push({ label: t('遮罩图像'), value: t('已使用') });
+    }
+    return summary;
+  }, [selectedAsset?.selected_group, selectedMetadata, selectedParams, t]);
+
+  const detailReadyForCanvasPrefill = Boolean(
+    !detailLoading &&
+      selectedAsset?.prompt &&
+      selectedAsset?.model_id,
+  );
+  const detailReadyForReferencePrefill = Boolean(
+    detailReadyForCanvasPrefill && selectedAsset?.image_url,
+  );
+  const detailReadyForPromptCopy = Boolean(
+    !detailLoading && selectedAsset?.prompt,
+  );
+  const detailReadyForDownload = Boolean(
+    !detailLoading && selectedAsset?.image_url,
   );
 
   const masonryColumnCount = useMemo(() => {
@@ -394,6 +458,7 @@ const Inspiration = () => {
     setSelectedAsset(asset);
     setDetailVisible(true);
     setDetailLoading(true);
+    setShowRawParams(false);
     try {
       const res = await API.get(`/api/inspiration/assets/${asset.id}`);
       if (requestSeq !== detailSeqRef.current) {
@@ -438,6 +503,24 @@ const Inspiration = () => {
     link.click();
     document.body.removeChild(link);
   };
+
+  const openCanvasWithPrefill = useCallback((mode) => {
+    if (!selectedAsset) {
+      return;
+    }
+    const payload = {
+      source: 'inspiration',
+      mode,
+      asset_id: selectedAsset.id,
+      prompt: selectedAsset.prompt || '',
+      model_id: selectedAsset.model_id || '',
+      model_series: selectedAsset.model_series || '',
+      selected_group: selectedAsset.selected_group || '',
+      params: selectedAsset.params || '',
+      image_url: selectedAsset.image_url || '',
+    };
+    navigate('/canvas', { state: { canvasPrefill: payload } });
+  }, [navigate, selectedAsset]);
 
   const renderAssetCard = (asset) => (
     <button
@@ -647,6 +730,21 @@ const Inspiration = () => {
               {t('重试')}
             </Button>
           </div>
+        ) : !loading && !loadError && pageChunks.length === 0 ? (
+          <div className='inspiration-error-state'>
+            <div className='inspiration-error-title'>{t('暂无灵感作品')}</div>
+            <div className='inspiration-error-message'>
+              {t('当前还没有公开展示的作品，稍后再来看看')}
+            </div>
+            <div className='inspiration-detail-actions'>
+              <Button theme='solid' type='primary' onClick={() => loadAssets('', false)}>
+                {t('重新加载')}
+              </Button>
+              <Button theme='outline' type='tertiary' onClick={() => navigate('/canvas')}>
+                {t('前往创作')}
+              </Button>
+            </div>
+          </div>
         ) : loading && pageChunks.length === 0 ? (
           <div
             className='inspiration-placeholder-grid'
@@ -723,10 +821,27 @@ const Inspiration = () => {
               </div>
               <div className='inspiration-detail-actions'>
                 <Button
+                  theme='solid'
+                  type='primary'
+                  onClick={() => openCanvasWithPrefill('prompt')}
+                  disabled={!detailReadyForCanvasPrefill}
+                >
+                  {t('继续创作')}
+                </Button>
+                <Button
+                  theme='solid'
+                  type='secondary'
+                  onClick={() => openCanvasWithPrefill('reference')}
+                  disabled={!detailReadyForReferencePrefill}
+                >
+                  {t('作为参考图继续创作')}
+                </Button>
+                <Button
                   theme='outline'
                   type='tertiary'
                   icon={<IconCopy />}
                   onClick={copyPrompt}
+                  disabled={!detailReadyForPromptCopy}
                 >
                   {t('复制提示词')}
                 </Button>
@@ -735,6 +850,7 @@ const Inspiration = () => {
                   type='tertiary'
                   icon={<IconDownload />}
                   onClick={downloadAsset}
+                  disabled={!detailReadyForDownload}
                 >
                   {t('下载图片')}
                 </Button>
@@ -760,12 +876,34 @@ const Inspiration = () => {
                   {selectedAsset.prompt || '-'}
                 </Paragraph>
               </div>
+              {selectedParamSummary.length > 0 && (
+                <div className='inspiration-info-block'>
+                  <span className='inspiration-info-label'>{t('参数摘要')}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {selectedParamSummary.map((item) => (
+                      <div key={item.label} className='inspiration-info-block'>
+                        <span className='inspiration-info-label'>{item.label}</span>
+                        <span className='inspiration-info-value'>{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {Object.keys(selectedParams).length > 0 && (
                 <div className='inspiration-info-block'>
-                  <span className='inspiration-info-label'>{t('生成参数')}</span>
-                  <pre className='inspiration-param-pre'>
-                    {JSON.stringify(selectedParams, null, 2)}
-                  </pre>
+                  <Button
+                    theme='borderless'
+                    type='tertiary'
+                    style={{ justifyContent: 'flex-start', paddingLeft: 0 }}
+                    onClick={() => setShowRawParams((value) => !value)}
+                  >
+                    {showRawParams ? t('隐藏原始参数') : t('查看原始参数')}
+                  </Button>
+                  {showRawParams && (
+                    <pre className='inspiration-param-pre'>
+                      {JSON.stringify(selectedParams, null, 2)}
+                    </pre>
+                  )}
                 </div>
               )}
             </div>

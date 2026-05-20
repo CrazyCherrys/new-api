@@ -3934,6 +3934,24 @@
     "无可用令牌": "No available token",
     "当前分组没有可用令牌，请前往 /console/token 创建或启用该分组令牌": "The current group has no available token. Please create or enable a token for this group in /console/token.",
     "当前分组暂无可用令牌，生成时会被拦截": "This group currently has no available token and generation will be blocked.",
-    "当前分组可用令牌数：{{count}}": "Available tokens in current group: {{count}}"
+    "当前分组可用令牌数：{{count}}": "Available tokens in current group: {{count}}",
+    "继续创作": "Continue creating",
+    "作为参考图继续创作": "Continue with as reference",
+    "参数摘要": "Parameter summary",
+    "原始参数": "Raw parameters",
+    "查看原始参数": "View raw parameters",
+    "隐藏原始参数": "Hide raw parameters",
+    "暂无灵感作品": "No inspiration works yet",
+    "当前还没有公开展示的作品，稍后再来看看": "There are no publicly displayed works yet. Please check back later.",
+    "重新加载": "Reload",
+    "前往创作": "Go create",
+    "原作品模型当前不可用于参考图继续创作，已切换到可编辑模型": "The original model cannot currently be used for reference-image editing. Switched to an editable model.",
+    "当前分组下没有支持参考图编辑的模型，请切换分组或模型": "There is no model in the current group that supports reference-image editing. Please switch group or model.",
+    "当前分组下没有支持生图的模型，请切换分组或模型": "There is no model in the current group that supports image generation. Please switch group or model.",
+    "原作品分组当前不可用，已切换到默认可用分组": "The original group is currently unavailable. Switched to the default available group.",
+    "原作品模型当前不可用，已切换到当前分组的可用模型": "The original model is currently unavailable. Switched to an available model in the current group.",
+    "当前分组暂无可用令牌，请前往令牌管理创建或启用": "The current group has no available token. Please go to token management to create or enable one.",
+    "前往令牌管理": "Go to token management",
+    "已使用": "Used"
   }
 }
