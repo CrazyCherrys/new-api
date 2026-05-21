@@ -37,17 +37,96 @@ const PAGE_SIZE = 24;
 const MAX_RENDERED_PAGES = 5;
 const FIRST_PAGE_KEY = '__first__';
 const FIRST_PAGE_TIMEOUT_MS = 20_000;
+const FIRST_PAGE_SNAPSHOT_KEY = 'new-api:inspiration:first-page:v1';
+const FIRST_PAGE_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 const PLACEHOLDER_COUNT = 12;
+
+const clearInspirationFirstPageSnapshot = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(FIRST_PAGE_SNAPSHOT_KEY);
+  } catch (error) {
+    void error;
+  }
+};
+
+const readInspirationFirstPageSnapshot = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(FIRST_PAGE_SNAPSHOT_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    const savedAt = Number(parsed?.saved_at || 0);
+    const items = Array.isArray(parsed?.items) ? parsed.items : [];
+    if (
+      savedAt <= 0 ||
+      items.length === 0 ||
+      Date.now() - savedAt > FIRST_PAGE_SNAPSHOT_TTL_MS
+    ) {
+      clearInspirationFirstPageSnapshot();
+      return null;
+    }
+    return {
+      items,
+      nextCursor:
+        typeof parsed?.next_cursor === 'string' ? parsed.next_cursor : '',
+      hasMore: parsed?.has_more === true,
+    };
+  } catch (error) {
+    void error;
+    clearInspirationFirstPageSnapshot();
+    return null;
+  }
+};
+
+const writeInspirationFirstPageSnapshot = (items, nextCursor, hasMore) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    clearInspirationFirstPageSnapshot();
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      FIRST_PAGE_SNAPSHOT_KEY,
+      JSON.stringify({
+        saved_at: Date.now(),
+        items,
+        next_cursor: nextCursor || '',
+        has_more: hasMore === true,
+      }),
+    );
+  } catch (error) {
+    void error;
+  }
+};
 
 const Inspiration = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [shellRef, shellWidth] = useContainerWidth();
-  const [pageChunks, setPageChunks] = useState([]);
+  const [initialSnapshot] = useState(() => readInspirationFirstPageSnapshot());
+  const hasInitialSnapshot = Boolean(initialSnapshot?.items?.length);
+  const [pageChunks, setPageChunks] = useState(() =>
+    initialSnapshot?.items?.length
+      ? [{ key: FIRST_PAGE_KEY, items: initialSnapshot.items }]
+      : [],
+  );
   const [renderStart, setRenderStart] = useState(0);
-  const [nextCursor, setNextCursor] = useState('');
-  const [hasMore, setHasMore] = useState(true);
+  const [nextCursor, setNextCursor] = useState(() =>
+    initialSnapshot?.nextCursor || '',
+  );
+  const [hasMore, setHasMore] = useState(() =>
+    initialSnapshot ? initialSnapshot.hasMore : true,
+  );
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -285,8 +364,10 @@ const Inspiration = () => {
 
       if (append) {
         setLoadingMore(true);
-      } else {
+      } else if (!hasInitialSnapshot) {
         setLoading(true);
+      }
+      if (!append) {
         setLoadError('');
       }
       try {
@@ -298,6 +379,15 @@ const Inspiration = () => {
         if (res.data.success) {
           const data = res.data.data || {};
           const items = data.items || [];
+          const resolvedNextCursor = data.next_cursor || '';
+          const resolvedHasMore = data.has_more === true;
+          if (!append) {
+            writeInspirationFirstPageSnapshot(
+              items,
+              resolvedNextCursor,
+              resolvedHasMore,
+            );
+          }
           appendJustHappenedRef.current = append;
           setPageChunks((prev) => {
             if (!append) {
@@ -315,8 +405,8 @@ const Inspiration = () => {
             }
             return [...prev, { key: pageKey, items: nextItems }];
           });
-          setNextCursor(data.next_cursor || '');
-          setHasMore(data.has_more === true);
+          setNextCursor(resolvedNextCursor);
+          setHasMore(resolvedHasMore);
         } else {
           const message = res.data.message || t('加载灵感失败');
           if (!append) {
@@ -355,12 +445,12 @@ const Inspiration = () => {
         loadingPagesRef.current.delete(pageKey);
         if (append) {
           setLoadingMore(false);
-        } else {
+        } else if (!hasInitialSnapshot) {
           setLoading(false);
         }
       }
     },
-    [t],
+    [hasInitialSnapshot, t],
   );
 
   useEffect(() => {

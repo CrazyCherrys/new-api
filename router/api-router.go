@@ -18,6 +18,8 @@ func SetApiRouter(router *gin.Engine) {
 		gzip.DefaultCompression,
 		gzip.WithExcludedPaths([]string{
 			"/api/image-generation/sse",
+			"/api/inspiration/assets",
+			"/api/creative-space/assets",
 		}),
 	))
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
