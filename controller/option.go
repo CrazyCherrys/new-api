@@ -30,8 +30,12 @@ var completionRatioMetaOptionKeys = []string{
 const maskedWorkerS3OptionValue = "****"
 
 var maskedWorkerS3OptionKeys = map[string]struct{}{
-	"worker_setting.s3_access_key": {},
-	"worker_setting.s3_secret_key": {},
+	"worker_setting.s3_access_key":           {},
+	"worker_setting.s3_secret_key":           {},
+	"worker_setting.result_s3_access_key":    {},
+	"worker_setting.result_s3_secret_key":    {},
+	"worker_setting.reference_s3_access_key": {},
+	"worker_setting.reference_s3_secret_key": {},
 }
 
 func isMaskedWorkerS3OptionValue(value string) bool {

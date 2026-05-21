@@ -33,6 +33,26 @@ export const WORKER_SETTING_DEFAULTS = Object.freeze({
   'worker_setting.s3_path_prefix': '',
   'worker_setting.s3_url_mode': 'direct',
   'worker_setting.s3_public_base_url': '',
+  'worker_setting.result_storage_type': '',
+  'worker_setting.result_local_storage_path': '',
+  'worker_setting.result_s3_endpoint': '',
+  'worker_setting.result_s3_bucket': '',
+  'worker_setting.result_s3_region': '',
+  'worker_setting.result_s3_access_key': '',
+  'worker_setting.result_s3_secret_key': '',
+  'worker_setting.result_s3_path_prefix': '',
+  'worker_setting.result_s3_url_mode': '',
+  'worker_setting.result_s3_public_base_url': '',
+  'worker_setting.reference_storage_type': '',
+  'worker_setting.reference_local_storage_path': '',
+  'worker_setting.reference_s3_endpoint': '',
+  'worker_setting.reference_s3_bucket': '',
+  'worker_setting.reference_s3_region': '',
+  'worker_setting.reference_s3_access_key': '',
+  'worker_setting.reference_s3_secret_key': '',
+  'worker_setting.reference_s3_path_prefix': '',
+  'worker_setting.reference_s3_url_mode': '',
+  'worker_setting.reference_s3_public_base_url': '',
   'worker_setting.image_timeout': 120,
   'worker_setting.video_timeout': 600,
   'worker_setting.retry_delay': 5,
@@ -42,6 +62,8 @@ export const WORKER_SETTING_DEFAULTS = Object.freeze({
   'worker_setting.inspiration_first_page_cache_ttl': 300,
   'worker_setting.auto_cleanup_enabled': false,
   'worker_setting.retention_days': 30,
+  'worker_setting.reference_auto_cleanup_enabled': false,
+  'worker_setting.reference_retention_days': 7,
   'worker_setting.max_image_size': 10,
 });
 
@@ -65,6 +87,90 @@ export function normalizeWorkerSettingInputs(rawOptions = {}) {
     }
     nextInputs[key] = normalizeWorkerSettingValue(key, rawOptions[key]);
   });
+
+  const baseStorageType = nextInputs['worker_setting.storage_type'];
+  const baseLocalPath = nextInputs['worker_setting.local_storage_path'];
+  const baseS3Endpoint = nextInputs['worker_setting.s3_endpoint'];
+  const baseS3Bucket = nextInputs['worker_setting.s3_bucket'];
+  const baseS3Region = nextInputs['worker_setting.s3_region'];
+  const baseS3AccessKey = nextInputs['worker_setting.s3_access_key'];
+  const baseS3SecretKey = nextInputs['worker_setting.s3_secret_key'];
+  const baseS3PathPrefix = nextInputs['worker_setting.s3_path_prefix'];
+  const baseS3URLMode = nextInputs['worker_setting.s3_url_mode'];
+  const baseS3PublicBaseURL = nextInputs['worker_setting.s3_public_base_url'];
+
+  if (!nextInputs['worker_setting.result_storage_type']) {
+    nextInputs['worker_setting.result_storage_type'] = baseStorageType;
+  }
+  if (!nextInputs['worker_setting.result_local_storage_path']) {
+    nextInputs['worker_setting.result_local_storage_path'] = baseLocalPath;
+  }
+  if (!nextInputs['worker_setting.result_s3_endpoint']) {
+    nextInputs['worker_setting.result_s3_endpoint'] = baseS3Endpoint;
+  }
+  if (!nextInputs['worker_setting.result_s3_bucket']) {
+    nextInputs['worker_setting.result_s3_bucket'] = baseS3Bucket;
+  }
+  if (!nextInputs['worker_setting.result_s3_region']) {
+    nextInputs['worker_setting.result_s3_region'] = baseS3Region;
+  }
+  if (!nextInputs['worker_setting.result_s3_access_key']) {
+    nextInputs['worker_setting.result_s3_access_key'] = baseS3AccessKey;
+  }
+  if (!nextInputs['worker_setting.result_s3_secret_key']) {
+    nextInputs['worker_setting.result_s3_secret_key'] = baseS3SecretKey;
+  }
+  if (!nextInputs['worker_setting.result_s3_path_prefix']) {
+    nextInputs['worker_setting.result_s3_path_prefix'] = baseS3PathPrefix;
+  }
+  if (!nextInputs['worker_setting.result_s3_url_mode']) {
+    nextInputs['worker_setting.result_s3_url_mode'] = baseS3URLMode;
+  }
+  if (!nextInputs['worker_setting.result_s3_public_base_url']) {
+    nextInputs['worker_setting.result_s3_public_base_url'] = baseS3PublicBaseURL;
+  }
+
+  if (!nextInputs['worker_setting.reference_storage_type']) {
+    nextInputs['worker_setting.reference_storage_type'] =
+      nextInputs['worker_setting.result_storage_type'];
+  }
+  if (!nextInputs['worker_setting.reference_local_storage_path']) {
+    nextInputs['worker_setting.reference_local_storage_path'] =
+      nextInputs['worker_setting.result_local_storage_path'];
+  }
+  if (!nextInputs['worker_setting.reference_s3_endpoint']) {
+    nextInputs['worker_setting.reference_s3_endpoint'] =
+      nextInputs['worker_setting.result_s3_endpoint'];
+  }
+  if (!nextInputs['worker_setting.reference_s3_bucket']) {
+    nextInputs['worker_setting.reference_s3_bucket'] =
+      nextInputs['worker_setting.result_s3_bucket'];
+  }
+  if (!nextInputs['worker_setting.reference_s3_region']) {
+    nextInputs['worker_setting.reference_s3_region'] =
+      nextInputs['worker_setting.result_s3_region'];
+  }
+  if (!nextInputs['worker_setting.reference_s3_access_key']) {
+    nextInputs['worker_setting.reference_s3_access_key'] =
+      nextInputs['worker_setting.result_s3_access_key'];
+  }
+  if (!nextInputs['worker_setting.reference_s3_secret_key']) {
+    nextInputs['worker_setting.reference_s3_secret_key'] =
+      nextInputs['worker_setting.result_s3_secret_key'];
+  }
+  if (!nextInputs['worker_setting.reference_s3_path_prefix']) {
+    nextInputs['worker_setting.reference_s3_path_prefix'] =
+      nextInputs['worker_setting.result_s3_path_prefix'];
+  }
+  if (!nextInputs['worker_setting.reference_s3_url_mode']) {
+    nextInputs['worker_setting.reference_s3_url_mode'] =
+      nextInputs['worker_setting.result_s3_url_mode'];
+  }
+  if (!nextInputs['worker_setting.reference_s3_public_base_url']) {
+    nextInputs['worker_setting.reference_s3_public_base_url'] =
+      nextInputs['worker_setting.result_s3_public_base_url'];
+  }
+
   return nextInputs;
 }
 

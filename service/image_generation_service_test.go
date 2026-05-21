@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -46,7 +47,7 @@ func setupImageGenerationServiceTestDB(t *testing.T) *gorm.DB {
 	model.DB = db
 	model.LOG_DB = db
 
-	if err := db.AutoMigrate(&model.User{}, &model.Token{}, &model.Ability{}, &model.ModelMapping{}, &model.ImageGenerationTask{}, &model.ImageCreativeSubmission{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Token{}, &model.Ability{}, &model.ModelMapping{}, &model.ImageGenerationTask{}, &model.ImageGenerationReferenceAsset{}, &model.ImageGenerationTaskReferenceAsset{}, &model.ImageCreativeSubmission{}); err != nil {
 		t.Fatalf("failed to migrate image generation task table: %v", err)
 	}
 
@@ -467,7 +468,7 @@ func TestCreateImageGenerationTaskQueueLimitIsSerializedWithinProcess(t *testing
 	if err := db.Create(mapping).Error; err != nil {
 		t.Fatalf("failed to create image mapping: %v", err)
 	}
-	seedImageAbility(t, db, "default", "gpt-image-1")
+	seedImageAbility(t, db, "default", "gpt-image-serialized")
 
 	previousEnqueue := enqueueImageGenerationTask
 	enqueueImageGenerationTask = func(taskId int) {}
@@ -1437,7 +1438,7 @@ func TestCreateImageGenerationTaskStoresReferenceImagesOutsideDatabase(t *testin
 	if !ok {
 		t.Fatalf("expected local asset key from %q", references[0])
 	}
-	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
 	if err != nil {
 		t.Fatalf("failed to resolve local reference image path: %v", err)
 	}
@@ -1638,12 +1639,301 @@ func TestCreateImageGenerationTaskStoresMaskOutsideDatabase(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected local asset key from %q", mask)
 	}
-	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
 	if err != nil {
 		t.Fatalf("failed to resolve local mask image path: %v", err)
 	}
 	if _, err := os.Stat(fullPath); err != nil {
 		t.Fatalf("expected stored mask image file to exist: %v", err)
+	}
+}
+
+func TestCreateImageGenerationTaskDeduplicatesReferenceAssets(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceLocalPath := cfg.ReferenceLocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceLocalStoragePath = previousReferenceLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+	cfg.ReferenceStorageType = "local"
+	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+
+	user := &model.User{
+		Username: "image-dedupe-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	seedUserToken(t, db, user.Id, "sk-image-dedupe")
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-dedupe",
+		ActualModel:       "gpt-image-dedupe",
+		DisplayName:       "GPT Image Dedupe",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation","image_editing"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+	seedImageAbility(t, db, "default", "gpt-image-dedupe")
+
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to encode test image: %v", err)
+	}
+	source := "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+	})
+
+	taskA, err := CreateImageGenerationTask(user.Id, "gpt-image-dedupe", "default", "prompt-a", "openai", `{"reference_images":["`+source+`"]}`)
+	if err != nil {
+		t.Fatalf("expected first task creation to succeed: %v", err)
+	}
+	taskB, err := CreateImageGenerationTask(user.Id, "gpt-image-dedupe", "default", "prompt-b", "openai", `{"reference_images":["`+source+`"]}`)
+	if err != nil {
+		t.Fatalf("expected second task creation to succeed: %v", err)
+	}
+
+	reloadedA, err := model.GetImageTaskByID(taskA.Id)
+	if err != nil || reloadedA == nil {
+		t.Fatalf("failed to load first task: %v", err)
+	}
+	reloadedB, err := model.GetImageTaskByID(taskB.Id)
+	if err != nil || reloadedB == nil {
+		t.Fatalf("failed to load second task: %v", err)
+	}
+
+	refsA, err := extractImageGenerationReferenceImages(reloadedA.Params)
+	if err != nil {
+		t.Fatalf("failed to extract first refs: %v", err)
+	}
+	refsB, err := extractImageGenerationReferenceImages(reloadedB.Params)
+	if err != nil {
+		t.Fatalf("failed to extract second refs: %v", err)
+	}
+	if len(refsA) != 1 || len(refsB) != 1 {
+		t.Fatalf("expected one ref in each task, got %v and %v", refsA, refsB)
+	}
+	if refsA[0] != refsB[0] {
+		t.Fatalf("expected deduped reference URL, got %q and %q", refsA[0], refsB[0])
+	}
+
+	var assets []model.ImageGenerationReferenceAsset
+	if err := db.Find(&assets).Error; err != nil {
+		t.Fatalf("failed to list reference assets: %v", err)
+	}
+	if len(assets) != 1 {
+		t.Fatalf("expected 1 reference asset row, got %d", len(assets))
+	}
+	if assets[0].RefCount != 2 {
+		t.Fatalf("expected reference asset ref_count=2, got %d", assets[0].RefCount)
+	}
+}
+
+func TestDeleteImageGenerationTaskKeepsSharedReferenceAssetUntilLastReference(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceLocalPath := cfg.ReferenceLocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceLocalStoragePath = previousReferenceLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+	cfg.ReferenceStorageType = "local"
+	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+
+	user := &model.User{
+		Username: "image-delete-shared-ref-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	seedUserToken(t, db, user.Id, "sk-image-delete-shared-ref")
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-delete-shared-ref",
+		ActualModel:       "gpt-image-delete-shared-ref",
+		DisplayName:       "GPT Image Delete Shared Ref",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation","image_editing"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+	seedImageAbility(t, db, "default", "gpt-image-delete-shared-ref")
+
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to encode test image: %v", err)
+	}
+	source := "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+	})
+
+	taskA, err := CreateImageGenerationTask(user.Id, "gpt-image-delete-shared-ref", "default", "prompt-a", "openai", `{"reference_images":["`+source+`"]}`)
+	if err != nil {
+		t.Fatalf("expected first task creation to succeed: %v", err)
+	}
+	taskB, err := CreateImageGenerationTask(user.Id, "gpt-image-delete-shared-ref", "default", "prompt-b", "openai", `{"reference_images":["`+source+`"]}`)
+	if err != nil {
+		t.Fatalf("expected second task creation to succeed: %v", err)
+	}
+
+	reloadedA, err := model.GetImageTaskByID(taskA.Id)
+	if err != nil || reloadedA == nil {
+		t.Fatalf("failed to load first task: %v", err)
+	}
+	refsA, err := extractImageGenerationReferenceImages(reloadedA.Params)
+	if err != nil || len(refsA) != 1 {
+		t.Fatalf("failed to load first task refs: %v %v", err, refsA)
+	}
+	objectKey, ok := imageGenerationLocalAssetKeyFromURL(refsA[0])
+	if !ok {
+		t.Fatalf("expected local asset key from %q", refsA[0])
+	}
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
+	if err != nil {
+		t.Fatalf("failed to resolve reference file path: %v", err)
+	}
+
+	if err := DeleteImageGenerationTask(taskA); err != nil {
+		t.Fatalf("expected first task delete to succeed: %v", err)
+	}
+	if _, err := os.Stat(fullPath); err != nil {
+		t.Fatalf("expected shared reference file to remain after first delete: %v", err)
+	}
+
+	var assets []model.ImageGenerationReferenceAsset
+	if err := db.Find(&assets).Error; err != nil {
+		t.Fatalf("failed to list assets after first delete: %v", err)
+	}
+	if len(assets) != 1 || assets[0].RefCount != 1 {
+		t.Fatalf("expected one shared asset with ref_count=1 after first delete, got %+v", assets)
+	}
+
+	if err := DeleteImageGenerationTask(taskB); err != nil {
+		t.Fatalf("expected second task delete to succeed: %v", err)
+	}
+	if _, err := os.Stat(fullPath); err != nil {
+		t.Fatalf("expected file to remain until reference GC runs, stat err=%v", err)
+	}
+
+	assets = nil
+	if err := db.Find(&assets).Error; err != nil {
+		t.Fatalf("failed to list assets after second delete: %v", err)
+	}
+	if len(assets) != 1 || assets[0].RefCount != 0 {
+		t.Fatalf("expected one asset with ref_count=0 after second delete, got %+v", assets)
+	}
+}
+
+func TestCleanupExpiredReferenceAssetsRemovesUnreferencedLocalFiles(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceLocalPath := cfg.ReferenceLocalStoragePath
+	previousReferenceAutoCleanupEnabled := cfg.ReferenceAutoCleanupEnabled
+	previousReferenceRetentionDays := cfg.ReferenceRetentionDays
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceLocalStoragePath = previousReferenceLocalPath
+		cfg.ReferenceAutoCleanupEnabled = previousReferenceAutoCleanupEnabled
+		cfg.ReferenceRetentionDays = previousReferenceRetentionDays
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+	cfg.ReferenceStorageType = "local"
+	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+	cfg.ReferenceAutoCleanupEnabled = true
+	cfg.ReferenceRetentionDays = 7
+
+	objectKey := "image-generation/ref/20260521/test-ref.png"
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
+	if err != nil {
+		t.Fatalf("failed to resolve local reference path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("failed to create reference dir: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("png"), 0o644); err != nil {
+		t.Fatalf("failed to create reference file: %v", err)
+	}
+
+	asset := &model.ImageGenerationReferenceAsset{
+		ContentHash:   strings.Repeat("a", 64),
+		StorageType:   "local",
+		StoragePath:   buildImageGenerationLocalObjectURL(objectKey),
+		ContentType:   "image/png",
+		FileSizeBytes: 3,
+		RefCount:      0,
+		CreatedTime:   common.GetTimestamp() - 10*24*60*60,
+		LastUsedTime:  common.GetTimestamp() - 10*24*60*60,
+	}
+	if err := db.Create(asset).Error; err != nil {
+		t.Fatalf("failed to create reference asset row: %v", err)
+	}
+
+	if err := CleanupExpiredReferenceAssets(); err != nil {
+		t.Fatalf("expected reference cleanup to succeed: %v", err)
+	}
+	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
+		t.Fatalf("expected reference file to be removed by GC, stat err=%v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.ImageGenerationReferenceAsset{}).Where("id = ?", asset.Id).Count(&count).Error; err != nil {
+		t.Fatalf("failed to count reference assets after cleanup: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected reference asset row to be deleted, got count=%d", count)
 	}
 }
 

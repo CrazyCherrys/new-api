@@ -49,7 +49,7 @@ func TestStoreImageGenerationResultLocally(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected local asset key from %q", stored.imageURL)
 	}
-	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindResult)
 	if err != nil {
 		t.Fatalf("failed to resolve local asset path: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestStoreImageGenerationResultLocally(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected local thumbnail key from %q", stored.thumbnailURL)
 	}
-	thumbPath, err := imageGenerationLocalAssetPath(cfg, thumbKey)
+	thumbPath, err := imageGenerationLocalAssetPath(cfg, thumbKey, imageGenerationAssetKindResult)
 	if err != nil {
 		t.Fatalf("failed to resolve local thumbnail path: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestDeleteImageGenerationTaskRemovesStoredReferenceImages(t *testing.T) {
 
 	objectKey := "image-generation/ref/20260428/123-reference.png"
 	referenceURL := buildImageGenerationLocalObjectURL(objectKey)
-	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindResult)
 	if err != nil {
 		t.Fatalf("failed to resolve local reference path: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestDeleteImageGenerationTaskRemovesStoredReferenceImages(t *testing.T) {
 
 	thumbKey := "image-generation/thumb/20260428/123-thumb.jpg"
 	thumbURL := buildImageGenerationLocalObjectURL(thumbKey)
-	thumbPath, err := imageGenerationLocalAssetPath(cfg, thumbKey)
+	thumbPath, err := imageGenerationLocalAssetPath(cfg, thumbKey, imageGenerationAssetKindResult)
 	if err != nil {
 		t.Fatalf("failed to resolve local thumbnail path: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestDeleteImageGenerationTaskRemovesStoredMaskImages(t *testing.T) {
 
 	objectKey := "image-generation/ref/20260428/124-mask.png"
 	maskURL := buildImageGenerationLocalObjectURL(objectKey)
-	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey)
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
 	if err != nil {
 		t.Fatalf("failed to resolve local mask path: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestBuildImageGenerationObjectURLUsesCDNBaseURL(t *testing.T) {
 	cfg.S3URLMode = "cdn"
 	cfg.S3PublicBaseURL = "https://img.example.com"
 
-	actualURL := buildImageGenerationObjectURL(cfg, "image-generation/20260510/test image.png")
+	actualURL := buildImageGenerationObjectURL(cfg, "image-generation/20260510/test image.png", imageGenerationAssetKindResult)
 	expectedURL := "https://img.example.com/image-generation/20260510/test%20image.png"
 	if actualURL != expectedURL {
 		t.Fatalf("expected CDN URL %q, got %q", expectedURL, actualURL)
@@ -518,6 +518,7 @@ func TestImageGenerationS3ObjectKeyFromCDNURL(t *testing.T) {
 	objectKey, ok := imageGenerationS3ObjectKeyFromURL(
 		"https://img.example.com/static/image-generation/20260510/test%20image.png",
 		cfg,
+		imageGenerationAssetKindResult,
 	)
 	if !ok {
 		t.Fatal("expected CDN URL to map back to object key")
@@ -544,6 +545,7 @@ func TestImageGenerationS3ObjectKeyFromLegacyPublicOSSURL(t *testing.T) {
 	objectKey, ok := imageGenerationS3ObjectKeyFromURL(
 		"https://oss-cn-hongkong.aliyuncs.com/image-bucket/image-generation/20260510/test.png",
 		cfg,
+		imageGenerationAssetKindResult,
 	)
 	if !ok {
 		t.Fatal("expected legacy public OSS URL to map back to object key")
@@ -577,7 +579,7 @@ func TestValidateImageS3ConfigRequiresPublicBaseURLForCDNMode(t *testing.T) {
 	cfg.S3URLMode = "cdn"
 	cfg.S3PublicBaseURL = ""
 
-	err := validateImageS3Config(cfg)
+	err := validateImageS3Config(cfg, imageGenerationAssetKindResult)
 	if err == nil || !strings.Contains(err.Error(), "s3 public base url is empty") {
 		t.Fatalf("expected missing public base url validation error, got %v", err)
 	}

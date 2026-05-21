@@ -282,6 +282,8 @@ func migrateDB() error {
 		&UserOAuthBinding{},
 		&ModelMapping{},
 		&ImageGenerationTask{},
+		&ImageGenerationReferenceAsset{},
+		&ImageGenerationTaskReferenceAsset{},
 		&ImageCreativeSubmission{},
 	)
 	if err != nil {
@@ -333,6 +335,8 @@ func migrateDBFast() error {
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 		{&ModelMapping{}, "ModelMapping"},
 		{&ImageGenerationTask{}, "ImageGenerationTask"},
+		{&ImageGenerationReferenceAsset{}, "ImageGenerationReferenceAsset"},
+		{&ImageGenerationTaskReferenceAsset{}, "ImageGenerationTaskReferenceAsset"},
 		{&ImageCreativeSubmission{}, "ImageCreativeSubmission"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大

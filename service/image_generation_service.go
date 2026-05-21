@@ -940,7 +940,7 @@ func CreateImageGenerationTask(userId int, modelId string, selectedGroup string,
 		if strings.TrimSpace(maskInput) != "" {
 			storedMask, err = storeImageGenerationReferenceImage(context.Background(), task.Id, maskInput)
 			if err != nil {
-				cleanupStoredImageGenerationAssets(storedRefs)
+				_ = releaseTaskReferenceAssets(task.Id, storedRefs, worker_setting.GetWorkerSetting(), true)
 				_ = model.DeleteImageTask(task.Id)
 				releaseReservedQueueSlot()
 				return nil, fmt.Errorf("failed to store mask image: %w", err)
@@ -950,14 +950,14 @@ func CreateImageGenerationTask(userId int, modelId string, selectedGroup string,
 		setImageGenerationMaskInParamsMap(paramMap, storedMask)
 		storedParamsBytes, err := common.Marshal(paramMap)
 		if err != nil {
-			cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
+			_ = releaseTaskReferenceAssets(task.Id, append(storedRefs, storedMask), worker_setting.GetWorkerSetting(), true)
 			_ = model.DeleteImageTask(task.Id)
 			releaseReservedQueueSlot()
 			return nil, fmt.Errorf("failed to marshal stored params: %w", err)
 		}
 		task.Params = string(storedParamsBytes)
 		if err := task.Update(); err != nil {
-			cleanupStoredImageGenerationAssets(append(storedRefs, storedMask))
+			_ = releaseTaskReferenceAssets(task.Id, append(storedRefs, storedMask), worker_setting.GetWorkerSetting(), true)
 			_ = model.DeleteImageTask(task.Id)
 			releaseReservedQueueSlot()
 			return nil, fmt.Errorf("failed to update stored params: %w", err)
@@ -1797,6 +1797,10 @@ func getUserValidToken(userId int) (string, error) {
 func CleanupExpiredImageTasks() error {
 	cfg := worker_setting.GetWorkerSetting()
 
+	if err := CleanupExpiredReferenceAssets(); err != nil {
+		return err
+	}
+
 	// 检查是否启用自动清理
 	if !cfg.AutoCleanupEnabled {
 		return nil
@@ -1841,6 +1845,38 @@ func CleanupExpiredImageTasks() error {
 	return nil
 }
 
+func CleanupExpiredReferenceAssets() error {
+	cfg := worker_setting.GetWorkerSetting()
+	if cfg == nil || !cfg.ReferenceAutoCleanupEnabled {
+		return nil
+	}
+
+	retentionDays := cfg.ReferenceRetentionDays
+	if retentionDays <= 0 {
+		retentionDays = 7
+	}
+	expirationTime := common.GetTimestamp() - int64(retentionDays*24*60*60)
+
+	assets, err := model.ListExpiredUnusedReferenceAssets(expirationTime)
+	if err != nil {
+		return fmt.Errorf("failed to query expired reference assets: %w", err)
+	}
+
+	for _, asset := range assets {
+		if asset == nil || strings.TrimSpace(asset.StoragePath) == "" {
+			continue
+		}
+		if err := deleteImageFileByKind(asset.StoragePath, cfg, imageGenerationAssetKindReference); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to cleanup reference asset %d: %v", asset.Id, err))
+			continue
+		}
+		if err := model.DeleteImageGenerationReferenceAsset(asset.Id); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to delete reference asset record %d: %v", asset.Id, err))
+		}
+	}
+	return nil
+}
+
 func shouldRunImageCleanup(now time.Time) bool {
 	lastRunUnix := imageCleanupLastRun.Load()
 	if lastRunUnix == 0 {
@@ -1852,7 +1888,7 @@ func shouldRunImageCleanup(now time.Time) bool {
 
 func runImageCleanupTaskOnce(now time.Time) {
 	cfg := worker_setting.GetWorkerSetting()
-	if cfg == nil || !cfg.AutoCleanupEnabled {
+	if cfg == nil || (!cfg.AutoCleanupEnabled && !cfg.ReferenceAutoCleanupEnabled) {
 		return
 	}
 	if !shouldRunImageCleanup(now) {
@@ -1877,21 +1913,19 @@ func DeleteImageGenerationTaskAssets(task *model.ImageGenerationTask, cfg *worke
 	}
 
 	if task.ImageUrl != "" {
-		if err := deleteImageFile(task.ImageUrl, cfg); err != nil {
+		if err := deleteImageFileByKind(task.ImageUrl, cfg, imageGenerationAssetKindResult); err != nil {
 			common.SysLog(fmt.Sprintf("Failed to delete image file for task %d: %v", task.Id, err))
 		}
 	}
 	if strings.TrimSpace(task.ThumbnailUrl) != "" && task.ThumbnailUrl != task.ImageUrl {
-		if err := deleteImageFile(task.ThumbnailUrl, cfg); err != nil {
+		if err := deleteImageFileByKind(task.ThumbnailUrl, cfg, imageGenerationAssetKindResult); err != nil {
 			common.SysLog(fmt.Sprintf("Failed to delete thumbnail file for task %d: %v", task.Id, err))
 		}
 	}
 
 	if refs, err := collectStoredReferenceImages(task.Params); err == nil {
-		for _, ref := range refs {
-			if err := deleteImageFile(ref, cfg); err != nil {
-				common.SysLog(fmt.Sprintf("Failed to delete reference image for task %d: %v", task.Id, err))
-			}
+		if err := releaseTaskReferenceAssets(task.Id, refs, cfg, false); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to release reference images for task %d: %v", task.Id, err))
 		}
 	}
 }
@@ -1923,38 +1957,81 @@ func DeleteImageGenerationTask(task *model.ImageGenerationTask) error {
 	return nil
 }
 
-// deleteImageFile 删除图片文件（本地或S3）
-func deleteImageFile(imageUrl string, cfg *worker_setting.WorkerSetting) error {
-	if isImageGenerationStoredReferenceURL(imageUrl) {
-		if objectKey, ok := imageGenerationLocalAssetKeyFromURL(imageUrl); ok {
-			return deleteLocalFile(objectKey, cfg)
-		}
-		if cfg != nil &&
-			strings.TrimSpace(cfg.S3Endpoint) != "" &&
-			strings.TrimSpace(cfg.S3Bucket) != "" &&
-			strings.TrimSpace(cfg.S3AccessKey) != "" &&
-			strings.TrimSpace(cfg.S3SecretKey) != "" {
-			return deleteS3File(imageUrl, cfg)
-		}
+func releaseTaskReferenceAssets(taskId int, refs []string, cfg *worker_setting.WorkerSetting, deleteUnreferenced bool) error {
+	links, err := model.ListTaskReferenceAssetLinks(taskId)
+	if err != nil {
+		return err
 	}
-
-	// 如果是外部URL（http/https），不需要删除
-	if strings.HasPrefix(imageUrl, "http://") || strings.HasPrefix(imageUrl, "https://") {
-		// 外部URL，跳过删除
+	if len(links) == 0 {
+		for _, ref := range refs {
+			if err := deleteImageFileByKind(ref, cfg, imageGenerationAssetKindReference); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 
-	// 本地文件
-	if cfg.StorageType == "local" {
-		return deleteLocalFile(imageUrl, cfg)
+	for _, link := range links {
+		if link == nil || link.AssetId <= 0 {
+			continue
+		}
+		asset, assetErr := model.GetImageGenerationReferenceAssetByID(link.AssetId)
+		if assetErr != nil {
+			return assetErr
+		}
+		if err := model.DecrementImageGenerationReferenceAssetRefCount(link.AssetId); err != nil {
+			return err
+		}
+		if deleteUnreferenced && asset != nil && asset.RefCount <= 1 {
+			if err := deleteImageFileByKind(asset.StoragePath, cfg, imageGenerationAssetKindReference); err != nil {
+				return err
+			}
+			if err := model.DeleteImageGenerationReferenceAsset(link.AssetId); err != nil {
+				return err
+			}
+		}
+	}
+
+	return model.DeleteTaskReferenceAssetLinks(taskId)
+}
+
+// deleteImageFile 删除图片文件（本地或S3）
+func deleteImageFile(imageUrl string, cfg *worker_setting.WorkerSetting) error {
+	return deleteImageFileByKind(imageUrl, cfg, imageGenerationAssetKindResult)
+}
+
+func deleteImageFileByKind(imageUrl string, cfg *worker_setting.WorkerSetting, kind imageGenerationAssetKind) error {
+	if strings.TrimSpace(imageUrl) == "" {
+		return nil
+	}
+
+	if objectKey, ok := imageGenerationLocalAssetKeyFromURL(imageUrl); ok {
+		return deleteLocalFile(objectKey, cfg, kind)
+	}
+
+	if cfg != nil {
+		if objectKey, ok := imageGenerationS3ObjectKeyFromURL(imageUrl, cfg, kind); ok {
+			return deleteS3FileByObjectKey(objectKey, cfg, kind)
+		}
+		if objectKey, matchedKind, ok := imageGenerationS3ObjectKeyFromAnyKnownURL(imageUrl, cfg); ok {
+			return deleteS3FileByObjectKey(objectKey, cfg, matchedKind)
+		}
+	}
+
+	if strings.HasPrefix(imageUrl, "http://") || strings.HasPrefix(imageUrl, "https://") {
+		return nil
+	}
+
+	if imageGenerationEffectiveStorageType(cfg, kind) == "local" {
+		return deleteLocalFile(imageUrl, cfg, kind)
 	}
 
 	return nil
 }
 
 // deleteLocalFile 删除本地文件
-func deleteLocalFile(filePath string, cfg *worker_setting.WorkerSetting) error {
-	fullPath, err := imageGenerationLocalAssetPath(cfg, filePath)
+func deleteLocalFile(filePath string, cfg *worker_setting.WorkerSetting, kind imageGenerationAssetKind) error {
+	fullPath, err := imageGenerationLocalAssetPath(cfg, filePath, kind)
 	if err != nil {
 		return err
 	}
@@ -1972,15 +2049,10 @@ func deleteLocalFile(filePath string, cfg *worker_setting.WorkerSetting) error {
 }
 
 // deleteS3File 删除S3文件
-func deleteS3File(imageUrl string, cfg *worker_setting.WorkerSetting) error {
-	objectKey, ok := imageGenerationS3ObjectKeyFromURL(imageUrl, cfg)
-	if !ok {
-		return nil
-	}
-
-	client := newImageS3Client(cfg)
+func deleteS3FileByObjectKey(objectKey string, cfg *worker_setting.WorkerSetting, kind imageGenerationAssetKind) error {
+	client := newImageS3Client(cfg, kind)
 	_, err := client.DeleteObject(context.Background(), &s3.DeleteObjectInput{
-		Bucket: aws.String(strings.TrimSpace(cfg.S3Bucket)),
+		Bucket: aws.String(strings.TrimSpace(imageGenerationS3Bucket(cfg, kind))),
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {

@@ -43,12 +43,16 @@ func withOptionMap(t *testing.T, options map[string]string) {
 func TestGetOptionsMasksWorkerS3SecretFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	withOptionMap(t, map[string]string{
-		"worker_setting.s3_endpoint":   "https://s3.example.com",
-		"worker_setting.s3_bucket":     "bucket",
-		"worker_setting.s3_region":     "us-east-1",
-		"worker_setting.s3_path_prefix": "worker/output",
-		"worker_setting.s3_access_key": "raw-access-key",
-		"worker_setting.s3_secret_key": "raw-secret-key",
+		"worker_setting.s3_endpoint":             "https://s3.example.com",
+		"worker_setting.s3_bucket":               "bucket",
+		"worker_setting.s3_region":               "us-east-1",
+		"worker_setting.s3_path_prefix":          "worker/output",
+		"worker_setting.s3_access_key":           "raw-access-key",
+		"worker_setting.s3_secret_key":           "raw-secret-key",
+		"worker_setting.result_s3_access_key":    "raw-result-access-key",
+		"worker_setting.result_s3_secret_key":    "raw-result-secret-key",
+		"worker_setting.reference_s3_access_key": "raw-reference-access-key",
+		"worker_setting.reference_s3_secret_key": "raw-reference-secret-key",
 	})
 
 	recorder := httptest.NewRecorder()
@@ -75,6 +79,18 @@ func TestGetOptionsMasksWorkerS3SecretFields(t *testing.T) {
 	if values["worker_setting.s3_secret_key"] != maskedWorkerS3OptionValue {
 		t.Fatalf("expected secret key to be masked, got %q", values["worker_setting.s3_secret_key"])
 	}
+	if values["worker_setting.result_s3_access_key"] != maskedWorkerS3OptionValue {
+		t.Fatalf("expected result access key to be masked, got %q", values["worker_setting.result_s3_access_key"])
+	}
+	if values["worker_setting.result_s3_secret_key"] != maskedWorkerS3OptionValue {
+		t.Fatalf("expected result secret key to be masked, got %q", values["worker_setting.result_s3_secret_key"])
+	}
+	if values["worker_setting.reference_s3_access_key"] != maskedWorkerS3OptionValue {
+		t.Fatalf("expected reference access key to be masked, got %q", values["worker_setting.reference_s3_access_key"])
+	}
+	if values["worker_setting.reference_s3_secret_key"] != maskedWorkerS3OptionValue {
+		t.Fatalf("expected reference secret key to be masked, got %q", values["worker_setting.reference_s3_secret_key"])
+	}
 	if values["worker_setting.s3_bucket"] != "bucket" {
 		t.Fatalf("expected bucket to be returned normally, got %q", values["worker_setting.s3_bucket"])
 	}
@@ -88,7 +104,15 @@ func TestGetOptionsMasksWorkerS3SecretFields(t *testing.T) {
 		t.Fatalf("expected path prefix to be returned normally, got %q", values["worker_setting.s3_path_prefix"])
 	}
 	if string(recorder.Body.Bytes()) == "" ||
-		containsAny(recorder.Body.String(), "raw-access-key", "raw-secret-key") {
+		containsAny(
+			recorder.Body.String(),
+			"raw-access-key",
+			"raw-secret-key",
+			"raw-result-access-key",
+			"raw-result-secret-key",
+			"raw-reference-access-key",
+			"raw-reference-secret-key",
+		) {
 		t.Fatalf("response leaked raw S3 credentials: %s", recorder.Body.String())
 	}
 }
@@ -155,6 +179,39 @@ func TestUpdateOptionKeepsWorkerS3SecretWhenMaskedValueSubmitted(t *testing.T) {
 				t.Fatalf("expected masked submit to keep existing secret, got %q", stored)
 			}
 		})
+	}
+}
+
+func TestUpdateOptionKeepsSplitWorkerS3SecretsWhenMaskedValueSubmitted(t *testing.T) {
+	for _, key := range []string{
+		"worker_setting.result_s3_secret_key",
+		"worker_setting.reference_s3_secret_key",
+	} {
+		withOptionMap(t, map[string]string{
+			key: "raw-secret-key",
+		})
+
+		ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/option/", map[string]string{
+			"key":   key,
+			"value": maskedWorkerS3OptionValue,
+		}, 1)
+
+		UpdateOption(ctx)
+
+		var response optionMutationResponse
+		if err := common.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if !response.Success {
+			t.Fatalf("expected success response, got message: %s", response.Message)
+		}
+
+		common.OptionMapRWMutex.RLock()
+		stored := common.OptionMap[key]
+		common.OptionMapRWMutex.RUnlock()
+		if stored != "raw-secret-key" {
+			t.Fatalf("expected masked submit to keep existing secret for %s, got %q", key, stored)
+		}
 	}
 }
 
