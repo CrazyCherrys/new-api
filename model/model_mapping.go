@@ -11,11 +11,17 @@ import (
 const (
 	ImageCapabilityGeneration = "image_generation"
 	ImageCapabilityEditing    = "image_editing"
+	VideoCapabilityImageToVideo = "image_to_video"
+	VideoCapabilityTextToVideo  = "text_to_video"
 )
 
 var defaultImageCapabilities = []string{
 	ImageCapabilityGeneration,
 	ImageCapabilityEditing,
+}
+
+var defaultVideoCapabilities = []string{
+	VideoCapabilityImageToVideo,
 }
 
 // ModelMapping 模型映射配置
@@ -33,6 +39,8 @@ type ModelMapping struct {
 	Resolutions       string `json:"resolutions" gorm:"type:text"`               // JSON array: ["1K","2K","4K"]
 	AspectRatios      string `json:"aspect_ratios" gorm:"type:text"`             // JSON array: ["1:1","16:9",...]
 	ImageCapabilities string `json:"image_capabilities" gorm:"type:text"`        // JSON array: ["image_generation","image_editing"]
+	VideoCapabilities string `json:"video_capabilities" gorm:"type:text"`        // JSON array: ["image_to_video","text_to_video"]
+	DurationOptions   string `json:"duration_options" gorm:"type:text"`          // JSON array: [5,10]
 	CreatedTime       int64  `json:"created_time" gorm:"bigint"`
 	UpdatedTime       int64  `json:"updated_time" gorm:"bigint"`
 }
@@ -41,7 +49,15 @@ func DefaultImageCapabilities() []string {
 	return append([]string(nil), defaultImageCapabilities...)
 }
 
+func DefaultVideoCapabilities() []string {
+	return append([]string(nil), defaultVideoCapabilities...)
+}
+
 func normalizeImageCapability(capability string) string {
+	return strings.ToLower(strings.TrimSpace(capability))
+}
+
+func normalizeVideoCapability(capability string) string {
 	return strings.ToLower(strings.TrimSpace(capability))
 }
 
@@ -118,6 +134,125 @@ func HasImageCapability(raw string, target string) (bool, error) {
 	return false, nil
 }
 
+func parseVideoCapabilities(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+
+	var capabilities []string
+	if err := common.UnmarshalJsonStr(raw, &capabilities); err != nil {
+		return nil, fmt.Errorf("failed to parse video capabilities: %w", err)
+	}
+
+	normalized := make([]string, 0, len(capabilities))
+	seen := make(map[string]struct{}, len(capabilities))
+	for _, capability := range capabilities {
+		value := normalizeVideoCapability(capability)
+		if value == "" {
+			continue
+		}
+		switch value {
+		case VideoCapabilityImageToVideo, VideoCapabilityTextToVideo:
+		default:
+			return nil, fmt.Errorf("unsupported video capability: %s", capability)
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+
+	return normalized, nil
+}
+
+func NormalizeVideoCapabilities(raw string) (string, error) {
+	capabilities, err := parseVideoCapabilities(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(capabilities) == 0 {
+		return "", nil
+	}
+
+	data, err := common.Marshal(capabilities)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal video capabilities: %w", err)
+	}
+	return string(data), nil
+}
+
+func EffectiveVideoCapabilities(raw string) ([]string, error) {
+	capabilities, err := parseVideoCapabilities(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(capabilities) == 0 {
+		return DefaultVideoCapabilities(), nil
+	}
+	return capabilities, nil
+}
+
+func HasVideoCapability(raw string, target string) (bool, error) {
+	capabilities, err := EffectiveVideoCapabilities(raw)
+	if err != nil {
+		return false, err
+	}
+	normalizedTarget := normalizeVideoCapability(target)
+	for _, capability := range capabilities {
+		if capability == normalizedTarget {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func parseDurationOptions(raw string) ([]int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+
+	var durations []int
+	if err := common.UnmarshalJsonStr(raw, &durations); err != nil {
+		return nil, fmt.Errorf("failed to parse duration options: %w", err)
+	}
+
+	normalized := make([]int, 0, len(durations))
+	seen := make(map[int]struct{}, len(durations))
+	for _, duration := range durations {
+		if duration <= 0 {
+			return nil, fmt.Errorf("invalid duration option: %d", duration)
+		}
+		if _, ok := seen[duration]; ok {
+			continue
+		}
+		seen[duration] = struct{}{}
+		normalized = append(normalized, duration)
+	}
+
+	return normalized, nil
+}
+
+func NormalizeDurationOptions(raw string) (string, error) {
+	durations, err := parseDurationOptions(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(durations) == 0 {
+		return "", nil
+	}
+
+	data, err := common.Marshal(durations)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal duration options: %w", err)
+	}
+	return string(data), nil
+}
+
+func EffectiveDurationOptions(raw string) ([]int, error) {
+	return parseDurationOptions(raw)
+}
+
 func (mm *ModelMapping) Insert() error {
 	now := common.GetTimestamp()
 	mm.CreatedTime = now
@@ -135,6 +270,8 @@ func (mm *ModelMapping) Insert() error {
 		"resolutions":        mm.Resolutions,
 		"aspect_ratios":      mm.AspectRatios,
 		"image_capabilities": mm.ImageCapabilities,
+		"video_capabilities": mm.VideoCapabilities,
+		"duration_options":   mm.DurationOptions,
 		"created_time":       mm.CreatedTime,
 		"updated_time":       mm.UpdatedTime,
 	}
@@ -159,6 +296,8 @@ func (mm *ModelMapping) Update() error {
 		"resolutions":        mm.Resolutions,
 		"aspect_ratios":      mm.AspectRatios,
 		"image_capabilities": mm.ImageCapabilities,
+		"video_capabilities": mm.VideoCapabilities,
+		"duration_options":   mm.DurationOptions,
 		"updated_time":       mm.UpdatedTime,
 	}
 	return DB.Model(&ModelMapping{}).Where("id = ?", mm.Id).Updates(updates).Error
@@ -205,6 +344,16 @@ func GetActiveImageModelMappings(startIdx int, num int) ([]*ModelMapping, int64,
 
 	query := DB.Model(&ModelMapping{}).
 		Where("model_type = ? AND status = ? AND request_endpoint <> ''", 2, 1)
+
+	err := query.Order("priority DESC, id DESC").Limit(num).Offset(startIdx).Find(&mappings).Error
+	return mappings, int64(len(mappings)), err
+}
+
+func GetActiveVideoModelMappings(startIdx int, num int) ([]*ModelMapping, int64, error) {
+	var mappings []*ModelMapping
+
+	query := DB.Model(&ModelMapping{}).
+		Where("model_type = ? AND status = ? AND request_endpoint <> ''", 3, 1)
 
 	err := query.Order("priority DESC, id DESC").Limit(num).Offset(startIdx).Find(&mappings).Error
 	return mappings, int64(len(mappings)), err
