@@ -14,6 +14,10 @@ func normalizeImageModelEndpoint(endpoint string) string {
 	switch strings.ToLower(strings.TrimSpace(endpoint)) {
 	case "dalle":
 		return "openai"
+	case "openai-video-generations", "video-generation":
+		return "openai-video-generation"
+	case "openai-videos", "sora":
+		return "openai-video"
 	default:
 		return strings.ToLower(strings.TrimSpace(endpoint))
 	}
@@ -33,6 +37,18 @@ func validateImageModelEndpoint(modelType int, endpoint string) error {
 		}
 		return errors.New("请求端点必须是 openai、openai-response、gemini 或 openai_mod 之一")
 	}
+	if modelType == 3 {
+		if endpoint == "" {
+			return errors.New("视频模型必须指定请求端点")
+		}
+		validEndpoints := []string{"openai-video-generation", "openai-video"}
+		for _, valid := range validEndpoints {
+			if endpoint == valid {
+				return nil
+			}
+		}
+		return errors.New("视频模型请求端点必须是 openai-video-generation 或 openai-video 之一")
+	}
 	return nil
 }
 
@@ -47,6 +63,36 @@ func validateImageModelCapabilities(modelType int, raw string) (string, error) {
 	}
 	if normalized == "" {
 		return "", errors.New("绘画模型必须至少选择一个模型能力")
+	}
+	return normalized, nil
+}
+
+func validateVideoModelCapabilities(modelType int, raw string) (string, error) {
+	if modelType != 3 {
+		return "", nil
+	}
+
+	normalized, err := model.NormalizeVideoCapabilities(raw)
+	if err != nil {
+		return "", err
+	}
+	if normalized == "" {
+		return "", errors.New("视频模型必须至少选择一个模型能力")
+	}
+	return normalized, nil
+}
+
+func validateVideoDurationOptions(modelType int, raw string) (string, error) {
+	if modelType != 3 {
+		return "", nil
+	}
+
+	normalized, err := model.NormalizeDurationOptions(raw)
+	if err != nil {
+		return "", err
+	}
+	if normalized == "" {
+		return "", errors.New("视频模型必须至少配置一个时长选项")
 	}
 	return normalized, nil
 }
@@ -142,6 +188,25 @@ func CreateModelMapping(c *gin.Context) {
 		return
 	}
 	mm.ImageCapabilities = normalizedCapabilities
+	normalizedVideoCapabilities, err := validateVideoModelCapabilities(mm.ModelType, mm.VideoCapabilities)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	mm.VideoCapabilities = normalizedVideoCapabilities
+	normalizedDurationOptions, err := validateVideoDurationOptions(mm.ModelType, mm.DurationOptions)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	mm.DurationOptions = normalizedDurationOptions
+	if mm.ModelType != 2 {
+		mm.ImageCapabilities = ""
+	}
+	if mm.ModelType != 3 {
+		mm.VideoCapabilities = ""
+		mm.DurationOptions = ""
+	}
 
 	// 如果 ActualModel 为空，使用 RequestModel 作为默认值
 	if mm.ActualModel == "" {
@@ -203,6 +268,25 @@ func UpdateModelMapping(c *gin.Context) {
 		return
 	}
 	mm.ImageCapabilities = normalizedCapabilities
+	normalizedVideoCapabilities, err := validateVideoModelCapabilities(mm.ModelType, mm.VideoCapabilities)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	mm.VideoCapabilities = normalizedVideoCapabilities
+	normalizedDurationOptions, err := validateVideoDurationOptions(mm.ModelType, mm.DurationOptions)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	mm.DurationOptions = normalizedDurationOptions
+	if mm.ModelType != 2 {
+		mm.ImageCapabilities = ""
+	}
+	if mm.ModelType != 3 {
+		mm.VideoCapabilities = ""
+		mm.DurationOptions = ""
+	}
 
 	// 如果 ActualModel 为空，使用 RequestModel 作为默认值
 	if mm.ActualModel == "" {

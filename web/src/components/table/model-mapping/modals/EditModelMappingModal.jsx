@@ -21,7 +21,6 @@ import React, { useState, useEffect } from 'react';
 import {
   Modal,
   Form,
-  Select,
   Button,
   Space,
   InputNumber,
@@ -30,6 +29,7 @@ import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../../../helpers';
 
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
+const DEFAULT_VIDEO_CAPABILITIES = ['image_to_video'];
 
 const EditModelMappingModal = ({
   visible,
@@ -44,6 +44,7 @@ const EditModelMappingModal = ({
   const [selectedAspectRatios, setSelectedAspectRatios] = useState([]);
   const [selectedModelType, setSelectedModelType] = useState(1);
   const isImageModel = Number(selectedModelType) === 2;
+  const isVideoModel = Number(selectedModelType) === 3;
 
   const modelSeriesOptions = [
     { value: 'openai', label: 'OpenAI' },
@@ -79,17 +80,43 @@ const EditModelMappingModal = ({
           { value: 'gemini', label: 'Gemini' },
           { value: 'openai_mod', label: 'OpenAI魔改' },
         ]
+      : selectedModelType === 3
+        ? [
+            {
+              value: 'openai-video-generation',
+              label: 'OpenAI Video Generations (/v1/video/generations)',
+            },
+            {
+              value: 'openai-video',
+              label: 'OpenAI Videos (Sora, /v1/videos)',
+            },
+          ]
       : [
           { value: 'openai', label: 'OpenAI (/v1/images)' },
           { value: 'gemini', label: 'Gemini' },
           { value: 'openai_mod', label: 'OpenAI魔改' },
         ];
 
-  const resolutionOptions = [
+  const imageResolutionOptions = [
     { value: '1K', label: '1K' },
     { value: '2K', label: '2K' },
     { value: '4K', label: '4K' },
   ];
+
+  const videoResolutionOptions = [
+    { value: '1280x720', label: '1280x720' },
+    { value: '720x1280', label: '720x1280' },
+    { value: '1920x1080', label: '1920x1080' },
+    { value: '1080x1920', label: '1080x1920' },
+    { value: '1024x1024', label: '1024x1024' },
+    { value: '960x960', label: '960x960' },
+    { value: '1792x1024', label: '1792x1024' },
+    { value: '1024x1792', label: '1024x1792' },
+  ];
+
+  const resolutionOptions = isVideoModel
+    ? videoResolutionOptions
+    : imageResolutionOptions;
 
   const aspectRatioOptions = [
     { value: '1:1', label: '1:1' },
@@ -108,6 +135,15 @@ const EditModelMappingModal = ({
   const imageCapabilityOptions = [
     { value: 'image_generation', label: t('图片生成') },
     { value: 'image_editing', label: t('图像编辑') },
+  ];
+
+  const videoCapabilityOptions = [
+    { value: 'image_to_video', label: t('图生视频') },
+  ];
+
+  const durationOptions = [
+    { value: 5, label: '5s' },
+    { value: 10, label: '10s' },
   ];
 
   const parseJsonArray = (value) => {
@@ -134,8 +170,17 @@ const EditModelMappingModal = ({
         let imageCapabilities = parseJsonArray(
           editingMapping.image_capabilities,
         );
+        let videoCapabilities = parseJsonArray(
+          editingMapping.video_capabilities,
+        );
+        let durationValues = parseJsonArray(editingMapping.duration_options);
         if (Number(editingMapping.model_type) === 2 && imageCapabilities.length === 0) {
           imageCapabilities = imageCapabilityOptions.map((item) => item.value);
+        }
+        if (Number(editingMapping.model_type) === 3 && videoCapabilities.length === 0) {
+          videoCapabilities = videoCapabilityOptions
+            .filter((item) => DEFAULT_VIDEO_CAPABILITIES.includes(item.value))
+            .map((item) => item.value);
         }
 
         setSelectedResolutions(resolutions);
@@ -149,6 +194,8 @@ const EditModelMappingModal = ({
           resolutions,
           aspect_ratios: aspectRatios,
           image_capabilities: imageCapabilities,
+          video_capabilities: videoCapabilities,
+          duration_options: durationValues,
           status: editingMapping.status === 1,
           priority: editingMapping.priority ?? 0,
         });
@@ -170,6 +217,8 @@ const EditModelMappingModal = ({
           resolutions: [],
           aspect_ratios: [],
           image_capabilities: [],
+          video_capabilities: [],
+          duration_options: [],
         });
       }
     }
@@ -188,6 +237,19 @@ const EditModelMappingModal = ({
     formApi.setValue('image_capabilities', DEFAULT_IMAGE_CAPABILITIES);
   }, [visible, formApi, selectedModelType]);
 
+  useEffect(() => {
+    if (!visible || !formApi || !isVideoModel) {
+      return;
+    }
+
+    const currentCapabilities = formApi.getValue('video_capabilities');
+    if (Array.isArray(currentCapabilities) && currentCapabilities.length > 0) {
+      return;
+    }
+
+    formApi.setValue('video_capabilities', DEFAULT_VIDEO_CAPABILITIES);
+  }, [visible, formApi, isVideoModel]);
+
   const handleSubmit = async (values) => {
     if (
       Number(values.model_type) === 2 &&
@@ -195,6 +257,22 @@ const EditModelMappingModal = ({
         values.image_capabilities.length === 0)
     ) {
       showError(t('请选择至少一个模型能力'));
+      return;
+    }
+    if (
+      Number(values.model_type) === 3 &&
+      (!Array.isArray(values.video_capabilities) ||
+        values.video_capabilities.length === 0)
+    ) {
+      showError(t('请选择至少一个视频能力'));
+      return;
+    }
+    if (
+      Number(values.model_type) === 3 &&
+      (!Array.isArray(values.duration_options) ||
+        values.duration_options.length === 0)
+    ) {
+      showError(t('请至少选择一个时长选项'));
       return;
     }
 
@@ -220,6 +298,14 @@ const EditModelMappingModal = ({
         image_capabilities:
           Number(values.model_type) === 2 && values.image_capabilities
             ? JSON.stringify(values.image_capabilities)
+            : '',
+        video_capabilities:
+          Number(values.model_type) === 3 && values.video_capabilities
+            ? JSON.stringify(values.video_capabilities)
+            : '',
+        duration_options:
+          Number(values.model_type) === 3 && values.duration_options
+            ? JSON.stringify(values.duration_options.map(Number))
             : '',
       };
 
@@ -334,11 +420,40 @@ const EditModelMappingModal = ({
                   DEFAULT_IMAGE_CAPABILITIES,
                 );
               }
+            } else if (Number(value) === 3) {
+              if (
+                !currentEndpoint ||
+                ['openai', 'openai-response', 'gemini', 'openai_mod'].includes(
+                  currentEndpoint,
+                )
+              ) {
+                formApi?.setValue(
+                  'request_endpoint',
+                  'openai-video-generation',
+                );
+              }
+              const currentVideoCapabilities =
+                formApi?.getValue('video_capabilities');
+              if (
+                !Array.isArray(currentVideoCapabilities) ||
+                currentVideoCapabilities.length === 0
+              ) {
+                formApi?.setValue(
+                  'video_capabilities',
+                  DEFAULT_VIDEO_CAPABILITIES,
+                );
+              }
             } else {
-              if (currentEndpoint === 'openai-response') {
+              if (
+                currentEndpoint === 'openai-response' ||
+                currentEndpoint === 'openai-video-generation' ||
+                currentEndpoint === 'openai-video'
+              ) {
                 formApi?.setValue('request_endpoint', 'openai');
               }
               formApi?.setValue('image_capabilities', []);
+              formApi?.setValue('video_capabilities', []);
+              formApi?.setValue('duration_options', []);
             }
           }}
         />
@@ -369,6 +484,42 @@ const EditModelMappingModal = ({
                     {
                       required: true,
                       message: t('请选择至少一个模型能力'),
+                    },
+                  ]
+                : []
+            }
+          />
+        </div>
+        <div hidden={!isVideoModel}>
+          <Form.CheckboxGroup
+            field='video_capabilities'
+            label={t('视频能力')}
+            options={videoCapabilityOptions}
+            direction='horizontal'
+            rules={
+              isVideoModel
+                ? [
+                    {
+                      required: true,
+                      message: t('请选择至少一个视频能力'),
+                    },
+                  ]
+                : []
+            }
+          />
+        </div>
+        <div hidden={!isVideoModel}>
+          <Form.CheckboxGroup
+            field='duration_options'
+            label={t('时长选项')}
+            options={durationOptions}
+            direction='horizontal'
+            rules={
+              isVideoModel
+                ? [
+                    {
+                      required: true,
+                      message: t('请至少选择一个时长选项'),
                     },
                   ]
                 : []

@@ -588,6 +588,16 @@ func RelayTask(c *gin.Context) {
 		service.LogTaskConsumption(c, relayInfo)
 
 		task := model.InitTask(result.Platform, relayInfo)
+		if req, err := relaycommon.GetTaskRequest(c); err == nil {
+			task.Properties.Input = req.GetPrompt()
+			sanitizedReq := req
+			sanitizedReq.Image = ""
+			sanitizedReq.Images = nil
+			sanitizedReq.InputReference = ""
+			if reqBytes, marshalErr := common.Marshal(sanitizedReq); marshalErr == nil {
+				task.Properties.RequestParams = string(reqBytes)
+			}
+		}
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 		task.PrivateData.BillingSource = relayInfo.BillingSource
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId

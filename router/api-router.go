@@ -89,7 +89,18 @@ func SetApiRouter(router *gin.Engine) {
 			imageGenRoute.GET("/tasks/:id", controller.GetImageGenerationTaskDetail)
 			imageGenRoute.POST("/tasks/:id/retry", controller.RetryImageGenerationTask)
 			imageGenRoute.DELETE("/tasks/:id", controller.DeleteImageGenerationTask)
-		}
+			}
+
+			videoGenRoute := apiRouter.Group("/video-generation")
+			videoGenRoute.Use(middleware.UserAuth())
+			{
+				videoGenRoute.GET("/models", controller.GetVideoGenerationModels)
+				videoGenRoute.POST("/tasks", controller.CreateVideoGenerationTask)
+				videoGenRoute.GET("/tasks", controller.GetVideoGenerationTasks)
+				videoGenRoute.GET("/tasks/:id", controller.GetVideoGenerationTaskDetail)
+				videoGenRoute.POST("/tasks/:id/retry", controller.RetryVideoGenerationTask)
+				videoGenRoute.DELETE("/tasks/:id", controller.DeleteVideoGenerationTask)
+			}
 
 		userRoute := apiRouter.Group("/user")
 		{

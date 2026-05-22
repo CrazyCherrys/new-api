@@ -45,6 +45,8 @@ import {
 import { API, showError, showSuccess } from '../../helpers';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
 import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
+import VideoGenerationTaskCard from '../../components/VideoGenerationTaskCard';
+import VideoGenerationTaskModal from '../../components/VideoGenerationTaskModal';
 
 const { Text } = Typography;
 
@@ -60,6 +62,7 @@ const DEFAULT_TASK_PAGE_SIZE = 21;
 const TASK_PAGE_SIZE_OPTIONS = [10, 21, 50, 100];
 const TASK_LIST_REQUEST_TIMEOUT_MS = 20000;
 const CANVAS_PREFILL_STORAGE_KEY = 'imageGen_canvasPrefill_v1';
+const DEFAULT_VIDEO_PAGE_SIZE = 20;
 
 const normalizeImageCapabilities = (raw) => {
   if (Array.isArray(raw)) {
@@ -151,11 +154,17 @@ const ImageGeneration = () => {
   // LocalStorage keys
   const STORAGE_KEYS = {
     GROUP: 'imageGen_selectedGroup',
+    MODE: 'canvas_generation_mode',
     SERIES: 'imageGen_selectedSeries',
     MODEL: 'imageGen_selectedModel',
     ASPECT_RATIO: 'imageGen_aspectRatio',
     RESOLUTION: 'imageGen_resolution',
     QUANTITY: 'imageGen_quantity',
+    VIDEO_SERIES: 'videoGen_selectedSeries',
+    VIDEO_MODEL: 'videoGen_selectedModel',
+    VIDEO_ASPECT_RATIO: 'videoGen_aspectRatio',
+    VIDEO_RESOLUTION: 'videoGen_resolution',
+    VIDEO_DURATION: 'videoGen_duration',
   };
 
   // 从 localStorage 读取初始值的辅助函数
@@ -187,9 +196,15 @@ const ImageGeneration = () => {
   const [selectedGroup, setSelectedGroup] = useState(() =>
     getStoredValue(STORAGE_KEYS.GROUP, ''),
   );
+  const [generationMode, setGenerationMode] = useState(() =>
+    getStoredValue(STORAGE_KEYS.MODE, 'image'),
+  );
   const [modelSeries, setModelSeries] = useState([]);
   const [models, setModels] = useState([]);
   const [filteredModels, setFilteredModels] = useState([]);
+  const [videoModelSeries, setVideoModelSeries] = useState([]);
+  const [videoModels, setVideoModels] = useState([]);
+  const [videoFilteredModels, setVideoFilteredModels] = useState([]);
 
   const [selectedSeries, setSelectedSeries] = useState(() =>
     getStoredValue(STORAGE_KEYS.SERIES, ''),
@@ -212,9 +227,35 @@ const ImageGeneration = () => {
   );
   const [generatedImages, setGeneratedImages] = useState([]);
   const [generating, setGenerating] = useState(false);
+  const [videoGenerating, setVideoGenerating] = useState(false);
 
   const [availableAspectRatios, setAvailableAspectRatios] = useState([]);
   const [availableResolutions, setAvailableResolutions] = useState([]);
+  const [videoAvailableAspectRatios, setVideoAvailableAspectRatios] = useState(
+    [],
+  );
+  const [videoAvailableResolutions, setVideoAvailableResolutions] = useState(
+    [],
+  );
+
+  const [videoSelectedSeries, setVideoSelectedSeries] = useState(() =>
+    getStoredValue(STORAGE_KEYS.VIDEO_SERIES, ''),
+  );
+  const [videoSelectedModel, setVideoSelectedModel] = useState(() =>
+    getStoredValue(STORAGE_KEYS.VIDEO_MODEL, ''),
+  );
+  const [videoSelectedModelData, setVideoSelectedModelData] = useState(null);
+  const [videoPrompt, setVideoPrompt] = useState('');
+  const [videoReferenceImage, setVideoReferenceImage] = useState(null);
+  const [videoAspectRatio, setVideoAspectRatio] = useState(() =>
+    getStoredValue(STORAGE_KEYS.VIDEO_ASPECT_RATIO, ''),
+  );
+  const [videoResolution, setVideoResolution] = useState(() =>
+    getStoredValue(STORAGE_KEYS.VIDEO_RESOLUTION, ''),
+  );
+  const [videoDuration, setVideoDuration] = useState(() =>
+    getStoredNumber(STORAGE_KEYS.VIDEO_DURATION, 0),
+  );
 
   // 任务列表相关状态
   const [tasks, setTasks] = useState([]);
@@ -233,6 +274,20 @@ const ImageGeneration = () => {
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
   const [deletingTasks, setDeletingTasks] = useState(false);
+  const [videoTasks, setVideoTasks] = useState([]);
+  const [videoTaskTotal, setVideoTaskTotal] = useState(0);
+  const [videoTaskPage, setVideoTaskPage] = useState(1);
+  const [videoTaskPageSize, setVideoTaskPageSize] = useState(
+    DEFAULT_VIDEO_PAGE_SIZE,
+  );
+  const [videoTaskStatusFilter, setVideoTaskStatusFilter] = useState('');
+  const [videoTaskModelFilter, setVideoTaskModelFilter] = useState('');
+  const [videoTaskTimeFilter, setVideoTaskTimeFilter] = useState('');
+  const [videoLoadingTasks, setVideoLoadingTasks] = useState(false);
+  const [videoSelectedTask, setVideoSelectedTask] = useState(null);
+  const [videoTaskModalVisible, setVideoTaskModalVisible] = useState(false);
+  const [videoSelectedTaskIds, setVideoSelectedTaskIds] = useState(new Set());
+  const [deletingVideoTasks, setDeletingVideoTasks] = useState(false);
   const sseRef = useRef(null);
   const pollingTimerRef = useRef(null);
   const pollingIntervalRef = useRef(DEFAULT_POLLING_INTERVAL_SECONDS);
@@ -261,6 +316,9 @@ const ImageGeneration = () => {
   );
   const hasActiveTasks = tasks.some(
     (task) => task.status === 'pending' || task.status === 'generating',
+  );
+  const hasActiveVideoTasks = videoTasks.some(
+    (task) => task.status === 'queued' || task.status === 'in_progress',
   );
   const canUseTaskCursorPagination = taskCursorPaginationSupported(
     taskListStateRef.current || {
@@ -348,6 +406,7 @@ const ImageGeneration = () => {
 
   useEffect(() => {
     loadImageGenerationGroups();
+    loadVideoModels();
     loadWorkerSettings();
     connectSSE();
 
@@ -413,11 +472,23 @@ const ImageGeneration = () => {
   }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
-    const taskId = new URLSearchParams(location.search).get('task_id');
+    const searchParams = new URLSearchParams(location.search);
+    const taskId = searchParams.get('task_id');
+    const mode = searchParams.get('mode');
     if (!taskId) return;
 
     const loadTaskDetail = async () => {
       try {
+        if (mode === 'video') {
+          const res = await API.get(`/api/video-generation/tasks/${taskId}`);
+          if (res.data.success) {
+            setVideoSelectedTask(res.data.data);
+            setVideoTaskModalVisible(true);
+          } else {
+            showError(res.data.message || t('加载任务详情失败'));
+          }
+          return;
+        }
         const res = await API.get(`/api/image-generation/tasks/${taskId}`);
         if (res.data.success) {
           setSelectedTask(res.data.data);
@@ -434,8 +505,13 @@ const ImageGeneration = () => {
   }, [location.search, t]);
 
   useEffect(() => {
+    if (generationMode === 'video') {
+      loadVideoTasks();
+      return;
+    }
     loadTasks();
   }, [
+    generationMode,
     taskPage,
     taskPageSize,
     taskStatusFilter,
@@ -443,6 +519,11 @@ const ImageGeneration = () => {
     taskTimeFilter,
     taskSortBy,
     taskSortOrder,
+    videoTaskPage,
+    videoTaskPageSize,
+    videoTaskStatusFilter,
+    videoTaskModelFilter,
+    videoTaskTimeFilter,
   ]);
 
   // 切换任意筛选/排序时回到第一页
@@ -458,6 +539,10 @@ const ImageGeneration = () => {
     taskSortBy,
     taskSortOrder,
   ]);
+
+  useEffect(() => {
+    setVideoTaskPage(1);
+  }, [videoTaskStatusFilter, videoTaskModelFilter, videoTaskTimeFilter]);
 
   const loadImageGenerationGroups = async () => {
     setGroupLoading(true);
@@ -549,6 +634,30 @@ const ImageGeneration = () => {
     }
     loadDrawingModels(selectedGroup);
   }, [selectedGroup]);
+
+  const loadVideoModels = async () => {
+    try {
+      const res = await API.get('/api/video-generation/models');
+      if (!res.data.success) {
+        showError(res.data.message || t('加载视频模型失败'));
+        return;
+      }
+      const items = res.data.data || [];
+      setVideoModels(items);
+      const series = Array.from(
+        new Set(items.map((item) => item.model_series).filter(Boolean)),
+      );
+      setVideoModelSeries(series);
+      setVideoSelectedSeries((prev) => {
+        if (prev === 'all' || (prev && series.includes(prev))) {
+          return prev;
+        }
+        return series[0] || 'all';
+      });
+    } catch (error) {
+      showError(error.message || t('加载视频模型失败'));
+    }
+  };
 
   const loadWorkerSettings = async () => {
     try {
@@ -707,6 +816,38 @@ const ImageGeneration = () => {
     }
   };
 
+  const loadVideoTasks = async () => {
+    setVideoLoadingTasks(true);
+    try {
+      const params = {
+        p: videoTaskPage,
+        page_size: videoTaskPageSize,
+      };
+      if (videoTaskStatusFilter) {
+        params.status = videoTaskStatusFilter;
+      }
+      if (videoTaskModelFilter) {
+        params.model_id = videoTaskModelFilter;
+      }
+      const { start, end } = computeTimeRange(videoTaskTimeFilter);
+      if (start > 0) {
+        params.start_time = start;
+        params.end_time = end;
+      }
+      const res = await API.get('/api/video-generation/tasks', { params });
+      if (res.data.success) {
+        setVideoTasks(res.data.data.items || []);
+        setVideoTaskTotal(res.data.data.total || 0);
+      } else {
+        showError(res.data.message || t('加载视频任务列表失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('加载视频任务列表失败'));
+    } finally {
+      setVideoLoadingTasks(false);
+    }
+  };
+
   const mergeTaskUpdates = (updates) => {
     if (!Array.isArray(updates) || updates.length === 0) {
       return;
@@ -778,6 +919,22 @@ const ImageGeneration = () => {
     }
   };
 
+  const handleVideoTaskCardClick = async (task) => {
+    if (!task?.id) return;
+    setVideoSelectedTask(task);
+    setVideoTaskModalVisible(true);
+    try {
+      const res = await API.get(`/api/video-generation/tasks/${task.id}`);
+      if (res.data.success) {
+        updateVideoTaskInList(res.data.data);
+      } else {
+        showError(res.data.message || t('加载视频任务详情失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('加载视频任务详情失败'));
+    }
+  };
+
   // 处理任务选择
   const handleTaskSelect = (taskId, checked) => {
     setSelectedTaskIds((prev) => {
@@ -791,6 +948,18 @@ const ImageGeneration = () => {
     });
   };
 
+  const handleVideoTaskSelect = (taskId, checked) => {
+    setVideoSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(taskId);
+      } else {
+        next.delete(taskId);
+      }
+      return next;
+    });
+  };
+
   const handleTaskPageSizeChange = (nextPageSize) => {
     setTaskPage(1);
     setTaskPageSize(nextPageSize);
@@ -799,12 +968,25 @@ const ImageGeneration = () => {
     taskCursorHistoryRef.current = [''];
   };
 
+  const handleVideoTaskPageSizeChange = (nextPageSize) => {
+    setVideoTaskPage(1);
+    setVideoTaskPageSize(nextPageSize);
+  };
+
   // 全选/取消全选
   const handleSelectAll = (checked) => {
     if (checked) {
       setSelectedTaskIds(new Set(tasks.map((t) => t.id)));
     } else {
       setSelectedTaskIds(new Set());
+    }
+  };
+
+  const handleSelectAllVideo = (checked) => {
+    if (checked) {
+      setVideoSelectedTaskIds(new Set(videoTasks.map((task) => task.id)));
+    } else {
+      setVideoSelectedTaskIds(new Set());
     }
   };
 
@@ -862,6 +1044,47 @@ const ImageGeneration = () => {
     }
   };
 
+  const handleVideoBatchDelete = async () => {
+    if (videoSelectedTaskIds.size === 0) {
+      showError(t('请先选择要删除的任务'));
+      return;
+    }
+    const selectedVideoTasks = videoTasks.filter((task) =>
+      videoSelectedTaskIds.has(task.id),
+    );
+    if (
+      selectedVideoTasks.some(
+        (task) => task.status === 'queued' || task.status === 'in_progress',
+      )
+    ) {
+      showError(t('运行中的任务暂不支持删除，请等待完成后再删除'));
+      return;
+    }
+    setDeletingVideoTasks(true);
+    try {
+      const results = await Promise.allSettled(
+        Array.from(videoSelectedTaskIds).map((taskId) =>
+          API.delete(`/api/video-generation/tasks/${taskId}`),
+        ),
+      );
+      const successIds = new Set(
+        Array.from(videoSelectedTaskIds).filter(
+          (taskId, index) => results[index]?.status === 'fulfilled',
+        ),
+      );
+      if (successIds.size > 0) {
+        showSuccess(t('成功删除 {{count}} 个任务', { count: successIds.size }));
+        setVideoTasks((prev) => prev.filter((task) => !successIds.has(task.id)));
+        setVideoTaskTotal((prev) => Math.max(0, prev - successIds.size));
+        setVideoSelectedTaskIds(new Set());
+      }
+    } catch (error) {
+      showError(error.message || t('批量删除失败'));
+    } finally {
+      setDeletingVideoTasks(false);
+    }
+  };
+
   // 连接 SSE
   const connectSSE = () => {
     try {
@@ -909,6 +1132,10 @@ const ImageGeneration = () => {
     if (pollingTimerRef.current) return;
 
     pollingTimerRef.current = setInterval(() => {
+      if (generationMode === 'video') {
+        loadVideoTasks();
+        return;
+      }
       if (isDefaultTaskViewState(taskListStateRef.current)) {
         loadTaskUpdates();
         return;
@@ -926,7 +1153,10 @@ const ImageGeneration = () => {
   };
 
   useEffect(() => {
-    const shouldPoll = !sseConnected && isPageVisible && hasActiveTasks;
+    const shouldPoll =
+      !sseConnected &&
+      isPageVisible &&
+      (generationMode === 'video' ? hasActiveVideoTasks : hasActiveTasks);
     if (!shouldPoll) {
       stopPolling();
       return undefined;
@@ -934,7 +1164,14 @@ const ImageGeneration = () => {
 
     startPolling();
     return () => stopPolling();
-  }, [hasActiveTasks, isPageVisible, pollingIntervalSeconds, sseConnected]);
+  }, [
+    generationMode,
+    hasActiveTasks,
+    hasActiveVideoTasks,
+    isPageVisible,
+    pollingIntervalSeconds,
+    sseConnected,
+  ]);
 
   // 更新任务列表中的单个任务
   const updateTaskInList = (updatedTask) => {
@@ -959,6 +1196,47 @@ const ImageGeneration = () => {
       }
       return {
         ...prevTask,
+        ...updatedTask,
+      };
+    });
+  };
+
+  const updateVideoTaskInList = (updatedTask) => {
+    setVideoTasks((prev) => {
+      const index = prev.findIndex((task) => task.id === updatedTask.id);
+      if (index === -1) {
+        if (
+          videoTaskPage === 1 &&
+          !videoTaskStatusFilter &&
+          !videoTaskModelFilter &&
+          !videoTaskTimeFilter
+        ) {
+          return [updatedTask, ...prev].slice(0, videoTaskPageSize);
+        }
+        return prev;
+      }
+      const next = [...prev];
+      next[index] = {
+        ...next[index],
+        ...updatedTask,
+      };
+      return next;
+    });
+    if (
+      videoTaskPage === 1 &&
+      !videoTaskStatusFilter &&
+      !videoTaskModelFilter &&
+      !videoTaskTimeFilter &&
+      !videoTasks.some((task) => task.id === updatedTask.id)
+    ) {
+      setVideoTaskTotal((prev) => prev + 1);
+    }
+    setVideoSelectedTask((prev) => {
+      if (!prev || prev.id !== updatedTask.id) {
+        return prev;
+      }
+      return {
+        ...prev,
         ...updatedTask,
       };
     });
@@ -1103,6 +1381,21 @@ const ImageGeneration = () => {
     }
   }, [groupLoading, groupOptions, models, selectedGroup, t]);
 
+  useEffect(() => {
+    if (videoModels.length === 0) return;
+    const filtered =
+      videoSelectedSeries === 'all'
+        ? videoModels
+        : videoModels.filter((model) => model.model_series === videoSelectedSeries);
+    setVideoFilteredModels(filtered);
+    setVideoSelectedModel((current) => {
+      if (filtered.some((model) => model.request_model === current)) {
+        return current;
+      }
+      return filtered[0]?.request_model || '';
+    });
+  }, [videoSelectedSeries, videoModels]);
+
   // 保存用户选择到 localStorage
   useEffect(() => {
     if (selectedGroup) {
@@ -1125,6 +1418,14 @@ const ImageGeneration = () => {
   }, [selectedSeries]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.MODE, generationMode);
+    } catch (e) {
+      console.error('Failed to save generation mode:', e);
+    }
+  }, [generationMode]);
+
+  useEffect(() => {
     if (selectedModel) {
       try {
         localStorage.setItem(STORAGE_KEYS.MODEL, selectedModel);
@@ -1133,6 +1434,26 @@ const ImageGeneration = () => {
       }
     }
   }, [selectedModel]);
+
+  useEffect(() => {
+    if (videoSelectedSeries) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.VIDEO_SERIES, videoSelectedSeries);
+      } catch (e) {
+        console.error('Failed to save videoSelectedSeries to localStorage:', e);
+      }
+    }
+  }, [videoSelectedSeries]);
+
+  useEffect(() => {
+    if (videoSelectedModel) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.VIDEO_MODEL, videoSelectedModel);
+      } catch (e) {
+        console.error('Failed to save videoSelectedModel to localStorage:', e);
+      }
+    }
+  }, [videoSelectedModel]);
 
   useEffect(() => {
     if (aspectRatio) {
@@ -1153,6 +1474,34 @@ const ImageGeneration = () => {
       }
     }
   }, [resolution]);
+
+  useEffect(() => {
+    if (videoAspectRatio) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.VIDEO_ASPECT_RATIO, videoAspectRatio);
+      } catch (e) {
+        console.error('Failed to save videoAspectRatio:', e);
+      }
+    }
+  }, [videoAspectRatio]);
+
+  useEffect(() => {
+    if (videoResolution) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.VIDEO_RESOLUTION, videoResolution);
+      } catch (e) {
+        console.error('Failed to save videoResolution:', e);
+      }
+    }
+  }, [videoResolution]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.VIDEO_DURATION, String(videoDuration || 0));
+    } catch (e) {
+      console.error('Failed to save videoDuration:', e);
+    }
+  }, [videoDuration]);
 
   useEffect(() => {
     try {
@@ -1218,6 +1567,40 @@ const ImageGeneration = () => {
   }, [selectedModel, models]);
 
   useEffect(() => {
+    if (!videoSelectedModel) {
+      setVideoSelectedModelData(null);
+      setVideoAvailableAspectRatios([]);
+      setVideoAvailableResolutions([]);
+      return;
+    }
+    const model = videoModels.find((item) => item.request_model === videoSelectedModel);
+    if (!model) {
+      return;
+    }
+    setVideoSelectedModelData(model);
+    setVideoAvailableAspectRatios(model.aspect_ratios || []);
+    setVideoAvailableResolutions(model.resolutions || []);
+    setVideoAspectRatio((current) => {
+      if (!current || !(model.aspect_ratios || []).includes(current)) {
+        return model.aspect_ratios?.[0] || '';
+      }
+      return current;
+    });
+    setVideoResolution((current) => {
+      if (!current || !(model.resolutions || []).includes(current)) {
+        return model.resolutions?.[0] || '';
+      }
+      return current;
+    });
+    setVideoDuration((current) => {
+      if (!current || !(model.duration_options || []).includes(current)) {
+        return model.duration_options?.[0] || 0;
+      }
+      return current;
+    });
+  }, [videoSelectedModel, videoModels]);
+
+  useEffect(() => {
     if (
       !selectedModelData ||
       !modelSupportsCapability(selectedModelData, IMAGE_CAPABILITY_EDITING)
@@ -1261,6 +1644,14 @@ const ImageGeneration = () => {
 
   const handleMaskRemove = () => {
     setMaskImage(null);
+  };
+
+  const handleVideoReferenceUpload = ({ fileList }) => {
+    setVideoReferenceImage(fileList[0] || null);
+  };
+
+  const handleVideoReferenceRemove = () => {
+    setVideoReferenceImage(null);
   };
 
   const normalizeTaskCount = (value) => {
@@ -1472,6 +1863,68 @@ const ImageGeneration = () => {
     }
   };
 
+  const handleGenerateVideo = async () => {
+    if (!videoSelectedModel) {
+      showError(t('请选择模型'));
+      return;
+    }
+    if (!videoPrompt.trim()) {
+      showError(t('请输入灵感'));
+      return;
+    }
+    if (!videoSelectedModelData?.request_endpoint) {
+      showError(t('模型配置错误：缺少 request_endpoint'));
+      return;
+    }
+    if (!videoReferenceImage?.fileInstance) {
+      showError(t('请上传一张参考图'));
+      return;
+    }
+
+    setVideoGenerating(true);
+    try {
+      const base64Image = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(videoReferenceImage.fileInstance);
+      });
+      const taskPayload = {
+        model_id: videoSelectedModel,
+        prompt: videoPrompt.trim(),
+        request_endpoint: videoSelectedModelData.request_endpoint,
+        params: JSON.stringify({
+          duration: videoDuration,
+          resolution: videoResolution,
+          aspect_ratio: videoAspectRatio,
+          reference_images: [base64Image],
+        }),
+      };
+      const res = await API.post('/api/video-generation/tasks', taskPayload);
+      if (!res.data.success) {
+        showError(res.data.message || t('创建视频任务失败'));
+        return;
+      }
+      const newTask = res.data.data;
+      showSuccess(t('视频任务已创建，正在生成中...'));
+      if (
+        videoTaskPage === 1 &&
+        !videoTaskStatusFilter &&
+        !videoTaskModelFilter &&
+        !videoTaskTimeFilter
+      ) {
+        setVideoTasks((prev) => [newTask, ...prev].slice(0, videoTaskPageSize));
+      } else {
+        loadVideoTasks();
+      }
+      setVideoTaskTotal((prev) => prev + 1);
+    } catch (error) {
+      showError(error.response?.data?.message || error.message || t('创建视频任务失败'));
+    } finally {
+      setVideoGenerating(false);
+    }
+  };
+
   const styles = {
     container: {
       display: 'flex',
@@ -1679,336 +2132,534 @@ const ImageGeneration = () => {
       (group) => group.group === selectedGroup && group.has_available_token !== false,
     );
 
+  const canGenerateVideo =
+    !!videoSelectedModel &&
+    !!videoSelectedModelData &&
+    !!videoPrompt.trim() &&
+    !!videoReferenceImage;
+
+  const renderImageLeftPanel = () => (
+    <>
+      <div style={styles.fieldGroup}>
+        <span style={styles.label}>{t('分组')}</span>
+        <Select
+          style={{ width: '100%' }}
+          value={selectedGroup}
+          onChange={setSelectedGroup}
+          disabled={groupLoading || groupOptions.length === 0}
+          placeholder={t('请选择分组')}
+        >
+          {groupOptions.map((group) => (
+            <Select.Option
+              key={group.group}
+              value={group.group}
+              disabled={group.has_available_token === false}
+            >
+              {group.group}
+              {group.has_available_token === false
+                ? ` (${t('无可用令牌')})`
+                : ''}
+            </Select.Option>
+          ))}
+        </Select>
+        {selectedGroup && (
+          <Text
+            type='tertiary'
+            size='small'
+            style={{ display: 'block', marginTop: 8 }}
+          >
+            {(() => {
+              const option = groupOptions.find((item) => item.group === selectedGroup);
+              if (!option) {
+                return '';
+              }
+              if (option.has_available_token === false) {
+                return t('当前分组暂无可用令牌，请前往令牌管理创建或启用');
+              }
+              return t('当前分组可用令牌数：{{count}}', {
+                count: option.available_token_count || 0,
+              });
+            })()}
+          </Text>
+        )}
+        {selectedGroup &&
+          groupOptions.find(
+            (item) => item.group === selectedGroup && item.has_available_token === false,
+          ) && (
+            <Button
+              size='small'
+              type='primary'
+              theme='outline'
+              style={{ marginTop: 8 }}
+              onClick={() => navigate('/console/token')}
+            >
+              {t('前往令牌管理')}
+            </Button>
+          )}
+      </div>
+
+      <div style={styles.fieldGroup}>
+        <span style={styles.label}>{t('模型系列')}</span>
+        <Select
+          style={{ width: '100%' }}
+          value={selectedSeries}
+          onChange={setSelectedSeries}
+          disabled={groupLoading || modelSeries.length === 0}
+        >
+          <Select.Option value='all'>{t('全部系列')}</Select.Option>
+          {modelSeries.map((series) => (
+            <Select.Option key={series} value={series}>
+              {formatModelSeries(series)}
+            </Select.Option>
+          ))}
+        </Select>
+      </div>
+
+      <div style={styles.fieldGroup}>
+        <span style={styles.label}>{t('模型')}</span>
+        <Select
+          style={{ width: '100%' }}
+          value={selectedModel}
+          onChange={setSelectedModel}
+          disabled={groupLoading || filteredModels.length === 0}
+          filter
+          placeholder={t('请选择模型')}
+        >
+          {filteredModels.map((model) => (
+            <Select.Option key={model.request_model} value={model.request_model}>
+              {model.display_name || model.request_model}
+            </Select.Option>
+          ))}
+        </Select>
+      </div>
+
+      <div style={styles.fieldGroup}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 6,
+          }}
+        >
+          <span style={styles.label}>{t('灵感')}</span>
+          <span
+            style={{
+              fontSize: 12,
+              color: 'var(--semi-color-primary)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <IconBolt size='small' />
+            {t('AI优化')}
+          </span>
+        </div>
+        <div style={styles.textareaWrapper}>
+          <TextArea
+            placeholder={t('请输入灵感...')}
+            value={inspiration}
+            onChange={setInspiration}
+            maxLength={5000}
+            showClear
+            autosize={{ minRows: 6, maxRows: 12 }}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              resize: 'none',
+            }}
+          />
+        </div>
+      </div>
+
+      {selectedModelSupportsEditing && (
+        <div style={styles.fieldGroup}>
+          <span style={styles.label}>{t('参考图像')}</span>
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              flexWrap: 'wrap',
+              alignItems: 'center',
+            }}
+          >
+            {referenceImages.map((file, idx) => (
+              <div key={file.uid || idx} style={styles.referenceImageContainer}>
+                <img
+                  src={
+                    file.url ||
+                    (file.fileInstance &&
+                      URL.createObjectURL(file.fileInstance))
+                  }
+                  alt=''
+                  style={styles.referenceImageThumb}
+                />
+                <button
+                  style={styles.removeImageBtn}
+                  onClick={() => handleImageRemove(file)}
+                >
+                  <IconDelete size='extra-small' />
+                </button>
+              </div>
+            ))}
+            <Upload
+              action=''
+              accept='image/*'
+              multiple
+              fileList={referenceImages}
+              onChange={handleImageUpload}
+              showUploadList={false}
+              beforeUpload={validateImageSize}
+            >
+              <div style={styles.addImageBtn}>
+                <IconPlus size='large' />
+              </div>
+            </Upload>
+          </div>
+        </div>
+      )}
+
+      {selectedModelSupportsMaskEditing && (
+        <div style={styles.fieldGroup}>
+          <span style={styles.label}>{t('遮罩图像')}</span>
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              flexWrap: 'wrap',
+              alignItems: 'center',
+            }}
+          >
+            {maskImage && (
+              <div style={styles.referenceImageContainer}>
+                <img
+                  src={
+                    maskImage.url ||
+                    (maskImage.fileInstance &&
+                      URL.createObjectURL(maskImage.fileInstance))
+                  }
+                  alt=''
+                  style={styles.referenceImageThumb}
+                />
+                <button
+                  style={styles.removeImageBtn}
+                  onClick={handleMaskRemove}
+                >
+                  <IconDelete size='extra-small' />
+                </button>
+              </div>
+            )}
+            <Upload
+              action=''
+              accept='image/*'
+              multiple={false}
+              fileList={maskImage ? [maskImage] : []}
+              onChange={handleMaskUpload}
+              showUploadList={false}
+              beforeUpload={validateImageSize}
+              disabled={referenceImages.length === 0}
+            >
+              <div
+                style={{
+                  ...styles.addImageBtn,
+                  opacity: referenceImages.length === 0 ? 0.5 : 1,
+                  cursor:
+                    referenceImages.length === 0 ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <IconImage size='large' />
+              </div>
+            </Upload>
+          </div>
+          <Text
+            type='tertiary'
+            size='small'
+            style={{ display: 'block', marginTop: 8 }}
+          >
+            {referenceImages.length === 0
+              ? t('请先上传参考图再添加遮罩')
+              : t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
+          </Text>
+        </div>
+      )}
+    </>
+  );
+
+  const renderVideoLeftPanel = () => (
+    <>
+      <div style={styles.fieldGroup}>
+        <span style={styles.label}>{t('模型系列')}</span>
+        <Select
+          style={{ width: '100%' }}
+          value={videoSelectedSeries}
+          onChange={setVideoSelectedSeries}
+          disabled={videoModelSeries.length === 0}
+        >
+          <Select.Option value='all'>{t('全部系列')}</Select.Option>
+          {videoModelSeries.map((series) => (
+            <Select.Option key={series} value={series}>
+              {formatModelSeries(series)}
+            </Select.Option>
+          ))}
+        </Select>
+      </div>
+
+      <div style={styles.fieldGroup}>
+        <span style={styles.label}>{t('模型')}</span>
+        <Select
+          style={{ width: '100%' }}
+          value={videoSelectedModel}
+          onChange={setVideoSelectedModel}
+          disabled={videoFilteredModels.length === 0}
+          filter
+          placeholder={t('请选择模型')}
+        >
+          {videoFilteredModels.map((model) => (
+            <Select.Option key={model.request_model} value={model.request_model}>
+              {model.display_name || model.request_model}
+            </Select.Option>
+          ))}
+        </Select>
+      </div>
+
+      <div style={styles.fieldGroup}>
+        <span style={styles.label}>{t('灵感')}</span>
+        <div style={styles.textareaWrapper}>
+          <TextArea
+            placeholder={t('请输入视频创意描述...')}
+            value={videoPrompt}
+            onChange={setVideoPrompt}
+            maxLength={5000}
+            showClear
+            autosize={{ minRows: 6, maxRows: 12 }}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              resize: 'none',
+            }}
+          />
+        </div>
+      </div>
+
+      <div style={styles.fieldGroup}>
+        <span style={styles.label}>{t('参考图像')}</span>
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+            alignItems: 'center',
+          }}
+        >
+          {videoReferenceImage && (
+            <div style={styles.referenceImageContainer}>
+              <img
+                src={
+                  videoReferenceImage.url ||
+                  (videoReferenceImage.fileInstance &&
+                    URL.createObjectURL(videoReferenceImage.fileInstance))
+                }
+                alt=''
+                style={styles.referenceImageThumb}
+              />
+              <button
+                style={styles.removeImageBtn}
+                onClick={handleVideoReferenceRemove}
+              >
+                <IconDelete size='extra-small' />
+              </button>
+            </div>
+          )}
+          <Upload
+            action=''
+            accept='image/*'
+            multiple={false}
+            fileList={videoReferenceImage ? [videoReferenceImage] : []}
+            onChange={handleVideoReferenceUpload}
+            showUploadList={false}
+            beforeUpload={validateImageSize}
+          >
+            <div style={styles.addImageBtn}>
+              <IconPlus size='large' />
+            </div>
+          </Upload>
+        </div>
+      </div>
+    </>
+  );
+
   const renderLeftPanel = () => (
     <div style={styles.leftPanel}>
       <div style={styles.leftContent}>
         <Spin spinning={loading}>
           <div style={styles.fieldGroup}>
-            <span style={styles.label}>{t('分组')}</span>
+            <span style={styles.label}>{t('创作模式')}</span>
             <Select
               style={{ width: '100%' }}
-              value={selectedGroup}
-              onChange={setSelectedGroup}
-              disabled={groupLoading || groupOptions.length === 0}
-              placeholder={t('请选择分组')}
+              value={generationMode}
+              onChange={setGenerationMode}
             >
-              {groupOptions.map((group) => (
-                <Select.Option
-                  key={group.group}
-                  value={group.group}
-                  disabled={group.has_available_token === false}
-                >
-                  {group.group}
-                  {group.has_available_token === false
-                    ? ` (${t('无可用令牌')})`
-                    : ''}
-                </Select.Option>
-              ))}
-            </Select>
-            {selectedGroup && (
-              <Text
-                type='tertiary'
-                size='small'
-                style={{ display: 'block', marginTop: 8 }}
-              >
-                {(() => {
-                  const option = groupOptions.find((item) => item.group === selectedGroup);
-                  if (!option) {
-                    return '';
-                  }
-                  if (option.has_available_token === false) {
-                    return t('当前分组暂无可用令牌，请前往令牌管理创建或启用');
-                  }
-                  return t('当前分组可用令牌数：{{count}}', {
-                    count: option.available_token_count || 0,
-                  });
-                })()}
-              </Text>
-            )}
-            {selectedGroup &&
-              groupOptions.find(
-                (item) => item.group === selectedGroup && item.has_available_token === false,
-              ) && (
-                <Button
-                  size='small'
-                  type='primary'
-                  theme='outline'
-                  style={{ marginTop: 8 }}
-                  onClick={() => navigate('/console/token')}
-                >
-                  {t('前往令牌管理')}
-                </Button>
-              )}
-          </div>
-
-          <div style={styles.fieldGroup}>
-            <span style={styles.label}>{t('模型系列')}</span>
-            <Select
-              style={{ width: '100%' }}
-              value={selectedSeries}
-              onChange={setSelectedSeries}
-              disabled={groupLoading || modelSeries.length === 0}
-            >
-              <Select.Option value='all'>{t('全部系列')}</Select.Option>
-              {modelSeries.map((series) => (
-                <Select.Option key={series} value={series}>
-                  {formatModelSeries(series)}
-                </Select.Option>
-              ))}
+              <Select.Option value='image'>{t('图片')}</Select.Option>
+              <Select.Option value='video'>{t('视频')}</Select.Option>
             </Select>
           </div>
-
-          <div style={styles.fieldGroup}>
-            <span style={styles.label}>{t('模型')}</span>
-            <Select
-              style={{ width: '100%' }}
-              value={selectedModel}
-              onChange={setSelectedModel}
-              disabled={groupLoading || filteredModels.length === 0}
-              filter
-              placeholder={t('请选择模型')}
-            >
-              {filteredModels.map((model) => (
-                <Select.Option
-                  key={model.request_model}
-                  value={model.request_model}
-                >
-                  {model.display_name || model.request_model}
-                </Select.Option>
-              ))}
-            </Select>
-          </div>
-
-          <div style={styles.fieldGroup}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 6,
-              }}
-            >
-              <span style={styles.label}>{t('灵感')}</span>
-              <span
-                style={{
-                  fontSize: 12,
-                  color: 'var(--semi-color-primary)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-              >
-                <IconBolt size='small' />
-                {t('AI优化')}
-              </span>
-            </div>
-            <div style={styles.textareaWrapper}>
-              <TextArea
-                placeholder={t('请输入灵感...')}
-                value={inspiration}
-                onChange={setInspiration}
-                maxLength={5000}
-                showClear
-                autosize={{ minRows: 6, maxRows: 12 }}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  resize: 'none',
-                }}
-              />
-            </div>
-          </div>
-
-          {selectedModelSupportsEditing && (
-            <div style={styles.fieldGroup}>
-              <span style={styles.label}>{t('参考图像')}</span>
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  flexWrap: 'wrap',
-                  alignItems: 'center',
-                }}
-              >
-                {referenceImages.map((file, idx) => (
-                  <div
-                    key={file.uid || idx}
-                    style={styles.referenceImageContainer}
-                  >
-                    <img
-                      src={
-                        file.url ||
-                        (file.fileInstance &&
-                          URL.createObjectURL(file.fileInstance))
-                      }
-                      alt=''
-                      style={styles.referenceImageThumb}
-                    />
-                    <button
-                      style={styles.removeImageBtn}
-                      onClick={() => handleImageRemove(file)}
-                    >
-                      <IconDelete size='extra-small' />
-                    </button>
-                  </div>
-                ))}
-                <Upload
-                  action=''
-                  accept='image/*'
-                  multiple
-                  fileList={referenceImages}
-                  onChange={handleImageUpload}
-                  showUploadList={false}
-                  beforeUpload={validateImageSize}
-                >
-                  <div style={styles.addImageBtn}>
-                    <IconPlus size='large' />
-                  </div>
-                </Upload>
-              </div>
-            </div>
-          )}
-
-          {selectedModelSupportsMaskEditing && (
-            <div style={styles.fieldGroup}>
-              <span style={styles.label}>{t('遮罩图像')}</span>
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  flexWrap: 'wrap',
-                  alignItems: 'center',
-                }}
-              >
-                {maskImage && (
-                  <div style={styles.referenceImageContainer}>
-                    <img
-                      src={
-                        maskImage.url ||
-                        (maskImage.fileInstance &&
-                          URL.createObjectURL(maskImage.fileInstance))
-                      }
-                      alt=''
-                      style={styles.referenceImageThumb}
-                    />
-                    <button
-                      style={styles.removeImageBtn}
-                      onClick={handleMaskRemove}
-                    >
-                      <IconDelete size='extra-small' />
-                    </button>
-                  </div>
-                )}
-                <Upload
-                  action=''
-                  accept='image/*'
-                  multiple={false}
-                  fileList={maskImage ? [maskImage] : []}
-                  onChange={handleMaskUpload}
-                  showUploadList={false}
-                  beforeUpload={validateImageSize}
-                  disabled={referenceImages.length === 0}
-                >
-                  <div
-                    style={{
-                      ...styles.addImageBtn,
-                      opacity: referenceImages.length === 0 ? 0.5 : 1,
-                      cursor:
-                        referenceImages.length === 0 ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    <IconImage size='large' />
-                  </div>
-                </Upload>
-              </div>
-              <Text
-                type='tertiary'
-                size='small'
-                style={{ display: 'block', marginTop: 8 }}
-              >
-                {referenceImages.length === 0
-                  ? t('请先上传参考图再添加遮罩')
-                  : t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
-              </Text>
-            </div>
-          )}
+          {generationMode === 'video'
+            ? renderVideoLeftPanel()
+            : renderImageLeftPanel()}
         </Spin>
       </div>
 
       <div style={styles.leftBottom}>
-        <div style={styles.paramRow}>
-          <div style={styles.paramItem}>
-            <span style={styles.paramLabel}>{t('生成比例')}</span>
-            <Select
-              style={{ width: '100%' }}
-              value={aspectRatio}
-              onChange={setAspectRatio}
-              size='default'
-              disabled={availableAspectRatios.length === 0}
-              placeholder={t('请选择')}
-            >
-              {availableAspectRatios.map((ratio) => (
-                <Select.Option key={ratio} value={ratio}>
-                  {ratio}
-                </Select.Option>
-              ))}
-            </Select>
-          </div>
-          <div style={styles.paramItem}>
-            <span style={styles.paramLabel}>{t('分辨率')}</span>
-            <Select
-              style={{ width: '100%' }}
-              value={resolution}
-              onChange={setResolution}
-              size='default'
-              disabled={availableResolutions.length === 0}
-              placeholder={t('请选择')}
-            >
-              {availableResolutions.map((res) => (
-                <Select.Option key={res} value={res}>
-                  {res}
-                </Select.Option>
-              ))}
-            </Select>
-          </div>
-          <div style={styles.paramItem}>
-            <span style={styles.paramLabel}>{t('生成数量')}</span>
-            <InputNumber
-              min={1}
-              max={DEFAULT_MAX_BATCH_TASKS}
-              value={quantity}
-              onChange={(val) => setQuantity(normalizeTaskCount(val))}
-              style={{ width: '100%' }}
-            />
-          </div>
-        </div>
+        {generationMode === 'video' ? (
+          <>
+            <div style={styles.paramRow}>
+              <div style={styles.paramItem}>
+                <span style={styles.paramLabel}>{t('视频比例')}</span>
+                <Select
+                  style={{ width: '100%' }}
+                  value={videoAspectRatio}
+                  onChange={setVideoAspectRatio}
+                  disabled={videoAvailableAspectRatios.length === 0}
+                  placeholder={t('请选择')}
+                >
+                  {videoAvailableAspectRatios.map((ratio) => (
+                    <Select.Option key={ratio} value={ratio}>
+                      {ratio}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </div>
+              <div style={styles.paramItem}>
+                <span style={styles.paramLabel}>{t('分辨率')}</span>
+                <Select
+                  style={{ width: '100%' }}
+                  value={videoResolution}
+                  onChange={setVideoResolution}
+                  disabled={videoAvailableResolutions.length === 0}
+                  placeholder={t('请选择')}
+                >
+                  {videoAvailableResolutions.map((res) => (
+                    <Select.Option key={res} value={res}>
+                      {res}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </div>
+              <div style={styles.paramItem}>
+                <span style={styles.paramLabel}>{t('时长')}</span>
+                <Select
+                  style={{ width: '100%' }}
+                  value={videoDuration}
+                  onChange={setVideoDuration}
+                  disabled={!videoSelectedModelData?.duration_options?.length}
+                  placeholder={t('请选择')}
+                >
+                  {(videoSelectedModelData?.duration_options || []).map((item) => (
+                    <Select.Option key={item} value={item}>
+                      {item}s
+                    </Select.Option>
+                  ))}
+                </Select>
+              </div>
+            </div>
 
-        <button
-          style={{
-            ...styles.generateBtn,
-            opacity: generating || !canGenerate ? 0.6 : 1,
-            pointerEvents: generating || !canGenerate ? 'none' : 'auto',
-          }}
-          onClick={handleGenerate}
-          disabled={generating || !canGenerate}
-        >
-          {generating ? (
-            <Spin size='small' />
-          ) : (
-            <>
-              <IconImage size='small' />
-              {t('生成')}
-            </>
-          )}
-        </button>
+            <button
+              style={{
+                ...styles.generateBtn,
+                opacity: videoGenerating || !canGenerateVideo ? 0.6 : 1,
+                pointerEvents: videoGenerating || !canGenerateVideo ? 'none' : 'auto',
+              }}
+              onClick={handleGenerateVideo}
+              disabled={videoGenerating || !canGenerateVideo}
+            >
+              {videoGenerating ? (
+                <Spin size='small' />
+              ) : (
+                <>
+                  <IconImage size='small' />
+                  {t('生成视频')}
+                </>
+              )}
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={styles.paramRow}>
+              <div style={styles.paramItem}>
+                <span style={styles.paramLabel}>{t('生成比例')}</span>
+                <Select
+                  style={{ width: '100%' }}
+                  value={aspectRatio}
+                  onChange={setAspectRatio}
+                  size='default'
+                  disabled={availableAspectRatios.length === 0}
+                  placeholder={t('请选择')}
+                >
+                  {availableAspectRatios.map((ratio) => (
+                    <Select.Option key={ratio} value={ratio}>
+                      {ratio}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </div>
+              <div style={styles.paramItem}>
+                <span style={styles.paramLabel}>{t('分辨率')}</span>
+                <Select
+                  style={{ width: '100%' }}
+                  value={resolution}
+                  onChange={setResolution}
+                  size='default'
+                  disabled={availableResolutions.length === 0}
+                  placeholder={t('请选择')}
+                >
+                  {availableResolutions.map((res) => (
+                    <Select.Option key={res} value={res}>
+                      {res}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </div>
+              <div style={styles.paramItem}>
+                <span style={styles.paramLabel}>{t('生成数量')}</span>
+                <InputNumber
+                  min={1}
+                  max={DEFAULT_MAX_BATCH_TASKS}
+                  value={quantity}
+                  onChange={(val) => setQuantity(normalizeTaskCount(val))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            </div>
+
+            <button
+              style={{
+                ...styles.generateBtn,
+                opacity: generating || !canGenerate ? 0.6 : 1,
+                pointerEvents: generating || !canGenerate ? 'none' : 'auto',
+              }}
+              onClick={handleGenerate}
+              disabled={generating || !canGenerate}
+            >
+              {generating ? (
+                <Spin size='small' />
+              ) : (
+                <>
+                  <IconImage size='small' />
+                  {t('生成')}
+                </>
+              )}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
 
   const renderHistoryContent = () => (
     <Spin
-      spinning={loadingTasks && tasks.length === 0}
+      spinning={generationMode === 'video' ? videoLoadingTasks : loadingTasks}
       style={{
         width: '100%',
         height: '100%',
@@ -2022,7 +2673,7 @@ const ImageGeneration = () => {
         display: 'flex',
       }}
     >
-      {tasks.length > 0 ? (
+      {(generationMode === 'video' ? videoTasks : tasks).length > 0 ? (
         <div
           style={{
             width: '100%',
@@ -2034,18 +2685,30 @@ const ImageGeneration = () => {
           }}
         >
           <div style={styles.tasksGrid}>
-            {tasks.map((task) => (
-              <ImageGenerationTaskCard
-                key={task.id}
-                task={task}
-                selected={selectedTaskIds.has(task.id)}
-                onSelectChange={handleTaskSelect}
-                onClick={() => handleTaskCardClick(task)}
-              />
-            ))}
+            {generationMode === 'video'
+              ? videoTasks.map((task) => (
+                  <VideoGenerationTaskCard
+                    key={task.id}
+                    task={task}
+                    selected={videoSelectedTaskIds.has(task.id)}
+                    onSelectChange={handleVideoTaskSelect}
+                    onClick={() => handleVideoTaskCardClick(task)}
+                  />
+                ))
+              : tasks.map((task) => (
+                  <ImageGenerationTaskCard
+                    key={task.id}
+                    task={task}
+                    selected={selectedTaskIds.has(task.id)}
+                    onSelectChange={handleTaskSelect}
+                    onClick={() => handleTaskCardClick(task)}
+                  />
+                ))}
           </div>
-          {((showsReliableTaskTotal && taskTotal > taskPageSize) ||
-            (!showsReliableTaskTotal && (taskPage > 1 || hasNextTaskPage))) && (
+          {(generationMode === 'video'
+            ? videoTaskTotal > videoTaskPageSize
+            : (showsReliableTaskTotal && taskTotal > taskPageSize) ||
+              (!showsReliableTaskTotal && (taskPage > 1 || hasNextTaskPage))) && (
             <div
               style={{
                 padding: '16px',
@@ -2054,7 +2717,17 @@ const ImageGeneration = () => {
                 flexShrink: 0,
               }}
             >
-              {showsReliableTaskTotal ? (
+              {generationMode === 'video' ? (
+                <Pagination
+                  total={videoTaskTotal}
+                  currentPage={videoTaskPage}
+                  pageSize={videoTaskPageSize}
+                  onPageChange={setVideoTaskPage}
+                  showSizeChanger
+                  onPageSizeChange={handleVideoTaskPageSizeChange}
+                  pageSizeOpts={[10, 20, 50, 100]}
+                />
+              ) : showsReliableTaskTotal ? (
                 <Pagination
                   total={taskTotal}
                   currentPage={taskPage}
@@ -2142,22 +2815,37 @@ const ImageGeneration = () => {
           strong
           style={{ fontSize: 15, color: 'var(--semi-color-text-0)' }}
         >
-          {t('生成记录')}
+          {generationMode === 'video' ? t('视频生成记录') : t('生成记录')}
         </Text>
 
         <div style={styles.filterGroup}>
-          <Button
-            size='small'
-            type='tertiary'
-            icon={<IconExternalOpen />}
-            onClick={() => navigate('/console/assets')}
-          >
-            {t('查看资产仓库')}
-          </Button>
+          {generationMode === 'video' ? (
+            <Button
+              size='small'
+              type='tertiary'
+              icon={<IconExternalOpen />}
+              onClick={() => navigate('/console/task')}
+            >
+              {t('查看任务日志')}
+            </Button>
+          ) : (
+            <Button
+              size='small'
+              type='tertiary'
+              icon={<IconExternalOpen />}
+              onClick={() => navigate('/console/assets')}
+            >
+              {t('查看资产仓库')}
+            </Button>
+          )}
 
-          {tasks.length > 0 && (
+          {(generationMode === 'video' ? videoTasks : tasks).length > 0 && (
             <>
-              {taskPage === 1 && taskTotal > 0 ? (
+              {generationMode === 'video' ? (
+                <Text type='tertiary' size='small'>
+                  {t('共')} {videoTaskTotal} {t('个任务')}
+                </Text>
+              ) : taskPage === 1 && taskTotal > 0 ? (
                 <Text type='tertiary' size='small'>
                   {t('共')} {taskTotal} {t('个任务')}
                 </Text>
@@ -2166,17 +2854,29 @@ const ImageGeneration = () => {
                   {t('上一页')} / {t('下一页')}
                 </Text>
               )}
-              {selectedTaskIds.size > 0 && (
+              {(generationMode === 'video'
+                ? videoSelectedTaskIds.size > 0
+                : selectedTaskIds.size > 0) && (
                 <Text type='tertiary' size='small'>
-                  ({t('已选择')} {selectedTaskIds.size} {t('个')})
+                  ({t('已选择')}{' '}
+                  {generationMode === 'video'
+                    ? videoSelectedTaskIds.size
+                    : selectedTaskIds.size}{' '}
+                  {t('个')})
                 </Text>
               )}
-              {selectedTaskIds.size > 0 ? (
+              {(generationMode === 'video'
+                ? videoSelectedTaskIds.size > 0
+                : selectedTaskIds.size > 0) ? (
                 <>
                   <Button
                     size='small'
                     type='tertiary'
-                    onClick={() => handleSelectAll(false)}
+                    onClick={() =>
+                      generationMode === 'video'
+                        ? handleSelectAllVideo(false)
+                        : handleSelectAll(false)
+                    }
                   >
                     {t('取消选择')}
                   </Button>
@@ -2184,11 +2884,19 @@ const ImageGeneration = () => {
                     size='small'
                     type='danger'
                     icon={<IconDelete />}
-                    loading={deletingTasks}
-                    disabled={tasks
-                      .filter((task) => selectedTaskIds.has(task.id))
-                      .some((task) => !taskIsDeletable(task))}
-                    onClick={handleBatchDelete}
+                    loading={generationMode === 'video' ? deletingVideoTasks : deletingTasks}
+                    disabled={
+                      generationMode === 'video'
+                        ? false
+                        : tasks
+                            .filter((task) => selectedTaskIds.has(task.id))
+                            .some((task) => !taskIsDeletable(task))
+                    }
+                    onClick={
+                      generationMode === 'video'
+                        ? handleVideoBatchDelete
+                        : handleBatchDelete
+                    }
                   >
                     {t('删除选中')}
                   </Button>
@@ -2197,7 +2905,11 @@ const ImageGeneration = () => {
                 <Button
                   size='small'
                   type='tertiary'
-                  onClick={() => handleSelectAll(true)}
+                  onClick={() =>
+                    generationMode === 'video'
+                      ? handleSelectAllVideo(true)
+                      : handleSelectAll(true)
+                  }
                 >
                   {t('全选')}
                 </Button>
@@ -2208,29 +2920,43 @@ const ImageGeneration = () => {
           <span style={styles.filterLabel}>{t('状态')}</span>
           <Select
             size='small'
-            value={taskStatusFilter}
-            onChange={setTaskStatusFilter}
+            value={generationMode === 'video' ? videoTaskStatusFilter : taskStatusFilter}
+            onChange={
+              generationMode === 'video'
+                ? setVideoTaskStatusFilter
+                : setTaskStatusFilter
+            }
             style={{ width: 110 }}
           >
             <Select.Option value=''>{t('全部')}</Select.Option>
-            <Select.Option value='pending'>{t('等待中')}</Select.Option>
-            <Select.Option value='generating'>{t('生成中')}</Select.Option>
-            <Select.Option value='success'>{t('已完成')}</Select.Option>
+            <Select.Option value={generationMode === 'video' ? 'queued' : 'pending'}>
+              {t('等待中')}
+            </Select.Option>
+            <Select.Option value={generationMode === 'video' ? 'in_progress' : 'generating'}>
+              {t('生成中')}
+            </Select.Option>
+            <Select.Option value={generationMode === 'video' ? 'completed' : 'success'}>
+              {t('已完成')}
+            </Select.Option>
             <Select.Option value='failed'>{t('失败')}</Select.Option>
           </Select>
 
           <span style={styles.filterLabel}>{t('模型')}</span>
           <Select
             size='small'
-            value={taskModelFilter}
-            onChange={setTaskModelFilter}
+            value={generationMode === 'video' ? videoTaskModelFilter : taskModelFilter}
+            onChange={
+              generationMode === 'video'
+                ? setVideoTaskModelFilter
+                : setTaskModelFilter
+            }
             style={{ width: 140 }}
             filter
             placeholder={t('全部')}
           >
             <Select.Option value=''>{t('全部')}</Select.Option>
-            {models
-              .filter((m) => m.status === 1)
+            {(generationMode === 'video' ? videoModels : models)
+              .filter((m) => m.status === undefined || m.status === 1)
               .map((m) => (
                 <Select.Option key={m.request_model} value={m.request_model}>
                   {m.display_name || m.request_model}
@@ -2241,8 +2967,12 @@ const ImageGeneration = () => {
           <span style={styles.filterLabel}>{t('时间')}</span>
           <Select
             size='small'
-            value={taskTimeFilter}
-            onChange={setTaskTimeFilter}
+            value={generationMode === 'video' ? videoTaskTimeFilter : taskTimeFilter}
+            onChange={
+              generationMode === 'video'
+                ? setVideoTaskTimeFilter
+                : setTaskTimeFilter
+            }
             style={{ width: 110 }}
           >
             <Select.Option value=''>{t('全部')}</Select.Option>
@@ -2252,33 +2982,37 @@ const ImageGeneration = () => {
             <Select.Option value='thisMonth'>{t('本月')}</Select.Option>
           </Select>
 
-          <Select
-            size='small'
-            value={taskSortBy}
-            onChange={setTaskSortBy}
-            style={{ width: 120 }}
-          >
-            <Select.Option value='created_time'>
-              {t('排序：创建时间')}
-            </Select.Option>
-            <Select.Option value='completed_time'>
-              {t('排序：完成时间')}
-            </Select.Option>
-            <Select.Option value='status'>{t('排序：状态')}</Select.Option>
-          </Select>
+          {generationMode !== 'video' && (
+            <>
+              <Select
+                size='small'
+                value={taskSortBy}
+                onChange={setTaskSortBy}
+                style={{ width: 120 }}
+              >
+                <Select.Option value='created_time'>
+                  {t('排序：创建时间')}
+                </Select.Option>
+                <Select.Option value='completed_time'>
+                  {t('排序：完成时间')}
+                </Select.Option>
+                <Select.Option value='status'>{t('排序：状态')}</Select.Option>
+              </Select>
 
-          <Button
-            size='small'
-            type='tertiary'
-            icon={
-              taskSortOrder === 'desc' ? <IconChevronDown /> : <IconChevronUp />
-            }
-            onClick={() =>
-              setTaskSortOrder(taskSortOrder === 'desc' ? 'asc' : 'desc')
-            }
-          >
-            {taskSortOrder === 'desc' ? t('降序') : t('升序')}
-          </Button>
+              <Button
+                size='small'
+                type='tertiary'
+                icon={
+                  taskSortOrder === 'desc' ? <IconChevronDown /> : <IconChevronUp />
+                }
+                onClick={() =>
+                  setTaskSortOrder(taskSortOrder === 'desc' ? 'asc' : 'desc')
+                }
+              >
+                {taskSortOrder === 'desc' ? t('降序') : t('升序')}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -2304,6 +3038,27 @@ const ImageGeneration = () => {
             return next;
           });
         }}
+      />
+      <VideoGenerationTaskModal
+        visible={videoTaskModalVisible}
+        onClose={() => {
+          setVideoTaskModalVisible(false);
+          setVideoSelectedTask(null);
+        }}
+        task={videoSelectedTask}
+        onRetrySuccess={(updatedTask) => {
+          updateVideoTaskInList(updatedTask);
+        }}
+        onDeleted={(deletedId) => {
+          setVideoTasks((prev) => prev.filter((task) => task.id !== deletedId));
+          setVideoTaskTotal((prev) => Math.max(0, prev - 1));
+          setVideoSelectedTaskIds((prev) => {
+            const next = new Set(prev);
+            next.delete(deletedId);
+            return next;
+          });
+        }}
+        onOpenTaskLogs={(task) => navigate(`/console/task?task_id=${task.task_id}`)}
       />
     </div>
   );
