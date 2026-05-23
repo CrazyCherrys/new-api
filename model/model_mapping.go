@@ -36,8 +36,8 @@ type ModelMapping struct {
 	Status                int    `json:"status" gorm:"default:1;index"`
 	Priority              int    `json:"priority" gorm:"default:0"`
 	RequestEndpoint       string `json:"request_endpoint" gorm:"size:32;default:''"` // chat: openai, anthropic, gemini; image: openai, openai-response, gemini; video: openai-video-generation, openai-video
-	Resolutions           string `json:"resolutions" gorm:"type:text"`               // Gemini image JSON array: ["1K","2K","4K"]
-	AspectRatios          string `json:"aspect_ratios" gorm:"type:text"`             // Gemini image JSON array: ["1:1","16:9",...]
+	Resolutions           string `json:"resolutions" gorm:"type:text"`               // 分辨率选项 JSON array: ["1K","2K","4K"]
+	AspectRatios          string `json:"aspect_ratios" gorm:"type:text"`             // 长宽比选项 JSON array: ["1:1","16:9",...]
 	ImageCapabilities     string `json:"image_capabilities" gorm:"type:text"`        // JSON array: ["image_generation","image_editing"]
 	VideoCapabilities     string `json:"video_capabilities" gorm:"type:text"`        // JSON array: ["image_to_video","text_to_video"]
 	DurationOptions       string `json:"duration_options" gorm:"type:text"`          // JSON array: [5,10]
@@ -251,6 +251,41 @@ func NormalizeDurationOptions(raw string) (string, error) {
 
 func EffectiveDurationOptions(raw string) ([]int, error) {
 	return parseDurationOptions(raw)
+}
+
+func parseStringArrayField(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+
+	var values []string
+	if err := common.UnmarshalJsonStr(raw, &values); err != nil {
+		return nil, err
+	}
+
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+
+	return normalized, nil
+}
+
+func EffectiveResolutions(raw string) ([]string, error) {
+	return parseStringArrayField(raw)
+}
+
+func EffectiveAspectRatios(raw string) ([]string, error) {
+	return parseStringArrayField(raw)
 }
 
 func (mm *ModelMapping) Insert() error {

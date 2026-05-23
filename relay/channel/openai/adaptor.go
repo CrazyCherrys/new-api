@@ -544,7 +544,7 @@ func resolveStandardOpenAIImageSize(request dto.ImageRequest) string {
 	if strings.EqualFold(aspectRatio, "auto") {
 		return "auto"
 	}
-	if aspectRatio != "" && resolution != "" {
+	if aspectRatio != "" || resolution != "" {
 		if mapped := calculateOpenAIPixelSize(resolution, aspectRatio); mapped != "" {
 			return mapped
 		}
@@ -687,7 +687,7 @@ func (a *Adaptor) convertStandardOpenAIImageRequest(c *gin.Context, info *relayc
 			resolution, _ = request.RawParams["resolution"].(string)
 		}
 
-		if aspectRatio != "" && resolution != "" {
+		if aspectRatio != "" || resolution != "" {
 			if calculatedSize := calculateOpenAIPixelSize(resolution, aspectRatio); calculatedSize != "" {
 				request.Size = calculatedSize
 			}

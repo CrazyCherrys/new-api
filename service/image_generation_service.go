@@ -814,6 +814,10 @@ func CreateImageGenerationTask(userId int, modelId string, selectedGroup string,
 		releaseReservedQueueSlot()
 		return nil, err
 	}
+	if err := validateImageGenerationSizeOptions(mapping, params); err != nil {
+		releaseReservedQueueSlot()
+		return nil, err
+	}
 
 	user, err := model.GetUserById(userId, false)
 	if err != nil {
@@ -1381,6 +1385,84 @@ func validateImageGenerationModelCapabilities(mapping *model.ModelMapping, param
 		}
 	}
 	return fmt.Errorf("selected model does not support image generation")
+}
+
+func validateImageGenerationSizeOptions(mapping *model.ModelMapping, params string) error {
+	if mapping == nil || mapping.ModelType != 2 {
+		return nil
+	}
+
+	var paramMap map[string]interface{}
+	if strings.TrimSpace(params) != "" {
+		if err := common.UnmarshalJsonStr(params, &paramMap); err != nil {
+			return fmt.Errorf("failed to parse params: %w", err)
+		}
+	}
+
+	allowedResolutions, err := model.EffectiveResolutions(mapping.Resolutions)
+	if err != nil {
+		return fmt.Errorf("invalid resolutions for model %s: %w", mapping.RequestModel, err)
+	}
+	allowedAspectRatios, err := model.EffectiveAspectRatios(mapping.AspectRatios)
+	if err != nil {
+		return fmt.Errorf("invalid aspect ratios for model %s: %w", mapping.RequestModel, err)
+	}
+	if len(allowedResolutions) == 0 && len(allowedAspectRatios) == 0 {
+		return nil
+	}
+
+	requestEndpoint := normalizeImageEndpoint(mapping.RequestEndpoint)
+	requestResolution := strings.TrimSpace(stringParamValue(paramMap, "resolution"))
+	requestAspectRatio := strings.TrimSpace(stringParamValue(paramMap, "aspect_ratio"))
+
+	if len(allowedResolutions) > 0 {
+		if requestResolution == "" {
+			return fmt.Errorf("resolution is required for model %s", mapping.RequestModel)
+		}
+		if !containsString(allowedResolutions, requestResolution) {
+			return fmt.Errorf("unsupported resolution: %s", requestResolution)
+		}
+	}
+	if len(allowedAspectRatios) > 0 {
+		if requestAspectRatio == "" {
+			return fmt.Errorf("aspect ratio is required for model %s", mapping.RequestModel)
+		}
+		if !containsString(allowedAspectRatios, requestAspectRatio) {
+			return fmt.Errorf("unsupported aspect ratio: %s", requestAspectRatio)
+		}
+	}
+
+	switch requestEndpoint {
+	case "openai", "openai-response":
+		mappedSize, ok := ResolveOpenAIImageSize(requestResolution, requestAspectRatio)
+		if !ok {
+			return fmt.Errorf("unsupported resolution or aspect ratio for OpenAI image requests")
+		}
+		if strings.TrimSpace(mappedSize) == "" {
+			return fmt.Errorf("unsupported resolution or aspect ratio for OpenAI image requests")
+		}
+	case "gemini":
+	default:
+		return fmt.Errorf("unsupported request endpoint: %s", mapping.RequestEndpoint)
+	}
+
+	return nil
+}
+
+func stringParamValue(params map[string]interface{}, key string) string {
+	if len(params) == 0 {
+		return ""
+	}
+	value, ok := params[key]
+	if !ok {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return fmt.Sprint(typed)
+	}
 }
 
 func referenceImageDecodedSize(raw string) (int64, bool, error) {

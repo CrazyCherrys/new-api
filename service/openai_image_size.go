@@ -17,16 +17,17 @@ const (
 )
 
 var (
-	openAIImageSizePattern = regexp.MustCompile(`^\s*(\d+)\s*[xX×]\s*(\d+)\s*$`)
+	openAIImageSizePattern  = regexp.MustCompile(`^\s*(\d+)\s*[xX×]\s*(\d+)\s*$`)
 	openAIImageRatioPattern = regexp.MustCompile(`^\s*(\d+(?:\.\d+)?)\s*[:xX×]\s*(\d+(?:\.\d+)?)\s*$`)
 )
 
 type openAIImageTier string
 
 const (
-	openAIImageTier1K openAIImageTier = "1K"
-	openAIImageTier2K openAIImageTier = "2K"
-	openAIImageTier4K openAIImageTier = "4K"
+	openAIImageTier1K             openAIImageTier = "1K"
+	openAIImageTier2K             openAIImageTier = "2K"
+	openAIImageTier4K             openAIImageTier = "4K"
+	defaultOpenAIImageAspectRatio                 = "1:1"
 )
 
 func normalizeOpenAIImageSizeTier(value string) openAIImageTier {
@@ -197,14 +198,28 @@ func calculateOpenAIImageSize(tier openAIImageTier, ratio string) string {
 // ResolveOpenAIImageSize maps resolution + aspect ratio to the same normalized size
 // calculation used by the playground UI.
 func ResolveOpenAIImageSize(resolution, aspectRatio string) (string, bool) {
+	hasResolution := strings.TrimSpace(resolution) != ""
+	hasAspectRatio := strings.TrimSpace(aspectRatio) != ""
 	tier := normalizeOpenAIImageSizeTier(resolution)
 	ar := normalizeOpenAIImageAspectRatio(aspectRatio)
 
 	if ar == "auto" {
 		return "auto", true
 	}
-	if tier == "" || ar == "" {
+	if !hasResolution && !hasAspectRatio {
 		return "auto", false
+	}
+	if hasResolution && tier == "" {
+		return "auto", false
+	}
+	if hasAspectRatio && ar == "" {
+		return "auto", false
+	}
+	if tier == "" {
+		tier = openAIImageTier1K
+	}
+	if ar == "" {
+		ar = defaultOpenAIImageAspectRatio
 	}
 
 	size := calculateOpenAIImageSize(tier, ar)

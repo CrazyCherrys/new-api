@@ -1408,7 +1408,7 @@ func TestCreateImageGenerationTaskStoresReferenceImagesOutsideDatabase(t *testin
 		enqueueImageGenerationTask = previousEnqueue
 	})
 
-	task, err := CreateImageGenerationTask(user.Id, "gpt-image-edit", "default", "prompt", "openai", `{"reference_images":["`+source+`"],"resolution":"2K"}`)
+	task, err := CreateImageGenerationTask(user.Id, "gpt-image-edit", "default", "prompt", "openai", `{"reference_images":["`+source+`"]}`)
 	if err != nil {
 		t.Fatalf("expected task creation to succeed: %v", err)
 	}
@@ -1612,7 +1612,7 @@ func TestCreateImageGenerationTaskStoresMaskOutsideDatabase(t *testing.T) {
 		enqueueImageGenerationTask = previousEnqueue
 	})
 
-	task, err := CreateImageGenerationTask(user.Id, "gpt-image-mask", "default", "prompt", "openai", `{"reference_images":["`+source+`"],"mask":"`+source+`","resolution":"2K"}`)
+	task, err := CreateImageGenerationTask(user.Id, "gpt-image-mask", "default", "prompt", "openai", `{"reference_images":["`+source+`"],"mask":"`+source+`"}`)
 	if err != nil {
 		t.Fatalf("expected task creation to succeed: %v", err)
 	}
@@ -2359,6 +2359,60 @@ func TestBuildOpenAIResponsesImageRequestWithReferenceImages(t *testing.T) {
 	}
 	if got := tools[0]["size"]; got != "1536x1024" {
 		t.Fatalf("unexpected tool size: %#v", got)
+	}
+}
+
+func TestResolveOpenAIImageSizeUsesDefaultsForMissingValues(t *testing.T) {
+	if got, ok := ResolveOpenAIImageSize("", ""); ok || got != "auto" {
+		t.Fatalf("unexpected default size result: got=%q ok=%t", got, ok)
+	}
+	if got, ok := ResolveOpenAIImageSize("", "16:9"); !ok || got != "1824x1024" {
+		t.Fatalf("unexpected aspect-ratio-only result: got=%q ok=%t", got, ok)
+	}
+	if got, ok := ResolveOpenAIImageSize("2K", ""); !ok || got != "2048x2048" {
+		t.Fatalf("unexpected resolution-only result: got=%q ok=%t", got, ok)
+	}
+}
+
+func TestResolveOpenAIImageSizeRejectsInvalidInputs(t *testing.T) {
+	if got, ok := ResolveOpenAIImageSize("bogus", "16:9"); ok || got != "auto" {
+		t.Fatalf("unexpected invalid resolution result: got=%q ok=%t", got, ok)
+	}
+	if got, ok := ResolveOpenAIImageSize("2K", "bogus"); ok || got != "auto" {
+		t.Fatalf("unexpected invalid aspect ratio result: got=%q ok=%t", got, ok)
+	}
+}
+
+func TestValidateImageGenerationSizeOptions(t *testing.T) {
+	mapping := &model.ModelMapping{
+		RequestModel:    "demo-image",
+		ModelType:       2,
+		RequestEndpoint: "openai",
+		Resolutions:     `["1K","2K"]`,
+		AspectRatios:    `["1:1","16:9"]`,
+	}
+	if err := validateImageGenerationSizeOptions(mapping, `{"resolution":"2K","aspect_ratio":"16:9"}`); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if err := validateImageGenerationSizeOptions(mapping, `{"resolution":"2K"}`); err == nil {
+		t.Fatalf("expected missing configured aspect ratio to fail")
+	}
+	if err := validateImageGenerationSizeOptions(mapping, `{"resolution":"4K","aspect_ratio":"16:9"}`); err == nil {
+		t.Fatalf("expected invalid resolution to fail")
+	}
+
+	geminiMapping := &model.ModelMapping{
+		RequestModel:    "demo-gemini",
+		ModelType:       2,
+		RequestEndpoint: "gemini",
+		Resolutions:     `["1K","2K"]`,
+		AspectRatios:    `["1:1","16:9"]`,
+	}
+	if err := validateImageGenerationSizeOptions(geminiMapping, `{"resolution":"2K","aspect_ratio":"16:9"}`); err != nil {
+		t.Fatalf("unexpected gemini validation error: %v", err)
+	}
+	if err := validateImageGenerationSizeOptions(geminiMapping, `{"resolution":"2K","aspect_ratio":"4:3"}`); err == nil {
+		t.Fatalf("expected invalid aspect ratio to fail")
 	}
 }
 

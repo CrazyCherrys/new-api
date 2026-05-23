@@ -60,15 +60,9 @@ const EditModelMappingModal = ({
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [formApi, setFormApi] = useState(null);
-  const [selectedResolutions, setSelectedResolutions] = useState([]);
-  const [selectedAspectRatios, setSelectedAspectRatios] = useState([]);
   const [selectedModelType, setSelectedModelType] = useState(1);
-  const [selectedRequestEndpoint, setSelectedRequestEndpoint] =
-    useState('openai');
   const isImageModel = Number(selectedModelType) === 2;
   const isVideoModel = Number(selectedModelType) === 3;
-  const isGeminiImageModel =
-    isImageModel && selectedRequestEndpoint === 'gemini';
 
   const modelSeriesOptions = [
     { value: 'openai', label: 'OpenAI' },
@@ -231,20 +225,16 @@ const EditModelMappingModal = ({
           ? normalizedEndpoint
           : getDefaultRequestEndpoint(nextModelType);
 
-        const isGeminiImageMapping =
-          nextModelType === 2 && nextEndpoint === 'gemini';
-        setSelectedResolutions(isGeminiImageMapping ? resolutions : []);
-        setSelectedAspectRatios(isGeminiImageMapping ? aspectRatios : []);
+        const isImageMapping = nextModelType === 2;
         setSelectedModelType(nextModelType);
-        setSelectedRequestEndpoint(nextEndpoint);
 
         formApi.setValues({
           ...editingMapping,
           request_endpoint: nextEndpoint,
           actual_model:
             editingMapping.actual_model || editingMapping.request_model || '',
-          resolutions: isGeminiImageMapping ? resolutions : [],
-          aspect_ratios: isGeminiImageMapping ? aspectRatios : [],
+          resolutions: isImageMapping ? resolutions : [],
+          aspect_ratios: isImageMapping ? aspectRatios : [],
           image_capabilities: imageCapabilities,
           video_capabilities: videoCapabilities,
           duration_options: durationValues,
@@ -252,10 +242,7 @@ const EditModelMappingModal = ({
           priority: editingMapping.priority ?? 0,
         });
       } else {
-        setSelectedResolutions([]);
-        setSelectedAspectRatios([]);
         setSelectedModelType(1);
-        setSelectedRequestEndpoint('openai');
 
         formApi.setValues({
           request_model: '',
@@ -332,8 +319,7 @@ const EditModelMappingModal = ({
     try {
       const modelType = Number(values.model_type);
       const requestEndpoint = normalizeRequestEndpoint(values.request_endpoint);
-      const shouldSubmitGeminiImageSettings =
-        modelType === 2 && requestEndpoint === 'gemini';
+      const shouldSubmitImageSettings = modelType === 2;
       const payload = {
         ...values,
         request_endpoint: requestEndpoint,
@@ -347,11 +333,11 @@ const EditModelMappingModal = ({
           : 0,
         // 将数组转换为 JSON 字符串
         resolutions:
-          shouldSubmitGeminiImageSettings && values.resolutions
+          shouldSubmitImageSettings && values.resolutions
           ? JSON.stringify(values.resolutions)
           : '',
         aspect_ratios:
-          shouldSubmitGeminiImageSettings && values.aspect_ratios
+          shouldSubmitImageSettings && values.aspect_ratios
           ? JSON.stringify(values.aspect_ratios)
           : '',
         image_capabilities:
@@ -396,23 +382,19 @@ const EditModelMappingModal = ({
 
   const handleSelectAllAspectRatios = () => {
     const allValues = aspectRatioOptions.map((opt) => opt.value);
-    setSelectedAspectRatios(allValues);
     formApi?.setValue('aspect_ratios', allValues);
   };
 
   const handleDeselectAllAspectRatios = () => {
-    setSelectedAspectRatios([]);
     formApi?.setValue('aspect_ratios', []);
   };
 
   const handleSelectAllResolutions = () => {
     const allValues = imageResolutionOptions.map((opt) => opt.value);
-    setSelectedResolutions(allValues);
     formApi?.setValue('resolutions', allValues);
   };
 
   const handleDeselectAllResolutions = () => {
-    setSelectedResolutions([]);
     formApi?.setValue('resolutions', []);
   };
 
@@ -473,9 +455,6 @@ const EditModelMappingModal = ({
             ) {
               const nextEndpoint = getDefaultRequestEndpoint(nextModelType);
               formApi?.setValue('request_endpoint', nextEndpoint);
-              setSelectedRequestEndpoint(nextEndpoint);
-            } else {
-              setSelectedRequestEndpoint(currentEndpoint);
             }
 
             if (nextModelType === 2) {
@@ -492,21 +471,10 @@ const EditModelMappingModal = ({
                   DEFAULT_IMAGE_CAPABILITIES,
                 );
               }
-              const nextEndpoint = normalizeRequestEndpoint(
-                formApi?.getValue('request_endpoint'),
-              );
-              if (nextEndpoint !== 'gemini') {
-                formApi?.setValue('resolutions', []);
-                formApi?.setValue('aspect_ratios', []);
-                setSelectedResolutions([]);
-                setSelectedAspectRatios([]);
-              }
             } else if (nextModelType === 3) {
               formApi?.setValue('image_capabilities', []);
               formApi?.setValue('resolutions', []);
               formApi?.setValue('aspect_ratios', []);
-              setSelectedResolutions([]);
-              setSelectedAspectRatios([]);
               const currentVideoCapabilities =
                 formApi?.getValue('video_capabilities');
               if (
@@ -524,8 +492,6 @@ const EditModelMappingModal = ({
               formApi?.setValue('duration_options', []);
               formApi?.setValue('resolutions', []);
               formApi?.setValue('aspect_ratios', []);
-              setSelectedResolutions([]);
-              setSelectedAspectRatios([]);
             }
           }}
         />
@@ -538,13 +504,6 @@ const EditModelMappingModal = ({
           onChange={(value) => {
             const nextEndpoint = normalizeRequestEndpoint(value);
             formApi?.setValue('request_endpoint', nextEndpoint);
-            setSelectedRequestEndpoint(nextEndpoint);
-            if (!(isImageModel && nextEndpoint === 'gemini')) {
-              formApi?.setValue('resolutions', []);
-              formApi?.setValue('aspect_ratios', []);
-              setSelectedResolutions([]);
-              setSelectedAspectRatios([]);
-            }
           }}
         />
         <Form.Switch field='status' label={t('状态')} size='large' />
@@ -609,7 +568,7 @@ const EditModelMappingModal = ({
             }
           />
         </div>
-        {isGeminiImageModel && (
+        {isImageModel && (
           <div>
             <div
               style={{
@@ -638,7 +597,7 @@ const EditModelMappingModal = ({
             />
           </div>
         )}
-        {isGeminiImageModel && (
+        {isImageModel && (
           <div>
             <div
               style={{
