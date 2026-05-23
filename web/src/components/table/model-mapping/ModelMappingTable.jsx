@@ -34,6 +34,26 @@ import { API, showError, showSuccess } from '../../../helpers';
 const { Text } = Typography;
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
 
+const normalizeRequestEndpoint = (endpoint) => {
+  const normalized = String(endpoint || '')
+    .trim()
+    .toLowerCase();
+  switch (normalized) {
+    case 'dalle':
+      return 'openai';
+    case 'claude':
+      return 'anthropic';
+    case 'openai-video-generations':
+    case 'video-generation':
+      return 'openai-video-generation';
+    case 'openai-videos':
+    case 'sora':
+      return 'openai-video';
+    default:
+      return normalized;
+  }
+};
+
 const renderTimestamp = (timestampInSeconds) => {
   const date = new Date(timestampInSeconds * 1000);
   const year = date.getFullYear();
@@ -70,6 +90,59 @@ const ModelMappingTable = ({
       }
     }
     return [...DEFAULT_IMAGE_CAPABILITIES];
+  };
+
+  const getDefaultRequestEndpoint = (modelType) => {
+    switch (Number(modelType)) {
+      case 1:
+        return 'openai';
+      case 2:
+        return 'openai';
+      case 3:
+        return 'openai-video-generation';
+      default:
+        return 'openai';
+    }
+  };
+
+  const isValidRequestEndpointForModelType = (modelType, endpoint) => {
+    const normalizedEndpoint = normalizeRequestEndpoint(endpoint);
+    const endpointOptions = {
+      1: ['openai', 'anthropic', 'gemini'],
+      2: ['openai', 'openai-response', 'gemini'],
+      3: ['openai-video-generation', 'openai-video'],
+    };
+    return (endpointOptions[Number(modelType)] || []).includes(
+      normalizedEndpoint,
+    );
+  };
+
+  const sanitizeMappingPayloadForUpdate = (record) => {
+    const payload = { ...record };
+    const modelType = Number(payload.model_type);
+    payload.request_endpoint = normalizeRequestEndpoint(payload.request_endpoint);
+
+    if (!isValidRequestEndpointForModelType(modelType, payload.request_endpoint)) {
+      payload.request_endpoint = getDefaultRequestEndpoint(modelType);
+    }
+    if (modelType !== 2) {
+      payload.image_capabilities = '';
+    }
+    if (modelType !== 3) {
+      payload.video_capabilities = '';
+      payload.duration_options = '';
+    }
+    if (modelType !== 2 && modelType !== 3) {
+      payload.resolutions = '';
+      payload.aspect_ratios = '';
+    }
+    if (modelType === 2) {
+      payload.image_capabilities = JSON.stringify(
+        normalizeImageCapabilities(payload.image_capabilities),
+      );
+    }
+
+    return payload;
   };
 
   const formatModelSeries = (series) => {
@@ -117,15 +190,10 @@ const ModelMappingTable = ({
   const handleStatusToggle = async (record) => {
     try {
       const newStatus = record.status === 1 ? 0 : 1;
-      const payload = {
+      const payload = sanitizeMappingPayloadForUpdate({
         ...record,
         status: newStatus,
-      };
-      if (record.model_type === 2) {
-        payload.image_capabilities = JSON.stringify(
-          normalizeImageCapabilities(record.image_capabilities),
-        );
-      }
+      });
       const res = await API.put(`/api/model-mapping/`, {
         ...payload,
       });
@@ -161,23 +229,36 @@ const ModelMappingTable = ({
   };
 
   const formatRequestEndpoint = (endpoint, modelType) => {
+    const normalizedEndpoint = normalizeRequestEndpoint(endpoint);
+    if (modelType === 1) {
+      const endpointMap = {
+        openai: 'OpenAI (/v1/chat/completions)',
+        anthropic: 'Claude (/v1/messages)',
+        gemini: 'Gemini (/v1beta/models/{model}:generateContent)',
+      };
+      return endpointMap[normalizedEndpoint] || endpoint || '-';
+    }
+
     if (modelType === 2) {
       const endpointMap = {
         openai: 'OpenAI (/v1/images)',
         dalle: 'OpenAI',
-        gemini: 'Gemini',
+        gemini: 'Gemini 图片生成',
         'openai-response': 'OpenAI (/v1/responses)',
       };
-      return endpointMap[endpoint] || endpoint || '-';
+      return endpointMap[normalizedEndpoint] || endpoint || '-';
     }
 
     const endpointMap = {
       openai: 'OpenAI',
       dalle: 'OpenAI',
       gemini: 'Gemini',
+      'openai-video-generation':
+        'OpenAI Video Generations (/v1/video/generations)',
+      'openai-video': 'OpenAI Videos (Sora, /v1/videos)',
     };
 
-    return endpointMap[endpoint] || endpoint || '-';
+    return endpointMap[normalizedEndpoint] || endpoint || '-';
   };
 
   const formatImageCapabilities = (raw) => {
@@ -257,7 +338,10 @@ const ModelMappingTable = ({
     {
       title: t('分辨率'),
       dataIndex: 'resolutions',
-      render: (text) => {
+      render: (text, record) => {
+        if (record.model_type !== 2 && record.model_type !== 3) {
+          return '-';
+        }
         if (!text) return '-';
         try {
           const resolutions = JSON.parse(text);
@@ -270,7 +354,10 @@ const ModelMappingTable = ({
     {
       title: t('宽高比'),
       dataIndex: 'aspect_ratios',
-      render: (text) => {
+      render: (text, record) => {
+        if (record.model_type !== 2 && record.model_type !== 3) {
+          return '-';
+        }
         if (!text) return '-';
         try {
           const ratios = JSON.parse(text);
