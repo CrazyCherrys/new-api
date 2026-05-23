@@ -212,14 +212,18 @@ func parseDurationOptions(raw string) ([]int, error) {
 		return nil, nil
 	}
 
-	var durations []int
-	if err := common.UnmarshalJsonStr(raw, &durations); err != nil {
+	var rawValues []any
+	if err := common.UnmarshalJsonStr(raw, &rawValues); err != nil {
 		return nil, fmt.Errorf("failed to parse duration options: %w", err)
 	}
 
-	normalized := make([]int, 0, len(durations))
-	seen := make(map[int]struct{}, len(durations))
-	for _, duration := range durations {
+	normalized := make([]int, 0, len(rawValues))
+	seen := make(map[int]struct{}, len(rawValues))
+	for _, rawValue := range rawValues {
+		duration, err := normalizeDurationOption(rawValue)
+		if err != nil {
+			return nil, err
+		}
 		if duration <= 0 {
 			return nil, fmt.Errorf("invalid duration option: %d", duration)
 		}
@@ -231,6 +235,35 @@ func parseDurationOptions(raw string) ([]int, error) {
 	}
 
 	return normalized, nil
+}
+
+func normalizeDurationOption(value any) (int, error) {
+	switch typed := value.(type) {
+	case float64:
+		duration := int(typed)
+		if float64(duration) != typed {
+			return 0, fmt.Errorf("invalid duration option: %v", typed)
+		}
+		return duration, nil
+	case string:
+		raw := strings.ToLower(strings.TrimSpace(typed))
+		raw = strings.TrimSuffix(raw, "秒")
+		raw = strings.TrimSuffix(raw, "s")
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return 0, fmt.Errorf("invalid duration option: %s", typed)
+		}
+		var duration int
+		if _, err := fmt.Sscanf(raw, "%d", &duration); err != nil {
+			return 0, fmt.Errorf("invalid duration option: %s", typed)
+		}
+		if fmt.Sprintf("%d", duration) != raw {
+			return 0, fmt.Errorf("invalid duration option: %s", typed)
+		}
+		return duration, nil
+	default:
+		return 0, fmt.Errorf("invalid duration option: %v", value)
+	}
 }
 
 func NormalizeDurationOptions(raw string) (string, error) {

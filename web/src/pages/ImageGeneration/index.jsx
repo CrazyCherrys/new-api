@@ -56,6 +56,8 @@ const DEFAULT_IMAGE_CAPABILITIES = [
   IMAGE_CAPABILITY_GENERATION,
   IMAGE_CAPABILITY_EDITING,
 ];
+const VIDEO_CAPABILITY_IMAGE_TO_VIDEO = 'image_to_video';
+const VIDEO_CAPABILITY_TEXT_TO_VIDEO = 'text_to_video';
 const DEFAULT_POLLING_INTERVAL_SECONDS = 5;
 const DEFAULT_MAX_BATCH_TASKS = 10;
 const DEFAULT_TASK_PAGE_SIZE = 21;
@@ -84,6 +86,27 @@ const normalizeImageCapabilities = (raw) => {
 const modelSupportsCapability = (model, capability) =>
   !!model &&
   normalizeImageCapabilities(model.image_capabilities).includes(capability);
+
+const normalizeVideoCapabilities = (raw) => {
+  if (Array.isArray(raw)) {
+    return raw;
+  }
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse video capabilities:', e);
+    }
+  }
+  return [VIDEO_CAPABILITY_IMAGE_TO_VIDEO];
+};
+
+const modelSupportsVideoCapability = (model, capability) =>
+  !!model &&
+  normalizeVideoCapabilities(model.video_capabilities).includes(capability);
 
 const taskCursorPaginationSupported = (state) =>
   !!state &&
@@ -648,7 +671,14 @@ const ImageGeneration = () => {
         return;
       }
       const items = res.data.data || [];
-      setVideoModels(items);
+      setVideoModels(
+        items.map((item) => ({
+          ...item,
+          video_capabilities: normalizeVideoCapabilities(
+            item.video_capabilities,
+          ),
+        })),
+      );
       const series = Array.from(
         new Set(items.map((item) => item.model_series).filter(Boolean)),
       );
@@ -663,6 +693,20 @@ const ImageGeneration = () => {
       showError(error.message || t('加载视频模型失败'));
     }
   };
+
+  useEffect(() => {
+    if (!videoSelectedModelData) {
+      return;
+    }
+    if (
+      !modelSupportsVideoCapability(
+        videoSelectedModelData,
+        VIDEO_CAPABILITY_IMAGE_TO_VIDEO,
+      )
+    ) {
+      setVideoReferenceImage(null);
+    }
+  }, [videoSelectedModelData]);
 
   const loadWorkerSettings = async () => {
     try {
@@ -1903,6 +1947,15 @@ const ImageGeneration = () => {
   };
 
   const handleGenerateVideo = async () => {
+    const supportsImageToVideo = modelSupportsVideoCapability(
+      videoSelectedModelData,
+      VIDEO_CAPABILITY_IMAGE_TO_VIDEO,
+    );
+    const supportsTextToVideo = modelSupportsVideoCapability(
+      videoSelectedModelData,
+      VIDEO_CAPABILITY_TEXT_TO_VIDEO,
+    );
+
     if (!videoSelectedModel) {
       showError(t('请选择模型'));
       return;
@@ -1915,29 +1968,43 @@ const ImageGeneration = () => {
       showError(t('模型配置错误：缺少 request_endpoint'));
       return;
     }
-    if (!videoReferenceImage?.fileInstance) {
-      showError(t('请上传一张参考图'));
+    if (!videoSelectedModelData?.duration_options?.length || !videoDuration) {
+      showError(t('当前模型未配置可用时长选项'));
+      return;
+    }
+    if (videoReferenceImage && !supportsImageToVideo) {
+      showError(t('当前模型不支持图生视频'));
+      return;
+    }
+    if (!videoReferenceImage && !supportsTextToVideo) {
+      showError(t('当前模型需要上传一张参考图'));
       return;
     }
 
     setVideoGenerating(true);
     try {
-      const base64Image = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(videoReferenceImage.fileInstance);
-      });
+      let base64Image = '';
+      if (videoReferenceImage?.fileInstance) {
+        base64Image = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(videoReferenceImage.fileInstance);
+        });
+      }
+      const params = {
+        duration: videoDuration,
+        resolution: videoResolution,
+        aspect_ratio: videoAspectRatio,
+      };
+      if (base64Image) {
+        params.reference_images = [base64Image];
+      }
       const taskPayload = {
         model_id: videoSelectedModel,
         prompt: videoPrompt.trim(),
         request_endpoint: videoSelectedModelData.request_endpoint,
-        params: JSON.stringify({
-          duration: videoDuration,
-          resolution: videoResolution,
-          aspect_ratio: videoAspectRatio,
-          reference_images: [base64Image],
-        }),
+        params: JSON.stringify(params),
       };
       const res = await API.post('/api/video-generation/tasks', taskPayload);
       if (!res.data.success) {
@@ -2164,6 +2231,18 @@ const ImageGeneration = () => {
     ['openai', 'openai-response'].includes(selectedModelData.request_endpoint);
   const requiresReferenceImage =
     selectedModelSupportsEditing && !selectedModelSupportsGeneration;
+  const videoSelectedModelSupportsImageToVideo =
+    !!videoSelectedModelData &&
+    modelSupportsVideoCapability(
+      videoSelectedModelData,
+      VIDEO_CAPABILITY_IMAGE_TO_VIDEO,
+    );
+  const videoSelectedModelSupportsTextToVideo =
+    !!videoSelectedModelData &&
+    modelSupportsVideoCapability(
+      videoSelectedModelData,
+      VIDEO_CAPABILITY_TEXT_TO_VIDEO,
+    );
   const canGenerate =
     !!selectedModel &&
     !!selectedModelData &&
@@ -2178,7 +2257,9 @@ const ImageGeneration = () => {
     !!videoSelectedModel &&
     !!videoSelectedModelData &&
     !!videoPrompt.trim() &&
-    !!videoReferenceImage;
+    !!videoSelectedModelData?.duration_options?.length &&
+    ((!!videoReferenceImage && videoSelectedModelSupportsImageToVideo) ||
+      (!videoReferenceImage && videoSelectedModelSupportsTextToVideo));
 
   const renderImageLeftPanel = () => (
     <>
@@ -2495,50 +2576,52 @@ const ImageGeneration = () => {
         </div>
       </div>
 
-      <div style={styles.fieldGroup}>
-        <span style={styles.label}>{t('参考图像')}</span>
-        <div
-          style={{
-            display: 'flex',
-            gap: 8,
-            flexWrap: 'wrap',
-            alignItems: 'center',
-          }}
-        >
-          {videoReferenceImage && (
-            <div style={styles.referenceImageContainer}>
-              <img
-                src={
-                  videoReferenceImage.url ||
-                  (videoReferenceImage.fileInstance &&
-                    URL.createObjectURL(videoReferenceImage.fileInstance))
-                }
-                alt=''
-                style={styles.referenceImageThumb}
-              />
-              <button
-                style={styles.removeImageBtn}
-                onClick={handleVideoReferenceRemove}
-              >
-                <IconDelete size='extra-small' />
-              </button>
-            </div>
-          )}
-          <Upload
-            action=''
-            accept='image/*'
-            multiple={false}
-            fileList={videoReferenceImage ? [videoReferenceImage] : []}
-            onChange={handleVideoReferenceUpload}
-            showUploadList={false}
-            beforeUpload={validateImageSize}
+      {videoSelectedModelSupportsImageToVideo && (
+        <div style={styles.fieldGroup}>
+          <span style={styles.label}>{t('参考图像')}</span>
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              flexWrap: 'wrap',
+              alignItems: 'center',
+            }}
           >
-            <div style={styles.addImageBtn}>
-              <IconPlus size='large' />
-            </div>
-          </Upload>
+            {videoReferenceImage && (
+              <div style={styles.referenceImageContainer}>
+                <img
+                  src={
+                    videoReferenceImage.url ||
+                    (videoReferenceImage.fileInstance &&
+                      URL.createObjectURL(videoReferenceImage.fileInstance))
+                  }
+                  alt=''
+                  style={styles.referenceImageThumb}
+                />
+                <button
+                  style={styles.removeImageBtn}
+                  onClick={handleVideoReferenceRemove}
+                >
+                  <IconDelete size='extra-small' />
+                </button>
+              </div>
+            )}
+            <Upload
+              action=''
+              accept='image/*'
+              multiple={false}
+              fileList={videoReferenceImage ? [videoReferenceImage] : []}
+              onChange={handleVideoReferenceUpload}
+              showUploadList={false}
+              beforeUpload={validateImageSize}
+            >
+              <div style={styles.addImageBtn}>
+                <IconPlus size='large' />
+              </div>
+            </Upload>
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 

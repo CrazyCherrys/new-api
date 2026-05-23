@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -20,6 +19,7 @@ import (
 
 const (
 	videoCapabilityImageToVideo = "image_to_video"
+	videoCapabilityTextToVideo  = "text_to_video"
 )
 
 type VideoGenerationParams struct {
@@ -76,14 +76,6 @@ func CreateVideoGenerationTask(userId int, modelId string, prompt string, reques
 		return nil, fmt.Errorf("request endpoint mismatch: expected %s, got %s", mapping.RequestEndpoint, requestEndpoint)
 	}
 
-	supportsImageToVideo, err := model.HasVideoCapability(mapping.VideoCapabilities, videoCapabilityImageToVideo)
-	if err != nil {
-		return nil, err
-	}
-	if !supportsImageToVideo {
-		return nil, fmt.Errorf("current model does not support image-to-video")
-	}
-
 	var params VideoGenerationParams
 	if strings.TrimSpace(rawParams) != "" {
 		if err := common.UnmarshalJsonStr(rawParams, &params); err != nil {
@@ -93,8 +85,26 @@ func CreateVideoGenerationTask(userId int, modelId string, prompt string, reques
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
 	}
-	if len(params.ReferenceImages) != 1 {
-		return nil, fmt.Errorf("image-to-video requires exactly one reference image")
+
+	hasReferenceImage := len(params.ReferenceImages) > 0 && strings.TrimSpace(params.ReferenceImages[0]) != ""
+	supportsImageToVideo, err := model.HasVideoCapability(mapping.VideoCapabilities, videoCapabilityImageToVideo)
+	if err != nil {
+		return nil, err
+	}
+	supportsTextToVideo, err := model.HasVideoCapability(mapping.VideoCapabilities, videoCapabilityTextToVideo)
+	if err != nil {
+		return nil, err
+	}
+	if hasReferenceImage {
+		if !supportsImageToVideo {
+			return nil, fmt.Errorf("current model does not support image-to-video")
+		}
+		params.ReferenceImages = []string{params.ReferenceImages[0]}
+	} else {
+		if !supportsTextToVideo {
+			return nil, fmt.Errorf("current model does not support text-to-video")
+		}
+		params.ReferenceImages = nil
 	}
 
 	durationOptions, err := model.EffectiveDurationOptions(mapping.DurationOptions)
@@ -147,7 +157,7 @@ func ListVideoGenerationTasks(userId int, page int, pageSize int, status string,
 		ModelID:        modelID,
 		StartTimestamp: startTime,
 		EndTimestamp:   endTime,
-	}, []string{constant.TaskActionGenerate})
+	}, nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -160,7 +170,7 @@ func ListVideoGenerationTasks(userId int, page int, pageSize int, status string,
 }
 
 func GetVideoGenerationTaskDetail(userId int, identifier string) (*dto.VideoGenerationTaskDetail, error) {
-	task, err := model.GetUserVideoTaskByIdentifier(userId, identifier, []string{constant.TaskActionGenerate})
+	task, err := model.GetUserVideoTaskByIdentifier(userId, identifier, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +178,7 @@ func GetVideoGenerationTaskDetail(userId int, identifier string) (*dto.VideoGene
 }
 
 func RetryVideoGenerationTask(userId int, id int64) (*dto.VideoGenerationTaskSummary, error) {
-	task, err := model.GetUserVideoTaskByID(userId, id, []string{constant.TaskActionGenerate})
+	task, err := model.GetUserVideoTaskByID(userId, id, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +218,7 @@ func RetryVideoGenerationTask(userId int, id int64) (*dto.VideoGenerationTaskSum
 }
 
 func DeleteVideoGenerationTask(userId int, id int64) error {
-	task, err := model.GetUserVideoTaskByID(userId, id, []string{constant.TaskActionGenerate})
+	task, err := model.GetUserVideoTaskByID(userId, id, nil)
 	if err != nil {
 		return err
 	}
@@ -287,16 +297,16 @@ func callUpstreamVideoAPIViaRelay(ctx context.Context, userId int, modelId strin
 		requestURL = fmt.Sprintf("http://127.0.0.1:%s/v1/videos", port)
 	}
 
-	imageInput := strings.TrimSpace(params.ReferenceImages[0])
-	if imageInput == "" {
-		return nil, "", fmt.Errorf("reference image is required")
-	}
-	if !model.IsProbablyDataURL(imageInput) {
-		converted, convErr := referenceImageAsDataURL(ctx, imageInput)
-		if convErr != nil {
-			return nil, "", fmt.Errorf("failed to load reference image: %w", convErr)
+	var imageInput string
+	if len(params.ReferenceImages) > 0 {
+		imageInput = strings.TrimSpace(params.ReferenceImages[0])
+		if !model.IsProbablyDataURL(imageInput) {
+			converted, convErr := referenceImageAsDataURL(ctx, imageInput)
+			if convErr != nil {
+				return nil, "", fmt.Errorf("failed to load reference image: %w", convErr)
+			}
+			imageInput = converted
 		}
-		imageInput = converted
 	}
 
 	videoReq := relaycommon.TaskSubmitReq{
@@ -307,11 +317,15 @@ func callUpstreamVideoAPIViaRelay(ctx context.Context, userId int, modelId strin
 		Size:     params.Resolution,
 	}
 	if normalizeVideoEndpoint(requestEndpoint) == "openai-video" {
-		videoReq.InputReference = imageInput
+		if imageInput != "" {
+			videoReq.InputReference = imageInput
+		}
 	} else {
-		videoReq.Image = imageInput
-		videoReq.Images = []string{imageInput}
-		videoReq.InputReference = imageInput
+		if imageInput != "" {
+			videoReq.Image = imageInput
+			videoReq.Images = []string{imageInput}
+			videoReq.InputReference = imageInput
+		}
 		videoReq.Metadata = map[string]interface{}{}
 		if params.Resolution != "" {
 			videoReq.Metadata["resolution"] = params.Resolution
@@ -572,9 +586,6 @@ func buildRetryVideoTaskPayload(task *model.Task) (VideoGenerationParams, string
 	}
 	if params.Duration == 0 {
 		params.Duration = model.ExtractTaskDuration(task)
-	}
-	if len(params.ReferenceImages) == 0 {
-		return VideoGenerationParams{}, prompt, fmt.Errorf("task %d is missing reference image for retry", task.ID)
 	}
 	return params, prompt, nil
 }

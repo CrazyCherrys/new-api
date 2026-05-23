@@ -23,13 +23,13 @@ import {
   Form,
   Button,
   Space,
-  InputNumber,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../../../helpers';
 
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
-const DEFAULT_VIDEO_CAPABILITIES = ['image_to_video'];
+const DEFAULT_VIDEO_CAPABILITIES = ['image_to_video', 'text_to_video'];
+const DEFAULT_VIDEO_DURATIONS = [5, 10];
 
 const normalizeRequestEndpoint = (endpoint) => {
   const normalized = String(endpoint || '')
@@ -170,11 +170,7 @@ const EditModelMappingModal = ({
 
   const videoCapabilityOptions = [
     { value: 'image_to_video', label: t('图生视频') },
-  ];
-
-  const durationOptions = [
-    { value: 5, label: '5s' },
-    { value: 10, label: '10s' },
+    { value: 'text_to_video', label: t('文生视频') },
   ];
 
   const parseJsonArray = (value) => {
@@ -191,6 +187,49 @@ const EditModelMappingModal = ({
       return [];
     }
   };
+
+  const normalizeDurationValue = (value) => {
+    const raw = String(value ?? '')
+      .trim()
+      .toLowerCase();
+    if (!raw) {
+      return null;
+    }
+    let normalized = raw;
+    if (normalized.endsWith('秒')) {
+      normalized = normalized.slice(0, -1).trim();
+    }
+    if (normalized.endsWith('s')) {
+      normalized = normalized.slice(0, -1).trim();
+    }
+    if (!/^\d+$/.test(normalized)) {
+      return null;
+    }
+    const seconds = Number(normalized);
+    return Number.isInteger(seconds) && seconds > 0 ? seconds : null;
+  };
+
+  const normalizeDurationOptions = (values) => {
+    const source = Array.isArray(values) ? values : [];
+    const seen = new Set();
+    const normalized = [];
+    source.forEach((item) => {
+      String(item ?? '')
+        .split(/[,\s，、]+/)
+        .forEach((part) => {
+          const seconds = normalizeDurationValue(part);
+          if (!seconds || seen.has(seconds)) {
+            return;
+          }
+          seen.add(seconds);
+          normalized.push(seconds);
+        });
+    });
+    return normalized;
+  };
+
+  const formatDurationTags = (values) =>
+    normalizeDurationOptions(values).map((item) => `${item}s`);
 
   useEffect(() => {
     if (visible && formApi) {
@@ -212,6 +251,9 @@ const EditModelMappingModal = ({
           videoCapabilities = videoCapabilityOptions
             .filter((item) => DEFAULT_VIDEO_CAPABILITIES.includes(item.value))
             .map((item) => item.value);
+        }
+        if (Number(editingMapping.model_type) === 3 && durationValues.length === 0) {
+          durationValues = DEFAULT_VIDEO_DURATIONS;
         }
 
         const nextModelType = Number(editingMapping.model_type) || 1;
@@ -237,7 +279,7 @@ const EditModelMappingModal = ({
           aspect_ratios: isImageMapping ? aspectRatios : [],
           image_capabilities: imageCapabilities,
           video_capabilities: videoCapabilities,
-          duration_options: durationValues,
+          duration_options: formatDurationTags(durationValues),
           status: editingMapping.status === 1,
           priority: editingMapping.priority ?? 0,
         });
@@ -306,12 +348,11 @@ const EditModelMappingModal = ({
       showError(t('请选择至少一个视频能力'));
       return;
     }
-    if (
-      Number(values.model_type) === 3 &&
-      (!Array.isArray(values.duration_options) ||
-        values.duration_options.length === 0)
-    ) {
-      showError(t('请至少选择一个时长选项'));
+    const normalizedDurations = normalizeDurationOptions(
+      values.duration_options,
+    );
+    if (Number(values.model_type) === 3 && normalizedDurations.length === 0) {
+      showError(t('请至少输入一个时长选项'));
       return;
     }
 
@@ -349,8 +390,8 @@ const EditModelMappingModal = ({
             ? JSON.stringify(values.video_capabilities)
             : '',
         duration_options:
-          modelType === 3 && values.duration_options
-            ? JSON.stringify(values.duration_options.map(Number))
+          modelType === 3
+            ? JSON.stringify(normalizedDurations)
             : '',
       };
 
@@ -486,6 +527,16 @@ const EditModelMappingModal = ({
                   DEFAULT_VIDEO_CAPABILITIES,
                 );
               }
+              const currentDurations = formApi?.getValue('duration_options');
+              if (
+                !Array.isArray(currentDurations) ||
+                currentDurations.length === 0
+              ) {
+                formApi?.setValue(
+                  'duration_options',
+                  formatDurationTags(DEFAULT_VIDEO_DURATIONS),
+                );
+              }
             } else {
               formApi?.setValue('image_capabilities', []);
               formApi?.setValue('video_capabilities', []);
@@ -551,17 +602,22 @@ const EditModelMappingModal = ({
           />
         </div>
         <div hidden={!isVideoModel}>
-          <Form.CheckboxGroup
+          <Form.TagInput
             field='duration_options'
             label={t('时长选项')}
-            options={durationOptions}
-            direction='horizontal'
+            placeholder={t('输入时长，如 5s 或 10s，回车添加')}
+            addOnBlur
+            showClear
+            style={{ width: '100%' }}
+            onChange={(values) => {
+              formApi?.setValue('duration_options', formatDurationTags(values));
+            }}
             rules={
               isVideoModel
                 ? [
                     {
                       required: true,
-                      message: t('请至少选择一个时长选项'),
+                      message: t('请至少输入一个时长选项'),
                     },
                   ]
                 : []

@@ -33,6 +33,8 @@ import { API, showError, showSuccess } from '../../../helpers';
 
 const { Text } = Typography;
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
+const DEFAULT_VIDEO_CAPABILITIES = ['image_to_video'];
+const DEFAULT_VIDEO_DURATIONS = [5, 10];
 
 const normalizeRequestEndpoint = (endpoint) => {
   const normalized = String(endpoint || '')
@@ -92,6 +94,57 @@ const ModelMappingTable = ({
     return [...DEFAULT_IMAGE_CAPABILITIES];
   };
 
+  const normalizeVideoCapabilities = (raw) => {
+    if (Array.isArray(raw)) {
+      return raw;
+    }
+    if (typeof raw === 'string' && raw.trim() !== '') {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch (e) {
+        return [...DEFAULT_VIDEO_CAPABILITIES];
+      }
+    }
+    return [...DEFAULT_VIDEO_CAPABILITIES];
+  };
+
+  const normalizeDurationOptions = (raw) => {
+    const source = Array.isArray(raw)
+      ? raw
+      : (() => {
+          if (typeof raw !== 'string' || raw.trim() === '') {
+            return [];
+          }
+          try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+          } catch (e) {
+            return [];
+          }
+        })();
+    const seen = new Set();
+    const normalized = [];
+    source.forEach((item) => {
+      const seconds = Number(
+        String(item ?? '')
+          .trim()
+          .toLowerCase()
+          .replace(/秒$/, '')
+          .replace(/s$/, '')
+          .trim(),
+      );
+      if (!Number.isInteger(seconds) || seconds <= 0 || seen.has(seconds)) {
+        return;
+      }
+      seen.add(seconds);
+      normalized.push(seconds);
+    });
+    return normalized;
+  };
+
   const getDefaultRequestEndpoint = (modelType) => {
     switch (Number(modelType)) {
       case 1:
@@ -139,6 +192,17 @@ const ModelMappingTable = ({
     if (modelType === 2) {
       payload.image_capabilities = JSON.stringify(
         normalizeImageCapabilities(payload.image_capabilities),
+      );
+    }
+    if (modelType === 3) {
+      payload.video_capabilities = JSON.stringify(
+        normalizeVideoCapabilities(payload.video_capabilities),
+      );
+      const durationOptions = normalizeDurationOptions(
+        payload.duration_options,
+      );
+      payload.duration_options = JSON.stringify(
+        durationOptions.length > 0 ? durationOptions : DEFAULT_VIDEO_DURATIONS,
       );
     }
 
@@ -272,6 +336,24 @@ const ModelMappingTable = ({
       .join(', ');
   };
 
+  const formatVideoCapabilities = (raw) => {
+    const capabilities = normalizeVideoCapabilities(raw);
+    const capabilityMap = {
+      image_to_video: t('图生视频'),
+      text_to_video: t('文生视频'),
+    };
+    return capabilities
+      .map((capability) => capabilityMap[capability] || capability)
+      .join(', ');
+  };
+
+  const formatDurationOptions = (raw) => {
+    const durations = normalizeDurationOptions(raw);
+    return durations.length > 0
+      ? durations.map((item) => `${item}s`).join(', ')
+      : '-';
+  };
+
   const columns = [
     {
       title: 'ID',
@@ -332,8 +414,21 @@ const ModelMappingTable = ({
     {
       title: t('模型能力'),
       dataIndex: 'image_capabilities',
+      render: (text, record) => {
+        if (record.model_type === 2) {
+          return formatImageCapabilities(text);
+        }
+        if (record.model_type === 3) {
+          return formatVideoCapabilities(record.video_capabilities);
+        }
+        return '-';
+      },
+    },
+    {
+      title: t('时长选项'),
+      dataIndex: 'duration_options',
       render: (text, record) =>
-        record.model_type === 2 ? formatImageCapabilities(text) : '-',
+        record.model_type === 3 ? formatDurationOptions(text) : '-',
     },
     {
       title: t('分辨率'),
