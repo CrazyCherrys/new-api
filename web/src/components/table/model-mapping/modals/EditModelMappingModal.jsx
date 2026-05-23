@@ -31,6 +31,26 @@ import { API, showError, showSuccess } from '../../../../helpers';
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
 const DEFAULT_VIDEO_CAPABILITIES = ['image_to_video'];
 
+const normalizeRequestEndpoint = (endpoint) => {
+  const normalized = String(endpoint || '')
+    .trim()
+    .toLowerCase();
+  switch (normalized) {
+    case 'dalle':
+      return 'openai';
+    case 'claude':
+      return 'anthropic';
+    case 'openai-video-generations':
+    case 'video-generation':
+      return 'openai-video-generation';
+    case 'openai-videos':
+    case 'sora':
+      return 'openai-video';
+    default:
+      return normalized;
+  }
+};
+
 const EditModelMappingModal = ({
   visible,
   handleClose,
@@ -43,8 +63,13 @@ const EditModelMappingModal = ({
   const [selectedResolutions, setSelectedResolutions] = useState([]);
   const [selectedAspectRatios, setSelectedAspectRatios] = useState([]);
   const [selectedModelType, setSelectedModelType] = useState(1);
+  const [selectedRequestEndpoint, setSelectedRequestEndpoint] =
+    useState('openai');
   const isImageModel = Number(selectedModelType) === 2;
   const isVideoModel = Number(selectedModelType) === 3;
+  const isGeminiImageModel =
+    isImageModel && selectedRequestEndpoint === 'gemini';
+  const showResolutionAndAspectRatio = isGeminiImageModel || isVideoModel;
 
   const modelSeriesOptions = [
     { value: 'openai', label: 'OpenAI' },
@@ -72,30 +97,59 @@ const EditModelMappingModal = ({
     { value: 4, label: t('音频') },
   ];
 
-  const requestEndpointOptions =
-    selectedModelType === 2
-      ? [
-          { value: 'openai', label: 'OpenAI (/v1/images)' },
-          { value: 'openai-response', label: 'OpenAI (/v1/responses)' },
-          { value: 'gemini', label: 'Gemini' },
-          { value: 'openai_mod', label: 'OpenAI魔改' },
-        ]
-      : selectedModelType === 3
-        ? [
-            {
-              value: 'openai-video-generation',
-              label: 'OpenAI Video Generations (/v1/video/generations)',
-            },
-            {
-              value: 'openai-video',
-              label: 'OpenAI Videos (Sora, /v1/videos)',
-            },
-          ]
-      : [
-          { value: 'openai', label: 'OpenAI (/v1/images)' },
-          { value: 'gemini', label: 'Gemini' },
-          { value: 'openai_mod', label: 'OpenAI魔改' },
-        ];
+  const chatEndpointOptions = [
+    { value: 'openai', label: 'OpenAI (/v1/chat/completions)' },
+    { value: 'anthropic', label: 'Claude (/v1/messages)' },
+    {
+      value: 'gemini',
+      label: 'Gemini (/v1beta/models/{model}:generateContent)',
+    },
+  ];
+
+  const imageEndpointOptions = [
+    { value: 'openai', label: 'OpenAI (/v1/images)' },
+    { value: 'openai-response', label: 'OpenAI (/v1/responses)' },
+    { value: 'gemini', label: 'Gemini 图片生成' },
+    { value: 'openai_mod', label: 'OpenAI魔改' },
+  ];
+
+  const videoEndpointOptions = [
+    {
+      value: 'openai-video-generation',
+      label: 'OpenAI Video Generations (/v1/video/generations)',
+    },
+    {
+      value: 'openai-video',
+      label: 'OpenAI Videos (Sora, /v1/videos)',
+    },
+  ];
+
+  const getRequestEndpointOptions = (modelType) => {
+    switch (Number(modelType)) {
+      case 1:
+        return chatEndpointOptions;
+      case 2:
+        return imageEndpointOptions;
+      case 3:
+        return videoEndpointOptions;
+      default:
+        return chatEndpointOptions;
+    }
+  };
+
+  const getDefaultRequestEndpoint = (modelType) => {
+    const options = getRequestEndpointOptions(modelType);
+    return options[0]?.value || 'openai';
+  };
+
+  const isValidRequestEndpointForModelType = (modelType, endpoint) => {
+    const normalizedEndpoint = normalizeRequestEndpoint(endpoint);
+    return getRequestEndpointOptions(modelType).some(
+      (option) => option.value === normalizedEndpoint,
+    );
+  };
+
+  const requestEndpointOptions = getRequestEndpointOptions(selectedModelType);
 
   const imageResolutionOptions = [
     { value: '1K', label: '1K' },
@@ -183,12 +237,25 @@ const EditModelMappingModal = ({
             .map((item) => item.value);
         }
 
+        const nextModelType = Number(editingMapping.model_type) || 1;
+        const normalizedEndpoint =
+          normalizeRequestEndpoint(editingMapping.request_endpoint) ||
+          getDefaultRequestEndpoint(nextModelType);
+        const nextEndpoint = isValidRequestEndpointForModelType(
+          nextModelType,
+          normalizedEndpoint,
+        )
+          ? normalizedEndpoint
+          : getDefaultRequestEndpoint(nextModelType);
+
         setSelectedResolutions(resolutions);
         setSelectedAspectRatios(aspectRatios);
-        setSelectedModelType(Number(editingMapping.model_type) || 1);
+        setSelectedModelType(nextModelType);
+        setSelectedRequestEndpoint(nextEndpoint);
 
         formApi.setValues({
           ...editingMapping,
+          request_endpoint: nextEndpoint,
           actual_model:
             editingMapping.actual_model || editingMapping.request_model || '',
           resolutions,
@@ -203,6 +270,7 @@ const EditModelMappingModal = ({
         setSelectedResolutions([]);
         setSelectedAspectRatios([]);
         setSelectedModelType(1);
+        setSelectedRequestEndpoint('openai');
 
         formApi.setValues({
           request_model: '',
@@ -278,8 +346,14 @@ const EditModelMappingModal = ({
 
     setLoading(true);
     try {
+      const modelType = Number(values.model_type);
+      const requestEndpoint = normalizeRequestEndpoint(values.request_endpoint);
+      const shouldSubmitImageSettings =
+        modelType === 2 && requestEndpoint === 'gemini';
+      const shouldSubmitVideoSettings = modelType === 3;
       const payload = {
         ...values,
+        request_endpoint: requestEndpoint,
         actual_model:
           typeof values.actual_model === 'string'
             ? values.actual_model.trim()
@@ -289,22 +363,26 @@ const EditModelMappingModal = ({
           ? Number(values.priority)
           : 0,
         // 将数组转换为 JSON 字符串
-        resolutions: values.resolutions
+        resolutions:
+          (shouldSubmitImageSettings || shouldSubmitVideoSettings) &&
+          values.resolutions
           ? JSON.stringify(values.resolutions)
           : '',
-        aspect_ratios: values.aspect_ratios
+        aspect_ratios:
+          (shouldSubmitImageSettings || shouldSubmitVideoSettings) &&
+          values.aspect_ratios
           ? JSON.stringify(values.aspect_ratios)
           : '',
         image_capabilities:
-          Number(values.model_type) === 2 && values.image_capabilities
+          modelType === 2 && values.image_capabilities
             ? JSON.stringify(values.image_capabilities)
             : '',
         video_capabilities:
-          Number(values.model_type) === 3 && values.video_capabilities
+          modelType === 3 && values.video_capabilities
             ? JSON.stringify(values.video_capabilities)
             : '',
         duration_options:
-          Number(values.model_type) === 3 && values.duration_options
+          modelType === 3 && values.duration_options
             ? JSON.stringify(values.duration_options.map(Number))
             : '',
       };
@@ -403,12 +481,26 @@ const EditModelMappingModal = ({
           optionList={modelTypeOptions}
           rules={[{ required: true, message: t('请选择模型类型') }]}
           onChange={(value) => {
-            setSelectedModelType(Number(value) || 1);
-            const currentEndpoint = formApi?.getValue('request_endpoint');
-            if (Number(value) === 2) {
-              if (!currentEndpoint) {
-                formApi?.setValue('request_endpoint', 'openai');
-              }
+            const nextModelType = Number(value) || 1;
+            const previousModelType = Number(selectedModelType) || 1;
+            setSelectedModelType(nextModelType);
+            const currentEndpoint = normalizeRequestEndpoint(
+              formApi?.getValue('request_endpoint'),
+            );
+            if (
+              !currentEndpoint ||
+              !isValidRequestEndpointForModelType(nextModelType, currentEndpoint)
+            ) {
+              const nextEndpoint = getDefaultRequestEndpoint(nextModelType);
+              formApi?.setValue('request_endpoint', nextEndpoint);
+              setSelectedRequestEndpoint(nextEndpoint);
+            } else {
+              setSelectedRequestEndpoint(currentEndpoint);
+            }
+
+            if (nextModelType === 2) {
+              formApi?.setValue('video_capabilities', []);
+              formApi?.setValue('duration_options', []);
               const currentCapabilities =
                 formApi?.getValue('image_capabilities');
               if (
@@ -420,17 +512,22 @@ const EditModelMappingModal = ({
                   DEFAULT_IMAGE_CAPABILITIES,
                 );
               }
-            } else if (Number(value) === 3) {
-              if (
-                !currentEndpoint ||
-                ['openai', 'openai-response', 'gemini', 'openai_mod'].includes(
-                  currentEndpoint,
-                )
-              ) {
-                formApi?.setValue(
-                  'request_endpoint',
-                  'openai-video-generation',
-                );
+              const nextEndpoint =
+                formApi?.getValue('request_endpoint') ||
+                getDefaultRequestEndpoint(nextModelType);
+              if (nextEndpoint !== 'gemini' || previousModelType !== 2) {
+                formApi?.setValue('resolutions', []);
+                formApi?.setValue('aspect_ratios', []);
+                setSelectedResolutions([]);
+                setSelectedAspectRatios([]);
+              }
+            } else if (nextModelType === 3) {
+              formApi?.setValue('image_capabilities', []);
+              if (previousModelType !== 3) {
+                formApi?.setValue('resolutions', []);
+                formApi?.setValue('aspect_ratios', []);
+                setSelectedResolutions([]);
+                setSelectedAspectRatios([]);
               }
               const currentVideoCapabilities =
                 formApi?.getValue('video_capabilities');
@@ -444,16 +541,13 @@ const EditModelMappingModal = ({
                 );
               }
             } else {
-              if (
-                currentEndpoint === 'openai-response' ||
-                currentEndpoint === 'openai-video-generation' ||
-                currentEndpoint === 'openai-video'
-              ) {
-                formApi?.setValue('request_endpoint', 'openai');
-              }
               formApi?.setValue('image_capabilities', []);
               formApi?.setValue('video_capabilities', []);
               formApi?.setValue('duration_options', []);
+              formApi?.setValue('resolutions', []);
+              formApi?.setValue('aspect_ratios', []);
+              setSelectedResolutions([]);
+              setSelectedAspectRatios([]);
             }
           }}
         />
@@ -463,6 +557,17 @@ const EditModelMappingModal = ({
           placeholder={t('选择请求端点类型')}
           optionList={requestEndpointOptions}
           rules={[{ required: true, message: t('请选择请求端点') }]}
+          onChange={(value) => {
+            const nextEndpoint = normalizeRequestEndpoint(value);
+            setSelectedRequestEndpoint(nextEndpoint);
+            formApi?.setValue('request_endpoint', nextEndpoint);
+            if (isImageModel && nextEndpoint !== 'gemini') {
+              formApi?.setValue('resolutions', []);
+              formApi?.setValue('aspect_ratios', []);
+              setSelectedResolutions([]);
+              setSelectedAspectRatios([]);
+            }
+          }}
         />
         <Form.Switch field='status' label={t('状态')} size='large' />
         <Form.InputNumber
@@ -526,56 +631,64 @@ const EditModelMappingModal = ({
             }
           />
         </div>
-        <div>
-          <div
-            style={{
-              marginBottom: 8,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <span style={{ fontSize: 14, fontWeight: 600 }}>{t('分辨率')}</span>
-            <Space>
-              <Button size='small' onClick={handleSelectAllResolutions}>
-                {t('全选')}
-              </Button>
-              <Button size='small' onClick={handleDeselectAllResolutions}>
-                {t('取消全选')}
-              </Button>
-            </Space>
+        {showResolutionAndAspectRatio && (
+          <div>
+            <div
+              style={{
+                marginBottom: 8,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span style={{ fontSize: 14, fontWeight: 600 }}>
+                {t('分辨率')}
+              </span>
+              <Space>
+                <Button size='small' onClick={handleSelectAllResolutions}>
+                  {t('全选')}
+                </Button>
+                <Button size='small' onClick={handleDeselectAllResolutions}>
+                  {t('取消全选')}
+                </Button>
+              </Space>
+            </div>
+            <Form.CheckboxGroup
+              field='resolutions'
+              options={resolutionOptions}
+              direction='horizontal'
+            />
           </div>
-          <Form.CheckboxGroup
-            field='resolutions'
-            options={resolutionOptions}
-            direction='horizontal'
-          />
-        </div>
-        <div>
-          <div
-            style={{
-              marginBottom: 8,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <span style={{ fontSize: 14, fontWeight: 600 }}>{t('宽高比')}</span>
-            <Space>
-              <Button size='small' onClick={handleSelectAllAspectRatios}>
-                {t('全选')}
-              </Button>
-              <Button size='small' onClick={handleDeselectAllAspectRatios}>
-                {t('取消全选')}
-              </Button>
-            </Space>
+        )}
+        {showResolutionAndAspectRatio && (
+          <div>
+            <div
+              style={{
+                marginBottom: 8,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span style={{ fontSize: 14, fontWeight: 600 }}>
+                {t('宽高比')}
+              </span>
+              <Space>
+                <Button size='small' onClick={handleSelectAllAspectRatios}>
+                  {t('全选')}
+                </Button>
+                <Button size='small' onClick={handleDeselectAllAspectRatios}>
+                  {t('取消全选')}
+                </Button>
+              </Space>
+            </div>
+            <Form.CheckboxGroup
+              field='aspect_ratios'
+              options={aspectRatioOptions}
+              direction='horizontal'
+            />
           </div>
-          <Form.CheckboxGroup
-            field='aspect_ratios'
-            options={aspectRatioOptions}
-            direction='horizontal'
-          />
-        </div>
+        )}
         <Form.TextArea
           field='description'
           label={t('描述')}

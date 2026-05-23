@@ -10,10 +10,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func normalizeImageModelEndpoint(endpoint string) string {
+func normalizeModelMappingEndpoint(endpoint string) string {
 	switch strings.ToLower(strings.TrimSpace(endpoint)) {
 	case "dalle":
 		return "openai"
+	case "claude":
+		return "anthropic"
 	case "openai-video-generations", "video-generation":
 		return "openai-video-generation"
 	case "openai-videos", "sora":
@@ -23,8 +25,19 @@ func normalizeImageModelEndpoint(endpoint string) string {
 	}
 }
 
-// validateImageModelEndpoint 校验绘画模型的请求端点
-func validateImageModelEndpoint(modelType int, endpoint string) error {
+func validateModelMappingEndpoint(modelType int, endpoint string) error {
+	if modelType == 1 {
+		if endpoint == "" {
+			return errors.New("对话模型必须指定请求端点")
+		}
+		validEndpoints := []string{"openai", "anthropic", "gemini"}
+		for _, valid := range validEndpoints {
+			if endpoint == valid {
+				return nil
+			}
+		}
+		return errors.New("对话模型请求端点必须是 openai、anthropic 或 gemini 之一")
+	}
 	if modelType == 2 {
 		if endpoint == "" {
 			return errors.New("绘画模型必须指定请求端点")
@@ -50,6 +63,22 @@ func validateImageModelEndpoint(modelType int, endpoint string) error {
 		return errors.New("视频模型请求端点必须是 openai-video-generation 或 openai-video 之一")
 	}
 	return nil
+}
+
+func sanitizeModelMappingSettings(mm *model.ModelMapping) {
+	if mm.ModelType != 2 {
+		mm.ImageCapabilities = ""
+	}
+	if mm.ModelType != 3 {
+		mm.VideoCapabilities = ""
+		mm.DurationOptions = ""
+	}
+	if mm.ModelType == 1 ||
+		(mm.ModelType == 2 && mm.RequestEndpoint != "gemini") ||
+		(mm.ModelType != 2 && mm.ModelType != 3) {
+		mm.Resolutions = ""
+		mm.AspectRatios = ""
+	}
 }
 
 func validateImageModelCapabilities(modelType int, raw string) (string, error) {
@@ -175,10 +204,9 @@ func CreateModelMapping(c *gin.Context) {
 		common.ApiErrorMsg(c, "请求端点不能为空")
 		return
 	}
-	mm.RequestEndpoint = normalizeImageModelEndpoint(mm.RequestEndpoint)
+	mm.RequestEndpoint = normalizeModelMappingEndpoint(mm.RequestEndpoint)
 
-	// 校验绘画模型的请求端点
-	if err := validateImageModelEndpoint(mm.ModelType, mm.RequestEndpoint); err != nil {
+	if err := validateModelMappingEndpoint(mm.ModelType, mm.RequestEndpoint); err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
@@ -200,13 +228,7 @@ func CreateModelMapping(c *gin.Context) {
 		return
 	}
 	mm.DurationOptions = normalizedDurationOptions
-	if mm.ModelType != 2 {
-		mm.ImageCapabilities = ""
-	}
-	if mm.ModelType != 3 {
-		mm.VideoCapabilities = ""
-		mm.DurationOptions = ""
-	}
+	sanitizeModelMappingSettings(&mm)
 
 	// 如果 ActualModel 为空，使用 RequestModel 作为默认值
 	if mm.ActualModel == "" {
@@ -255,10 +277,9 @@ func UpdateModelMapping(c *gin.Context) {
 		common.ApiErrorMsg(c, "请求端点不能为空")
 		return
 	}
-	mm.RequestEndpoint = normalizeImageModelEndpoint(mm.RequestEndpoint)
+	mm.RequestEndpoint = normalizeModelMappingEndpoint(mm.RequestEndpoint)
 
-	// 校验绘画模型的请求端点
-	if err := validateImageModelEndpoint(mm.ModelType, mm.RequestEndpoint); err != nil {
+	if err := validateModelMappingEndpoint(mm.ModelType, mm.RequestEndpoint); err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
@@ -280,13 +301,7 @@ func UpdateModelMapping(c *gin.Context) {
 		return
 	}
 	mm.DurationOptions = normalizedDurationOptions
-	if mm.ModelType != 2 {
-		mm.ImageCapabilities = ""
-	}
-	if mm.ModelType != 3 {
-		mm.VideoCapabilities = ""
-		mm.DurationOptions = ""
-	}
+	sanitizeModelMappingSettings(&mm)
 
 	// 如果 ActualModel 为空，使用 RequestModel 作为默认值
 	if mm.ActualModel == "" {
