@@ -45,14 +45,6 @@ func ListVideoGenerationModels() ([]*dto.VideoGenerationModel, error) {
 			return nil, err
 		}
 		requestEndpoint := normalizeVideoEndpoint(mapping.RequestEndpoint)
-		resolutions := normalizeVideoModelResolutions(
-			requestEndpoint,
-			parseJSONStringArray(mapping.Resolutions),
-		)
-		aspectRatios := normalizeVideoModelAspectRatios(
-			requestEndpoint,
-			parseJSONStringArray(mapping.AspectRatios),
-		)
 		items = append(items, &dto.VideoGenerationModel{
 			RequestModel:      mapping.RequestModel,
 			DisplayName:       mapping.DisplayName,
@@ -60,8 +52,8 @@ func ListVideoGenerationModels() ([]*dto.VideoGenerationModel, error) {
 			RequestEndpoint:   requestEndpoint,
 			VideoCapabilities: capabilities,
 			DurationOptions:   durations,
-			Resolutions:       resolutions,
-			AspectRatios:      aspectRatios,
+			Resolutions:       defaultVideoModelResolutions(requestEndpoint),
+			AspectRatios:      defaultVideoModelAspectRatios(requestEndpoint),
 		})
 	}
 	return items, nil
@@ -113,18 +105,12 @@ func CreateVideoGenerationTask(userId int, modelId string, prompt string, reques
 		return nil, fmt.Errorf("unsupported duration: %d", params.Duration)
 	}
 
-	resolutionOptions := normalizeVideoModelResolutions(
-		requestEndpoint,
-		parseJSONStringArray(mapping.Resolutions),
-	)
+	resolutionOptions := defaultVideoModelResolutions(requestEndpoint)
 	if len(resolutionOptions) > 0 && !containsString(resolutionOptions, params.Resolution) {
 		return nil, fmt.Errorf("unsupported resolution: %s", params.Resolution)
 	}
 
-	aspectRatioOptions := normalizeVideoModelAspectRatios(
-		requestEndpoint,
-		parseJSONStringArray(mapping.AspectRatios),
-	)
+	aspectRatioOptions := defaultVideoModelAspectRatios(requestEndpoint)
 	if len(aspectRatioOptions) > 0 && !containsString(aspectRatioOptions, params.AspectRatio) {
 		return nil, fmt.Errorf("unsupported aspect ratio: %s", params.AspectRatio)
 	}
@@ -259,24 +245,10 @@ func normalizeVideoTaskStatus(status string) string {
 	}
 }
 
-func normalizeVideoModelResolutions(requestEndpoint string, raw []string) []string {
-	normalized := make([]string, 0, len(raw))
-	seen := make(map[string]struct{}, len(raw))
-	for _, item := range raw {
-		value := strings.TrimSpace(item)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		normalized = append(normalized, value)
-	}
-
+func defaultVideoModelResolutions(requestEndpoint string) []string {
 	switch requestEndpoint {
 	case "openai-video":
-		allowed := []string{
+		return []string{
 			"1280x720",
 			"720x1280",
 			"1920x1080",
@@ -286,57 +258,18 @@ func normalizeVideoModelResolutions(requestEndpoint string, raw []string) []stri
 			"1792x1024",
 			"1024x1792",
 		}
-		if len(normalized) == 0 {
-			return allowed
-		}
-		return intersectStringOptions(normalized, allowed)
 	default:
-		return normalized
+		return nil
 	}
 }
 
-func normalizeVideoModelAspectRatios(requestEndpoint string, raw []string) []string {
-	normalized := make([]string, 0, len(raw))
-	seen := make(map[string]struct{}, len(raw))
-	for _, item := range raw {
-		value := strings.TrimSpace(item)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		normalized = append(normalized, value)
-	}
-
+func defaultVideoModelAspectRatios(requestEndpoint string) []string {
 	switch requestEndpoint {
 	case "openai-video":
-		allowed := []string{"16:9", "9:16", "1:1"}
-		if len(normalized) == 0 {
-			return allowed
-		}
-		return intersectStringOptions(normalized, allowed)
+		return []string{"16:9", "9:16", "1:1"}
 	default:
-		return normalized
+		return nil
 	}
-}
-
-func intersectStringOptions(current []string, allowed []string) []string {
-	out := make([]string, 0, len(current))
-	allowedSet := make(map[string]struct{}, len(allowed))
-	for _, item := range allowed {
-		allowedSet[item] = struct{}{}
-	}
-	for _, item := range current {
-		if _, ok := allowedSet[item]; ok {
-			out = append(out, item)
-		}
-	}
-	if len(out) > 0 {
-		return out
-	}
-	return allowed
 }
 
 func callUpstreamVideoAPIViaRelay(ctx context.Context, userId int, modelId string, prompt string, requestEndpoint string, params VideoGenerationParams) ([]byte, string, error) {

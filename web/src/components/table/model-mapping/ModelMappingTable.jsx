@@ -132,7 +132,7 @@ const ModelMappingTable = ({
       payload.video_capabilities = '';
       payload.duration_options = '';
     }
-    if (modelType !== 2 && modelType !== 3) {
+    if (!(modelType === 2 && payload.request_endpoint === 'gemini')) {
       payload.resolutions = '';
       payload.aspect_ratios = '';
     }
@@ -339,7 +339,10 @@ const ModelMappingTable = ({
       title: t('分辨率'),
       dataIndex: 'resolutions',
       render: (text, record) => {
-        if (record.model_type !== 2 && record.model_type !== 3) {
+        if (
+          record.model_type !== 2 ||
+          normalizeRequestEndpoint(record.request_endpoint) !== 'gemini'
+        ) {
           return '-';
         }
         if (!text) return '-';
@@ -355,7 +358,10 @@ const ModelMappingTable = ({
       title: t('宽高比'),
       dataIndex: 'aspect_ratios',
       render: (text, record) => {
-        if (record.model_type !== 2 && record.model_type !== 3) {
+        if (
+          record.model_type !== 2 ||
+          normalizeRequestEndpoint(record.request_endpoint) !== 'gemini'
+        ) {
           return '-';
         }
         if (!text) return '-';
