@@ -73,7 +73,7 @@ func sanitizeModelMappingSettings(mm *model.ModelMapping) {
 		mm.VideoCapabilities = ""
 		mm.DurationOptions = ""
 	}
-	if mm.ModelType != 2 && mm.ModelType != 3 {
+	if !(mm.ModelType == 2 && mm.RequestEndpoint == "gemini") {
 		mm.Resolutions = ""
 		mm.AspectRatios = ""
 	}

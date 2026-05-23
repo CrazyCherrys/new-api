@@ -628,7 +628,6 @@ func TestModelMappingUpdatePreservesCreatedTime(t *testing.T) {
 	record.ActualModel = "target-model-v2"
 	record.Priority = 9
 	record.Status = 0
-	record.Description = "updated description"
 	if err := record.Update(); err != nil {
 		t.Fatalf("update failed: %v", err)
 	}

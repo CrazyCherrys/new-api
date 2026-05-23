@@ -63,9 +63,12 @@ const EditModelMappingModal = ({
   const [selectedResolutions, setSelectedResolutions] = useState([]);
   const [selectedAspectRatios, setSelectedAspectRatios] = useState([]);
   const [selectedModelType, setSelectedModelType] = useState(1);
+  const [selectedRequestEndpoint, setSelectedRequestEndpoint] =
+    useState('openai');
   const isImageModel = Number(selectedModelType) === 2;
   const isVideoModel = Number(selectedModelType) === 3;
-  const showResolutionAndAspectRatio = isImageModel || isVideoModel;
+  const isGeminiImageModel =
+    isImageModel && selectedRequestEndpoint === 'gemini';
 
   const modelSeriesOptions = [
     { value: 'openai', label: 'OpenAI' },
@@ -152,21 +155,6 @@ const EditModelMappingModal = ({
     { value: '4K', label: '4K' },
   ];
 
-  const videoResolutionOptions = [
-    { value: '1280x720', label: '1280x720' },
-    { value: '720x1280', label: '720x1280' },
-    { value: '1920x1080', label: '1920x1080' },
-    { value: '1080x1920', label: '1080x1920' },
-    { value: '1024x1024', label: '1024x1024' },
-    { value: '960x960', label: '960x960' },
-    { value: '1792x1024', label: '1792x1024' },
-    { value: '1024x1792', label: '1024x1792' },
-  ];
-
-  const resolutionOptions = isVideoModel
-    ? videoResolutionOptions
-    : imageResolutionOptions;
-
   const aspectRatioOptions = [
     { value: '1:1', label: '1:1' },
     { value: '16:9', label: '16:9' },
@@ -243,17 +231,20 @@ const EditModelMappingModal = ({
           ? normalizedEndpoint
           : getDefaultRequestEndpoint(nextModelType);
 
-        setSelectedResolutions(resolutions);
-        setSelectedAspectRatios(aspectRatios);
+        const isGeminiImageMapping =
+          nextModelType === 2 && nextEndpoint === 'gemini';
+        setSelectedResolutions(isGeminiImageMapping ? resolutions : []);
+        setSelectedAspectRatios(isGeminiImageMapping ? aspectRatios : []);
         setSelectedModelType(nextModelType);
+        setSelectedRequestEndpoint(nextEndpoint);
 
         formApi.setValues({
           ...editingMapping,
           request_endpoint: nextEndpoint,
           actual_model:
             editingMapping.actual_model || editingMapping.request_model || '',
-          resolutions,
-          aspect_ratios: aspectRatios,
+          resolutions: isGeminiImageMapping ? resolutions : [],
+          aspect_ratios: isGeminiImageMapping ? aspectRatios : [],
           image_capabilities: imageCapabilities,
           video_capabilities: videoCapabilities,
           duration_options: durationValues,
@@ -264,6 +255,7 @@ const EditModelMappingModal = ({
         setSelectedResolutions([]);
         setSelectedAspectRatios([]);
         setSelectedModelType(1);
+        setSelectedRequestEndpoint('openai');
 
         formApi.setValues({
           request_model: '',
@@ -271,7 +263,6 @@ const EditModelMappingModal = ({
           display_name: '',
           model_series: '',
           model_type: 1,
-          description: '',
           status: true,
           priority: 0,
           request_endpoint: 'openai',
@@ -341,8 +332,8 @@ const EditModelMappingModal = ({
     try {
       const modelType = Number(values.model_type);
       const requestEndpoint = normalizeRequestEndpoint(values.request_endpoint);
-      const shouldSubmitImageSettings = modelType === 2;
-      const shouldSubmitVideoSettings = modelType === 3;
+      const shouldSubmitGeminiImageSettings =
+        modelType === 2 && requestEndpoint === 'gemini';
       const payload = {
         ...values,
         request_endpoint: requestEndpoint,
@@ -356,13 +347,11 @@ const EditModelMappingModal = ({
           : 0,
         // 将数组转换为 JSON 字符串
         resolutions:
-          (shouldSubmitImageSettings || shouldSubmitVideoSettings) &&
-          values.resolutions
+          shouldSubmitGeminiImageSettings && values.resolutions
           ? JSON.stringify(values.resolutions)
           : '',
         aspect_ratios:
-          (shouldSubmitImageSettings || shouldSubmitVideoSettings) &&
-          values.aspect_ratios
+          shouldSubmitGeminiImageSettings && values.aspect_ratios
           ? JSON.stringify(values.aspect_ratios)
           : '',
         image_capabilities:
@@ -417,7 +406,7 @@ const EditModelMappingModal = ({
   };
 
   const handleSelectAllResolutions = () => {
-    const allValues = resolutionOptions.map((opt) => opt.value);
+    const allValues = imageResolutionOptions.map((opt) => opt.value);
     setSelectedResolutions(allValues);
     formApi?.setValue('resolutions', allValues);
   };
@@ -474,7 +463,6 @@ const EditModelMappingModal = ({
           rules={[{ required: true, message: t('请选择模型类型') }]}
           onChange={(value) => {
             const nextModelType = Number(value) || 1;
-            const previousModelType = Number(selectedModelType) || 1;
             setSelectedModelType(nextModelType);
             const currentEndpoint = normalizeRequestEndpoint(
               formApi?.getValue('request_endpoint'),
@@ -485,6 +473,9 @@ const EditModelMappingModal = ({
             ) {
               const nextEndpoint = getDefaultRequestEndpoint(nextModelType);
               formApi?.setValue('request_endpoint', nextEndpoint);
+              setSelectedRequestEndpoint(nextEndpoint);
+            } else {
+              setSelectedRequestEndpoint(currentEndpoint);
             }
 
             if (nextModelType === 2) {
@@ -501,14 +492,21 @@ const EditModelMappingModal = ({
                   DEFAULT_IMAGE_CAPABILITIES,
                 );
               }
-            } else if (nextModelType === 3) {
-              formApi?.setValue('image_capabilities', []);
-              if (previousModelType !== 3) {
+              const nextEndpoint = normalizeRequestEndpoint(
+                formApi?.getValue('request_endpoint'),
+              );
+              if (nextEndpoint !== 'gemini') {
                 formApi?.setValue('resolutions', []);
                 formApi?.setValue('aspect_ratios', []);
                 setSelectedResolutions([]);
                 setSelectedAspectRatios([]);
               }
+            } else if (nextModelType === 3) {
+              formApi?.setValue('image_capabilities', []);
+              formApi?.setValue('resolutions', []);
+              formApi?.setValue('aspect_ratios', []);
+              setSelectedResolutions([]);
+              setSelectedAspectRatios([]);
               const currentVideoCapabilities =
                 formApi?.getValue('video_capabilities');
               if (
@@ -540,6 +538,13 @@ const EditModelMappingModal = ({
           onChange={(value) => {
             const nextEndpoint = normalizeRequestEndpoint(value);
             formApi?.setValue('request_endpoint', nextEndpoint);
+            setSelectedRequestEndpoint(nextEndpoint);
+            if (!(isImageModel && nextEndpoint === 'gemini')) {
+              formApi?.setValue('resolutions', []);
+              formApi?.setValue('aspect_ratios', []);
+              setSelectedResolutions([]);
+              setSelectedAspectRatios([]);
+            }
           }}
         />
         <Form.Switch field='status' label={t('状态')} size='large' />
@@ -604,7 +609,7 @@ const EditModelMappingModal = ({
             }
           />
         </div>
-        {showResolutionAndAspectRatio && (
+        {isGeminiImageModel && (
           <div>
             <div
               style={{
@@ -628,12 +633,12 @@ const EditModelMappingModal = ({
             </div>
             <Form.CheckboxGroup
               field='resolutions'
-              options={resolutionOptions}
+              options={imageResolutionOptions}
               direction='horizontal'
             />
           </div>
         )}
-        {showResolutionAndAspectRatio && (
+        {isGeminiImageModel && (
           <div>
             <div
               style={{
@@ -662,13 +667,6 @@ const EditModelMappingModal = ({
             />
           </div>
         )}
-        <Form.TextArea
-          field='description'
-          label={t('描述')}
-          placeholder={t('输入模型描述')}
-          autosize
-          showClear
-        />
         <Space
           style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}
         >

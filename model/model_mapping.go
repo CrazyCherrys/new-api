@@ -26,23 +26,23 @@ var defaultVideoCapabilities = []string{
 
 // ModelMapping 模型映射配置
 type ModelMapping struct {
-	Id                int    `json:"id"`
-	RequestModel      string `json:"request_model" gorm:"size:128;not null;uniqueIndex:uk_request_model"`
-	ActualModel       string `json:"actual_model" gorm:"size:128;not null"`
-	DisplayName       string `json:"display_name" gorm:"size:255;not null"`
-	ModelSeries       string `json:"model_series" gorm:"size:64;default:'';index"`
-	ModelType         int    `json:"model_type" gorm:"default:1;index"` // 1=对话 2=绘画 3=视频 4=音频
-	Description       string `json:"description" gorm:"type:text"`
-	Status            int    `json:"status" gorm:"default:1;index"`
-	Priority          int    `json:"priority" gorm:"default:0"`
-	RequestEndpoint   string `json:"request_endpoint" gorm:"size:32;default:''"` // openai, openai-response, gemini
-	Resolutions       string `json:"resolutions" gorm:"type:text"`               // JSON array: ["1K","2K","4K"]
-	AspectRatios      string `json:"aspect_ratios" gorm:"type:text"`             // JSON array: ["1:1","16:9",...]
-	ImageCapabilities string `json:"image_capabilities" gorm:"type:text"`        // JSON array: ["image_generation","image_editing"]
-	VideoCapabilities string `json:"video_capabilities" gorm:"type:text"`        // JSON array: ["image_to_video","text_to_video"]
-	DurationOptions   string `json:"duration_options" gorm:"type:text"`          // JSON array: [5,10]
-	CreatedTime       int64  `json:"created_time" gorm:"bigint"`
-	UpdatedTime       int64  `json:"updated_time" gorm:"bigint"`
+	Id                    int    `json:"id"`
+	RequestModel          string `json:"request_model" gorm:"size:128;not null;uniqueIndex:uk_request_model"`
+	ActualModel           string `json:"actual_model" gorm:"size:128;not null"`
+	DisplayName           string `json:"display_name" gorm:"size:255;not null"`
+	ModelSeries           string `json:"model_series" gorm:"size:64;default:'';index"`
+	ModelType             int    `json:"model_type" gorm:"default:1;index"`     // 1=对话 2=绘画 3=视频 4=音频
+	DeprecatedDescription string `json:"-" gorm:"column:description;type:text"` // Deprecated: kept only for existing DB schemas; model mapping settings no longer expose or update description.
+	Status                int    `json:"status" gorm:"default:1;index"`
+	Priority              int    `json:"priority" gorm:"default:0"`
+	RequestEndpoint       string `json:"request_endpoint" gorm:"size:32;default:''"` // chat: openai, anthropic, gemini; image: openai, openai-response, gemini; video: openai-video-generation, openai-video
+	Resolutions           string `json:"resolutions" gorm:"type:text"`               // Gemini image JSON array: ["1K","2K","4K"]
+	AspectRatios          string `json:"aspect_ratios" gorm:"type:text"`             // Gemini image JSON array: ["1:1","16:9",...]
+	ImageCapabilities     string `json:"image_capabilities" gorm:"type:text"`        // JSON array: ["image_generation","image_editing"]
+	VideoCapabilities     string `json:"video_capabilities" gorm:"type:text"`        // JSON array: ["image_to_video","text_to_video"]
+	DurationOptions       string `json:"duration_options" gorm:"type:text"`          // JSON array: [5,10]
+	CreatedTime           int64  `json:"created_time" gorm:"bigint"`
+	UpdatedTime           int64  `json:"updated_time" gorm:"bigint"`
 }
 
 func DefaultImageCapabilities() []string {
@@ -263,7 +263,6 @@ func (mm *ModelMapping) Insert() error {
 		"display_name":       mm.DisplayName,
 		"model_series":       mm.ModelSeries,
 		"model_type":         mm.ModelType,
-		"description":        mm.Description,
 		"status":             mm.Status,
 		"priority":           mm.Priority,
 		"request_endpoint":   mm.RequestEndpoint,
@@ -289,7 +288,6 @@ func (mm *ModelMapping) Update() error {
 		"display_name":       mm.DisplayName,
 		"model_series":       mm.ModelSeries,
 		"model_type":         mm.ModelType,
-		"description":        mm.Description,
 		"status":             mm.Status,
 		"priority":           mm.Priority,
 		"request_endpoint":   mm.RequestEndpoint,
