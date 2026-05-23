@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	ImageCapabilityGeneration = "image_generation"
-	ImageCapabilityEditing    = "image_editing"
+	ImageCapabilityGeneration   = "image_generation"
+	ImageCapabilityEditing      = "image_editing"
 	VideoCapabilityImageToVideo = "image_to_video"
 	VideoCapabilityTextToVideo  = "text_to_video"
 )
@@ -35,7 +35,7 @@ type ModelMapping struct {
 	Description       string `json:"description" gorm:"type:text"`
 	Status            int    `json:"status" gorm:"default:1;index"`
 	Priority          int    `json:"priority" gorm:"default:0"`
-	RequestEndpoint   string `json:"request_endpoint" gorm:"size:32;default:''"` // openai, openai-response, gemini, openai_mod
+	RequestEndpoint   string `json:"request_endpoint" gorm:"size:32;default:''"` // openai, openai-response, gemini
 	Resolutions       string `json:"resolutions" gorm:"type:text"`               // JSON array: ["1K","2K","4K"]
 	AspectRatios      string `json:"aspect_ratios" gorm:"type:text"`             // JSON array: ["1:1","16:9",...]
 	ImageCapabilities string `json:"image_capabilities" gorm:"type:text"`        // JSON array: ["image_generation","image_editing"]
@@ -343,7 +343,7 @@ func GetActiveImageModelMappings(startIdx int, num int) ([]*ModelMapping, int64,
 	var mappings []*ModelMapping
 
 	query := DB.Model(&ModelMapping{}).
-		Where("model_type = ? AND status = ? AND request_endpoint <> ''", 2, 1)
+		Where("model_type = ? AND status = ? AND request_endpoint IN ?", 2, 1, []string{"openai", "openai-response", "gemini"})
 
 	err := query.Order("priority DESC, id DESC").Limit(num).Offset(startIdx).Find(&mappings).Error
 	return mappings, int64(len(mappings)), err
@@ -374,7 +374,9 @@ func GetModelMappingByRequestModel(requestModel string) (*ModelMapping, error) {
 
 func GetActiveModelMappingByRequestModel(requestModel string) (*ModelMapping, error) {
 	var mm ModelMapping
-	err := DB.Where("request_model = ? AND status = 1", requestModel).First(&mm).Error
+	err := DB.Where("request_model = ? AND status = 1", requestModel).
+		Where("(model_type <> 2 OR request_endpoint IN ?)", []string{"openai", "openai-response", "gemini"}).
+		First(&mm).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}

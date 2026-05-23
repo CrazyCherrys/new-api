@@ -1558,8 +1558,6 @@ func callUpstreamImageAPIViaRelay(ctx context.Context, task *model.ImageGenerati
 	//     有参考图或遮罩时走 /v1/images/edits。
 	//   - "openai-response"（Responses 图像工具）：统一发往 /v1/responses，
 	//     由 convertOpenAIResponsesImageRequest 组装 Responses API payload。
-	//   - "openai_mod"（魔改端点）：无参考图走 /v1/images/generations；
-	//     有参考图走 /v1/images/edits（JSON 透传，由 convertOpenAIModImageEditRequest 处理）。
 	//   - 其他端点（gemini 等）：保持原行为。
 	taskEndpoint := normalizeImageEndpoint(imageReq.RequestEndpoint)
 	requestURL := fmt.Sprintf("http://127.0.0.1:%s/v1/images/generations", port)
@@ -1739,7 +1737,7 @@ func calculateImageCost(modelId string, imageReq *dto.ImageRequest) int {
 // channelTypesForImageEndpoint 根据 endpoint 返回对应的渠道类型列表
 func channelTypesForImageEndpoint(endpoint string) ([]int, error) {
 	switch normalizeImageEndpoint(endpoint) {
-	case "openai", "openai-response", "openai_mod":
+	case "openai", "openai-response":
 		return []int{constant.ChannelTypeOpenAI}, nil
 	case "gemini":
 		return []int{constant.ChannelTypeGemini}, nil

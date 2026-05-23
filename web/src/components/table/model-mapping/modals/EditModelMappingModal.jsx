@@ -78,7 +78,6 @@ const EditModelMappingModal = ({
           { value: 'openai', label: 'OpenAI (/v1/images)' },
           { value: 'openai-response', label: 'OpenAI (/v1/responses)' },
           { value: 'gemini', label: 'Gemini' },
-          { value: 'openai_mod', label: 'OpenAI魔改' },
         ]
       : selectedModelType === 3
         ? [
@@ -94,7 +93,6 @@ const EditModelMappingModal = ({
       : [
           { value: 'openai', label: 'OpenAI (/v1/images)' },
           { value: 'gemini', label: 'Gemini' },
-          { value: 'openai_mod', label: 'OpenAI魔改' },
         ];
 
   const imageResolutionOptions = [
@@ -423,7 +421,7 @@ const EditModelMappingModal = ({
             } else if (Number(value) === 3) {
               if (
                 !currentEndpoint ||
-                ['openai', 'openai-response', 'gemini', 'openai_mod'].includes(
+                ['openai', 'openai-response', 'gemini'].includes(
                   currentEndpoint,
                 )
               ) {

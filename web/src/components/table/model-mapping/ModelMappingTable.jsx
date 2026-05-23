@@ -167,7 +167,6 @@ const ModelMappingTable = ({
         dalle: 'OpenAI',
         gemini: 'Gemini',
         'openai-response': 'OpenAI (/v1/responses)',
-        openai_mod: 'OpenAI魔改',
       };
       return endpointMap[endpoint] || endpoint || '-';
     }
@@ -176,7 +175,6 @@ const ModelMappingTable = ({
       openai: 'OpenAI',
       dalle: 'OpenAI',
       gemini: 'Gemini',
-      openai_mod: 'OpenAI魔改',
     };
 
     return endpointMap[endpoint] || endpoint || '-';

@@ -214,7 +214,7 @@ func getUserCustomImageGenerationChannel(c *gin.Context, modelRequest *ModelRequ
 	switch strings.ToLower(strings.TrimSpace(c.GetHeader("X-New-API-Image-Request-Endpoint"))) {
 	case "gemini":
 		channelType = constant.ChannelTypeGemini
-	case "openai", "openai-response", "openai_mod", "":
+	case "openai", "openai-response", "":
 		channelType = constant.ChannelTypeOpenAI
 	default:
 		if modelRequest != nil && strings.TrimSpace(modelRequest.Model) != "" {

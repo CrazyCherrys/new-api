@@ -29,13 +29,13 @@ func validateImageModelEndpoint(modelType int, endpoint string) error {
 		if endpoint == "" {
 			return errors.New("绘画模型必须指定请求端点")
 		}
-		validEndpoints := []string{"openai", "openai-response", "gemini", "openai_mod"}
+		validEndpoints := []string{"openai", "openai-response", "gemini"}
 		for _, valid := range validEndpoints {
 			if endpoint == valid {
 				return nil
 			}
 		}
-		return errors.New("请求端点必须是 openai、openai-response、gemini 或 openai_mod 之一")
+		return errors.New("请求端点必须是 openai、openai-response 或 gemini 之一")
 	}
 	if modelType == 3 {
 		if endpoint == "" {

@@ -576,6 +576,15 @@ func TestGetActiveImageModelMappingsFiltersDisabledAndMissingEndpoint(t *testing
 			Status:          1,
 			RequestEndpoint: "",
 		},
+		{
+			RequestModel:    "enabled-with-deprecated-endpoint",
+			ActualModel:     "enabled-with-deprecated-endpoint",
+			DisplayName:     "Enabled With Deprecated Endpoint",
+			ModelSeries:     "openai",
+			ModelType:       2,
+			Status:          1,
+			RequestEndpoint: "openai_mod",
+		},
 	}
 	for _, record := range records {
 		if err := record.Insert(); err != nil {
@@ -669,6 +678,27 @@ func TestGetModelMappingByRequestModelAndActiveVariant(t *testing.T) {
 	}
 	if gotActive != nil {
 		t.Fatalf("expected no active mapping, got %#v", gotActive)
+	}
+
+	deprecated := &ModelMapping{
+		RequestModel:    "deprecated-openai-mod-model",
+		ActualModel:     "deprecated-openai-mod-model",
+		DisplayName:     "Deprecated OpenAI Mod Model",
+		ModelSeries:     "openai",
+		ModelType:       2,
+		Status:          1,
+		RequestEndpoint: "openai_mod",
+	}
+	if err := deprecated.Insert(); err != nil {
+		t.Fatalf("failed to create deprecated endpoint model mapping: %v", err)
+	}
+
+	gotDeprecated, err := GetActiveModelMappingByRequestModel("deprecated-openai-mod-model")
+	if err != nil {
+		t.Fatalf("failed to get active mapping for deprecated endpoint: %v", err)
+	}
+	if gotDeprecated != nil {
+		t.Fatalf("expected deprecated openai_mod mapping to be excluded from active lookups, got %#v", gotDeprecated)
 	}
 }
 

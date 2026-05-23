@@ -449,7 +449,7 @@ func calculateOpenAIPixelSize(resolution, aspectRatio string) string {
 //	    2048x1152 / 3840x2160 / 2160x3840 / auto），由 calculateOpenAIPixelSize 映射。
 //	  - image：参考图数组（URL 或 base64 data URL）。无参考图时省略整个字段。
 //
-// 该结构与 openai_mod / gemini 端点的请求体完全独立，互不影响。
+// 该结构与 gemini 端点的请求体完全独立，互不影响。
 type StandardOpenAIImageRequest struct {
 	Prompt string   `json:"prompt"`
 	Model  string   `json:"model"`
@@ -633,121 +633,7 @@ func collectMultipartImagesAsDataURL(mf *multipart.Form) ([]string, error) {
 	return out, nil
 }
 
-// OpenAIModImageRequest represents the text-to-image request for OpenAI modified endpoints.
-// Only model, prompt and image_config (aspect_ratio / image_size) are sent upstream.
-type OpenAIModImageRequest struct {
-	Model       string                `json:"model"`
-	Prompt      string                `json:"prompt"`
-	ImageConfig *OpenAIModImageConfig `json:"image_config,omitempty"`
-}
-
-// OpenAIModImageEditRequest represents the image-to-image request for OpenAI modified endpoints.
-// image field accepts a single URL/data-URI string or an array of strings.
-// Only model, image, prompt and image_config are sent upstream.
-type OpenAIModImageEditRequest struct {
-	Model       string                `json:"model"`
-	Image       interface{}           `json:"image"` // string or []string
-	Prompt      string                `json:"prompt"`
-	ImageConfig *OpenAIModImageConfig `json:"image_config,omitempty"`
-}
-
-// OpenAIModImageConfig represents the image_config object for OpenAI modified endpoints
-type OpenAIModImageConfig struct {
-	ImageSize   string `json:"image_size,omitempty"`
-	AspectRatio string `json:"aspect_ratio,omitempty"`
-}
-
-// convertOpenAIModImageRequest converts the standard ImageRequest to OpenAI modified endpoint format.
-// Only model, prompt and image_config (aspect_ratio / image_size) are forwarded upstream.
-func (a *Adaptor) convertOpenAIModImageRequest(request dto.ImageRequest) (any, error) {
-	modRequest := OpenAIModImageRequest{
-		Model:  request.Model,
-		Prompt: request.Prompt,
-	}
-
-	// 优先读取正式 JSON 字段（序列化安全），回退到 RawParams（兼容进程内直调路径）
-	resolution := request.Resolution
-	aspectRatio := request.AspectRatio
-
-	if resolution == "" && request.RawParams != nil {
-		if r, ok := request.RawParams["resolution"].(string); ok {
-			resolution = r
-		}
-	}
-	if aspectRatio == "" && request.RawParams != nil {
-		if a, ok := request.RawParams["aspect_ratio"].(string); ok {
-			aspectRatio = a
-		}
-	}
-
-	if resolution != "" || aspectRatio != "" {
-		modRequest.ImageConfig = &OpenAIModImageConfig{
-			ImageSize:   resolution,
-			AspectRatio: aspectRatio,
-		}
-	}
-
-	return modRequest, nil
-}
-
-// convertOpenAIModImageEditRequest converts the standard ImageRequest to the OpenAI modified
-// image-to-image (edits) endpoint format. The upstream expects JSON with:
-//
-//	{ model, image: string|string[], prompt, image_config? }
-func (a *Adaptor) convertOpenAIModImageEditRequest(request dto.ImageRequest) (any, error) {
-	editRequest := OpenAIModImageEditRequest{
-		Model:  request.Model,
-		Prompt: request.Prompt,
-	}
-
-	// image_config
-	resolution := request.Resolution
-	aspectRatio := request.AspectRatio
-	if resolution == "" && request.RawParams != nil {
-		if r, ok := request.RawParams["resolution"].(string); ok {
-			resolution = r
-		}
-	}
-	if aspectRatio == "" && request.RawParams != nil {
-		if ap, ok := request.RawParams["aspect_ratio"].(string); ok {
-			aspectRatio = ap
-		}
-	}
-	if resolution != "" || aspectRatio != "" {
-		editRequest.ImageConfig = &OpenAIModImageConfig{
-			ImageSize:   resolution,
-			AspectRatio: aspectRatio,
-		}
-	}
-
-	// Collect images from ReferenceImages first; fall back to request.Image (json.RawMessage)
-	images := request.ReferenceImages
-	if len(images) == 0 && len(request.Image) > 0 {
-		var imgStr string
-		if err := common.Unmarshal(request.Image, &imgStr); err == nil && imgStr != "" {
-			images = []string{imgStr}
-		}
-	}
-
-	if len(images) == 0 {
-		return nil, errors.New("image is required for openai_mod image edit")
-	}
-	if len(images) == 1 {
-		editRequest.Image = images[0]
-	} else {
-		editRequest.Image = images
-	}
-
-	return editRequest, nil
-}
-
-// ConvertImageRequest 按 request_endpoint 分发到独立的转换逻辑：
-//
-//   - "openai_mod" + RelayModeImagesEdits → convertOpenAIModImageEditRequest
-//     image 字段为 string|[]string，整体以 JSON 发送（非 multipart form）
-//
-//   - "openai_mod" + RelayModeImagesGenerations → convertOpenAIModImageRequest
-//     resolution/aspect_ratio 原样写入 image_config（上游自行解释 "1K"/"2K"/"4K"）
+// ConvertImageRequest 按 request_endpoint 分发到独立的转换逻辑。
 //
 //   - "openai"：
 //     无编辑输入 -> convertOpenAIStandardJSONImageRequest（精简 JSON 协议，走 /v1/images/generations）
@@ -759,16 +645,9 @@ func (a *Adaptor) convertOpenAIModImageEditRequest(request dto.ImageRequest) (an
 //   - "gemini" 端点不经过此适配器，由 relay/channel/gemini 独立处理：
 //     resolution 原样映射为 Gemini imageSize（"1K"/"2K"/"4K"），上游自行解释像素含义
 //
-// 三条路径的 resolution 含义相互独立，切勿共用像素换算表。
+// 两条路径的 resolution 含义相互独立，切勿共用像素换算表。
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
 	switch request.RequestEndpoint {
-	case "openai_mod":
-		if info.RelayMode == relayconstant.RelayModeImagesEdits {
-			// 图生图：以 JSON 发送，上游 endpoint 为 /v1/images/edits
-			return a.convertOpenAIModImageEditRequest(request)
-		}
-		// 文生图：resolution/aspect_ratio 原样透传至 image_config，上游负责解释
-		return a.convertOpenAIModImageRequest(request)
 	case "openai":
 		// 标准 OpenAI 端点（由 /console/model-mapping 配置触发）：
 		// 文生图走精简 JSON；图像编辑走标准 multipart /v1/images/edits。
@@ -784,7 +663,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 
 // convertStandardOpenAIImageRequest 处理「未指定 request_endpoint」的标准 OpenAI 兼容请求。
 //
-// 该函数现在仅服务于直接调用 /v1/images/{generations,edits} 的外部 OpenAI SDK 路径，
+// 该函数服务于直接调用 /v1/images/{generations,edits} 的外部 OpenAI SDK 路径，
 // 不再用于 /image-generation 内部图床流程（后者通过 request_endpoint == "openai" 走
 // convertOpenAIStandardJSONImageRequest 的精简 JSON 协议）。
 //
@@ -794,7 +673,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 //   - RelayModeImagesGenerations：原样透传 ImageRequest 结构体（含 n / quality 等全字段）。
 //
 // 若 Size 未设置，则通过 calculateOpenAIPixelSize 将 resolution + aspect_ratio 换算为像素字符串。
-// 像素映射表以 gpt-image-2 规格为准，与 openai_mod / gemini 端点的换算表完全独立。
+// 像素映射表以 gpt-image-2 规格为准，与 gemini 端点的换算表完全独立。
 func (a *Adaptor) convertStandardOpenAIImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
 	// 若 Size 未设置，尝试从 aspect_ratio + resolution 换算（openai 端点专用逻辑）
 	if request.Size == "" {
@@ -1104,9 +983,7 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 		info.RelayMode == relayconstant.RelayModeAudioTranslation {
 		return channel.DoFormRequest(a, c, info, requestBody)
 	} else if info.RelayMode == relayconstant.RelayModeImagesEdits {
-		// openai_mod 图生图以 JSON 发送；标准 OpenAI edits 以 multipart form 发送。
-		// convertStandardOpenAIImageRequest 会显式将 Content-Type 设为 multipart/form-data，
-		// 而 convertOpenAIModImageEditRequest 不会修改 Content-Type（保持 application/json）。
+		// 标准 OpenAI edits 使用 multipart form。
 		if strings.Contains(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
 			return channel.DoFormRequest(a, c, info, requestBody)
 		}

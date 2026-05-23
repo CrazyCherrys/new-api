@@ -374,7 +374,7 @@ func (s *ImageGenerationService) generateOpenAIModWithClient(...) {
 **文件**: `frontend/src/api/modelSettings.ts` (行8-25)
 
 ```typescript
-export type RequestEndpoint = 'openai' | 'gemini' | 'openai_mod' | 'qwen' | 'sora'
+export type RequestEndpoint = 'openai' | 'gemini' | 'qwen' | 'sora'
 export type ModelType = 'image' | 'video' | 'text'
 
 export interface UserModelSetting {
@@ -428,7 +428,7 @@ type UserModelSetting struct {
   "model_id": "DALL-E 3 HD",           // 前端显示
   "request_model_id": "dall-e-3-hd-custom",  // 实际请求
   "display_name": "DALL-E 3 高清版",
-  "request_endpoint": "openai_mod"
+  "request_endpoint": "openai"
 }
 ```
 
@@ -449,7 +449,6 @@ const resolveRequestModelId = (modelId: string) => {
 const (
     requestEndpointOpenAI    = "openai"      // 标准OpenAI API
     requestEndpointGemini    = "gemini"      // Google Gemini API
-    requestEndpointOpenAIMod = "openai_mod"  // OpenAI魔改版
     requestEndpointQwen      = "qwen"        // 通义千问
     requestEndpointSora      = "sora"        // OpenAI Sora (仅视频)
 )
@@ -763,7 +762,7 @@ func pickAccountByPriorityAndWeight(accounts []*Account) *Account {
 ```go
 func channelTypeFromRequestEndpoint(endpoint string) string {
     switch strings.TrimSpace(strings.ToLower(endpoint)) {
-    case "openai", "openai_mod":
+    case "openai":
         return ChannelTypeOpenAI
     case "gemini":
         return ChannelTypeGemini
@@ -882,7 +881,6 @@ x-goog-api-key: AIzaSyxxx
 }
 ```
 
-### 4.3 OpenAI魔改端点
 
 ```http
 POST /v1/images/generations
@@ -940,7 +938,6 @@ Authorization: Bearer sk-xxx
 | **后端Service** | ❌ 仅处理单张 | 需修改 `ImageGenerationInput` |
 | **Gemini提供商** | ✅ 架构支持多图 | 修改 `parts` 数组构建逻辑 |
 | **OpenAI标准** | ❌ API限制单图 | 无法扩展 |
-| **OpenAI魔改** | ⚠️ 取决于实现 | 需确认API规范 |
 
 ### 5.2 分辨率计算规则
 
@@ -1093,7 +1090,7 @@ export interface ImageGeneratePayload {
   {
     "model_id": "DALL-E 3 HD",
     "request_model_id": "dall-e-3-hd-custom",
-    "request_endpoint": "openai_mod",
+    "request_endpoint": "openai",
     "model_type": "image",
     "display_name": "DALL-E 3 高清魔改版",
     "resolutions": ["2K", "4K"],
