@@ -228,6 +228,120 @@ func TestCanAccessImageGenerationLocalAssetUsesCache(t *testing.T) {
 	}
 }
 
+func TestCanAccessImageGenerationLocalReferenceAssetRequiresOwnerTaskParams(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+	previousRedisEnabled := common.RedisEnabled
+	InvalidateImageGenerationLocalAssetAccessCache()
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		InvalidateImageGenerationLocalAssetAccessCache()
+	})
+
+	objectKey := "image-generation/ref/20260428/125-reference.png"
+	assetURL := buildImageGenerationLocalObjectURL(objectKey)
+	task := &model.ImageGenerationTask{
+		UserId:          11,
+		ModelId:         "gpt-image-1",
+		Prompt:          "reference prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusFailed,
+		Params:          `{"reference_images":["` + assetURL + `"]}`,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	allowed, err := CanAccessImageGenerationLocalAsset(11, objectKey)
+	if err != nil {
+		t.Fatalf("failed to check reference access: %v", err)
+	}
+	if !allowed {
+		t.Fatal("expected owner to access local reference asset through task params")
+	}
+
+	allowed, err = CanAccessImageGenerationLocalAsset(12, objectKey)
+	if err != nil {
+		t.Fatalf("failed to check non-owner reference access: %v", err)
+	}
+	if allowed {
+		t.Fatal("expected non-owner to be denied local reference asset access")
+	}
+}
+
+func TestCanAccessImageGenerationLocalReferenceAssetIgnoresUnrelatedParamStrings(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+	previousRedisEnabled := common.RedisEnabled
+	InvalidateImageGenerationLocalAssetAccessCache()
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		InvalidateImageGenerationLocalAssetAccessCache()
+	})
+
+	objectKey := "image-generation/ref/20260428/127-reference.png"
+	assetURL := buildImageGenerationLocalObjectURL(objectKey)
+	task := &model.ImageGenerationTask{
+		UserId:          21,
+		ModelId:         "gpt-image-1",
+		Prompt:          "reference prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusFailed,
+		Params:          `{"note":"` + assetURL + `"}`,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	allowed, err := CanAccessImageGenerationLocalAsset(21, objectKey)
+	if err != nil {
+		t.Fatalf("failed to check access for unrelated param string: %v", err)
+	}
+	if allowed {
+		t.Fatal("expected unrelated param string not to grant local reference asset access")
+	}
+}
+
+func TestOpenImageGenerationLocalAssetFallsBackToReferenceStorage(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceLocalPath := cfg.ReferenceLocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceLocalStoragePath = previousReferenceLocalPath
+	})
+
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+	cfg.ReferenceStorageType = "local"
+	cfg.ReferenceLocalStoragePath = t.TempDir()
+
+	objectKey := "image-generation/ref/20260428/126-reference.png"
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
+	if err != nil {
+		t.Fatalf("failed to resolve reference asset path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("failed to create reference asset directory: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("reference"), 0o644); err != nil {
+		t.Fatalf("failed to write reference asset file: %v", err)
+	}
+
+	file, contentType, err := OpenImageGenerationLocalAsset(objectKey)
+	if err != nil {
+		t.Fatalf("failed to open local reference asset: %v", err)
+	}
+	_ = file.Close()
+	if contentType != "image/png" {
+		t.Fatalf("expected reference asset content type image/png, got %q", contentType)
+	}
+}
+
 func TestCanAccessApprovedInspirationLocalAssetRequiresApprovedSubmission(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
 	objectKey := "image-generation/20260428/123-approved.png"

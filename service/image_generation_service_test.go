@@ -1870,6 +1870,135 @@ func TestDeleteImageGenerationTaskKeepsSharedReferenceAssetUntilLastReference(t 
 	}
 }
 
+func TestCreateImageGenerationTaskRollsBackStoredReferencesWhenTaskUpdateFails(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceLocalPath := cfg.ReferenceLocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceLocalStoragePath = previousReferenceLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+	cfg.ReferenceStorageType = "local"
+	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+
+	user := &model.User{
+		Username: "image-create-rollback-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	seedUserToken(t, db, user.Id, "sk-image-create-rollback")
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-create-rollback",
+		ActualModel:       "gpt-image-create-rollback",
+		DisplayName:       "GPT Image Create Rollback",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation","image_editing"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+	seedImageAbility(t, db, "default", "gpt-image-create-rollback")
+
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{G: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to encode test image: %v", err)
+	}
+	source := "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+	})
+
+	callbackName := "test:fail_image_task_update_after_reference_store"
+	if err := db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx == nil || tx.Statement == nil || tx.Statement.Schema == nil {
+			return
+		}
+		if tx.Statement.Schema.Table == "image_generation_tasks" {
+			tx.AddError(fmt.Errorf("forced image task update failure"))
+		}
+	}); err != nil {
+		t.Fatalf("failed to register update callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Update().Remove(callbackName)
+	})
+
+	_, err := CreateImageGenerationTask(
+		user.Id,
+		"gpt-image-create-rollback",
+		"default",
+		"prompt",
+		"openai",
+		`{"reference_images":["`+source+`"]}`,
+	)
+	if err == nil || !strings.Contains(err.Error(), "failed to update stored params") {
+		t.Fatalf("expected stored params update failure, got %v", err)
+	}
+
+	var taskCount int64
+	if err := db.Model(&model.ImageGenerationTask{}).Count(&taskCount).Error; err != nil {
+		t.Fatalf("failed to count tasks after rollback: %v", err)
+	}
+	if taskCount != 0 {
+		t.Fatalf("expected rolled back task row to be deleted, got count=%d", taskCount)
+	}
+
+	var assetCount int64
+	if err := db.Model(&model.ImageGenerationReferenceAsset{}).Count(&assetCount).Error; err != nil {
+		t.Fatalf("failed to count reference assets after rollback: %v", err)
+	}
+	if assetCount != 0 {
+		t.Fatalf("expected rolled back reference asset row to be deleted, got count=%d", assetCount)
+	}
+
+	var linkCount int64
+	if err := db.Model(&model.ImageGenerationTaskReferenceAsset{}).Count(&linkCount).Error; err != nil {
+		t.Fatalf("failed to count task reference links after rollback: %v", err)
+	}
+	if linkCount != 0 {
+		t.Fatalf("expected rolled back reference links to be deleted, got count=%d", linkCount)
+	}
+
+	fileCount := 0
+	walkErr := filepath.Walk(cfg.ReferenceLocalStoragePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info != nil && !info.IsDir() {
+			fileCount++
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("failed to inspect reference storage path after rollback: %v", walkErr)
+	}
+	if fileCount != 0 {
+		t.Fatalf("expected rolled back reference files to be removed, got file_count=%d", fileCount)
+	}
+}
+
 func TestCleanupExpiredReferenceAssetsRemovesUnreferencedLocalFiles(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
 
@@ -1934,6 +2063,191 @@ func TestCleanupExpiredReferenceAssetsRemovesUnreferencedLocalFiles(t *testing.T
 	}
 	if count != 0 {
 		t.Fatalf("expected reference asset row to be deleted, got count=%d", count)
+	}
+}
+
+func TestCleanupExpiredReferenceAssetsDeletesEmptyPathRecords(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousReferenceAutoCleanupEnabled := cfg.ReferenceAutoCleanupEnabled
+	previousReferenceRetentionDays := cfg.ReferenceRetentionDays
+	t.Cleanup(func() {
+		cfg.ReferenceAutoCleanupEnabled = previousReferenceAutoCleanupEnabled
+		cfg.ReferenceRetentionDays = previousReferenceRetentionDays
+	})
+	cfg.ReferenceAutoCleanupEnabled = true
+	cfg.ReferenceRetentionDays = 7
+
+	asset := &model.ImageGenerationReferenceAsset{
+		ContentHash:   strings.Repeat("b", 64),
+		StorageType:   "local",
+		StoragePath:   "",
+		ContentType:   "image/png",
+		FileSizeBytes: 0,
+		RefCount:      0,
+		CreatedTime:   common.GetTimestamp() - 10*24*60*60,
+		LastUsedTime:  common.GetTimestamp() - 10*24*60*60,
+	}
+	if err := db.Create(asset).Error; err != nil {
+		t.Fatalf("failed to create empty-path reference asset row: %v", err)
+	}
+
+	if err := CleanupExpiredReferenceAssets(); err != nil {
+		t.Fatalf("expected reference cleanup to succeed: %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.ImageGenerationReferenceAsset{}).Where("id = ?", asset.Id).Count(&count).Error; err != nil {
+		t.Fatalf("failed to count reference assets after cleanup: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected empty-path reference asset row to be deleted, got count=%d", count)
+	}
+}
+
+func TestDeleteImageGenerationTaskWithoutLinksDoesNotDeleteTrackedSharedReferenceAsset(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceLocalPath := cfg.ReferenceLocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceLocalStoragePath = previousReferenceLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+	cfg.ReferenceStorageType = "local"
+	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+
+	objectKey := "image-generation/ref/20260522/shared-ref.png"
+	referenceURL := buildImageGenerationLocalObjectURL(objectKey)
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
+	if err != nil {
+		t.Fatalf("failed to resolve local reference path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("failed to create local reference directory: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("reference"), 0o644); err != nil {
+		t.Fatalf("failed to write local reference file: %v", err)
+	}
+
+	asset := &model.ImageGenerationReferenceAsset{
+		ContentHash:   strings.Repeat("c", 64),
+		StorageType:   "local",
+		StoragePath:   referenceURL,
+		ContentType:   "image/png",
+		FileSizeBytes: int64(len("reference")),
+		RefCount:      1,
+		CreatedTime:   common.GetTimestamp(),
+		LastUsedTime:  common.GetTimestamp(),
+	}
+	if err := db.Create(asset).Error; err != nil {
+		t.Fatalf("failed to create tracked reference asset row: %v", err)
+	}
+
+	task := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusFailed,
+		Params:          `{"reference_images":["` + referenceURL + `"]}`,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	if err := DeleteImageGenerationTask(task); err != nil {
+		t.Fatalf("failed to delete image generation task: %v", err)
+	}
+	if _, err := os.Stat(fullPath); err != nil {
+		t.Fatalf("expected tracked shared reference file to remain when links are missing: %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.ImageGenerationReferenceAsset{}).Where("id = ?", asset.Id).Count(&count).Error; err != nil {
+		t.Fatalf("failed to count reference asset row: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected tracked reference asset row to remain, got count=%d", count)
+	}
+
+	var assetRecord model.ImageGenerationReferenceAsset
+	if err := db.First(&assetRecord, asset.Id).Error; err != nil {
+		t.Fatalf("failed to reload tracked reference asset row: %v", err)
+	}
+	if assetRecord.RefCount != 0 {
+		t.Fatalf("expected tracked reference asset ref_count to be released to 0, got %d", assetRecord.RefCount)
+	}
+}
+
+func TestReleaseTaskReferenceAssetsWithoutLinksDeletesUnreferencedTrackedAssetImmediately(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceLocalPath := cfg.ReferenceLocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceLocalStoragePath = previousReferenceLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+	cfg.ReferenceStorageType = "local"
+	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+
+	objectKey := "image-generation/ref/20260522/orphan-ref.png"
+	referenceURL := buildImageGenerationLocalObjectURL(objectKey)
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
+	if err != nil {
+		t.Fatalf("failed to resolve local reference path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("failed to create local reference directory: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("reference"), 0o644); err != nil {
+		t.Fatalf("failed to write local reference file: %v", err)
+	}
+
+	asset := &model.ImageGenerationReferenceAsset{
+		ContentHash:   strings.Repeat("d", 64),
+		StorageType:   "local",
+		StoragePath:   referenceURL,
+		ContentType:   "image/png",
+		FileSizeBytes: int64(len("reference")),
+		RefCount:      1,
+		CreatedTime:   common.GetTimestamp(),
+		LastUsedTime:  common.GetTimestamp(),
+	}
+	if err := db.Create(asset).Error; err != nil {
+		t.Fatalf("failed to create tracked reference asset row: %v", err)
+	}
+
+	if err := releaseTaskReferenceAssets(99999, []string{referenceURL}, cfg, true); err != nil {
+		t.Fatalf("expected orphan tracked asset release to succeed: %v", err)
+	}
+
+	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
+		t.Fatalf("expected orphan tracked reference file to be removed immediately, stat err=%v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.ImageGenerationReferenceAsset{}).Where("id = ?", asset.Id).Count(&count).Error; err != nil {
+		t.Fatalf("failed to count tracked reference asset row: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected orphan tracked reference asset row to be deleted, got count=%d", count)
 	}
 }
 

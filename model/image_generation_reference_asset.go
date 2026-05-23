@@ -52,6 +52,14 @@ func GetImageGenerationReferenceAssetByID(id int) (*ImageGenerationReferenceAsse
 	return &asset, nil
 }
 
+func GetImageGenerationReferenceAssetsByStoragePath(storagePath string) ([]*ImageGenerationReferenceAsset, error) {
+	var assets []*ImageGenerationReferenceAsset
+	if err := DB.Where("storage_path = ?", storagePath).Find(&assets).Error; err != nil {
+		return nil, err
+	}
+	return assets, nil
+}
+
 func CreateImageGenerationReferenceAsset(asset *ImageGenerationReferenceAsset) error {
 	if asset == nil {
 		return nil

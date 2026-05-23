@@ -1863,7 +1863,13 @@ func CleanupExpiredReferenceAssets() error {
 	}
 
 	for _, asset := range assets {
-		if asset == nil || strings.TrimSpace(asset.StoragePath) == "" {
+		if asset == nil {
+			continue
+		}
+		if strings.TrimSpace(asset.StoragePath) == "" {
+			if err := model.DeleteImageGenerationReferenceAsset(asset.Id); err != nil {
+				common.SysLog(fmt.Sprintf("Failed to delete empty-path reference asset record %d: %v", asset.Id, err))
+			}
 			continue
 		}
 		if err := deleteImageFileByKind(asset.StoragePath, cfg, imageGenerationAssetKindReference); err != nil {
@@ -1964,6 +1970,16 @@ func releaseTaskReferenceAssets(taskId int, refs []string, cfg *worker_setting.W
 	}
 	if len(links) == 0 {
 		for _, ref := range refs {
+			if strings.TrimSpace(ref) == "" {
+				continue
+			}
+			assetStillTracked, trackErr := releaseTrackedReferenceAssetsByPath(ref, cfg, deleteUnreferenced)
+			if trackErr != nil {
+				return trackErr
+			}
+			if assetStillTracked {
+				continue
+			}
 			if err := deleteImageFileByKind(ref, cfg, imageGenerationAssetKindReference); err != nil {
 				return err
 			}
@@ -1993,6 +2009,37 @@ func releaseTaskReferenceAssets(taskId int, refs []string, cfg *worker_setting.W
 	}
 
 	return model.DeleteTaskReferenceAssetLinks(taskId)
+}
+
+func releaseTrackedReferenceAssetsByPath(ref string, cfg *worker_setting.WorkerSetting, deleteUnreferenced bool) (bool, error) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return false, nil
+	}
+	assets, err := model.GetImageGenerationReferenceAssetsByStoragePath(trimmed)
+	if err != nil {
+		return false, err
+	}
+	if len(assets) == 0 {
+		return false, nil
+	}
+	for _, asset := range assets {
+		if asset == nil || asset.Id <= 0 {
+			continue
+		}
+		if err := model.DecrementImageGenerationReferenceAssetRefCount(asset.Id); err != nil {
+			return true, err
+		}
+		if deleteUnreferenced && asset.RefCount <= 1 {
+			if err := deleteImageFileByKind(asset.StoragePath, cfg, imageGenerationAssetKindReference); err != nil {
+				return true, err
+			}
+			if err := model.DeleteImageGenerationReferenceAsset(asset.Id); err != nil {
+				return true, err
+			}
+		}
+	}
+	return true, nil
 }
 
 // deleteImageFile 删除图片文件（本地或S3）
@@ -2074,6 +2121,23 @@ func collectStoredReferenceImages(params string) ([]string, error) {
 		references = append(references, mask)
 	}
 	return references, nil
+}
+
+func taskParamsContainReferenceAssetURL(params string, assetURL string) (bool, error) {
+	assetURL = strings.TrimSpace(assetURL)
+	if assetURL == "" {
+		return false, nil
+	}
+	references, err := collectStoredReferenceImages(params)
+	if err != nil {
+		return false, err
+	}
+	for _, ref := range references {
+		if strings.TrimSpace(ref) == assetURL {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // StartImageCleanupTask 启动图片清理定时任务

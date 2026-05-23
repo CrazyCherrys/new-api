@@ -1167,6 +1167,29 @@ func CanAccessImageGenerationLocalAsset(userId int, assetPath string) (bool, err
 		return false, err
 	}
 	allowed := count > 0
+	if !allowed {
+		var tasks []*model.ImageGenerationTask
+		if err := model.DB.Model(&model.ImageGenerationTask{}).
+			Select("params").
+			Where("user_id = ?", userId).
+			Where("params LIKE ?", "%"+assetURL+"%").
+			Find(&tasks).Error; err != nil {
+			return false, err
+		}
+		for _, task := range tasks {
+			if task == nil {
+				continue
+			}
+			matched, matchErr := taskParamsContainReferenceAssetURL(task.Params, assetURL)
+			if matchErr != nil {
+				return false, matchErr
+			}
+			if matched {
+				allowed = true
+				break
+			}
+		}
+	}
 	if allowed {
 		_ = cache.SetWithTTL(cacheKey, 1, imageGenerationLocalAssetAccessCacheTTL())
 	}
@@ -1206,6 +1229,18 @@ func CanAccessApprovedCreativeSpaceLocalAsset(assetPath string) (bool, error) {
 func OpenImageGenerationLocalAsset(assetPath string) (*os.File, string, error) {
 	cfg := worker_setting.GetWorkerSetting()
 	fullPath, err := imageGenerationLocalAssetPath(cfg, assetPath, imageGenerationAssetKindResult)
+	if err == nil {
+		file, openErr := os.Open(fullPath)
+		if openErr == nil {
+			contentType := mime.TypeByExtension(filepath.Ext(fullPath))
+			if contentType == "" {
+				contentType = "application/octet-stream"
+			}
+			return file, contentType, nil
+		}
+	}
+
+	fullPath, err = imageGenerationLocalAssetPath(cfg, assetPath, imageGenerationAssetKindReference)
 	if err != nil {
 		return nil, "", err
 	}

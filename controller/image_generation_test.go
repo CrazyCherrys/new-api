@@ -3,11 +3,15 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/worker_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -170,5 +174,102 @@ func TestDeleteImageGenerationTaskRejectsActiveTask(t *testing.T) {
 	}
 	if reloaded == nil {
 		t.Fatal("expected active task to remain in database")
+	}
+}
+
+func TestDeleteImageGenerationTaskDeletesFinishedTask(t *testing.T) {
+	db := setupImageGenerationControllerTestDB(t)
+
+	task := &model.ImageGenerationTask{
+		UserId:          9,
+		ModelId:         "gpt-image-finished",
+		Prompt:          "finished prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusFailed,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodDelete, fmt.Sprintf("/api/image-generation/tasks/%d", task.Id), nil, task.UserId)
+	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", task.Id)}}
+
+	DeleteImageGenerationTask(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected delete finished task to succeed, got message %q", response.Message)
+	}
+
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded != nil {
+		t.Fatal("expected finished task to be deleted from database")
+	}
+}
+
+func TestGetImageGenerationFileAllowsOwnerReferenceAssetFromTaskParams(t *testing.T) {
+	db := setupImageGenerationControllerTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceLocalPath := cfg.ReferenceLocalStoragePath
+	service.InvalidateImageGenerationLocalAssetAccessCache()
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceLocalStoragePath = previousReferenceLocalPath
+		service.InvalidateImageGenerationLocalAssetAccessCache()
+	})
+
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+	cfg.ReferenceStorageType = "local"
+	cfg.ReferenceLocalStoragePath = t.TempDir()
+
+	objectKey := "image-generation/ref/20260522/controller-reference.png"
+	assetURL := "/api/image-generation/files/" + objectKey
+	fullPath := filepath.Join(cfg.ReferenceLocalStoragePath, filepath.FromSlash(objectKey))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("failed to create reference asset directory: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("reference-data"), 0o644); err != nil {
+		t.Fatalf("failed to write reference asset file: %v", err)
+	}
+
+	task := &model.ImageGenerationTask{
+		UserId:          15,
+		ModelId:         "gpt-image-controller-ref",
+		Prompt:          "reference prompt",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusFailed,
+		Params:          `{"reference_images":["` + assetURL + `"]}`,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, assetURL, nil, task.UserId)
+	ctx.Params = gin.Params{{Key: "path", Value: "/" + objectKey}}
+
+	GetImageGenerationFile(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	if body := recorder.Body.String(); body != "reference-data" {
+		t.Fatalf("expected reference file body %q, got %q", "reference-data", body)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "image/png" {
+		t.Fatalf("expected content type image/png, got %q", contentType)
 	}
 }
