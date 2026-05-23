@@ -23,6 +23,7 @@ import {
   Form,
   Button,
   Space,
+  Switch,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../../../helpers';
@@ -30,6 +31,9 @@ import { API, showError, showSuccess } from '../../../../helpers';
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
 const DEFAULT_VIDEO_CAPABILITIES = ['image_to_video', 'text_to_video'];
 const DEFAULT_VIDEO_DURATIONS = [5, 10];
+const IMAGE_CAPABILITY_EDITING = 'image_editing';
+const DEFAULT_REFERENCE_IMAGE_LIMIT = 1;
+const MAX_REFERENCE_IMAGE_LIMIT = 20;
 
 const normalizeRequestEndpoint = (endpoint) => {
   const normalized = String(endpoint || '')
@@ -61,8 +65,13 @@ const EditModelMappingModal = ({
   const [loading, setLoading] = useState(false);
   const [formApi, setFormApi] = useState(null);
   const [selectedModelType, setSelectedModelType] = useState(1);
+  const [referenceImageLimitEnabled, setReferenceImageLimitEnabled] =
+    useState(false);
+  const [selectedImageCapabilities, setSelectedImageCapabilities] = useState([]);
   const isImageModel = Number(selectedModelType) === 2;
   const isVideoModel = Number(selectedModelType) === 3;
+  const canConfigureReferenceImageLimit =
+    isImageModel && selectedImageCapabilities.includes(IMAGE_CAPABILITY_EDITING);
 
   const modelSeriesOptions = [
     { value: 'openai', label: 'OpenAI' },
@@ -269,6 +278,12 @@ const EditModelMappingModal = ({
 
         const isImageMapping = nextModelType === 2;
         setSelectedModelType(nextModelType);
+        setSelectedImageCapabilities(imageCapabilities);
+        setReferenceImageLimitEnabled(
+          nextModelType === 2 &&
+            imageCapabilities.includes(IMAGE_CAPABILITY_EDITING) &&
+            Number(editingMapping.reference_image_limit) > 0,
+        );
 
         formApi.setValues({
           ...editingMapping,
@@ -278,6 +293,10 @@ const EditModelMappingModal = ({
           resolutions: isImageMapping ? resolutions : [],
           aspect_ratios: isImageMapping ? aspectRatios : [],
           image_capabilities: imageCapabilities,
+          reference_image_limit:
+            Number(editingMapping.reference_image_limit) > 0
+              ? Number(editingMapping.reference_image_limit)
+              : DEFAULT_REFERENCE_IMAGE_LIMIT,
           video_capabilities: videoCapabilities,
           duration_options: formatDurationTags(durationValues),
           status: editingMapping.status === 1,
@@ -285,6 +304,8 @@ const EditModelMappingModal = ({
         });
       } else {
         setSelectedModelType(1);
+        setSelectedImageCapabilities([]);
+        setReferenceImageLimitEnabled(false);
 
         formApi.setValues({
           request_model: '',
@@ -298,6 +319,7 @@ const EditModelMappingModal = ({
           resolutions: [],
           aspect_ratios: [],
           image_capabilities: [],
+          reference_image_limit: DEFAULT_REFERENCE_IMAGE_LIMIT,
           video_capabilities: [],
           duration_options: [],
         });
@@ -316,6 +338,7 @@ const EditModelMappingModal = ({
     }
 
     formApi.setValue('image_capabilities', DEFAULT_IMAGE_CAPABILITIES);
+    setSelectedImageCapabilities(DEFAULT_IMAGE_CAPABILITIES);
   }, [visible, formApi, selectedModelType]);
 
   useEffect(() => {
@@ -356,6 +379,22 @@ const EditModelMappingModal = ({
       return;
     }
 
+    const imageCapabilities = Array.isArray(values.image_capabilities)
+      ? values.image_capabilities
+      : [];
+    const shouldSubmitReferenceImageLimit =
+      Number(values.model_type) === 2 &&
+      imageCapabilities.includes(IMAGE_CAPABILITY_EDITING) &&
+      referenceImageLimitEnabled;
+    if (
+      shouldSubmitReferenceImageLimit &&
+      (!Number.isFinite(Number(values.reference_image_limit)) ||
+        Number(values.reference_image_limit) < 1)
+    ) {
+      showError(t('请输入有效的参考图张数限制'));
+      return;
+    }
+
     setLoading(true);
     try {
       const modelType = Number(values.model_type);
@@ -385,6 +424,12 @@ const EditModelMappingModal = ({
           modelType === 2 && values.image_capabilities
             ? JSON.stringify(values.image_capabilities)
             : '',
+        reference_image_limit: shouldSubmitReferenceImageLimit
+          ? Math.min(
+              MAX_REFERENCE_IMAGE_LIMIT,
+              Math.max(1, Math.floor(Number(values.reference_image_limit))),
+            )
+          : 0,
         video_capabilities:
           modelType === 3 && values.video_capabilities
             ? JSON.stringify(values.video_capabilities)
@@ -511,9 +556,16 @@ const EditModelMappingModal = ({
                   'image_capabilities',
                   DEFAULT_IMAGE_CAPABILITIES,
                 );
+                setSelectedImageCapabilities(DEFAULT_IMAGE_CAPABILITIES);
               }
             } else if (nextModelType === 3) {
               formApi?.setValue('image_capabilities', []);
+              setSelectedImageCapabilities([]);
+              formApi?.setValue(
+                'reference_image_limit',
+                DEFAULT_REFERENCE_IMAGE_LIMIT,
+              );
+              setReferenceImageLimitEnabled(false);
               formApi?.setValue('resolutions', []);
               formApi?.setValue('aspect_ratios', []);
               const currentVideoCapabilities =
@@ -539,6 +591,12 @@ const EditModelMappingModal = ({
               }
             } else {
               formApi?.setValue('image_capabilities', []);
+              setSelectedImageCapabilities([]);
+              formApi?.setValue(
+                'reference_image_limit',
+                DEFAULT_REFERENCE_IMAGE_LIMIT,
+              );
+              setReferenceImageLimitEnabled(false);
               formApi?.setValue('video_capabilities', []);
               formApi?.setValue('duration_options', []);
               formApi?.setValue('resolutions', []);
@@ -571,6 +629,13 @@ const EditModelMappingModal = ({
             label={t('模型能力')}
             options={imageCapabilityOptions}
             direction='horizontal'
+            onChange={(value) => {
+              const nextCapabilities = Array.isArray(value) ? value : [];
+              setSelectedImageCapabilities(nextCapabilities);
+              if (!nextCapabilities.includes(IMAGE_CAPABILITY_EDITING)) {
+                setReferenceImageLimitEnabled(false);
+              }
+            }}
             rules={
               isImageModel
                 ? [
@@ -583,6 +648,47 @@ const EditModelMappingModal = ({
             }
           />
         </div>
+        {canConfigureReferenceImageLimit && (
+          <>
+            <Form.Slot label={t('限制参考图张数')}>
+              <Switch
+                size='large'
+                checked={referenceImageLimitEnabled}
+                onChange={(checked) => {
+                  setReferenceImageLimitEnabled(checked);
+                  if (
+                    checked &&
+                    !Number(formApi?.getValue('reference_image_limit'))
+                  ) {
+                    formApi?.setValue(
+                      'reference_image_limit',
+                      DEFAULT_REFERENCE_IMAGE_LIMIT,
+                    );
+                  }
+                }}
+              />
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 12,
+                  color: 'var(--semi-color-text-2)',
+                }}
+              >
+                {t('不勾选则不限制')}
+              </div>
+            </Form.Slot>
+            {referenceImageLimitEnabled && (
+              <Form.InputNumber
+                field='reference_image_limit'
+                label={t('最多参考图张数')}
+                min={1}
+                max={MAX_REFERENCE_IMAGE_LIMIT}
+                precision={0}
+                style={{ width: '100%' }}
+              />
+            )}
+          </>
+        )}
         <div hidden={!isVideoModel}>
           <Form.CheckboxGroup
             field='video_capabilities'

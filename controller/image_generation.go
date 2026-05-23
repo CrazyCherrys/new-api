@@ -1106,13 +1106,14 @@ func GetImageGenerationModels(c *gin.Context) {
 			imageCapabilities = model.DefaultImageCapabilities()
 		}
 		models = append(models, gin.H{
-			"request_model":      mapping.RequestModel,
-			"display_name":       mapping.DisplayName,
-			"model_series":       mapping.ModelSeries,
-			"request_endpoint":   mapping.RequestEndpoint,
-			"resolutions":        mapping.Resolutions,
-			"aspect_ratios":      mapping.AspectRatios,
-			"image_capabilities": imageCapabilities,
+			"request_model":         mapping.RequestModel,
+			"display_name":          mapping.DisplayName,
+			"model_series":          mapping.ModelSeries,
+			"request_endpoint":      mapping.RequestEndpoint,
+			"resolutions":           mapping.Resolutions,
+			"aspect_ratios":         mapping.AspectRatios,
+			"image_capabilities":    imageCapabilities,
+			"reference_image_limit": mapping.ReferenceImageLimit,
 		})
 	}
 

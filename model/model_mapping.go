@@ -39,6 +39,7 @@ type ModelMapping struct {
 	Resolutions           string `json:"resolutions" gorm:"type:text"`               // 分辨率选项 JSON array: ["1K","2K","4K"]
 	AspectRatios          string `json:"aspect_ratios" gorm:"type:text"`             // 长宽比选项 JSON array: ["1:1","16:9",...]
 	ImageCapabilities     string `json:"image_capabilities" gorm:"type:text"`        // JSON array: ["image_generation","image_editing"]
+	ReferenceImageLimit   int    `json:"reference_image_limit" gorm:"default:0"`     // Canvas reference image count limit, 0 means unlimited
 	VideoCapabilities     string `json:"video_capabilities" gorm:"type:text"`        // JSON array: ["image_to_video","text_to_video"]
 	DurationOptions       string `json:"duration_options" gorm:"type:text"`          // JSON array: [5,10]
 	CreatedTime           int64  `json:"created_time" gorm:"bigint"`
@@ -326,21 +327,22 @@ func (mm *ModelMapping) Insert() error {
 	mm.CreatedTime = now
 	mm.UpdatedTime = now
 	record := map[string]any{
-		"request_model":      mm.RequestModel,
-		"actual_model":       mm.ActualModel,
-		"display_name":       mm.DisplayName,
-		"model_series":       mm.ModelSeries,
-		"model_type":         mm.ModelType,
-		"status":             mm.Status,
-		"priority":           mm.Priority,
-		"request_endpoint":   mm.RequestEndpoint,
-		"resolutions":        mm.Resolutions,
-		"aspect_ratios":      mm.AspectRatios,
-		"image_capabilities": mm.ImageCapabilities,
-		"video_capabilities": mm.VideoCapabilities,
-		"duration_options":   mm.DurationOptions,
-		"created_time":       mm.CreatedTime,
-		"updated_time":       mm.UpdatedTime,
+		"request_model":         mm.RequestModel,
+		"actual_model":          mm.ActualModel,
+		"display_name":          mm.DisplayName,
+		"model_series":          mm.ModelSeries,
+		"model_type":            mm.ModelType,
+		"status":                mm.Status,
+		"priority":              mm.Priority,
+		"request_endpoint":      mm.RequestEndpoint,
+		"resolutions":           mm.Resolutions,
+		"aspect_ratios":         mm.AspectRatios,
+		"image_capabilities":    mm.ImageCapabilities,
+		"reference_image_limit": mm.ReferenceImageLimit,
+		"video_capabilities":    mm.VideoCapabilities,
+		"duration_options":      mm.DurationOptions,
+		"created_time":          mm.CreatedTime,
+		"updated_time":          mm.UpdatedTime,
 	}
 	if err := DB.Model(&ModelMapping{}).Create(record).Error; err != nil {
 		return err
@@ -351,20 +353,21 @@ func (mm *ModelMapping) Insert() error {
 func (mm *ModelMapping) Update() error {
 	mm.UpdatedTime = common.GetTimestamp()
 	updates := map[string]any{
-		"request_model":      mm.RequestModel,
-		"actual_model":       mm.ActualModel,
-		"display_name":       mm.DisplayName,
-		"model_series":       mm.ModelSeries,
-		"model_type":         mm.ModelType,
-		"status":             mm.Status,
-		"priority":           mm.Priority,
-		"request_endpoint":   mm.RequestEndpoint,
-		"resolutions":        mm.Resolutions,
-		"aspect_ratios":      mm.AspectRatios,
-		"image_capabilities": mm.ImageCapabilities,
-		"video_capabilities": mm.VideoCapabilities,
-		"duration_options":   mm.DurationOptions,
-		"updated_time":       mm.UpdatedTime,
+		"request_model":         mm.RequestModel,
+		"actual_model":          mm.ActualModel,
+		"display_name":          mm.DisplayName,
+		"model_series":          mm.ModelSeries,
+		"model_type":            mm.ModelType,
+		"status":                mm.Status,
+		"priority":              mm.Priority,
+		"request_endpoint":      mm.RequestEndpoint,
+		"resolutions":           mm.Resolutions,
+		"aspect_ratios":         mm.AspectRatios,
+		"image_capabilities":    mm.ImageCapabilities,
+		"reference_image_limit": mm.ReferenceImageLimit,
+		"video_capabilities":    mm.VideoCapabilities,
+		"duration_options":      mm.DurationOptions,
+		"updated_time":          mm.UpdatedTime,
 	}
 	return DB.Model(&ModelMapping{}).Where("id = ?", mm.Id).Updates(updates).Error
 }
