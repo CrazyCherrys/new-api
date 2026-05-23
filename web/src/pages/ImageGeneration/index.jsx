@@ -64,6 +64,11 @@ const TASK_LIST_REQUEST_TIMEOUT_MS = 20000;
 const CANVAS_PREFILL_STORAGE_KEY = 'imageGen_canvasPrefill_v1';
 const DEFAULT_VIDEO_PAGE_SIZE = 20;
 
+const getReferenceImageLimit = (model) => {
+  const limit = Number(model?.reference_image_limit) || 0;
+  return limit > 0 ? Math.floor(limit) : 0;
+};
+
 const normalizeImageCapabilities = (raw) => {
   if (Array.isArray(raw)) {
     return raw;
@@ -1611,12 +1616,35 @@ const ImageGeneration = () => {
   }, [selectedModelData]);
 
   useEffect(() => {
+    const limit = getReferenceImageLimit(selectedModelData);
+    if (limit <= 0 || referenceImages.length <= limit) {
+      return;
+    }
+
+    setReferenceImages((prev) => prev.slice(0, limit));
+    showError(
+      t('当前模型最多只能上传 {{count}} 张参考图', {
+        count: limit,
+      }),
+    );
+  }, [selectedModelData, referenceImages.length, t]);
+
+  useEffect(() => {
     if (referenceImages.length === 0) {
       setMaskImage(null);
     }
   }, [referenceImages]);
 
   const handleImageUpload = ({ fileList }) => {
+    const limit = getReferenceImageLimit(selectedModelData);
+    if (limit > 0 && fileList.length > limit) {
+      showError(
+        t('当前模型最多只能上传 {{count}} 张参考图', {
+          count: limit,
+        }),
+      );
+      return;
+    }
     setReferenceImages(fileList);
   };
 
@@ -1702,6 +1730,18 @@ const ImageGeneration = () => {
     }
     if (referenceImages.length > 0 && !supportsImageEditing) {
       showError(t('当前模型不支持图像编辑'));
+      return;
+    }
+    const referenceImageLimit = getReferenceImageLimit(selectedModelData);
+    if (
+      referenceImageLimit > 0 &&
+      referenceImages.length > referenceImageLimit
+    ) {
+      showError(
+        t('当前模型最多只能上传 {{count}} 张参考图', {
+          count: referenceImageLimit,
+        }),
+      );
       return;
     }
     if (maskImage && referenceImages.length === 0) {
@@ -2121,6 +2161,12 @@ const ImageGeneration = () => {
     !!selectedModelData &&
     selectedModelSupportsEditing &&
     ['openai', 'openai-response'].includes(selectedModelData.request_endpoint);
+  const selectedModelReferenceImageLimit =
+    getReferenceImageLimit(selectedModelData);
+  const hasReferenceImageLimit = selectedModelReferenceImageLimit > 0;
+  const referenceImageLimitReached =
+    hasReferenceImageLimit &&
+    referenceImages.length >= selectedModelReferenceImageLimit;
   const requiresReferenceImage =
     selectedModelSupportsEditing && !selectedModelSupportsGeneration;
   const canGenerate =
@@ -2276,7 +2322,27 @@ const ImageGeneration = () => {
 
       {selectedModelSupportsEditing && (
         <div style={styles.fieldGroup}>
-          <span style={styles.label}>{t('参考图像')}</span>
+          <span style={styles.label}>
+            {hasReferenceImageLimit
+              ? t('参考图像 {{current}}/{{max}}', {
+                  current: referenceImages.length,
+                  max: selectedModelReferenceImageLimit,
+                })
+              : t('参考图像')}
+          </span>
+          {hasReferenceImageLimit && (
+            <Text
+              type={referenceImageLimitReached ? 'danger' : 'tertiary'}
+              size='small'
+              style={{ display: 'block', marginBottom: 8 }}
+            >
+              {referenceImageLimitReached
+                ? t('已达到当前模型参考图上限')
+                : t('当前模型最多上传 {{count}} 张参考图', {
+                    count: selectedModelReferenceImageLimit,
+                  })}
+            </Text>
+          )}
           <div
             style={{
               display: 'flex',
@@ -2312,8 +2378,15 @@ const ImageGeneration = () => {
               onChange={handleImageUpload}
               showUploadList={false}
               beforeUpload={validateImageSize}
+              disabled={referenceImageLimitReached}
             >
-              <div style={styles.addImageBtn}>
+              <div
+                style={{
+                  ...styles.addImageBtn,
+                  opacity: referenceImageLimitReached ? 0.5 : 1,
+                  cursor: referenceImageLimitReached ? 'not-allowed' : 'pointer',
+                }}
+              >
                 <IconPlus size='large' />
               </div>
             </Upload>

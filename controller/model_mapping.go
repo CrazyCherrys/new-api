@@ -10,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const maxReferenceImageLimit = 20
+
 func normalizeModelMappingEndpoint(endpoint string) string {
 	switch strings.ToLower(strings.TrimSpace(endpoint)) {
 	case "dalle":
@@ -68,6 +70,7 @@ func validateModelMappingEndpoint(modelType int, endpoint string) error {
 func sanitizeModelMappingSettings(mm *model.ModelMapping) {
 	if mm.ModelType != 2 {
 		mm.ImageCapabilities = ""
+		mm.ReferenceImageLimit = 0
 	}
 	if mm.ModelType != 3 {
 		mm.VideoCapabilities = ""
@@ -77,6 +80,30 @@ func sanitizeModelMappingSettings(mm *model.ModelMapping) {
 		mm.Resolutions = ""
 		mm.AspectRatios = ""
 	}
+}
+
+func validateReferenceImageLimit(mm *model.ModelMapping) error {
+	if mm.ModelType != 2 {
+		mm.ReferenceImageLimit = 0
+		return nil
+	}
+
+	hasEditing, err := model.HasImageCapability(mm.ImageCapabilities, model.ImageCapabilityEditing)
+	if err != nil {
+		return err
+	}
+	if !hasEditing {
+		mm.ReferenceImageLimit = 0
+		return nil
+	}
+
+	if mm.ReferenceImageLimit < 0 {
+		return errors.New("参考图张数限制不能小于 0")
+	}
+	if mm.ReferenceImageLimit > maxReferenceImageLimit {
+		return errors.New("参考图张数限制不能超过 20")
+	}
+	return nil
 }
 
 func validateImageModelCapabilities(modelType int, raw string) (string, error) {
@@ -214,6 +241,10 @@ func CreateModelMapping(c *gin.Context) {
 		return
 	}
 	mm.ImageCapabilities = normalizedCapabilities
+	if err := validateReferenceImageLimit(&mm); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
 	normalizedVideoCapabilities, err := validateVideoModelCapabilities(mm.ModelType, mm.VideoCapabilities)
 	if err != nil {
 		common.ApiErrorMsg(c, err.Error())
@@ -287,6 +318,10 @@ func UpdateModelMapping(c *gin.Context) {
 		return
 	}
 	mm.ImageCapabilities = normalizedCapabilities
+	if err := validateReferenceImageLimit(&mm); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
 	normalizedVideoCapabilities, err := validateVideoModelCapabilities(mm.ModelType, mm.VideoCapabilities)
 	if err != nil {
 		common.ApiErrorMsg(c, err.Error())

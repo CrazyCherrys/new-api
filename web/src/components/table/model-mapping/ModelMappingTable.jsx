@@ -33,6 +33,7 @@ import { API, showError, showSuccess } from '../../../helpers';
 
 const { Text } = Typography;
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
+const IMAGE_CAPABILITY_EDITING = 'image_editing';
 
 const normalizeRequestEndpoint = (endpoint) => {
   const normalized = String(endpoint || '')
@@ -127,6 +128,7 @@ const ModelMappingTable = ({
     }
     if (modelType !== 2) {
       payload.image_capabilities = '';
+      payload.reference_image_limit = 0;
     }
     if (modelType !== 3) {
       payload.video_capabilities = '';
@@ -137,9 +139,13 @@ const ModelMappingTable = ({
       payload.aspect_ratios = '';
     }
     if (modelType === 2) {
-      payload.image_capabilities = JSON.stringify(
-        normalizeImageCapabilities(payload.image_capabilities),
+      const imageCapabilities = normalizeImageCapabilities(
+        payload.image_capabilities,
       );
+      payload.image_capabilities = JSON.stringify(imageCapabilities);
+      if (!imageCapabilities.includes(IMAGE_CAPABILITY_EDITING)) {
+        payload.reference_image_limit = 0;
+      }
     }
 
     return payload;
@@ -272,6 +278,21 @@ const ModelMappingTable = ({
       .join(', ');
   };
 
+  const formatReferenceImageLimit = (record) => {
+    if (record.model_type !== 2) {
+      return '-';
+    }
+    const capabilities = normalizeImageCapabilities(record.image_capabilities);
+    if (!capabilities.includes(IMAGE_CAPABILITY_EDITING)) {
+      return '-';
+    }
+    const limit = Number(record.reference_image_limit) || 0;
+    if (limit <= 0) {
+      return t('参考图：不限制');
+    }
+    return t('参考图：最多 {{count}} 张', { count: limit });
+  };
+
   const columns = [
     {
       title: 'ID',
@@ -333,7 +354,16 @@ const ModelMappingTable = ({
       title: t('模型能力'),
       dataIndex: 'image_capabilities',
       render: (text, record) =>
-        record.model_type === 2 ? formatImageCapabilities(text) : '-',
+        record.model_type === 2 ? (
+          <Space vertical align='start' spacing={2}>
+            <span>{formatImageCapabilities(text)}</span>
+            <Text type='tertiary' size='small'>
+              {formatReferenceImageLimit(record)}
+            </Text>
+          </Space>
+        ) : (
+          '-'
+        ),
     },
     {
       title: t('分辨率'),
