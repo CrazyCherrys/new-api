@@ -1304,6 +1304,58 @@ func TestImageGenerationModelCapabilitiesValidation(t *testing.T) {
 	}
 }
 
+func TestImageGenerationRejectsMaskForGeminiEndpoint(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	user := &model.User{
+		Username: "gemini-mask-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	seedUserToken(t, db, user.Id, "sk-gemini-mask")
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gemini-image-mask",
+		ActualModel:       "gemini-2.5-flash-image",
+		DisplayName:       "Gemini Image",
+		ModelSeries:       "gemini",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "gemini",
+		ImageCapabilities: `["image_editing"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+	seedImageAbility(t, db, "default", "gemini-image-mask")
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+	})
+
+	_, err := CreateImageGenerationTask(
+		user.Id,
+		"gemini-image-mask",
+		"default",
+		"prompt",
+		"gemini",
+		`{"reference_images":["data:image/png;base64,AAAA"],"mask":"data:image/png;base64,AAAA"}`,
+	)
+	if err == nil {
+		t.Fatal("expected gemini mask request to be rejected")
+	}
+	if !strings.Contains(err.Error(), "mask image is only supported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestCreateImageGenerationTaskRequiresValidUserToken(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
 
@@ -1645,6 +1697,76 @@ func TestCreateImageGenerationTaskStoresMaskOutsideDatabase(t *testing.T) {
 	}
 	if _, err := os.Stat(fullPath); err != nil {
 		t.Fatalf("expected stored mask image file to exist: %v", err)
+	}
+}
+
+func TestCreateImageGenerationTaskAllowsMaskForOpenAIResponsesEndpoint(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+
+	user := &model.User{
+		Username: "image-response-mask-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	seedUserToken(t, db, user.Id, "sk-image-response-mask")
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-response-mask",
+		ActualModel:       "gpt-image-1",
+		DisplayName:       "GPT Image Responses Mask",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai-response",
+		ImageCapabilities: `["image_editing"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+	seedImageAbility(t, db, "default", "gpt-image-response-mask")
+
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{G: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to encode test image: %v", err)
+	}
+	source := "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+	})
+
+	task, err := CreateImageGenerationTask(
+		user.Id,
+		"gpt-image-response-mask",
+		"default",
+		"prompt",
+		"openai-response",
+		`{"reference_images":["`+source+`"],"mask":"`+source+`"}`,
+	)
+	if err != nil {
+		t.Fatalf("expected openai-response mask task creation to succeed: %v", err)
+	}
+	if task == nil || task.RequestEndpoint != "openai-response" {
+		t.Fatalf("unexpected task: %#v", task)
 	}
 }
 
@@ -2362,6 +2484,29 @@ func TestBuildOpenAIResponsesImageRequestWithReferenceImages(t *testing.T) {
 	}
 }
 
+func TestBuildOpenAIResponsesImageRequestMapsResolutionAndAspectRatioToSize(t *testing.T) {
+	req, err := buildOpenAIResponsesImageRequest(&dto.ImageRequest{
+		Model:       "gpt-image-1",
+		Prompt:      "generate a skyline",
+		Resolution:  "2K",
+		AspectRatio: "16:9",
+	})
+	if err != nil {
+		t.Fatalf("unexpected build error: %v", err)
+	}
+
+	var tools []map[string]any
+	if err := common.Unmarshal(req.Tools, &tools); err != nil {
+		t.Fatalf("failed to decode tools: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected one tool, got %d", len(tools))
+	}
+	if got := tools[0]["size"]; got != "2048x1152" {
+		t.Fatalf("unexpected tool size: %#v", got)
+	}
+}
+
 func TestResolveOpenAIImageSizeUsesDefaultsForMissingValues(t *testing.T) {
 	if got, ok := ResolveOpenAIImageSize("", ""); ok || got != "auto" {
 		t.Fatalf("unexpected default size result: got=%q ok=%t", got, ok)
@@ -2394,11 +2539,46 @@ func TestValidateImageGenerationSizeOptions(t *testing.T) {
 	if err := validateImageGenerationSizeOptions(mapping, `{"resolution":"2K","aspect_ratio":"16:9"}`); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
-	if err := validateImageGenerationSizeOptions(mapping, `{"resolution":"2K"}`); err == nil {
+	if err := validateImageGenerationSizeOptions(mapping, `{"aspect_ratio":"16:9"}`); err != nil {
+		t.Fatalf("unexpected aspect-only validation error for openai mapping: %v", err)
+	}
+	if err := validateImageGenerationSizeOptions(mapping, `{"resolution":"4K","aspect_ratio":"16:9"}`); err != nil {
+		t.Fatalf("unexpected ignored resolution validation error: %v", err)
+	}
+	if err := validateImageGenerationSizeOptions(mapping, `{}`); err == nil {
 		t.Fatalf("expected missing configured aspect ratio to fail")
 	}
-	if err := validateImageGenerationSizeOptions(mapping, `{"resolution":"4K","aspect_ratio":"16:9"}`); err == nil {
-		t.Fatalf("expected invalid resolution to fail")
+
+	openAIAspectOnlyMapping := &model.ModelMapping{
+		RequestModel:    "demo-image-aspect-only",
+		ModelType:       2,
+		RequestEndpoint: "openai",
+		AspectRatios:    `["1:1","16:9"]`,
+	}
+	if err := validateImageGenerationSizeOptions(openAIAspectOnlyMapping, `{"aspect_ratio":"16:9"}`); err != nil {
+		t.Fatalf("unexpected aspect-only validation error: %v", err)
+	}
+	if err := validateImageGenerationSizeOptions(openAIAspectOnlyMapping, `{}`); err == nil {
+		t.Fatalf("expected missing configured aspect ratio to fail")
+	}
+
+	openAIResolutionOnlyMapping := &model.ModelMapping{
+		RequestModel:    "demo-image-resolution-only",
+		ModelType:       2,
+		RequestEndpoint: "openai-response",
+		Resolutions:     `["1K","2K"]`,
+	}
+	if err := validateImageGenerationSizeOptions(openAIResolutionOnlyMapping, `{}`); err != nil {
+		t.Fatalf("unexpected ignored openai-response resolution validation error: %v", err)
+	}
+
+	unconfiguredMapping := &model.ModelMapping{
+		RequestModel:    "demo-image-unconfigured",
+		ModelType:       2,
+		RequestEndpoint: "openai",
+	}
+	if err := validateImageGenerationSizeOptions(unconfiguredMapping, `{}`); err != nil {
+		t.Fatalf("unexpected unconfigured validation error: %v", err)
 	}
 
 	geminiMapping := &model.ModelMapping{

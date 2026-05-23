@@ -36,6 +36,7 @@ const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
 const DEFAULT_VIDEO_CAPABILITIES = ['image_to_video'];
 const DEFAULT_VIDEO_DURATIONS = [5, 10];
 const IMAGE_CAPABILITY_EDITING = 'image_editing';
+const OPENAI_IMAGE_SIZE_ENDPOINTS = new Set(['openai', 'openai-response']);
 
 const normalizeRequestEndpoint = (endpoint) => {
   const normalized = String(endpoint || '')
@@ -77,6 +78,12 @@ const ModelMappingTable = ({
   refresh,
 }) => {
   const { t } = useTranslation();
+
+  const usesOpenAIImageSize = (record) =>
+    record.model_type === 2 &&
+    OPENAI_IMAGE_SIZE_ENDPOINTS.has(
+      normalizeRequestEndpoint(record.request_endpoint),
+    );
 
   const normalizeImageCapabilities = (raw) => {
     if (Array.isArray(raw)) {
@@ -198,6 +205,9 @@ const ModelMappingTable = ({
       payload.image_capabilities = JSON.stringify(imageCapabilities);
       if (!imageCapabilities.includes(IMAGE_CAPABILITY_EDITING)) {
         payload.reference_image_limit = 0;
+      }
+      if (OPENAI_IMAGE_SIZE_ENDPOINTS.has(payload.request_endpoint)) {
+        payload.resolutions = '';
       }
     }
     if (modelType === 3) {
@@ -462,7 +472,10 @@ const ModelMappingTable = ({
       title: t('分辨率'),
       dataIndex: 'resolutions',
       render: (text, record) => {
-        if (record.model_type !== 2) {
+        if (
+          record.model_type !== 2 ||
+          usesOpenAIImageSize(record)
+        ) {
           return '-';
         }
         if (!text) return '-';

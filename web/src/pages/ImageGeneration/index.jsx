@@ -47,6 +47,16 @@ import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
 import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
 import VideoGenerationTaskCard from '../../components/VideoGenerationTaskCard';
 import VideoGenerationTaskModal from '../../components/VideoGenerationTaskModal';
+import {
+  getCanvasImageUiState,
+  getCanvasImageSelectorVisibility,
+  getReferenceImageLimit,
+  modelSupportsCapability,
+  modelSupportsImageEditing,
+  modelSupportsImageGeneration,
+  modelSupportsMaskEditing,
+  modelUsesOpenAIImageSize,
+} from './canvasRules';
 
 const { Text } = Typography;
 
@@ -66,11 +76,6 @@ const TASK_LIST_REQUEST_TIMEOUT_MS = 20000;
 const CANVAS_PREFILL_STORAGE_KEY = 'imageGen_canvasPrefill_v1';
 const DEFAULT_VIDEO_PAGE_SIZE = 20;
 
-const getReferenceImageLimit = (model) => {
-  const limit = Number(model?.reference_image_limit) || 0;
-  return limit > 0 ? Math.floor(limit) : 0;
-};
-
 const normalizeImageCapabilities = (raw) => {
   if (Array.isArray(raw)) {
     return raw;
@@ -87,10 +92,6 @@ const normalizeImageCapabilities = (raw) => {
   }
   return [...DEFAULT_IMAGE_CAPABILITIES];
 };
-
-const modelSupportsCapability = (model, capability) =>
-  !!model &&
-  normalizeImageCapabilities(model.image_capabilities).includes(capability);
 
 const normalizeVideoCapabilities = (raw) => {
   if (Array.isArray(raw)) {
@@ -285,8 +286,14 @@ const ImageGeneration = () => {
     getStoredNumber(STORAGE_KEYS.VIDEO_DURATION, 0),
   );
 
-  const showImageAspectRatioSelector = availableAspectRatios.length > 0;
-  const showImageResolutionSelector = availableResolutions.length > 0;
+  const {
+    showImageAspectRatioSelector,
+    showImageResolutionSelector,
+  } = getCanvasImageSelectorVisibility({
+    model: selectedModelData,
+    aspectRatios: availableAspectRatios,
+    resolutions: availableResolutions,
+  });
   const showVideoAspectRatioSelector = videoAvailableAspectRatios.length > 0;
   const showVideoResolutionSelector = videoAvailableResolutions.length > 0;
 
@@ -1619,14 +1626,19 @@ const ImageGeneration = () => {
         if (model.resolutions) {
           try {
             const resolutions = JSON.parse(model.resolutions);
-            setAvailableResolutions(resolutions);
-            // 只在当前 resolution 为空或不在新列表中时才重置
-            setResolution((current) => {
-              if (!current || !resolutions.includes(current)) {
-                return resolutions.length > 0 ? resolutions[0] : '';
-              }
-              return current;
-            });
+            if (modelUsesOpenAIImageSize(model)) {
+              setAvailableResolutions([]);
+              setResolution('');
+            } else {
+              setAvailableResolutions(resolutions);
+              // 只在当前 resolution 为空或不在新列表中时才重置
+              setResolution((current) => {
+                if (!current || !resolutions.includes(current)) {
+                  return resolutions.length > 0 ? resolutions[0] : '';
+                }
+                return current;
+              });
+            }
           } catch (e) {
             setAvailableResolutions([]);
             setResolution('');
@@ -1684,9 +1696,12 @@ const ImageGeneration = () => {
   useEffect(() => {
     if (
       !selectedModelData ||
-      !modelSupportsCapability(selectedModelData, IMAGE_CAPABILITY_EDITING)
+      !modelSupportsImageEditing(selectedModelData)
     ) {
       setReferenceImages([]);
+      setMaskImage(null);
+    }
+    if (!selectedModelData || !modelSupportsMaskEditing(selectedModelData)) {
       setMaskImage(null);
     }
   }, [selectedModelData]);
@@ -1804,6 +1819,14 @@ const ImageGeneration = () => {
       showError(t('模型配置错误：缺少 request_endpoint'));
       return;
     }
+    if (showImageAspectRatioSelector && !aspectRatio) {
+      showError(t('请选择宽高比'));
+      return;
+    }
+    if (showImageResolutionSelector && !resolution) {
+      showError(t('请选择分辨率'));
+      return;
+    }
     if (referenceImages.length > 0 && !supportsImageEditing) {
       showError(t('当前模型不支持图像编辑'));
       return;
@@ -1847,12 +1870,12 @@ const ImageGeneration = () => {
       if (aspectRatio) {
         params.aspect_ratio = aspectRatio;
       }
-      if (resolution) {
+      if (!modelUsesOpenAIImageSize(selectedModelData) && resolution) {
         params.resolution = resolution;
       }
 
       // 处理参考图片
-      if (referenceImages.length > 0) {
+      if (supportsImageEditing && referenceImages.length > 0) {
         const imagePromises = referenceImages.map((file) => {
           if (!file.fileInstance && file.url) {
             return Promise.resolve(file.url);
@@ -1867,7 +1890,7 @@ const ImageGeneration = () => {
         const base64Images = await Promise.all(imagePromises);
         params.reference_images = base64Images;
       }
-      if (maskImage?.fileInstance) {
+      if (modelSupportsMaskEditing(selectedModelData) && maskImage?.fileInstance) {
         params.mask = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = (e) => resolve(e.target.result);
@@ -2259,24 +2282,30 @@ const ImageGeneration = () => {
     },
   };
 
-  const selectedModelSupportsGeneration =
-    !!selectedModelData &&
-    modelSupportsCapability(selectedModelData, IMAGE_CAPABILITY_GENERATION);
-  const selectedModelSupportsEditing =
-    !!selectedModelData &&
-    modelSupportsCapability(selectedModelData, IMAGE_CAPABILITY_EDITING);
-  const selectedModelSupportsMaskEditing =
-    !!selectedModelData &&
-    selectedModelSupportsEditing &&
-    ['openai', 'openai-response'].includes(selectedModelData.request_endpoint);
+  const selectedGroupHasAvailableToken = !!groupOptions.find(
+    (group) =>
+      group.group === selectedGroup && group.has_available_token !== false,
+  );
+  const imageUiState = getCanvasImageUiState({
+    model: selectedModelData,
+    prompt: inspiration,
+    referenceImages,
+    selectedGroupHasAvailableToken,
+    showImageAspectRatioSelector,
+    showImageResolutionSelector,
+    aspectRatio,
+    resolution,
+  });
+  const selectedModelSupportsGeneration = imageUiState.supportsGeneration;
+  const selectedModelSupportsEditing = imageUiState.supportsEditing;
+  const selectedModelSupportsMaskEditing = imageUiState.supportsMaskEditing;
   const selectedModelReferenceImageLimit =
     getReferenceImageLimit(selectedModelData);
   const hasReferenceImageLimit = selectedModelReferenceImageLimit > 0;
   const referenceImageLimitReached =
     hasReferenceImageLimit &&
     referenceImages.length >= selectedModelReferenceImageLimit;
-  const requiresReferenceImage =
-    selectedModelSupportsEditing && !selectedModelSupportsGeneration;
+  const requiresReferenceImage = imageUiState.requiresReferenceImage;
   const videoSelectedModelSupportsImageToVideo =
     !!videoSelectedModelData &&
     modelSupportsVideoCapability(
@@ -2292,12 +2321,7 @@ const ImageGeneration = () => {
   const canGenerate =
     !!selectedModel &&
     !!selectedModelData &&
-    !!inspiration.trim() &&
-    (!requiresReferenceImage || referenceImages.length > 0) &&
-    !!groupOptions.find(
-      (group) =>
-        group.group === selectedGroup && group.has_available_token !== false,
-    );
+    imageUiState.canGenerate;
 
   const canGenerateVideo =
     !!videoSelectedModel &&

@@ -1365,6 +1365,13 @@ func validateImageGenerationModelCapabilities(mapping *model.ModelMapping, param
 	if strings.TrimSpace(mask) != "" && len(referenceImages) == 0 {
 		return fmt.Errorf("mask image requires at least one reference image")
 	}
+	if strings.TrimSpace(mask) != "" {
+		switch normalizeImageEndpoint(mapping.RequestEndpoint) {
+		case "openai", "openai-response":
+		default:
+			return fmt.Errorf("mask image is only supported for OpenAI image edit requests")
+		}
+	}
 	capabilities, err := model.EffectiveImageCapabilities(mapping.ImageCapabilities)
 	if err != nil {
 		return fmt.Errorf("invalid image capabilities for model %s: %w", mapping.RequestModel, err)
@@ -1414,6 +1421,13 @@ func validateImageGenerationSizeOptions(mapping *model.ModelMapping, params stri
 	requestEndpoint := normalizeImageEndpoint(mapping.RequestEndpoint)
 	requestResolution := strings.TrimSpace(stringParamValue(paramMap, "resolution"))
 	requestAspectRatio := strings.TrimSpace(stringParamValue(paramMap, "aspect_ratio"))
+	if requestEndpoint == "openai" || requestEndpoint == "openai-response" {
+		allowedResolutions = nil
+		requestResolution = ""
+		if len(allowedAspectRatios) == 0 {
+			return nil
+		}
+	}
 
 	if len(allowedResolutions) > 0 {
 		if requestResolution == "" {

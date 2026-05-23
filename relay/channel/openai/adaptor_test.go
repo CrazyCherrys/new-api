@@ -15,6 +15,41 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestConvertImageRequestOpenAIGenerationMapsResolutionAndAspectRatioToSize(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/images/generations", nil)
+
+	adaptor := &Adaptor{}
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeImagesGenerations,
+	}
+	request := dto.ImageRequest{
+		RequestEndpoint: "openai",
+		Model:           "gpt-image-1",
+		Prompt:          "draw prompt",
+		Resolution:      "2K",
+		AspectRatio:     "16:9",
+	}
+
+	converted, err := adaptor.ConvertImageRequest(ctx, info, request)
+	if err != nil {
+		t.Fatalf("ConvertImageRequest returned error: %v", err)
+	}
+
+	out, ok := converted.(StandardOpenAIImageRequest)
+	if !ok {
+		t.Fatalf("expected StandardOpenAIImageRequest, got %T", converted)
+	}
+	if out.Size != "2048x1152" {
+		t.Fatalf("unexpected size: %q", out.Size)
+	}
+	if len(out.Image) != 0 {
+		t.Fatalf("expected no edit images, got %#v", out.Image)
+	}
+}
+
 func TestConvertImageRequestOpenAIEditUsesMultipartForReferenceImagesAndMask(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

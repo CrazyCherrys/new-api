@@ -21,6 +21,15 @@ import (
 var imageGenerationDimensionPattern = regexp.MustCompile(`^(\d{2,5})\s*[xX×*]\s*(\d{2,5})$`)
 var imageGenerationAspectRatioPattern = regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*(?::|x|X|/)\s*(\d+(?:\.\d+)?)$`)
 
+func imageGenerationEndpointUsesOpenAISize(endpoint string) bool {
+	switch strings.ToLower(strings.TrimSpace(endpoint)) {
+	case "openai", "openai-response":
+		return true
+	default:
+		return false
+	}
+}
+
 func sanitizeImageGenerationTaskParams(task *model.ImageGenerationTask) {
 	if task == nil {
 		return
@@ -1105,12 +1114,16 @@ func GetImageGenerationModels(c *gin.Context) {
 		if err != nil {
 			imageCapabilities = model.DefaultImageCapabilities()
 		}
+		resolutions := mapping.Resolutions
+		if imageGenerationEndpointUsesOpenAISize(mapping.RequestEndpoint) {
+			resolutions = ""
+		}
 		models = append(models, gin.H{
 			"request_model":         mapping.RequestModel,
 			"display_name":          mapping.DisplayName,
 			"model_series":          mapping.ModelSeries,
 			"request_endpoint":      mapping.RequestEndpoint,
-			"resolutions":           mapping.Resolutions,
+			"resolutions":           resolutions,
 			"aspect_ratios":         mapping.AspectRatios,
 			"image_capabilities":    imageCapabilities,
 			"reference_image_limit": mapping.ReferenceImageLimit,
