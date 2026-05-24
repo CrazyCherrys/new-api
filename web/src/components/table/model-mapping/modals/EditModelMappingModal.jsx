@@ -246,6 +246,7 @@ const EditModelMappingModal = ({
 
   const formatDurationTags = (values) =>
     normalizeDurationOptions(values).map((item) => `${item}s`);
+  const convertDurationTagInput = (values) => formatDurationTags(values);
 
   useEffect(() => {
     if (visible && formApi) {
@@ -740,10 +741,9 @@ const EditModelMappingModal = ({
             placeholder={t('输入时长，如 5s 或 10s，回车添加')}
             addOnBlur
             showClear
+            allowDuplicates={false}
             style={{ width: '100%' }}
-            onChange={(values) => {
-              formApi?.setValue('duration_options', formatDurationTags(values));
-            }}
+            convert={convertDurationTagInput}
             rules={
               isVideoModel
                 ? [
