@@ -2302,20 +2302,19 @@ const ImageGeneration = () => {
       background: 'var(--semi-color-primary-light-default)',
     },
     modelCardTitle: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 8,
-      marginBottom: 4,
+      display: 'block',
+      marginBottom: 5,
+      color: 'var(--semi-color-text-0)',
+      fontSize: 15,
+      fontWeight: 650,
+      lineHeight: 1.35,
     },
     modelCardMeta: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 6,
-      flexWrap: 'wrap',
+      display: 'block',
       color: 'var(--semi-color-text-2)',
       fontSize: 12,
       lineHeight: 1.4,
+      wordBreak: 'break-all',
     },
     composer: {
       flexShrink: 0,
@@ -2554,41 +2553,6 @@ const ImageGeneration = () => {
     const handleClick = isVideo
       ? () => selectVideoModelFromCatalog(model)
       : () => selectImageModelFromCatalog(model);
-    const capabilities = isVideo
-      ? normalizeVideoCapabilities(model.video_capabilities)
-      : normalizeImageCapabilities(model.image_capabilities);
-    const capabilityText = isVideo
-      ? capabilities
-          .map((capability) =>
-            capability === VIDEO_CAPABILITY_IMAGE_TO_VIDEO
-              ? t('图生视频')
-              : capability === VIDEO_CAPABILITY_TEXT_TO_VIDEO
-                ? t('文生视频')
-                : capability,
-          )
-          .join(' · ')
-      : capabilities
-          .map((capability) =>
-            capability === IMAGE_CAPABILITY_GENERATION
-              ? t('生图')
-              : capability === IMAGE_CAPABILITY_EDITING
-                ? t('编辑')
-                : capability,
-          )
-          .join(' · ');
-    const extraMeta = isVideo
-      ? (model.duration_options || []).length > 0
-        ? t('时长 {{values}}', {
-            values: (model.duration_options || [])
-              .map((item) => `${item}s`)
-              .join(' / '),
-          })
-        : ''
-      : getReferenceImageLimit(model) > 0
-        ? t('参考图上限 {{count}}', {
-            count: getReferenceImageLimit(model),
-          })
-        : '';
 
     return (
       <button
@@ -2600,30 +2564,8 @@ const ImageGeneration = () => {
         }}
         onClick={handleClick}
       >
-        <div style={styles.modelCardTitle}>
-          <Text
-            strong
-            style={{
-              fontSize: 13,
-              lineHeight: 1.4,
-              color: 'var(--semi-color-text-0)',
-              minWidth: 0,
-            }}
-          >
-            {getModelDisplayName(model)}
-          </Text>
-          <Text type='tertiary' size='small' style={{ flexShrink: 0 }}>
-            {mode === 'image' ? <IconImage size='small' /> : <IconVideo size='small' />}
-          </Text>
-        </div>
-        <div style={styles.modelCardMeta}>
-          <span>{model.request_model}</span>
-          {model.model_series ? <span>{formatModelSeries(model.model_series)}</span> : null}
-        </div>
-        <div style={styles.modelCardMeta}>
-          {capabilityText ? <span>{capabilityText}</span> : null}
-          {extraMeta ? <span>{extraMeta}</span> : null}
-        </div>
+        <div style={styles.modelCardTitle}>{getModelDisplayName(model)}</div>
+        <div style={styles.modelCardMeta}>{model.request_model}</div>
       </button>
     );
   };
