@@ -37,6 +37,7 @@ import {
   IconChevronUp,
   IconChevronDown,
   IconSearch,
+  IconSend,
   IconMenu,
   IconVideo,
   IconSetting,
@@ -345,6 +346,7 @@ const ImageGeneration = () => {
   const taskCursorHistoryRef = useRef(['']);
   const pendingCanvasPrefillRef = useRef(null);
   const prefillGroupFallbackNoticeShownRef = useRef(false);
+  const composerComposingRef = useRef(false);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
   const [userCustomWorkerKeyEnabled, setUserCustomWorkerKeyEnabled] =
     useState(false);
@@ -2317,25 +2319,23 @@ const ImageGeneration = () => {
     },
     composer: {
       flexShrink: 0,
-      padding: isMobile ? '10px 10px 12px' : '14px 20px 18px',
+      padding: isMobile ? '8px 10px 10px' : '12px 20px 14px',
       background: 'var(--semi-color-bg-1)',
       borderTop: '1px solid var(--semi-color-border)',
     },
     composerBox: {
       maxWidth: 1100,
       margin: '0 auto',
-      borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
-      boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)',
-      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
     },
     composerTop: {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 10,
-      padding: '10px 12px 0',
+      padding: '0 2px',
     },
     selectedModelPill: {
       display: 'flex',
@@ -2347,59 +2347,62 @@ const ImageGeneration = () => {
       fontWeight: 600,
     },
     composerBody: {
-      padding: isMobile ? '8px 10px 10px' : '8px 12px 12px',
+      padding: 0,
     },
-    composerFooter: {
+    textareaWrapper: {
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)',
+      padding: isMobile ? '6px 8px 8px' : '8px 10px 10px',
+    },
+    composerInlineBar: {
       display: 'flex',
       alignItems: 'flex-end',
       justifyContent: 'space-between',
-      gap: 12,
-      borderTop: '1px solid var(--semi-color-border)',
-      padding: isMobile ? 10 : 12,
+      gap: 8,
       flexWrap: 'wrap',
+      paddingTop: 6,
+      borderTop: '1px solid var(--semi-color-border)',
     },
     composerAssets: {
       display: 'flex',
       alignItems: 'center',
-      gap: 8,
+      gap: 6,
       flexWrap: 'wrap',
       minWidth: 0,
       flex: 1,
     },
-    composerActions: {
+    composerRightTools: {
       display: 'flex',
       alignItems: 'flex-end',
-      gap: 8,
+      gap: 6,
       flexWrap: 'wrap',
       justifyContent: 'flex-end',
+      marginLeft: 'auto',
     },
     composerParams: {
       display: 'flex',
-      gap: 8,
+      gap: 6,
       alignItems: 'flex-end',
       flexWrap: 'wrap',
       justifyContent: 'flex-end',
     },
-    generateBtn: {
-      minWidth: 112,
-      height: 44,
+    generateIconBtn: {
+      width: 36,
+      height: 36,
+      minWidth: 36,
       borderRadius: 8,
-      border: 'none',
+      border: '1px solid var(--semi-color-border)',
       cursor: 'pointer',
-      fontSize: 15,
-      fontWeight: 600,
-      color: '#fff',
-      background:
-        'linear-gradient(135deg, #e8593c 0%, #d4a843 50%, #5a9e6f 100%)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 6,
-      transition: 'opacity 0.2s',
+      transition: 'opacity 0.2s, background 0.2s, border-color 0.2s, color 0.2s',
     },
     addImageBtn: {
-      width: 48,
-      height: 48,
+      width: 36,
+      height: 36,
       borderRadius: 8,
       border: '1px dashed var(--semi-color-border)',
       background: 'var(--semi-color-fill-0)',
@@ -2409,13 +2412,6 @@ const ImageGeneration = () => {
       cursor: 'pointer',
       color: 'var(--semi-color-text-2)',
       transition: 'border-color 0.2s',
-    },
-    textareaWrapper: {
-      position: 'relative',
-      borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
-      padding: 0,
     },
     emptyState: {
       display: 'flex',
@@ -2436,17 +2432,18 @@ const ImageGeneration = () => {
       justifyContent: 'center',
     },
     paramItem: {
-      flex: 1,
+      width: isMobile ? 88 : 104,
+      flexShrink: 0,
     },
     paramLabel: {
       fontSize: 12,
       color: 'var(--semi-color-text-2)',
-      marginBottom: 4,
+      marginBottom: 3,
       display: 'block',
     },
     referenceImageThumb: {
-      width: 48,
-      height: 48,
+      width: 36,
+      height: 36,
       borderRadius: 8,
       objectFit: 'cover',
       border: '1px solid var(--semi-color-border)',
@@ -2788,6 +2785,7 @@ const ImageGeneration = () => {
       <span style={styles.paramLabel}>{label}</span>
       <Select
         style={{ width: '100%' }}
+        size='small'
         value={value}
         onChange={onChange}
         placeholder={t('请选择')}
@@ -2816,13 +2814,44 @@ const ImageGeneration = () => {
   );
 
   const renderComposer = () => {
-    const activeModel = generationMode === 'video' ? videoSelectedModelData : selectedModelData;
+    const isVideoMode = generationMode === 'video';
+    const activeModel = isVideoMode ? videoSelectedModelData : selectedModelData;
     const activeModelLabel = activeModel ? getModelDisplayName(activeModel) : t('请选择模型');
     const activeModelSeries = activeModel?.model_series
       ? formatModelSeries(activeModel.model_series)
       : '';
+    const activePrompt = isVideoMode ? videoPrompt : inspiration;
+    const promptHasContent = activePrompt.trim().length > 0;
+    const submitLoading = isVideoMode ? videoGenerating : generating;
+    const submitDisabled = isVideoMode
+      ? videoGenerating || !canGenerateVideo
+      : generating || !canGenerate;
+    const handleComposerSubmit = () => {
+      if (submitDisabled) {
+        return;
+      }
+      if (isVideoMode) {
+        handleGenerateVideo();
+        return;
+      }
+      handleGenerate();
+    };
+    const handleComposerKeyDown = (event) => {
+      const nativeEvent = event.nativeEvent || {};
+      if (
+        event.key !== 'Enter' ||
+        event.shiftKey ||
+        composerComposingRef.current ||
+        nativeEvent.isComposing ||
+        event.keyCode === 229
+      ) {
+        return;
+      }
+      event.preventDefault();
+      handleComposerSubmit();
+    };
     const showMaskEditor =
-      generationMode === 'image' &&
+      !isVideoMode &&
       selectedModelSupportsMaskEditing &&
       referenceImages.length > 0;
     const videoComposerParameters = [
@@ -2934,139 +2963,119 @@ const ImageGeneration = () => {
             <div style={styles.textareaWrapper}>
               <TextArea
                 placeholder={
-                  generationMode === 'video'
+                  isVideoMode
                     ? t('输入视频创意描述...')
                     : t('输入创作描述...')
                 }
-                value={generationMode === 'video' ? videoPrompt : inspiration}
-                onChange={generationMode === 'video' ? setVideoPrompt : setInspiration}
+                value={activePrompt}
+                onChange={isVideoMode ? setVideoPrompt : setInspiration}
+                onKeyDown={handleComposerKeyDown}
+                onCompositionStart={() => {
+                  composerComposingRef.current = true;
+                }}
+                onCompositionEnd={() => {
+                  composerComposingRef.current = false;
+                }}
                 maxLength={5000}
                 showClear
-                autosize={{ minRows: isMobile ? 4 : 5, maxRows: 10 }}
+                borderless
+                autosize={{ minRows: isMobile ? 3 : 4, maxRows: 10 }}
                 style={{
                   border: 'none',
                   background: 'transparent',
                   resize: 'none',
+                  boxShadow: 'none',
                 }}
               />
-            </div>
-          </div>
+              <div style={styles.composerInlineBar}>
+                <div style={styles.composerAssets}>
+                  {isVideoMode
+                    ? videoSelectedModelSupportsImageToVideo &&
+                      (videoReferenceImage ? (
+                        renderReferenceThumb(videoReferenceImage, handleVideoReferenceRemove)
+                      ) : null)
+                    : selectedModelSupportsEditing &&
+                      referenceImages.map((file) => renderReferenceThumb(file, () => handleImageRemove(file)))}
 
-          <div style={styles.composerFooter}>
-            <div style={styles.composerAssets}>
-              {generationMode === 'video'
-                ? videoSelectedModelSupportsImageToVideo &&
-                  (videoReferenceImage ? (
-                    renderReferenceThumb(videoReferenceImage, handleVideoReferenceRemove)
-                  ) : null)
-                : selectedModelSupportsEditing &&
-                  referenceImages.map((file) => renderReferenceThumb(file, () => handleImageRemove(file)))}
-
-              {generationMode === 'video' ? (
-                videoSelectedModelSupportsImageToVideo && (
-                  <Upload
-                    action=''
-                    accept='image/*'
-                    multiple={false}
-                    fileList={videoReferenceImage ? [videoReferenceImage] : []}
-                    onChange={handleVideoReferenceUpload}
-                    showUploadList={false}
-                    beforeUpload={validateImageSize}
-                  >
-                    <div style={styles.addImageBtn}>
-                      <IconPlus size='large' />
-                    </div>
-                  </Upload>
-                )
-              ) : selectedModelSupportsEditing ? (
-                <>
-                  <Upload
-                    action=''
-                    accept='image/*'
-                    multiple
-                    fileList={referenceImages}
-                    onChange={handleImageUpload}
-                    showUploadList={false}
-                    beforeUpload={validateImageSize}
-                    disabled={referenceImageLimitReached}
-                  >
-                    <div
-                      style={{
-                        ...styles.addImageBtn,
-                        opacity: referenceImageLimitReached ? 0.5 : 1,
-                        cursor: referenceImageLimitReached ? 'not-allowed' : 'pointer',
-                      }}
-                    >
-                      <IconPlus size='large' />
-                    </div>
-                  </Upload>
-                  {selectedModelSupportsMaskEditing && referenceImages.length > 0 && (
-                    <Button
-                      size='small'
-                      type='tertiary'
-                      icon={<IconSetting />}
-                      onClick={() => setComposerAdvancedVisible((current) => !current)}
-                    >
-                      {t('高级')}
-                    </Button>
-                  )}
-                </>
-              ) : null}
-            </div>
-
-            <div style={styles.composerActions}>
-              <div style={styles.composerParams}>
-                {generationMode === 'video'
-                  ? videoComposerParameters
-                  : imageComposerParameters}
-              </div>
-
-              <button
-                style={{
-                  ...styles.generateBtn,
-                  opacity:
-                    generationMode === 'video'
-                      ? videoGenerating || !canGenerateVideo
-                        ? 0.6
-                        : 1
-                      : generating || !canGenerate
-                        ? 0.6
-                        : 1,
-                  pointerEvents:
-                    generationMode === 'video'
-                      ? videoGenerating || !canGenerateVideo
-                        ? 'none'
-                        : 'auto'
-                      : generating || !canGenerate
-                        ? 'none'
-                        : 'auto',
-                }}
-                onClick={generationMode === 'video' ? handleGenerateVideo : handleGenerate}
-                disabled={
-                  generationMode === 'video'
-                    ? videoGenerating || !canGenerateVideo
-                    : generating || !canGenerate
-                }
-                type='button'
-              >
-                {generationMode === 'video' ? (
-                  videoGenerating ? (
-                    <Spin size='small' />
-                  ) : (
+                  {isVideoMode ? (
+                    videoSelectedModelSupportsImageToVideo && (
+                      <Upload
+                        action=''
+                        accept='image/*'
+                        multiple={false}
+                        fileList={videoReferenceImage ? [videoReferenceImage] : []}
+                        onChange={handleVideoReferenceUpload}
+                        showUploadList={false}
+                        beforeUpload={validateImageSize}
+                      >
+                        <div style={styles.addImageBtn}>
+                          <IconPlus />
+                        </div>
+                      </Upload>
+                    )
+                  ) : selectedModelSupportsEditing ? (
                     <>
-                      <IconVideo size='small' />
-                      {t('生成视频')}
+                      <Upload
+                        action=''
+                        accept='image/*'
+                        multiple
+                        fileList={referenceImages}
+                        onChange={handleImageUpload}
+                        showUploadList={false}
+                        beforeUpload={validateImageSize}
+                        disabled={referenceImageLimitReached}
+                      >
+                        <div
+                          style={{
+                            ...styles.addImageBtn,
+                            opacity: referenceImageLimitReached ? 0.5 : 1,
+                            cursor: referenceImageLimitReached ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          <IconPlus />
+                        </div>
+                      </Upload>
+                      {selectedModelSupportsMaskEditing && referenceImages.length > 0 && (
+                        <Button
+                          size='small'
+                          type='tertiary'
+                          icon={<IconSetting />}
+                          onClick={() => setComposerAdvancedVisible((current) => !current)}
+                        >
+                          {t('高级')}
+                        </Button>
+                      )}
                     </>
-                  )
-                ) : generating ? (
-                  <Spin size='small' />
-                ) : (
-                  <>
-                    <IconImage size='small' />
-                    {t('生成')}
-                  </>
-                )}
-              </button>
+                  ) : null}
+                </div>
+
+                <div style={styles.composerRightTools}>
+                  <div style={styles.composerParams}>
+                    {isVideoMode ? videoComposerParameters : imageComposerParameters}
+                  </div>
+
+                  <button
+                    aria-label={isVideoMode ? t('生成视频') : t('生成')}
+                    style={{
+                      ...styles.generateIconBtn,
+                      opacity: submitDisabled ? 0.55 : 1,
+                      pointerEvents: submitDisabled ? 'none' : 'auto',
+                      background: promptHasContent
+                        ? 'var(--semi-color-primary)'
+                        : 'var(--semi-color-fill-0)',
+                      borderColor: promptHasContent
+                        ? 'var(--semi-color-primary)'
+                        : 'var(--semi-color-border)',
+                      color: promptHasContent ? '#fff' : 'var(--semi-color-text-2)',
+                    }}
+                    onClick={handleComposerSubmit}
+                    disabled={submitDisabled}
+                    type='button'
+                  >
+                    {submitLoading ? <Spin size='small' /> : <IconSend size='small' />}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
