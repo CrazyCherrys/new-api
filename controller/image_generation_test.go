@@ -48,7 +48,7 @@ func setupImageGenerationControllerTestDB(t *testing.T) *gorm.DB {
 	model.DB = db
 	model.LOG_DB = db
 
-	if err := db.AutoMigrate(&model.ImageGenerationTask{}, &model.ModelMapping{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Ability{}, &model.ImageGenerationTask{}, &model.ModelMapping{}); err != nil {
 		t.Fatalf("failed to migrate image generation tables: %v", err)
 	}
 
@@ -60,6 +60,47 @@ func setupImageGenerationControllerTestDB(t *testing.T) *gorm.DB {
 	})
 
 	return db
+}
+
+func TestBuildImageGenerationModelResponseKeepsOpenAIConfiguredResolutions(t *testing.T) {
+	mappings := []*model.ModelMapping{
+		{
+			RequestModel:      "gpt-image-models",
+			ActualModel:       "gpt-image-models",
+			DisplayName:       "GPT Image Models",
+			ModelSeries:       "openai",
+			ModelType:         2,
+			Status:            1,
+			RequestEndpoint:   "openai",
+			Resolutions:       `["1K","2K"]`,
+			AspectRatios:      `["1:1","16:9"]`,
+			ImageCapabilities: `["image_generation"]`,
+		},
+		{
+			RequestModel:      "gpt-response-models",
+			ActualModel:       "gpt-response-models",
+			DisplayName:       "GPT Response Models",
+			ModelSeries:       "openai",
+			ModelType:         2,
+			Status:            1,
+			RequestEndpoint:   "openai-response",
+			Resolutions:       `["2K","4K"]`,
+			AspectRatios:      `["1:1","21:9"]`,
+			ImageCapabilities: `["image_generation"]`,
+		},
+	}
+	for _, mapping := range mappings {
+		response := buildImageGenerationModelResponse(mapping)
+		if response["request_endpoint"] != mapping.RequestEndpoint {
+			t.Fatalf("expected endpoint %q, got %#v", mapping.RequestEndpoint, response["request_endpoint"])
+		}
+		if response["resolutions"] != mapping.Resolutions {
+			t.Fatalf("expected resolutions %q, got %#v", mapping.Resolutions, response["resolutions"])
+		}
+		if response["aspect_ratios"] != mapping.AspectRatios {
+			t.Fatalf("expected aspect ratios %q, got %#v", mapping.AspectRatios, response["aspect_ratios"])
+		}
+	}
 }
 
 func TestGetImageGenerationTaskDetailReturnsComputedDetailFields(t *testing.T) {

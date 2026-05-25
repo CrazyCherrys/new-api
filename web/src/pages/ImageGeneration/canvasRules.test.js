@@ -78,7 +78,7 @@ describe('canvas image model rules', () => {
       }),
     ).toEqual({
       showImageAspectRatioSelector: true,
-      showImageResolutionSelector: false,
+      showImageResolutionSelector: true,
     });
 
     expect(
@@ -91,6 +91,19 @@ describe('canvas image model rules', () => {
       }),
     ).toEqual({
       showImageAspectRatioSelector: false,
+      showImageResolutionSelector: true,
+    });
+
+    expect(
+      getCanvasImageSelectorVisibility({
+        model: {
+          request_endpoint: 'openai-response',
+        },
+        aspectRatios: '["1:1"]',
+        resolutions: '["4K"]',
+      }),
+    ).toEqual({
+      showImageAspectRatioSelector: true,
       showImageResolutionSelector: true,
     });
   });

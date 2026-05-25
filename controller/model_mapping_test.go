@@ -19,6 +19,28 @@ func TestValidateImageModelEndpointRejectsDeprecatedOpenAIMod(t *testing.T) {
 	}
 }
 
+func TestSanitizeModelMappingSettingsKeepsOpenAIImageResolutions(t *testing.T) {
+	for _, endpoint := range []string{"openai", "openai-response"} {
+		t.Run(endpoint, func(t *testing.T) {
+			mapping := &model.ModelMapping{
+				ModelType:       2,
+				RequestEndpoint: endpoint,
+				Resolutions:     `["1K","2K"]`,
+				AspectRatios:    `["1:1","16:9"]`,
+			}
+
+			sanitizeModelMappingSettings(mapping)
+
+			if mapping.Resolutions != `["1K","2K"]` {
+				t.Fatalf("expected resolutions to be preserved, got %q", mapping.Resolutions)
+			}
+			if mapping.AspectRatios != `["1:1","16:9"]` {
+				t.Fatalf("expected aspect ratios to be preserved, got %q", mapping.AspectRatios)
+			}
+		})
+	}
+}
+
 func TestNormalizeVideoCapabilitiesIncludesTextToVideo(t *testing.T) {
 	normalized, err := model.NormalizeVideoCapabilities(`["image_to_video","text_to_video"]`)
 	if err != nil {

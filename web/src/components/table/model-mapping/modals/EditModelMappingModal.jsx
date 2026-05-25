@@ -34,7 +34,6 @@ const DEFAULT_VIDEO_DURATIONS = [5, 10];
 const IMAGE_CAPABILITY_EDITING = 'image_editing';
 const DEFAULT_REFERENCE_IMAGE_LIMIT = 1;
 const MAX_REFERENCE_IMAGE_LIMIT = 20;
-const OPENAI_IMAGE_SIZE_ENDPOINTS = new Set(['openai', 'openai-response']);
 
 const normalizeRequestEndpoint = (endpoint) => {
   const normalized = String(endpoint || '')
@@ -66,8 +65,6 @@ const EditModelMappingModal = ({
   const [loading, setLoading] = useState(false);
   const [formApi, setFormApi] = useState(null);
   const [selectedModelType, setSelectedModelType] = useState(1);
-  const [selectedRequestEndpoint, setSelectedRequestEndpoint] =
-    useState('openai');
   const [referenceImageLimitEnabled, setReferenceImageLimitEnabled] =
     useState(false);
   const [selectedImageCapabilities, setSelectedImageCapabilities] = useState([]);
@@ -75,10 +72,7 @@ const EditModelMappingModal = ({
   const isVideoModel = Number(selectedModelType) === 3;
   const canConfigureReferenceImageLimit =
     isImageModel && selectedImageCapabilities.includes(IMAGE_CAPABILITY_EDITING);
-  const usesOpenAIImageEndpoint =
-    isImageModel && OPENAI_IMAGE_SIZE_ENDPOINTS.has(selectedRequestEndpoint);
-  const canConfigureImageResolution =
-    isImageModel && !usesOpenAIImageEndpoint;
+  const canConfigureImageResolution = isImageModel;
 
   const modelSeriesOptions = [
     { value: 'openai', label: 'OpenAI' },
@@ -285,10 +279,7 @@ const EditModelMappingModal = ({
           : getDefaultRequestEndpoint(nextModelType);
 
         const isImageMapping = nextModelType === 2;
-        const shouldLoadResolutions =
-          isImageMapping && !OPENAI_IMAGE_SIZE_ENDPOINTS.has(nextEndpoint);
         setSelectedModelType(nextModelType);
-        setSelectedRequestEndpoint(nextEndpoint);
         setSelectedImageCapabilities(imageCapabilities);
         setReferenceImageLimitEnabled(
           nextModelType === 2 &&
@@ -301,7 +292,7 @@ const EditModelMappingModal = ({
           request_endpoint: nextEndpoint,
           actual_model:
             editingMapping.actual_model || editingMapping.request_model || '',
-          resolutions: shouldLoadResolutions ? resolutions : [],
+          resolutions: isImageMapping ? resolutions : [],
           aspect_ratios: isImageMapping ? aspectRatios : [],
           image_capabilities: imageCapabilities,
           reference_image_limit:
@@ -315,7 +306,6 @@ const EditModelMappingModal = ({
         });
       } else {
         setSelectedModelType(1);
-        setSelectedRequestEndpoint('openai');
         setSelectedImageCapabilities([]);
         setReferenceImageLimitEnabled(false);
 
@@ -425,9 +415,7 @@ const EditModelMappingModal = ({
           : 0,
         // 将数组转换为 JSON 字符串
         resolutions:
-          shouldSubmitImageSettings &&
-          !OPENAI_IMAGE_SIZE_ENDPOINTS.has(requestEndpoint) &&
-          values.resolutions
+          shouldSubmitImageSettings && values.resolutions
           ? JSON.stringify(values.resolutions)
           : '',
         aspect_ratios:
@@ -555,15 +543,6 @@ const EditModelMappingModal = ({
             ) {
               const nextEndpoint = getDefaultRequestEndpoint(nextModelType);
               formApi?.setValue('request_endpoint', nextEndpoint);
-              setSelectedRequestEndpoint(nextEndpoint);
-              if (OPENAI_IMAGE_SIZE_ENDPOINTS.has(nextEndpoint)) {
-                formApi?.setValue('resolutions', []);
-              }
-            } else {
-              setSelectedRequestEndpoint(currentEndpoint);
-              if (OPENAI_IMAGE_SIZE_ENDPOINTS.has(currentEndpoint)) {
-                formApi?.setValue('resolutions', []);
-              }
             }
 
             if (nextModelType === 2) {
@@ -636,10 +615,6 @@ const EditModelMappingModal = ({
           onChange={(value) => {
             const nextEndpoint = normalizeRequestEndpoint(value);
             formApi?.setValue('request_endpoint', nextEndpoint);
-            setSelectedRequestEndpoint(nextEndpoint);
-            if (OPENAI_IMAGE_SIZE_ENDPOINTS.has(nextEndpoint)) {
-              formApi?.setValue('resolutions', []);
-            }
           }}
         />
         <Form.Switch field='status' label={t('状态')} size='large' />

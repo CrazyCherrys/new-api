@@ -1421,13 +1421,6 @@ func validateImageGenerationSizeOptions(mapping *model.ModelMapping, params stri
 	requestEndpoint := normalizeImageEndpoint(mapping.RequestEndpoint)
 	requestResolution := strings.TrimSpace(stringParamValue(paramMap, "resolution"))
 	requestAspectRatio := strings.TrimSpace(stringParamValue(paramMap, "aspect_ratio"))
-	if requestEndpoint == "openai" || requestEndpoint == "openai-response" {
-		allowedResolutions = nil
-		requestResolution = ""
-		if len(allowedAspectRatios) == 0 {
-			return nil
-		}
-	}
 
 	if len(allowedResolutions) > 0 {
 		if requestResolution == "" {

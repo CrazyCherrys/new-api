@@ -55,7 +55,6 @@ import {
   modelSupportsImageEditing,
   modelSupportsImageGeneration,
   modelSupportsMaskEditing,
-  modelUsesOpenAIImageSize,
 } from './canvasRules';
 
 const { Text } = Typography;
@@ -1626,19 +1625,14 @@ const ImageGeneration = () => {
         if (model.resolutions) {
           try {
             const resolutions = JSON.parse(model.resolutions);
-            if (modelUsesOpenAIImageSize(model)) {
-              setAvailableResolutions([]);
-              setResolution('');
-            } else {
-              setAvailableResolutions(resolutions);
-              // 只在当前 resolution 为空或不在新列表中时才重置
-              setResolution((current) => {
-                if (!current || !resolutions.includes(current)) {
-                  return resolutions.length > 0 ? resolutions[0] : '';
-                }
-                return current;
-              });
-            }
+            setAvailableResolutions(resolutions);
+            // 只在当前 resolution 为空或不在新列表中时才重置
+            setResolution((current) => {
+              if (!current || !resolutions.includes(current)) {
+                return resolutions.length > 0 ? resolutions[0] : '';
+              }
+              return current;
+            });
           } catch (e) {
             setAvailableResolutions([]);
             setResolution('');
@@ -1870,7 +1864,7 @@ const ImageGeneration = () => {
       if (aspectRatio) {
         params.aspect_ratio = aspectRatio;
       }
-      if (!modelUsesOpenAIImageSize(selectedModelData) && resolution) {
+      if (resolution) {
         params.resolution = resolution;
       }
 

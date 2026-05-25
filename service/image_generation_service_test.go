@@ -2539,14 +2539,14 @@ func TestValidateImageGenerationSizeOptions(t *testing.T) {
 	if err := validateImageGenerationSizeOptions(mapping, `{"resolution":"2K","aspect_ratio":"16:9"}`); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
-	if err := validateImageGenerationSizeOptions(mapping, `{"aspect_ratio":"16:9"}`); err != nil {
-		t.Fatalf("unexpected aspect-only validation error for openai mapping: %v", err)
+	if err := validateImageGenerationSizeOptions(mapping, `{"aspect_ratio":"16:9"}`); err == nil {
+		t.Fatalf("expected missing configured resolution to fail for openai mapping")
 	}
-	if err := validateImageGenerationSizeOptions(mapping, `{"resolution":"4K","aspect_ratio":"16:9"}`); err != nil {
-		t.Fatalf("unexpected ignored resolution validation error: %v", err)
+	if err := validateImageGenerationSizeOptions(mapping, `{"resolution":"4K","aspect_ratio":"16:9"}`); err == nil {
+		t.Fatalf("expected unsupported configured resolution to fail for openai mapping")
 	}
 	if err := validateImageGenerationSizeOptions(mapping, `{}`); err == nil {
-		t.Fatalf("expected missing configured aspect ratio to fail")
+		t.Fatalf("expected missing configured resolution and aspect ratio to fail")
 	}
 
 	openAIAspectOnlyMapping := &model.ModelMapping{
@@ -2568,8 +2568,11 @@ func TestValidateImageGenerationSizeOptions(t *testing.T) {
 		RequestEndpoint: "openai-response",
 		Resolutions:     `["1K","2K"]`,
 	}
-	if err := validateImageGenerationSizeOptions(openAIResolutionOnlyMapping, `{}`); err != nil {
-		t.Fatalf("unexpected ignored openai-response resolution validation error: %v", err)
+	if err := validateImageGenerationSizeOptions(openAIResolutionOnlyMapping, `{}`); err == nil {
+		t.Fatal("expected missing openai-response resolution to fail")
+	}
+	if err := validateImageGenerationSizeOptions(openAIResolutionOnlyMapping, `{"resolution":"2K"}`); err != nil {
+		t.Fatalf("unexpected openai-response resolution-only validation error: %v", err)
 	}
 
 	unconfiguredMapping := &model.ModelMapping{

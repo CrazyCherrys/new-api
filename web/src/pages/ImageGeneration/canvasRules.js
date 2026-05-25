@@ -7,8 +7,6 @@ const normalizeRequestEndpoint = (endpoint) =>
     .trim()
     .toLowerCase();
 
-const OPENAI_IMAGE_SIZE_ENDPOINTS = new Set(['openai', 'openai-response']);
-
 const parseJsonArray = (raw) => {
   if (Array.isArray(raw)) {
     return raw;
@@ -49,19 +47,12 @@ export const modelSupportsMaskEditing = (model) =>
   modelSupportsImageEditing(model) &&
   OPENAI_MASK_EDIT_ENDPOINTS.has(normalizeRequestEndpoint(model?.request_endpoint));
 
-export const modelUsesOpenAIImageSize = (model) =>
-  OPENAI_IMAGE_SIZE_ENDPOINTS.has(
-    normalizeRequestEndpoint(model?.request_endpoint),
-  );
-
 export const getCanvasImageSelectorVisibility = ({
-  model,
   aspectRatios,
   resolutions,
 } = {}) => ({
   showImageAspectRatioSelector: parseJsonArray(aspectRatios).length > 0,
-  showImageResolutionSelector:
-    !modelUsesOpenAIImageSize(model) && parseJsonArray(resolutions).length > 0,
+  showImageResolutionSelector: parseJsonArray(resolutions).length > 0,
 });
 
 export const getCanvasImageUiState = ({
