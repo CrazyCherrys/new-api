@@ -28,20 +28,16 @@ import {
   Typography,
   Input,
   TextArea,
-  Pagination,
   SideSheet,
 } from '@douyinfe/semi-ui';
 import {
   IconPlus,
   IconDelete,
-  IconClock,
   IconImage,
   IconChevronUp,
   IconChevronDown,
-  IconExternalOpen,
   IconSearch,
   IconMenu,
-  IconFilter,
   IconVideo,
   IconSetting,
 } from '@douyinfe/semi-icons';
@@ -3108,6 +3104,23 @@ const ImageGeneration = () => {
       </div>
     );
   };
+
+  const renderModernRightPanel = () => (
+    <div style={styles.rightPanel}>
+      <div style={styles.rightContent} />
+
+      <SideSheet
+        placement='left'
+        visible={mobileCatalogVisible}
+        onCancel={() => setMobileCatalogVisible(false)}
+        width='100%'
+        title={t('模型目录')}
+        bodyStyle={{ padding: 0 }}
+      >
+        {renderLeftCatalog()}
+      </SideSheet>
+    </div>
+  );
 
   return (
     <div style={styles.container}>
