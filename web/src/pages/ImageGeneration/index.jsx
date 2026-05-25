@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -26,23 +26,27 @@ import {
   Upload,
   Spin,
   Typography,
-  Image,
-  InputNumber,
+  Input,
   TextArea,
   Pagination,
-  Empty,
+  SideSheet,
 } from '@douyinfe/semi-ui';
 import {
   IconPlus,
   IconDelete,
   IconClock,
   IconImage,
-  IconBolt,
   IconChevronUp,
   IconChevronDown,
   IconExternalOpen,
+  IconSearch,
+  IconMenu,
+  IconFilter,
+  IconVideo,
+  IconSetting,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
+import { useIsMobile } from '../../hooks/common/useIsMobile';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
 import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
 import VideoGenerationTaskCard from '../../components/VideoGenerationTaskCard';
@@ -53,7 +57,6 @@ import {
   getReferenceImageLimit,
   modelSupportsCapability,
   modelSupportsImageEditing,
-  modelSupportsImageGeneration,
   modelSupportsMaskEditing,
 } from './canvasRules';
 
@@ -74,6 +77,7 @@ const TASK_PAGE_SIZE_OPTIONS = [10, 21, 50, 100];
 const TASK_LIST_REQUEST_TIMEOUT_MS = 20000;
 const CANVAS_PREFILL_STORAGE_KEY = 'imageGen_canvasPrefill_v1';
 const DEFAULT_VIDEO_PAGE_SIZE = 20;
+const MODEL_CATALOG_ALL_SERIES = 'all';
 
 const normalizeImageCapabilities = (raw) => {
   if (Array.isArray(raw)) {
@@ -178,6 +182,7 @@ const ImageGeneration = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const isMobile = useIsMobile();
 
   // LocalStorage keys
   const STORAGE_KEYS = {
@@ -233,6 +238,15 @@ const ImageGeneration = () => {
   const [videoModelSeries, setVideoModelSeries] = useState([]);
   const [videoModels, setVideoModels] = useState([]);
   const [videoFilteredModels, setVideoFilteredModels] = useState([]);
+  const [modelSearchKeyword, setModelSearchKeyword] = useState('');
+  const [catalogSeriesFilter, setCatalogSeriesFilter] = useState(
+    MODEL_CATALOG_ALL_SERIES,
+  );
+  const [imageModelsCollapsed, setImageModelsCollapsed] = useState(false);
+  const [videoModelsCollapsed, setVideoModelsCollapsed] = useState(false);
+  const [mobileCatalogVisible, setMobileCatalogVisible] = useState(false);
+  const [mobileFiltersVisible, setMobileFiltersVisible] = useState(false);
+  const [composerAdvancedVisible, setComposerAdvancedVisible] = useState(false);
 
   const [selectedSeries, setSelectedSeries] = useState(() =>
     getStoredValue(STORAGE_KEYS.SERIES, ''),
@@ -253,7 +267,6 @@ const ImageGeneration = () => {
   const [quantity, setQuantity] = useState(() =>
     getStoredNumber(STORAGE_KEYS.QUANTITY, 1),
   );
-  const [generatedImages, setGeneratedImages] = useState([]);
   const [generating, setGenerating] = useState(false);
   const [videoGenerating, setVideoGenerating] = useState(false);
 
@@ -428,6 +441,95 @@ const ImageGeneration = () => {
       seriesMap[series.toLowerCase()] ||
       series.charAt(0).toUpperCase() + series.slice(1)
     );
+  };
+
+  const getModelDisplayName = (model) =>
+    model?.display_name || model?.request_model || '';
+
+  const modelMatchesCatalogFilters = (model) => {
+    if (!model) {
+      return false;
+    }
+    if (
+      catalogSeriesFilter !== MODEL_CATALOG_ALL_SERIES &&
+      model.model_series !== catalogSeriesFilter
+    ) {
+      return false;
+    }
+    const keyword = modelSearchKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return true;
+    }
+    return [
+      model.display_name,
+      model.request_model,
+      model.model_series,
+      model.request_endpoint,
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(keyword));
+  };
+
+  const imageCatalogModels = useMemo(
+    () =>
+      models
+        .filter(
+          (model) =>
+            model.status === undefined ||
+            model.status === null ||
+            model.status === 1,
+        )
+        .filter(modelMatchesCatalogFilters),
+    [models, catalogSeriesFilter, modelSearchKeyword],
+  );
+
+  const videoCatalogModels = useMemo(
+    () =>
+      videoModels
+        .filter(
+          (model) =>
+            model.status === undefined ||
+            model.status === null ||
+            model.status === 1,
+        )
+        .filter(modelMatchesCatalogFilters),
+    [videoModels, catalogSeriesFilter, modelSearchKeyword],
+  );
+
+  const catalogSeriesOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...modelSeries, ...videoModelSeries].filter(
+            (series) => typeof series === 'string' && series.trim() !== '',
+          ),
+        ),
+      ),
+    [modelSeries, videoModelSeries],
+  );
+
+  const selectImageModelFromCatalog = (model) => {
+    if (!model?.request_model) {
+      return;
+    }
+    setGenerationMode('image');
+    if (model.model_series) {
+      setSelectedSeries(model.model_series);
+    }
+    setSelectedModel(model.request_model);
+    setMobileCatalogVisible(false);
+  };
+
+  const selectVideoModelFromCatalog = (model) => {
+    if (!model?.request_model) {
+      return;
+    }
+    setGenerationMode('video');
+    if (model.model_series) {
+      setVideoSelectedSeries(model.model_series);
+    }
+    setVideoSelectedModel(model.request_model);
+    setMobileCatalogVisible(false);
   };
 
   const buildRemoteReferenceFile = (imageUrl) => {
@@ -2096,10 +2198,11 @@ const ImageGeneration = () => {
       height: 'calc(100vh - 60px)',
       marginTop: 60,
       overflow: 'hidden',
+      background: 'var(--semi-color-bg-1)',
     },
     leftPanel: {
-      width: 320,
-      minWidth: 320,
+      width: isMobile ? '100%' : 300,
+      minWidth: isMobile ? 0 : 300,
       display: 'flex',
       flexDirection: 'column',
       borderRight: '1px solid var(--semi-color-border)',
@@ -2108,11 +2211,7 @@ const ImageGeneration = () => {
     leftContent: {
       flex: 1,
       overflowY: 'auto',
-      padding: '20px 16px 0',
-    },
-    leftBottom: {
-      padding: '16px',
-      borderTop: '1px solid var(--semi-color-border)',
+      padding: 16,
     },
     rightPanel: {
       flex: 1,
@@ -2125,11 +2224,12 @@ const ImageGeneration = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '10px 20px',
+      padding: isMobile ? '8px 12px' : '10px 20px',
       borderBottom: '1px solid var(--semi-color-border)',
       flexWrap: 'wrap',
       gap: 12,
       minHeight: 56,
+      background: 'var(--semi-color-bg-0)',
     },
     rightContent: {
       flex: 1,
@@ -2138,6 +2238,13 @@ const ImageGeneration = () => {
       display: 'flex',
       alignItems: 'stretch',
       justifyContent: 'stretch',
+    },
+    contentColumn: {
+      flex: 1,
+      minWidth: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
     },
     label: {
       display: 'block',
@@ -2149,10 +2256,143 @@ const ImageGeneration = () => {
     fieldGroup: {
       marginBottom: 16,
     },
-    generateBtn: {
+    catalogHeader: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      marginBottom: 14,
+    },
+    catalogTitle: {
+      fontSize: 16,
+      fontWeight: 650,
+      color: 'var(--semi-color-text-0)',
+    },
+    catalogTools: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      marginBottom: 14,
+    },
+    modelSection: {
+      marginBottom: 14,
+    },
+    modelSectionHeader: {
       width: '100%',
+      minHeight: 36,
+      border: 'none',
+      background: 'transparent',
+      padding: '6px 0',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      cursor: 'pointer',
+      color: 'var(--semi-color-text-0)',
+    },
+    modelList: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+    },
+    modelCard: {
+      width: '100%',
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      padding: '10px 12px',
+      textAlign: 'left',
+      cursor: 'pointer',
+      transition: 'border-color 0.2s, background 0.2s',
+    },
+    modelCardActive: {
+      borderColor: 'var(--semi-color-primary)',
+      background: 'var(--semi-color-primary-light-default)',
+    },
+    modelCardTitle: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      marginBottom: 4,
+    },
+    modelCardMeta: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      flexWrap: 'wrap',
+      color: 'var(--semi-color-text-2)',
+      fontSize: 12,
+      lineHeight: 1.4,
+    },
+    composer: {
+      flexShrink: 0,
+      padding: isMobile ? '10px 10px 12px' : '14px 20px 18px',
+      background: 'var(--semi-color-bg-1)',
+      borderTop: '1px solid var(--semi-color-border)',
+    },
+    composerBox: {
+      maxWidth: 1100,
+      margin: '0 auto',
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)',
+      overflow: 'hidden',
+    },
+    composerTop: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      padding: '10px 12px 0',
+    },
+    selectedModelPill: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      minWidth: 0,
+      color: 'var(--semi-color-text-0)',
+      fontSize: 13,
+      fontWeight: 600,
+    },
+    composerBody: {
+      padding: isMobile ? '8px 10px 10px' : '8px 12px 12px',
+    },
+    composerFooter: {
+      display: 'flex',
+      alignItems: 'flex-end',
+      justifyContent: 'space-between',
+      gap: 12,
+      borderTop: '1px solid var(--semi-color-border)',
+      padding: isMobile ? 10 : 12,
+      flexWrap: 'wrap',
+    },
+    composerAssets: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: 'wrap',
+      minWidth: 0,
+      flex: 1,
+    },
+    composerActions: {
+      display: 'flex',
+      alignItems: 'flex-end',
+      gap: 8,
+      flexWrap: 'wrap',
+      justifyContent: 'flex-end',
+    },
+    composerParams: {
+      display: 'flex',
+      gap: 8,
+      alignItems: 'flex-end',
+      flexWrap: 'wrap',
+      justifyContent: 'flex-end',
+    },
+    generateBtn: {
+      minWidth: 112,
       height: 44,
-      borderRadius: 10,
+      borderRadius: 8,
       border: 'none',
       cursor: 'pointer',
       fontSize: 15,
@@ -2165,7 +2405,6 @@ const ImageGeneration = () => {
       justifyContent: 'center',
       gap: 6,
       transition: 'opacity 0.2s',
-      marginTop: 12,
     },
     addImageBtn: {
       width: 48,
@@ -2205,11 +2444,6 @@ const ImageGeneration = () => {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    paramRow: {
-      display: 'flex',
-      gap: 12,
-      alignItems: 'flex-end',
-    },
     paramItem: {
       flex: 1,
     },
@@ -2247,6 +2481,11 @@ const ImageGeneration = () => {
       fontSize: 10,
       padding: 0,
     },
+    mobileOnlyFilters: {
+      display: isMobile ? 'flex' : 'none',
+      alignItems: 'center',
+      gap: 8,
+    },
     filterGroup: {
       display: 'flex',
       alignItems: 'center',
@@ -2257,19 +2496,11 @@ const ImageGeneration = () => {
       fontSize: 13,
       color: 'var(--semi-color-text-2)',
     },
-    imagesGrid: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-      gap: 16,
-      padding: 16,
-      width: '100%',
-      alignContent: 'start',
-    },
     tasksGrid: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
       gap: 20,
-      padding: 20,
+      padding: isMobile ? 12 : 20,
       width: '100%',
       alignContent: 'start',
       flexShrink: 0,
@@ -2290,7 +2521,6 @@ const ImageGeneration = () => {
     aspectRatio,
     resolution,
   });
-  const selectedModelSupportsGeneration = imageUiState.supportsGeneration;
   const selectedModelSupportsEditing = imageUiState.supportsEditing;
   const selectedModelSupportsMaskEditing = imageUiState.supportsMaskEditing;
   const selectedModelReferenceImageLimit =
@@ -2299,7 +2529,6 @@ const ImageGeneration = () => {
   const referenceImageLimitReached =
     hasReferenceImageLimit &&
     referenceImages.length >= selectedModelReferenceImageLimit;
-  const requiresReferenceImage = imageUiState.requiresReferenceImage;
   const videoSelectedModelSupportsImageToVideo =
     !!videoSelectedModelData &&
     modelSupportsVideoCapability(
@@ -2325,572 +2554,715 @@ const ImageGeneration = () => {
     ((!!videoReferenceImage && videoSelectedModelSupportsImageToVideo) ||
       (!videoReferenceImage && videoSelectedModelSupportsTextToVideo));
 
-  const renderImageLeftPanel = () => (
-    <>
-      <div style={styles.fieldGroup}>
-        <span style={styles.label}>{t('分组')}</span>
-        <Select
-          style={{ width: '100%' }}
-          value={selectedGroup}
-          onChange={setSelectedGroup}
-          disabled={groupLoading || groupOptions.length === 0}
-          placeholder={t('请选择分组')}
-        >
-          {groupOptions.map((group) => (
-            <Select.Option
-              key={group.group}
-              value={group.group}
-              disabled={group.has_available_token === false}
-            >
-              {group.group}
-              {group.has_available_token === false
-                ? ` (${t('无可用令牌')})`
-                : ''}
-            </Select.Option>
-          ))}
-        </Select>
-        {selectedGroup && (
+  const selectedGroupOption = groupOptions.find(
+    (group) => group.group === selectedGroup,
+  );
+
+  const renderModelCard = (model, mode) => {
+    const isVideo = mode === 'video';
+    const isActive = isVideo
+      ? videoSelectedModel === model.request_model
+      : selectedModel === model.request_model;
+    const handleClick = isVideo
+      ? () => selectVideoModelFromCatalog(model)
+      : () => selectImageModelFromCatalog(model);
+    const capabilities = isVideo
+      ? normalizeVideoCapabilities(model.video_capabilities)
+      : normalizeImageCapabilities(model.image_capabilities);
+    const capabilityText = isVideo
+      ? capabilities
+          .map((capability) =>
+            capability === VIDEO_CAPABILITY_IMAGE_TO_VIDEO
+              ? t('图生视频')
+              : capability === VIDEO_CAPABILITY_TEXT_TO_VIDEO
+                ? t('文生视频')
+                : capability,
+          )
+          .join(' · ')
+      : capabilities
+          .map((capability) =>
+            capability === IMAGE_CAPABILITY_GENERATION
+              ? t('生图')
+              : capability === IMAGE_CAPABILITY_EDITING
+                ? t('编辑')
+                : capability,
+          )
+          .join(' · ');
+    const extraMeta = isVideo
+      ? (model.duration_options || []).length > 0
+        ? t('时长 {{values}}', {
+            values: (model.duration_options || [])
+              .map((item) => `${item}s`)
+              .join(' / '),
+          })
+        : ''
+      : getReferenceImageLimit(model) > 0
+        ? t('参考图上限 {{count}}', {
+            count: getReferenceImageLimit(model),
+          })
+        : '';
+
+    return (
+      <button
+        type='button'
+        key={model.request_model}
+        style={{
+          ...styles.modelCard,
+          ...(isActive ? styles.modelCardActive : null),
+        }}
+        onClick={handleClick}
+      >
+        <div style={styles.modelCardTitle}>
           <Text
-            type='tertiary'
-            size='small'
-            style={{ display: 'block', marginTop: 8 }}
+            strong
+            style={{
+              fontSize: 13,
+              lineHeight: 1.4,
+              color: 'var(--semi-color-text-0)',
+              minWidth: 0,
+            }}
           >
-            {(() => {
-              const option = groupOptions.find(
-                (item) => item.group === selectedGroup,
-              );
-              if (!option) {
-                return '';
-              }
-              if (option.has_available_token === false) {
-                return t('当前分组暂无可用令牌，请前往令牌管理创建或启用');
-              }
-              return t('当前分组可用令牌数：{{count}}', {
-                count: option.available_token_count || 0,
-              });
-            })()}
+            {getModelDisplayName(model)}
           </Text>
-        )}
-        {selectedGroup &&
-          groupOptions.find(
-            (item) =>
-              item.group === selectedGroup &&
-              item.has_available_token === false,
-          ) && (
-            <Button
-              size='small'
-              type='primary'
-              theme='outline'
-              style={{ marginTop: 8 }}
-              onClick={() => navigate('/console/token')}
-            >
-              {t('前往令牌管理')}
-            </Button>
-          )}
-      </div>
-
-      <div style={styles.fieldGroup}>
-        <span style={styles.label}>{t('模型系列')}</span>
-        <Select
-          style={{ width: '100%' }}
-          value={selectedSeries}
-          onChange={setSelectedSeries}
-          disabled={groupLoading || modelSeries.length === 0}
-        >
-          <Select.Option value='all'>{t('全部系列')}</Select.Option>
-          {modelSeries.map((series) => (
-            <Select.Option key={series} value={series}>
-              {formatModelSeries(series)}
-            </Select.Option>
-          ))}
-        </Select>
-      </div>
-
-      <div style={styles.fieldGroup}>
-        <span style={styles.label}>{t('模型')}</span>
-        <Select
-          style={{ width: '100%' }}
-          value={selectedModel}
-          onChange={setSelectedModel}
-          disabled={groupLoading || filteredModels.length === 0}
-          filter
-          placeholder={t('请选择模型')}
-        >
-          {filteredModels.map((model) => (
-            <Select.Option
-              key={model.request_model}
-              value={model.request_model}
-            >
-              {model.display_name || model.request_model}
-            </Select.Option>
-          ))}
-        </Select>
-      </div>
-
-      <div style={styles.fieldGroup}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 6,
-          }}
-        >
-          <span style={styles.label}>{t('灵感')}</span>
-          <span
-            style={{
-              fontSize: 12,
-              color: 'var(--semi-color-primary)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
-            <IconBolt size='small' />
-            {t('AI优化')}
-          </span>
+          <Text type='tertiary' size='small' style={{ flexShrink: 0 }}>
+            {mode === 'image' ? <IconImage size='small' /> : <IconVideo size='small' />}
+          </Text>
         </div>
-        <div style={styles.textareaWrapper}>
-          <TextArea
-            placeholder={t('请输入灵感...')}
-            value={inspiration}
-            onChange={setInspiration}
-            maxLength={5000}
-            showClear
-            autosize={{ minRows: 6, maxRows: 12 }}
-            style={{
-              border: 'none',
-              background: 'transparent',
-              resize: 'none',
-            }}
-          />
+        <div style={styles.modelCardMeta}>
+          <span>{model.request_model}</span>
+          {model.model_series ? <span>{formatModelSeries(model.model_series)}</span> : null}
         </div>
-      </div>
+        <div style={styles.modelCardMeta}>
+          {capabilityText ? <span>{capabilityText}</span> : null}
+          {extraMeta ? <span>{extraMeta}</span> : null}
+        </div>
+      </button>
+    );
+  };
 
-      {selectedModelSupportsEditing && (
-        <div style={styles.fieldGroup}>
-          <span style={styles.label}>
-            {hasReferenceImageLimit
-              ? t('参考图像 {{current}}/{{max}}', {
-                  current: referenceImages.length,
-                  max: selectedModelReferenceImageLimit,
-                })
-              : t('参考图像')}
-          </span>
-          {hasReferenceImageLimit && (
-            <Text
-              type={referenceImageLimitReached ? 'danger' : 'tertiary'}
-              size='small'
-              style={{ display: 'block', marginBottom: 8 }}
-            >
-              {referenceImageLimitReached
-                ? t('已达到当前模型参考图上限')
-                : t('当前模型最多上传 {{count}} 张参考图', {
-                    count: selectedModelReferenceImageLimit,
-                  })}
+  const renderModelSection = (mode, title, modelsList, collapsed, onToggle) => (
+    <div style={styles.modelSection}>
+      <button type='button' style={styles.modelSectionHeader} onClick={onToggle}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          {mode === 'image' ? <IconImage size='small' /> : <IconVideo size='small' />}
+          <Text strong style={{ fontSize: 14, color: 'var(--semi-color-text-0)' }}>
+            {title}
+          </Text>
+          <Text type='tertiary' size='small'>
+            {modelsList.length}
+          </Text>
+        </span>
+        {collapsed ? <IconChevronDown /> : <IconChevronUp />}
+      </button>
+      {!collapsed && (
+        <div style={styles.modelList}>
+          {modelsList.length > 0 ? (
+            modelsList.map((model) => renderModelCard(model, mode))
+          ) : (
+            <Text type='tertiary' size='small' style={{ padding: '4px 2px 2px' }}>
+              {mode === 'image' ? t('当前分组下没有可用图片模型') : t('当前没有可用视频模型')}
             </Text>
           )}
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              flexWrap: 'wrap',
-              alignItems: 'center',
-            }}
-          >
-            {referenceImages.map((file, idx) => (
-              <div key={file.uid || idx} style={styles.referenceImageContainer}>
-                <img
-                  src={
-                    file.url ||
-                    (file.fileInstance &&
-                      URL.createObjectURL(file.fileInstance))
-                  }
-                  alt=''
-                  style={styles.referenceImageThumb}
-                />
-                <button
-                  style={styles.removeImageBtn}
-                  onClick={() => handleImageRemove(file)}
-                >
-                  <IconDelete size='extra-small' />
-                </button>
-              </div>
-            ))}
-            <Upload
-              action=''
-              accept='image/*'
-              multiple
-              fileList={referenceImages}
-              onChange={handleImageUpload}
-              showUploadList={false}
-              beforeUpload={validateImageSize}
-              disabled={referenceImageLimitReached}
-            >
-              <div
-                style={{
-                  ...styles.addImageBtn,
-                  opacity: referenceImageLimitReached ? 0.5 : 1,
-                  cursor: referenceImageLimitReached ? 'not-allowed' : 'pointer',
-                }}
-              >
-                <IconPlus size='large' />
-              </div>
-            </Upload>
-          </div>
         </div>
       )}
-
-      {selectedModelSupportsMaskEditing && (
-        <div style={styles.fieldGroup}>
-          <span style={styles.label}>{t('遮罩图像')}</span>
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              flexWrap: 'wrap',
-              alignItems: 'center',
-            }}
-          >
-            {maskImage && (
-              <div style={styles.referenceImageContainer}>
-                <img
-                  src={
-                    maskImage.url ||
-                    (maskImage.fileInstance &&
-                      URL.createObjectURL(maskImage.fileInstance))
-                  }
-                  alt=''
-                  style={styles.referenceImageThumb}
-                />
-                <button
-                  style={styles.removeImageBtn}
-                  onClick={handleMaskRemove}
-                >
-                  <IconDelete size='extra-small' />
-                </button>
-              </div>
-            )}
-            <Upload
-              action=''
-              accept='image/*'
-              multiple={false}
-              fileList={maskImage ? [maskImage] : []}
-              onChange={handleMaskUpload}
-              showUploadList={false}
-              beforeUpload={validateImageSize}
-              disabled={referenceImages.length === 0}
-            >
-              <div
-                style={{
-                  ...styles.addImageBtn,
-                  opacity: referenceImages.length === 0 ? 0.5 : 1,
-                  cursor:
-                    referenceImages.length === 0 ? 'not-allowed' : 'pointer',
-                }}
-              >
-                <IconImage size='large' />
-              </div>
-            </Upload>
-          </div>
-          <Text
-            type='tertiary'
-            size='small'
-            style={{ display: 'block', marginTop: 8 }}
-          >
-            {referenceImages.length === 0
-              ? t('请先上传参考图再添加遮罩')
-              : t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
-          </Text>
-        </div>
-      )}
-    </>
+    </div>
   );
 
-  const renderVideoLeftPanel = () => (
-    <>
-      <div style={styles.fieldGroup}>
-        <span style={styles.label}>{t('模型系列')}</span>
-        <Select
-          style={{ width: '100%' }}
-          value={videoSelectedSeries}
-          onChange={setVideoSelectedSeries}
-          disabled={videoModelSeries.length === 0}
-        >
-          <Select.Option value='all'>{t('全部系列')}</Select.Option>
-          {videoModelSeries.map((series) => (
-            <Select.Option key={series} value={series}>
-              {formatModelSeries(series)}
-            </Select.Option>
-          ))}
-        </Select>
-      </div>
-
-      <div style={styles.fieldGroup}>
-        <span style={styles.label}>{t('模型')}</span>
-        <Select
-          style={{ width: '100%' }}
-          value={videoSelectedModel}
-          onChange={setVideoSelectedModel}
-          disabled={videoFilteredModels.length === 0}
-          filter
-          placeholder={t('请选择模型')}
-        >
-          {videoFilteredModels.map((model) => (
-            <Select.Option
-              key={model.request_model}
-              value={model.request_model}
-            >
-              {model.display_name || model.request_model}
-            </Select.Option>
-          ))}
-        </Select>
-      </div>
-
-      <div style={styles.fieldGroup}>
-        <span style={styles.label}>{t('灵感')}</span>
-        <div style={styles.textareaWrapper}>
-          <TextArea
-            placeholder={t('请输入视频创意描述...')}
-            value={videoPrompt}
-            onChange={setVideoPrompt}
-            maxLength={5000}
-            showClear
-            autosize={{ minRows: 6, maxRows: 12 }}
-            style={{
-              border: 'none',
-              background: 'transparent',
-              resize: 'none',
-            }}
-          />
-        </div>
-      </div>
-
-      {videoSelectedModelSupportsImageToVideo && (
-        <div style={styles.fieldGroup}>
-          <span style={styles.label}>{t('参考图像')}</span>
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              flexWrap: 'wrap',
-              alignItems: 'center',
-            }}
-          >
-            {videoReferenceImage && (
-              <div style={styles.referenceImageContainer}>
-                <img
-                  src={
-                    videoReferenceImage.url ||
-                    (videoReferenceImage.fileInstance &&
-                      URL.createObjectURL(videoReferenceImage.fileInstance))
-                  }
-                  alt=''
-                  style={styles.referenceImageThumb}
-                />
-                <button
-                  style={styles.removeImageBtn}
-                  onClick={handleVideoReferenceRemove}
-                >
-                  <IconDelete size='extra-small' />
-                </button>
-              </div>
-            )}
-            <Upload
-              action=''
-              accept='image/*'
-              multiple={false}
-              fileList={videoReferenceImage ? [videoReferenceImage] : []}
-              onChange={handleVideoReferenceUpload}
-              showUploadList={false}
-              beforeUpload={validateImageSize}
-            >
-              <div style={styles.addImageBtn}>
-                <IconPlus size='large' />
-              </div>
-            </Upload>
-          </div>
-        </div>
-      )}
-    </>
-  );
-
-  const renderLeftPanel = () => (
+  const renderLeftCatalog = () => (
     <div style={styles.leftPanel}>
       <div style={styles.leftContent}>
-        <Spin spinning={loading}>
-          <div style={styles.fieldGroup}>
-            <span style={styles.label}>{t('创作模式')}</span>
+        <Spin spinning={loading || groupLoading}>
+          <div style={styles.catalogHeader}>
+            <div style={{ minWidth: 0 }}>
+              <div style={styles.catalogTitle}>{t('模型目录')}</div>
+              <Text type='tertiary' size='small'>
+                {generationMode === 'video' ? t('当前正在浏览视频模型') : t('当前正在浏览图片模型')}
+              </Text>
+            </div>
+            {isMobile && (
+              <Button
+                size='small'
+                type='tertiary'
+                icon={<IconMenu />}
+                onClick={() => setMobileCatalogVisible(true)}
+              >
+                {t('模型')}
+              </Button>
+            )}
+          </div>
+
+          <div style={styles.catalogTools}>
+            <div style={styles.fieldGroup}>
+              <span style={styles.label}>{t('图片分组')}</span>
+              <Select
+                style={{ width: '100%' }}
+                value={selectedGroup}
+                onChange={setSelectedGroup}
+                disabled={groupLoading || groupOptions.length === 0}
+                placeholder={t('请选择分组')}
+              >
+                {groupOptions.map((group) => (
+                  <Select.Option
+                    key={group.group}
+                    value={group.group}
+                    disabled={group.has_available_token === false}
+                  >
+                    {group.group}
+                    {group.has_available_token === false
+                      ? ` (${t('无可用令牌')})`
+                      : ''}
+                  </Select.Option>
+                ))}
+              </Select>
+              {selectedGroupOption && (
+                <Text
+                  type={selectedGroupOption.has_available_token === false ? 'danger' : 'tertiary'}
+                  size='small'
+                  style={{ display: 'block', marginTop: 8 }}
+                >
+                  {selectedGroupOption.has_available_token === false
+                    ? t('当前分组暂无可用令牌，请前往令牌管理创建或启用')
+                    : t('当前分组可用令牌数：{{count}}', {
+                        count: selectedGroupOption.available_token_count || 0,
+                      })}
+                </Text>
+              )}
+              {selectedGroupOption &&
+                selectedGroupOption.has_available_token === false && (
+                  <Button
+                    size='small'
+                    type='primary'
+                    theme='outline'
+                    style={{ marginTop: 8 }}
+                    onClick={() => navigate('/console/token')}
+                  >
+                    {t('前往令牌管理')}
+                  </Button>
+                )}
+            </div>
+
+            <Input
+              prefix={<IconSearch />}
+              placeholder={t('搜索模型名称或系列')}
+              value={modelSearchKeyword}
+              onChange={setModelSearchKeyword}
+              showClear
+            />
+
             <Select
-              style={{ width: '100%' }}
-              value={generationMode}
-              onChange={setGenerationMode}
+              value={catalogSeriesFilter}
+              onChange={setCatalogSeriesFilter}
+              disabled={catalogSeriesOptions.length === 0}
+              placeholder={t('全部系列')}
             >
-              <Select.Option value='image'>{t('图片')}</Select.Option>
-              <Select.Option value='video'>{t('视频')}</Select.Option>
+              <Select.Option value={MODEL_CATALOG_ALL_SERIES}>
+                {t('全部系列')}
+              </Select.Option>
+              {catalogSeriesOptions.map((series) => (
+                <Select.Option key={series} value={series}>
+                  {formatModelSeries(series)}
+                </Select.Option>
+              ))}
             </Select>
           </div>
-          {generationMode === 'video'
-            ? renderVideoLeftPanel()
-            : renderImageLeftPanel()}
+
+          {renderModelSection(
+            'image',
+            t('图片模型'),
+            imageCatalogModels,
+            imageModelsCollapsed,
+            () => setImageModelsCollapsed((current) => !current),
+          )}
+          {renderModelSection(
+            'video',
+            t('视频模型'),
+            videoCatalogModels,
+            videoModelsCollapsed,
+            () => setVideoModelsCollapsed((current) => !current),
+          )}
         </Spin>
-      </div>
-
-      <div style={styles.leftBottom}>
-        {generationMode === 'video' ? (
-          <>
-            <div style={styles.paramRow}>
-              {showVideoAspectRatioSelector && (
-                <div style={styles.paramItem}>
-                  <span style={styles.paramLabel}>{t('视频比例')}</span>
-                  <Select
-                    style={{ width: '100%' }}
-                    value={videoAspectRatio}
-                    onChange={setVideoAspectRatio}
-                    placeholder={t('请选择')}
-                  >
-                    {videoAvailableAspectRatios.map((ratio) => (
-                      <Select.Option key={ratio} value={ratio}>
-                        {ratio}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </div>
-              )}
-              {showVideoResolutionSelector && (
-                <div style={styles.paramItem}>
-                  <span style={styles.paramLabel}>{t('分辨率')}</span>
-                  <Select
-                    style={{ width: '100%' }}
-                    value={videoResolution}
-                    onChange={setVideoResolution}
-                    placeholder={t('请选择')}
-                  >
-                    {videoAvailableResolutions.map((res) => (
-                      <Select.Option key={res} value={res}>
-                        {res}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </div>
-              )}
-              <div style={styles.paramItem}>
-                <span style={styles.paramLabel}>{t('时长')}</span>
-                <Select
-                  style={{ width: '100%' }}
-                  value={videoDuration}
-                  onChange={setVideoDuration}
-                  disabled={!videoSelectedModelData?.duration_options?.length}
-                  placeholder={t('请选择')}
-                >
-                  {(videoSelectedModelData?.duration_options || []).map(
-                    (item) => (
-                      <Select.Option key={item} value={item}>
-                        {item}s
-                      </Select.Option>
-                    ),
-                  )}
-                </Select>
-              </div>
-            </div>
-
-            <button
-              style={{
-                ...styles.generateBtn,
-                opacity: videoGenerating || !canGenerateVideo ? 0.6 : 1,
-                pointerEvents:
-                  videoGenerating || !canGenerateVideo ? 'none' : 'auto',
-              }}
-              onClick={handleGenerateVideo}
-              disabled={videoGenerating || !canGenerateVideo}
-            >
-              {videoGenerating ? (
-                <Spin size='small' />
-              ) : (
-                <>
-                  <IconImage size='small' />
-                  {t('生成视频')}
-                </>
-              )}
-            </button>
-          </>
-        ) : (
-          <>
-            <div style={styles.paramRow}>
-              {showImageAspectRatioSelector && (
-                <div style={styles.paramItem}>
-                  <span style={styles.paramLabel}>{t('生成比例')}</span>
-                  <Select
-                    style={{ width: '100%' }}
-                    value={aspectRatio}
-                    onChange={setAspectRatio}
-                    size='default'
-                    placeholder={t('请选择')}
-                  >
-                    {availableAspectRatios.map((ratio) => (
-                      <Select.Option key={ratio} value={ratio}>
-                        {ratio}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </div>
-              )}
-              {showImageResolutionSelector && (
-                <div style={styles.paramItem}>
-                  <span style={styles.paramLabel}>{t('分辨率')}</span>
-                  <Select
-                    style={{ width: '100%' }}
-                    value={resolution}
-                    onChange={setResolution}
-                    size='default'
-                    placeholder={t('请选择')}
-                  >
-                    {availableResolutions.map((res) => (
-                      <Select.Option key={res} value={res}>
-                        {res}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </div>
-              )}
-              <div style={styles.paramItem}>
-                <span style={styles.paramLabel}>{t('生成数量')}</span>
-                <InputNumber
-                  min={1}
-                  max={DEFAULT_MAX_BATCH_TASKS}
-                  value={quantity}
-                  onChange={(val) => setQuantity(normalizeTaskCount(val))}
-                  style={{ width: '100%' }}
-                />
-              </div>
-            </div>
-
-            <button
-              style={{
-                ...styles.generateBtn,
-                opacity: generating || !canGenerate ? 0.6 : 1,
-                pointerEvents: generating || !canGenerate ? 'none' : 'auto',
-              }}
-              onClick={handleGenerate}
-              disabled={generating || !canGenerate}
-            >
-              {generating ? (
-                <Spin size='small' />
-              ) : (
-                <>
-                  <IconImage size='small' />
-                  {t('生成')}
-                </>
-              )}
-            </button>
-          </>
-        )}
       </div>
     </div>
   );
 
-  const renderHistoryContent = () => (
+  const renderComposerParameterField = (
+    key,
+    label,
+    value,
+    onChange,
+    options,
+    disabled,
+  ) => (
+    <div key={key} style={styles.paramItem}>
+      <span style={styles.paramLabel}>{label}</span>
+      <Select
+        style={{ width: '100%' }}
+        value={value}
+        onChange={onChange}
+        placeholder={t('请选择')}
+        disabled={disabled}
+      >
+        {options.map((option) => (
+          <Select.Option key={option.value} value={option.value}>
+            {option.label}
+          </Select.Option>
+        ))}
+      </Select>
+    </div>
+  );
+
+  const renderReferenceThumb = (file, onRemove) => (
+    <div key={file.uid || file.name || file.url} style={styles.referenceImageContainer}>
+      <img
+        src={file.url || (file.fileInstance && URL.createObjectURL(file.fileInstance))}
+        alt=''
+        style={styles.referenceImageThumb}
+      />
+      <button type='button' style={styles.removeImageBtn} onClick={onRemove}>
+        <IconDelete size='extra-small' />
+      </button>
+    </div>
+  );
+
+  const renderComposer = () => {
+    const activeModel = generationMode === 'video' ? videoSelectedModelData : selectedModelData;
+    const activeModelLabel = activeModel ? getModelDisplayName(activeModel) : t('请选择模型');
+    const activeModelSeries = activeModel?.model_series
+      ? formatModelSeries(activeModel.model_series)
+      : '';
+    const showMaskEditor =
+      generationMode === 'image' &&
+      selectedModelSupportsMaskEditing &&
+      referenceImages.length > 0;
+    const videoComposerParameters = [
+      showVideoAspectRatioSelector &&
+        renderComposerParameterField(
+          'video-aspect-ratio',
+          t('视频比例'),
+          videoAspectRatio,
+          setVideoAspectRatio,
+          videoAvailableAspectRatios.map((ratio) => ({
+            value: ratio,
+            label: ratio,
+          })),
+          false,
+        ),
+      showVideoResolutionSelector &&
+        renderComposerParameterField(
+          'video-resolution',
+          t('分辨率'),
+          videoResolution,
+          setVideoResolution,
+          videoAvailableResolutions.map((res) => ({
+            value: res,
+            label: res,
+          })),
+          false,
+        ),
+      renderComposerParameterField(
+        'video-duration',
+        t('时长'),
+        videoDuration,
+        setVideoDuration,
+        (videoSelectedModelData?.duration_options || []).map((item) => ({
+          value: item,
+          label: `${item}s`,
+        })),
+        !videoSelectedModelData?.duration_options?.length,
+      ),
+    ].filter(Boolean);
+    const imageComposerParameters = [
+      showImageAspectRatioSelector &&
+        renderComposerParameterField(
+          'image-aspect-ratio',
+          t('生成比例'),
+          aspectRatio,
+          setAspectRatio,
+          availableAspectRatios.map((ratio) => ({
+            value: ratio,
+            label: ratio,
+          })),
+          false,
+        ),
+      showImageResolutionSelector &&
+        renderComposerParameterField(
+          'image-resolution',
+          t('分辨率'),
+          resolution,
+          setResolution,
+          availableResolutions.map((res) => ({
+            value: res,
+            label: res,
+          })),
+          false,
+        ),
+      renderComposerParameterField(
+        'image-quantity',
+        t('生成数量'),
+        quantity,
+        (val) => setQuantity(normalizeTaskCount(val)),
+        Array.from({ length: DEFAULT_MAX_BATCH_TASKS }, (_, index) => {
+          const value = index + 1;
+          return {
+            value,
+            label: String(value),
+          };
+        }),
+        false,
+      ),
+    ].filter(Boolean);
+
+    return (
+      <div style={styles.composer}>
+        <div style={styles.composerBox}>
+          <div style={styles.composerTop}>
+            <div style={styles.selectedModelPill}>
+              {generationMode === 'video' ? <IconVideo size='small' /> : <IconImage size='small' />}
+              <Text ellipsis={{ showTooltip: true }} style={{ maxWidth: 360 }}>
+                {activeModelLabel}
+              </Text>
+              {activeModelSeries ? (
+                <Text type='tertiary' size='small'>
+                  {activeModelSeries}
+                </Text>
+              ) : null}
+            </div>
+            {isMobile && (
+              <Button
+                size='small'
+                type='tertiary'
+                icon={<IconMenu />}
+                onClick={() => setMobileCatalogVisible(true)}
+              >
+                {t('模型')}
+              </Button>
+            )}
+          </div>
+
+          <div style={styles.composerBody}>
+            <div style={styles.textareaWrapper}>
+              <TextArea
+                placeholder={
+                  generationMode === 'video'
+                    ? t('输入视频创意描述...')
+                    : t('输入创作描述...')
+                }
+                value={generationMode === 'video' ? videoPrompt : inspiration}
+                onChange={generationMode === 'video' ? setVideoPrompt : setInspiration}
+                maxLength={5000}
+                showClear
+                autosize={{ minRows: isMobile ? 4 : 5, maxRows: 10 }}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  resize: 'none',
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={styles.composerFooter}>
+            <div style={styles.composerAssets}>
+              {generationMode === 'video'
+                ? videoSelectedModelSupportsImageToVideo &&
+                  (videoReferenceImage ? (
+                    renderReferenceThumb(videoReferenceImage, handleVideoReferenceRemove)
+                  ) : null)
+                : selectedModelSupportsEditing &&
+                  referenceImages.map((file) => renderReferenceThumb(file, () => handleImageRemove(file)))}
+
+              {generationMode === 'video' ? (
+                videoSelectedModelSupportsImageToVideo && (
+                  <Upload
+                    action=''
+                    accept='image/*'
+                    multiple={false}
+                    fileList={videoReferenceImage ? [videoReferenceImage] : []}
+                    onChange={handleVideoReferenceUpload}
+                    showUploadList={false}
+                    beforeUpload={validateImageSize}
+                  >
+                    <div style={styles.addImageBtn}>
+                      <IconPlus size='large' />
+                    </div>
+                  </Upload>
+                )
+              ) : selectedModelSupportsEditing ? (
+                <>
+                  <Upload
+                    action=''
+                    accept='image/*'
+                    multiple
+                    fileList={referenceImages}
+                    onChange={handleImageUpload}
+                    showUploadList={false}
+                    beforeUpload={validateImageSize}
+                    disabled={referenceImageLimitReached}
+                  >
+                    <div
+                      style={{
+                        ...styles.addImageBtn,
+                        opacity: referenceImageLimitReached ? 0.5 : 1,
+                        cursor: referenceImageLimitReached ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      <IconPlus size='large' />
+                    </div>
+                  </Upload>
+                  {selectedModelSupportsMaskEditing && referenceImages.length > 0 && (
+                    <Button
+                      size='small'
+                      type='tertiary'
+                      icon={<IconSetting />}
+                      onClick={() => setComposerAdvancedVisible((current) => !current)}
+                    >
+                      {t('高级')}
+                    </Button>
+                  )}
+                </>
+              ) : null}
+            </div>
+
+            <div style={styles.composerActions}>
+              <div style={styles.composerParams}>
+                {generationMode === 'video'
+                  ? videoComposerParameters
+                  : imageComposerParameters}
+              </div>
+
+              <button
+                style={{
+                  ...styles.generateBtn,
+                  opacity:
+                    generationMode === 'video'
+                      ? videoGenerating || !canGenerateVideo
+                        ? 0.6
+                        : 1
+                      : generating || !canGenerate
+                        ? 0.6
+                        : 1,
+                  pointerEvents:
+                    generationMode === 'video'
+                      ? videoGenerating || !canGenerateVideo
+                        ? 'none'
+                        : 'auto'
+                      : generating || !canGenerate
+                        ? 'none'
+                        : 'auto',
+                }}
+                onClick={generationMode === 'video' ? handleGenerateVideo : handleGenerate}
+                disabled={
+                  generationMode === 'video'
+                    ? videoGenerating || !canGenerateVideo
+                    : generating || !canGenerate
+                }
+                type='button'
+              >
+                {generationMode === 'video' ? (
+                  videoGenerating ? (
+                    <Spin size='small' />
+                  ) : (
+                    <>
+                      <IconVideo size='small' />
+                      {t('生成视频')}
+                    </>
+                  )
+                ) : generating ? (
+                  <Spin size='small' />
+                ) : (
+                  <>
+                    <IconImage size='small' />
+                    {t('生成')}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {showMaskEditor && composerAdvancedVisible && (
+            <div style={{ borderTop: '1px solid var(--semi-color-border)', padding: '12px' }}>
+              <Text type='tertiary' size='small' style={{ display: 'block', marginBottom: 8 }}>
+                {t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
+              </Text>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                {maskImage ? renderReferenceThumb(maskImage, handleMaskRemove) : null}
+                <Upload
+                  action=''
+                  accept='image/*'
+                  multiple={false}
+                  fileList={maskImage ? [maskImage] : []}
+                  onChange={handleMaskUpload}
+                  showUploadList={false}
+                  beforeUpload={validateImageSize}
+                  disabled={referenceImages.length === 0}
+                >
+                  <div
+                    style={{
+                      ...styles.addImageBtn,
+                      opacity: referenceImages.length === 0 ? 0.5 : 1,
+                      cursor: referenceImages.length === 0 ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    <IconSetting size='large' />
+                  </div>
+                </Upload>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderTaskControls = (compact = false) => {
+    const isVideo = generationMode === 'video';
+    const taskCount = isVideo ? videoTasks.length : tasks.length;
+    const selectedCount = isVideo ? videoSelectedTaskIds.size : selectedTaskIds.size;
+
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        {isVideo ? (
+          <Button
+            size='small'
+            type='tertiary'
+            icon={<IconExternalOpen />}
+            onClick={() => navigate('/console/task')}
+          >
+            {compact ? t('任务日志') : t('查看任务日志')}
+          </Button>
+        ) : (
+          <Button
+            size='small'
+            type='tertiary'
+            icon={<IconExternalOpen />}
+            onClick={() => navigate('/console/assets')}
+          >
+            {compact ? t('资产') : t('查看资产仓库')}
+          </Button>
+        )}
+
+        {taskCount > 0 && (
+          <>
+            <Text type='tertiary' size='small'>
+              {isVideo ? t('共 {{count}} 个任务', { count: videoTaskTotal }) : taskPage === 1 && taskTotal > 0 ? t('共 {{count}} 个任务', { count: taskTotal }) : t('上一页 / 下一页')}
+            </Text>
+            {selectedCount > 0 && (
+              <Text type='tertiary' size='small'>
+                {t('已选择 {{count}} 个', { count: selectedCount })}
+              </Text>
+            )}
+            {selectedCount > 0 ? (
+              <>
+                <Button
+                  size='small'
+                  type='tertiary'
+                  onClick={() =>
+                    isVideo ? handleSelectAllVideo(false) : handleSelectAll(false)
+                  }
+                >
+                  {t('取消选择')}
+                </Button>
+                <Button
+                  size='small'
+                  type='danger'
+                  icon={<IconDelete />}
+                  loading={isVideo ? deletingVideoTasks : deletingTasks}
+                  disabled={
+                    isVideo
+                      ? false
+                      : tasks
+                          .filter((task) => selectedTaskIds.has(task.id))
+                          .some((task) => !taskIsDeletable(task))
+                  }
+                  onClick={isVideo ? handleVideoBatchDelete : handleBatchDelete}
+                >
+                  {t('删除选中')}
+                </Button>
+              </>
+            ) : (
+              <Button
+                size='small'
+                type='tertiary'
+                onClick={() =>
+                  isVideo ? handleSelectAllVideo(true) : handleSelectAll(true)
+                }
+              >
+                {t('全选')}
+              </Button>
+            )}
+          </>
+        )}
+
+        <span style={styles.filterLabel}>{t('状态')}</span>
+        <Select
+          size='small'
+          value={isVideo ? videoTaskStatusFilter : taskStatusFilter}
+          onChange={isVideo ? setVideoTaskStatusFilter : setTaskStatusFilter}
+          style={{ width: compact ? 140 : 110 }}
+        >
+          <Select.Option value=''>{t('全部')}</Select.Option>
+          <Select.Option value={isVideo ? 'queued' : 'pending'}>{t('等待中')}</Select.Option>
+          <Select.Option value={isVideo ? 'in_progress' : 'generating'}>{t('生成中')}</Select.Option>
+          <Select.Option value={isVideo ? 'completed' : 'success'}>{t('已完成')}</Select.Option>
+          <Select.Option value='failed'>{t('失败')}</Select.Option>
+        </Select>
+
+        <span style={styles.filterLabel}>{t('模型')}</span>
+        <Select
+          size='small'
+          value={isVideo ? videoTaskModelFilter : taskModelFilter}
+          onChange={isVideo ? setVideoTaskModelFilter : setTaskModelFilter}
+          style={{ width: compact ? 180 : 140 }}
+          filter
+          placeholder={t('全部')}
+        >
+          <Select.Option value=''>{t('全部')}</Select.Option>
+          {(isVideo ? videoModels : models)
+            .filter((m) => m.status === undefined || m.status === 1)
+            .map((m) => (
+              <Select.Option key={m.request_model} value={m.request_model}>
+                {m.display_name || m.request_model}
+              </Select.Option>
+            ))}
+        </Select>
+
+        <span style={styles.filterLabel}>{t('时间')}</span>
+        <Select
+          size='small'
+          value={isVideo ? videoTaskTimeFilter : taskTimeFilter}
+          onChange={isVideo ? setVideoTaskTimeFilter : setTaskTimeFilter}
+          style={{ width: compact ? 140 : 110 }}
+        >
+          <Select.Option value=''>{t('全部')}</Select.Option>
+          <Select.Option value='today'>{t('今天')}</Select.Option>
+          <Select.Option value='last7d'>{t('近 7 天')}</Select.Option>
+          <Select.Option value='last30d'>{t('近 30 天')}</Select.Option>
+          <Select.Option value='thisMonth'>{t('本月')}</Select.Option>
+        </Select>
+
+        {!isVideo && (
+          <>
+            <Select size='small' value={taskSortBy} onChange={setTaskSortBy} style={{ width: compact ? 150 : 120 }}>
+              <Select.Option value='created_time'>{t('排序：创建时间')}</Select.Option>
+              <Select.Option value='completed_time'>{t('排序：完成时间')}</Select.Option>
+              <Select.Option value='status'>{t('排序：状态')}</Select.Option>
+            </Select>
+
+            <Button
+              size='small'
+              type='tertiary'
+              icon={taskSortOrder === 'desc' ? <IconChevronDown /> : <IconChevronUp />}
+              onClick={() => setTaskSortOrder(taskSortOrder === 'desc' ? 'asc' : 'desc')}
+            >
+              {taskSortOrder === 'desc' ? t('降序') : t('升序')}
+            </Button>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const renderModernHistoryContent = () => (
     <Spin
       spinning={generationMode === 'video' ? videoLoadingTasks : loadingTasks}
       style={{
@@ -3034,249 +3406,66 @@ const ImageGeneration = () => {
             type='tertiary'
             style={{ fontSize: 13, textAlign: 'center', maxWidth: 320 }}
           >
-            {t('完成一次生成后，这里会保留你的创作历史记录。')}
+            {t('在下方输入描述、选择模型后开始创作，完成后这里会保留历史记录。')}
           </Text>
         </div>
       )}
     </Spin>
   );
 
-  const renderRightPanel = () => (
+  const renderModernRightPanel = () => (
     <div style={styles.rightPanel}>
-      {/* 顶部栏：左侧标题 + 右侧筛选 */}
       <div style={styles.rightTopBar}>
-        <Text
-          strong
-          style={{ fontSize: 15, color: 'var(--semi-color-text-0)' }}
-        >
+        <Text strong style={{ fontSize: 15, color: 'var(--semi-color-text-0)' }}>
           {generationMode === 'video' ? t('视频生成记录') : t('生成记录')}
         </Text>
 
-        <div style={styles.filterGroup}>
-          {generationMode === 'video' ? (
+        {isMobile ? (
+          <div style={styles.mobileOnlyFilters}>
             <Button
               size='small'
               type='tertiary'
-              icon={<IconExternalOpen />}
-              onClick={() => navigate('/console/task')}
+              icon={<IconMenu />}
+              onClick={() => setMobileCatalogVisible(true)}
             >
-              {t('查看任务日志')}
+              {t('模型')}
             </Button>
-          ) : (
             <Button
               size='small'
               type='tertiary'
-              icon={<IconExternalOpen />}
-              onClick={() => navigate('/console/assets')}
+              icon={<IconFilter />}
+              onClick={() => setMobileFiltersVisible(true)}
             >
-              {t('查看资产仓库')}
+              {t('筛选')}
             </Button>
-          )}
-
-          {(generationMode === 'video' ? videoTasks : tasks).length > 0 && (
-            <>
-              {generationMode === 'video' ? (
-                <Text type='tertiary' size='small'>
-                  {t('共')} {videoTaskTotal} {t('个任务')}
-                </Text>
-              ) : taskPage === 1 && taskTotal > 0 ? (
-                <Text type='tertiary' size='small'>
-                  {t('共')} {taskTotal} {t('个任务')}
-                </Text>
-              ) : (
-                <Text type='tertiary' size='small'>
-                  {t('上一页')} / {t('下一页')}
-                </Text>
-              )}
-              {(generationMode === 'video'
-                ? videoSelectedTaskIds.size > 0
-                : selectedTaskIds.size > 0) && (
-                <Text type='tertiary' size='small'>
-                  ({t('已选择')}{' '}
-                  {generationMode === 'video'
-                    ? videoSelectedTaskIds.size
-                    : selectedTaskIds.size}{' '}
-                  {t('个')})
-                </Text>
-              )}
-              {(
-                generationMode === 'video'
-                  ? videoSelectedTaskIds.size > 0
-                  : selectedTaskIds.size > 0
-              ) ? (
-                <>
-                  <Button
-                    size='small'
-                    type='tertiary'
-                    onClick={() =>
-                      generationMode === 'video'
-                        ? handleSelectAllVideo(false)
-                        : handleSelectAll(false)
-                    }
-                  >
-                    {t('取消选择')}
-                  </Button>
-                  <Button
-                    size='small'
-                    type='danger'
-                    icon={<IconDelete />}
-                    loading={
-                      generationMode === 'video'
-                        ? deletingVideoTasks
-                        : deletingTasks
-                    }
-                    disabled={
-                      generationMode === 'video'
-                        ? false
-                        : tasks
-                            .filter((task) => selectedTaskIds.has(task.id))
-                            .some((task) => !taskIsDeletable(task))
-                    }
-                    onClick={
-                      generationMode === 'video'
-                        ? handleVideoBatchDelete
-                        : handleBatchDelete
-                    }
-                  >
-                    {t('删除选中')}
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  size='small'
-                  type='tertiary'
-                  onClick={() =>
-                    generationMode === 'video'
-                      ? handleSelectAllVideo(true)
-                      : handleSelectAll(true)
-                  }
-                >
-                  {t('全选')}
-                </Button>
-              )}
-            </>
-          )}
-
-          <span style={styles.filterLabel}>{t('状态')}</span>
-          <Select
-            size='small'
-            value={
-              generationMode === 'video'
-                ? videoTaskStatusFilter
-                : taskStatusFilter
-            }
-            onChange={
-              generationMode === 'video'
-                ? setVideoTaskStatusFilter
-                : setTaskStatusFilter
-            }
-            style={{ width: 110 }}
-          >
-            <Select.Option value=''>{t('全部')}</Select.Option>
-            <Select.Option
-              value={generationMode === 'video' ? 'queued' : 'pending'}
-            >
-              {t('等待中')}
-            </Select.Option>
-            <Select.Option
-              value={generationMode === 'video' ? 'in_progress' : 'generating'}
-            >
-              {t('生成中')}
-            </Select.Option>
-            <Select.Option
-              value={generationMode === 'video' ? 'completed' : 'success'}
-            >
-              {t('已完成')}
-            </Select.Option>
-            <Select.Option value='failed'>{t('失败')}</Select.Option>
-          </Select>
-
-          <span style={styles.filterLabel}>{t('模型')}</span>
-          <Select
-            size='small'
-            value={
-              generationMode === 'video'
-                ? videoTaskModelFilter
-                : taskModelFilter
-            }
-            onChange={
-              generationMode === 'video'
-                ? setVideoTaskModelFilter
-                : setTaskModelFilter
-            }
-            style={{ width: 140 }}
-            filter
-            placeholder={t('全部')}
-          >
-            <Select.Option value=''>{t('全部')}</Select.Option>
-            {(generationMode === 'video' ? videoModels : models)
-              .filter((m) => m.status === undefined || m.status === 1)
-              .map((m) => (
-                <Select.Option key={m.request_model} value={m.request_model}>
-                  {m.display_name || m.request_model}
-                </Select.Option>
-              ))}
-          </Select>
-
-          <span style={styles.filterLabel}>{t('时间')}</span>
-          <Select
-            size='small'
-            value={
-              generationMode === 'video' ? videoTaskTimeFilter : taskTimeFilter
-            }
-            onChange={
-              generationMode === 'video'
-                ? setVideoTaskTimeFilter
-                : setTaskTimeFilter
-            }
-            style={{ width: 110 }}
-          >
-            <Select.Option value=''>{t('全部')}</Select.Option>
-            <Select.Option value='today'>{t('今天')}</Select.Option>
-            <Select.Option value='last7d'>{t('近 7 天')}</Select.Option>
-            <Select.Option value='last30d'>{t('近 30 天')}</Select.Option>
-            <Select.Option value='thisMonth'>{t('本月')}</Select.Option>
-          </Select>
-
-          {generationMode !== 'video' && (
-            <>
-              <Select
-                size='small'
-                value={taskSortBy}
-                onChange={setTaskSortBy}
-                style={{ width: 120 }}
-              >
-                <Select.Option value='created_time'>
-                  {t('排序：创建时间')}
-                </Select.Option>
-                <Select.Option value='completed_time'>
-                  {t('排序：完成时间')}
-                </Select.Option>
-                <Select.Option value='status'>{t('排序：状态')}</Select.Option>
-              </Select>
-
+            {generationMode === 'video' ? (
               <Button
                 size='small'
                 type='tertiary'
-                icon={
-                  taskSortOrder === 'desc' ? (
-                    <IconChevronDown />
-                  ) : (
-                    <IconChevronUp />
-                  )
-                }
-                onClick={() =>
-                  setTaskSortOrder(taskSortOrder === 'desc' ? 'asc' : 'desc')
-                }
+                icon={<IconExternalOpen />}
+                onClick={() => navigate('/console/task')}
               >
-                {taskSortOrder === 'desc' ? t('降序') : t('升序')}
+                {t('日志')}
               </Button>
-            </>
-          )}
-        </div>
+            ) : (
+              <Button
+                size='small'
+                type='tertiary'
+                icon={<IconExternalOpen />}
+                onClick={() => navigate('/console/assets')}
+              >
+                {t('资产')}
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div style={styles.filterGroup}>
+            {renderTaskControls(false)}
+          </div>
+        )}
       </div>
 
-      <div style={styles.rightContent}>{renderHistoryContent()}</div>
+      <div style={styles.rightContent}>{renderModernHistoryContent()}</div>
 
       <ImageGenerationTaskModal
         visible={taskModalVisible}
@@ -3322,13 +3511,40 @@ const ImageGeneration = () => {
           navigate(`/console/task?task_id=${task.task_id}`)
         }
       />
+
+      <SideSheet
+        placement='right'
+        visible={mobileFiltersVisible}
+        onCancel={() => setMobileFiltersVisible(false)}
+        width='100%'
+        title={generationMode === 'video' ? t('视频筛选') : t('生成筛选')}
+        bodyStyle={{ padding: 16 }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {renderTaskControls(true)}
+        </div>
+      </SideSheet>
+
+      <SideSheet
+        placement='left'
+        visible={mobileCatalogVisible}
+        onCancel={() => setMobileCatalogVisible(false)}
+        width='100%'
+        title={t('模型目录')}
+        bodyStyle={{ padding: 0 }}
+      >
+        {renderLeftCatalog()}
+      </SideSheet>
     </div>
   );
 
   return (
     <div style={styles.container}>
-      {renderLeftPanel()}
-      {renderRightPanel()}
+      {!isMobile && renderLeftCatalog()}
+      <div style={styles.contentColumn}>
+        {renderModernRightPanel()}
+        {renderComposer()}
+      </div>
     </div>
   );
 };
