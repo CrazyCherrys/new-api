@@ -22,6 +22,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Select,
+  Dropdown,
   Button,
   Upload,
   Spin,
@@ -289,6 +290,8 @@ const ImageGeneration = () => {
   const [videoDuration, setVideoDuration] = useState(() =>
     getStoredNumber(STORAGE_KEYS.VIDEO_DURATION, 0),
   );
+  const [customCanvasWidth, setCustomCanvasWidth] = useState('');
+  const [customCanvasHeight, setCustomCanvasHeight] = useState('');
 
   const {
     showImageAspectRatioSelector,
@@ -393,137 +396,27 @@ const ImageGeneration = () => {
     }
   }, [tasks]);
 
-  const formatModelSeries = (series) => {
-    if (!series) return '';
-
-    const seriesMap = {
-      openai: 'OpenAI',
-      gemini: 'Gemini',
-      claude: 'Claude',
-      grok: 'Grok',
-      deepseek: 'DeepSeek',
-      qwen: 'Qwen',
-      glm: 'GLM',
-      hunyuan: 'Hunyuan',
-      doubao: 'Doubao',
-      spark: 'Spark',
-      baichuan: 'Baichuan',
-      minimax: 'Minimax',
-      moonshot: 'Moonshot',
-      yi: 'Yi',
-      chatglm: 'ChatGLM',
-      ernie: 'ERNIE',
-      wenxin: 'Wenxin',
-      tongyi: 'Tongyi',
-      azure: 'Azure',
-      aws: 'AWS',
-      cohere: 'Cohere',
-      anthropic: 'Anthropic',
-      mistral: 'Mistral',
-      llama: 'Llama',
-      palm: 'PaLM',
-      bard: 'Bard',
-      midjourney: 'Midjourney',
-      dalle: 'OpenAI',
-      'stable-diffusion': 'Stable Diffusion',
-      flux: 'Flux',
-      suno: 'Suno',
-    };
-
-    return (
-      seriesMap[series.toLowerCase()] ||
-      series.charAt(0).toUpperCase() + series.slice(1)
-    );
-  };
-
-  const getModelDisplayName = (model) =>
-    model?.display_name || model?.request_model || '';
-
-  const modelMatchesCatalogFilters = (model) => {
-    if (!model) {
-      return false;
-    }
-    if (
-      catalogSeriesFilter !== MODEL_CATALOG_ALL_SERIES &&
-      model.model_series !== catalogSeriesFilter
-    ) {
-      return false;
-    }
-    const keyword = modelSearchKeyword.trim().toLowerCase();
-    if (!keyword) {
-      return true;
-    }
-    return [
-      model.display_name,
-      model.request_model,
-      model.model_series,
-      model.request_endpoint,
-    ]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(keyword));
-  };
-
-  const imageCatalogModels = useMemo(
+  const enabledImageModels = useMemo(
     () =>
-      models
-        .filter(
-          (model) =>
-            model.status === undefined ||
-            model.status === null ||
-            model.status === 1,
-        )
-        .filter(modelMatchesCatalogFilters),
-    [models, catalogSeriesFilter, modelSearchKeyword],
+      models.filter(
+        (model) =>
+          model.status === undefined ||
+          model.status === null ||
+          model.status === 1,
+    ),
+    [models],
   );
 
-  const videoCatalogModels = useMemo(
+  const enabledVideoModels = useMemo(
     () =>
-      videoModels
-        .filter(
-          (model) =>
-            model.status === undefined ||
-            model.status === null ||
-            model.status === 1,
-        )
-        .filter(modelMatchesCatalogFilters),
-    [videoModels, catalogSeriesFilter, modelSearchKeyword],
+      videoModels.filter(
+        (model) =>
+          model.status === undefined ||
+          model.status === null ||
+          model.status === 1,
+    ),
+    [videoModels],
   );
-
-  const catalogSeriesOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          [...modelSeries, ...videoModelSeries].filter(
-            (series) => typeof series === 'string' && series.trim() !== '',
-          ),
-        ),
-      ),
-    [modelSeries, videoModelSeries],
-  );
-
-  const selectImageModelFromCatalog = (model) => {
-    if (!model?.request_model) {
-      return;
-    }
-    setGenerationMode('image');
-    if (model.model_series) {
-      setSelectedSeries(model.model_series);
-    }
-    setSelectedModel(model.request_model);
-    setMobileCatalogVisible(false);
-  };
-
-  const selectVideoModelFromCatalog = (model) => {
-    if (!model?.request_model) {
-      return;
-    }
-    setGenerationMode('video');
-    if (model.model_series) {
-      setVideoSelectedSeries(model.model_series);
-    }
-    setVideoSelectedModel(model.request_model);
-    setMobileCatalogVisible(false);
-  };
 
   const buildRemoteReferenceFile = (imageUrl) => {
     if (!imageUrl) {
@@ -813,6 +706,138 @@ const ImageGeneration = () => {
       setVideoReferenceImage(null);
     }
   }, [videoSelectedModelData]);
+
+  const formatModelSeries = (series) => {
+    if (!series) return '';
+
+    const seriesMap = {
+      openai: 'OpenAI',
+      gemini: 'Gemini',
+      claude: 'Claude',
+      grok: 'Grok',
+      deepseek: 'DeepSeek',
+      qwen: 'Qwen',
+      glm: 'GLM',
+      hunyuan: 'Hunyuan',
+      doubao: 'Doubao',
+      spark: 'Spark',
+      baichuan: 'Baichuan',
+      minimax: 'Minimax',
+      moonshot: 'Moonshot',
+      yi: 'Yi',
+      chatglm: 'ChatGLM',
+      ernie: 'ERNIE',
+      wenxin: 'Wenxin',
+      tongyi: 'Tongyi',
+      azure: 'Azure',
+      aws: 'AWS',
+      cohere: 'Cohere',
+      anthropic: 'Anthropic',
+      mistral: 'Mistral',
+      llama: 'Llama',
+      palm: 'PaLM',
+      bard: 'Bard',
+      midjourney: 'Midjourney',
+      dalle: 'OpenAI',
+      'stable-diffusion': 'Stable Diffusion',
+      flux: 'Flux',
+      suno: 'Suno',
+    };
+
+    return (
+      seriesMap[series.toLowerCase()] ||
+      series.charAt(0).toUpperCase() + series.slice(1)
+    );
+  };
+
+  const getModelDisplayName = (model) =>
+    model?.display_name || model?.request_model || '';
+
+  const modelMatchesCatalogFilters = (model) => {
+    if (!model) {
+      return false;
+    }
+    if (
+      catalogSeriesFilter !== MODEL_CATALOG_ALL_SERIES &&
+      model.model_series !== catalogSeriesFilter
+    ) {
+      return false;
+    }
+    const keyword = modelSearchKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return true;
+    }
+    return [
+      model.display_name,
+      model.request_model,
+      model.model_series,
+      model.request_endpoint,
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(keyword));
+  };
+
+  const imageCatalogModels = useMemo(
+    () =>
+      models
+        .filter(
+          (model) =>
+            model.status === undefined ||
+            model.status === null ||
+            model.status === 1,
+        )
+        .filter(modelMatchesCatalogFilters),
+    [models, catalogSeriesFilter, modelSearchKeyword],
+  );
+
+  const videoCatalogModels = useMemo(
+    () =>
+      videoModels
+        .filter(
+          (model) =>
+            model.status === undefined ||
+            model.status === null ||
+            model.status === 1,
+        )
+        .filter(modelMatchesCatalogFilters),
+    [videoModels, catalogSeriesFilter, modelSearchKeyword],
+  );
+
+  const catalogSeriesOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...modelSeries, ...videoModelSeries].filter(
+            (series) => typeof series === 'string' && series.trim() !== '',
+          ),
+        ),
+      ),
+    [modelSeries, videoModelSeries],
+  );
+
+  const selectImageModelFromCatalog = (model) => {
+    if (!model?.request_model) {
+      return;
+    }
+    setGenerationMode('image');
+    if (model.model_series) {
+      setSelectedSeries(model.model_series);
+    }
+    setSelectedModel(model.request_model);
+    setMobileCatalogVisible(false);
+  };
+
+  const selectVideoModelFromCatalog = (model) => {
+    if (!model?.request_model) {
+      return;
+    }
+    setGenerationMode('video');
+    if (model.model_series) {
+      setVideoSelectedSeries(model.model_series);
+    }
+    setVideoSelectedModel(model.request_model);
+    setMobileCatalogVisible(false);
+  };
 
   const loadWorkerSettings = async () => {
     try {
@@ -2210,24 +2235,12 @@ const ImageGeneration = () => {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      background: 'var(--semi-color-bg-1)',
+      background: 'linear-gradient(180deg, #15181f 0%, #0f1218 100%)',
       overflow: 'hidden',
-    },
-    rightTopBar: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: isMobile ? '8px 12px' : '10px 20px',
-      borderBottom: '1px solid var(--semi-color-border)',
-      flexWrap: 'wrap',
-      gap: 12,
-      minHeight: 56,
-      background: 'var(--semi-color-bg-0)',
     },
     rightContent: {
       flex: 1,
       minHeight: 0,
-      overflow: 'hidden',
       display: 'flex',
       alignItems: 'stretch',
       justifyContent: 'stretch',
@@ -2238,6 +2251,198 @@ const ImageGeneration = () => {
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
+    },
+    stage: {
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: isMobile ? '20px 12px 12px' : '40px 24px 24px',
+      overflowY: 'auto',
+    },
+    stageInner: {
+      width: '100%',
+      maxWidth: 980,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'stretch',
+      gap: isMobile ? 12 : 16,
+    },
+    stageTitle: {
+      color: '#f5f7fa',
+      textAlign: 'center',
+      fontSize: isMobile ? 18 : 24,
+      fontWeight: 700,
+      letterSpacing: 0,
+      lineHeight: 1.2,
+    },
+    stageSubtitle: {
+      color: 'rgba(245, 247, 250, 0.6)',
+      textAlign: 'center',
+      fontSize: isMobile ? 12 : 13,
+      lineHeight: 1.5,
+      maxWidth: 720,
+      margin: '0 auto',
+    },
+    stagePanelWrap: {
+      width: '100%',
+      display: 'flex',
+      justifyContent: 'center',
+    },
+    stagePanel: {
+      width: '100%',
+      maxWidth: 900,
+      borderRadius: 12,
+      border: '1px solid rgba(148, 163, 184, 0.2)',
+      background: 'rgba(8, 10, 15, 0.88)',
+      boxShadow: '0 28px 80px rgba(0, 0, 0, 0.38)',
+      backdropFilter: 'blur(18px)',
+      padding: isMobile ? '14px' : '18px',
+    },
+    promptArea: {
+      borderRadius: 10,
+      border: '1px solid rgba(148, 163, 184, 0.18)',
+      background: 'rgba(13, 18, 28, 0.95)',
+      padding: isMobile ? '10px 10px 12px' : '12px 12px 14px',
+    },
+    promptInput: {
+      border: 'none',
+      background: 'transparent',
+      resize: 'none',
+      boxShadow: 'none',
+      color: '#f5f7fa',
+      caretColor: '#fff',
+      fontSize: 15,
+      lineHeight: 1.55,
+    },
+    promptInputHint: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: 8,
+      alignItems: 'center',
+      marginTop: 8,
+      color: 'rgba(245, 247, 250, 0.48)',
+      fontSize: 12,
+      lineHeight: 1.4,
+    },
+    footer: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      marginTop: 12,
+    },
+    footerRow: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      flexWrap: 'wrap',
+    },
+    footerRowLeft: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: 'wrap',
+      minWidth: 0,
+    },
+    footerRowRight: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: 'wrap',
+      justifyContent: 'flex-end',
+      minWidth: 0,
+    },
+    pillButton: {
+      minHeight: 34,
+      borderRadius: 999,
+      border: '1px solid rgba(148, 163, 184, 0.24)',
+      background: 'rgba(17, 24, 39, 0.88)',
+      color: '#e5e7eb',
+      padding: '0 12px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      fontSize: 13,
+      lineHeight: 1,
+    },
+    pillButtonActive: {
+      borderColor: 'rgba(99, 102, 241, 0.9)',
+      background: 'rgba(30, 41, 59, 0.96)',
+      color: '#fff',
+    },
+    pillButtonMuted: {
+      color: 'rgba(226, 232, 240, 0.82)',
+    },
+    pillButtonLabel: {
+      maxWidth: 170,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    },
+    darkMenu: {
+      minWidth: 240,
+      maxWidth: 340,
+      border: '1px solid rgba(148, 163, 184, 0.2)',
+      borderRadius: 12,
+      background: '#0f172a',
+      boxShadow: '0 24px 60px rgba(0, 0, 0, 0.45)',
+      padding: 6,
+    },
+    darkMenuItem: {
+      color: '#e5e7eb',
+      borderRadius: 8,
+      margin: 0,
+      padding: '8px 10px',
+      whiteSpace: 'nowrap',
+    },
+    darkMenuItemActive: {
+      background: 'rgba(59, 130, 246, 0.18)',
+      color: '#fff',
+    },
+    modelMenuItem: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 2,
+      minWidth: 0,
+    },
+    modelMenuTitle: {
+      fontSize: 13,
+      lineHeight: 1.35,
+      color: 'inherit',
+      whiteSpace: 'normal',
+      wordBreak: 'break-word',
+    },
+    modelMenuMeta: {
+      fontSize: 11,
+      lineHeight: 1.4,
+      color: 'rgba(226, 232, 240, 0.66)',
+      wordBreak: 'break-all',
+    },
+    compactField: {
+      minWidth: 112,
+    },
+    customSizeGroup: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      flexWrap: 'wrap',
+    },
+    sizeInput: {
+      width: 76,
+      borderRadius: 8,
+      border: '1px solid rgba(148, 163, 184, 0.24)',
+      background: 'rgba(15, 23, 42, 0.9)',
+      color: '#f8fafc',
+      padding: '6px 8px',
+      fontSize: 12,
+      lineHeight: 1.4,
+    },
+    sizeInputLabel: {
+      color: 'rgba(226, 232, 240, 0.66)',
+      fontSize: 12,
     },
     label: {
       display: 'block',
@@ -2316,76 +2521,12 @@ const ImageGeneration = () => {
       lineHeight: 1.4,
       wordBreak: 'break-all',
     },
-    composer: {
-      flexShrink: 0,
-      padding: isMobile ? '8px 10px 10px' : '12px 20px 14px',
-      background: 'var(--semi-color-bg-1)',
-      borderTop: '1px solid var(--semi-color-border)',
-    },
-    composerBox: {
-      maxWidth: 1100,
-      margin: '0 auto',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 8,
-    },
-    composerTop: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 10,
-      padding: '0 2px',
-    },
-    selectedModelPill: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      minWidth: 0,
-      color: 'var(--semi-color-text-0)',
-      fontSize: 13,
-      fontWeight: 600,
-    },
-    composerBody: {
-      padding: 0,
-    },
-    textareaWrapper: {
-      borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
-      boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)',
-      padding: isMobile ? '6px 8px 8px' : '8px 10px 10px',
-    },
-    composerInlineBar: {
-      display: 'flex',
-      alignItems: 'flex-end',
-      justifyContent: 'space-between',
-      gap: 8,
-      flexWrap: 'wrap',
-      paddingTop: 6,
-      borderTop: '1px solid var(--semi-color-border)',
-    },
     composerAssets: {
       display: 'flex',
       alignItems: 'center',
       gap: 6,
       flexWrap: 'wrap',
       minWidth: 0,
-      flex: 1,
-    },
-    composerRightTools: {
-      display: 'flex',
-      alignItems: 'flex-end',
-      gap: 6,
-      flexWrap: 'wrap',
-      justifyContent: 'flex-end',
-      marginLeft: 'auto',
-    },
-    composerParams: {
-      display: 'flex',
-      gap: 6,
-      alignItems: 'flex-end',
-      flexWrap: 'wrap',
-      justifyContent: 'flex-end',
     },
     generateIconBtn: {
       width: 36,
@@ -2404,12 +2545,12 @@ const ImageGeneration = () => {
       height: 36,
       borderRadius: 8,
       border: '1px dashed var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
+      background: 'rgba(15, 23, 42, 0.9)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       cursor: 'pointer',
-      color: 'var(--semi-color-text-2)',
+      color: '#cbd5e1',
       transition: 'border-color 0.2s',
     },
     emptyState: {
@@ -2433,12 +2574,6 @@ const ImageGeneration = () => {
     paramItem: {
       width: isMobile ? 88 : 104,
       flexShrink: 0,
-    },
-    paramLabel: {
-      fontSize: 12,
-      color: 'var(--semi-color-text-2)',
-      marginBottom: 3,
-      display: 'block',
     },
     referenceImageThumb: {
       width: 36,
@@ -2715,33 +2850,6 @@ const ImageGeneration = () => {
     </div>
   );
 
-  const renderComposerParameterField = (
-    key,
-    label,
-    value,
-    onChange,
-    options,
-    disabled,
-  ) => (
-    <div key={key} style={styles.paramItem}>
-      <span style={styles.paramLabel}>{label}</span>
-      <Select
-        style={{ width: '100%' }}
-        size='small'
-        value={value}
-        onChange={onChange}
-        placeholder={t('请选择')}
-        disabled={disabled}
-      >
-        {options.map((option) => (
-          <Select.Option key={option.value} value={option.value}>
-            {option.label}
-          </Select.Option>
-        ))}
-      </Select>
-    </div>
-  );
-
   const renderReferenceThumb = (file, onRemove) => (
     <div key={file.uid || file.name || file.url} style={styles.referenceImageContainer}>
       <img
@@ -2752,6 +2860,219 @@ const ImageGeneration = () => {
       <button type='button' style={styles.removeImageBtn} onClick={onRemove}>
         <IconDelete size='extra-small' />
       </button>
+    </div>
+  );
+
+  const renderDarkDropdownMenu = (options, currentValue, onChange, emptyText) => (
+    <Dropdown.Menu style={styles.darkMenu}>
+      {options.length > 0 ? (
+        options.map((option) => {
+          const selected = option.value === currentValue;
+          return (
+            <Dropdown.Item
+              key={option.value}
+              style={{
+                ...styles.darkMenuItem,
+                ...(selected ? styles.darkMenuItemActive : null),
+              }}
+              onClick={() => onChange(option.value)}
+            >
+              {option.label}
+            </Dropdown.Item>
+          );
+        })
+      ) : (
+        <div
+          style={{
+            ...styles.darkMenuItem,
+            color: 'rgba(226, 232, 240, 0.66)',
+          }}
+        >
+          {emptyText}
+        </div>
+      )}
+    </Dropdown.Menu>
+  );
+
+  const renderPillDropdown = ({
+    key,
+    label,
+    value,
+    displayValue,
+    options,
+    onChange,
+    disabled = false,
+    emptyText = t('暂无可用选项'),
+    extraContent = null,
+  }) => {
+    const menu = (
+      <Dropdown.Menu style={styles.darkMenu}>
+        {options.length > 0 ? (
+          options.map((option) => {
+            const selected = option.value === value;
+            return (
+              <Dropdown.Item
+                key={option.value}
+                style={{
+                  ...styles.darkMenuItem,
+                  ...(selected ? styles.darkMenuItemActive : null),
+                }}
+                onClick={() => onChange(option.value)}
+              >
+                {option.label}
+              </Dropdown.Item>
+            );
+          })
+        ) : (
+          <div
+            style={{
+              ...styles.darkMenuItem,
+              color: 'rgba(226, 232, 240, 0.66)',
+            }}
+          >
+            {emptyText}
+          </div>
+        )}
+        {extraContent ? (
+          <div style={{ marginTop: 6, borderTop: '1px solid rgba(148, 163, 184, 0.16)' }}>
+            {extraContent}
+          </div>
+        ) : null}
+      </Dropdown.Menu>
+    );
+
+    return (
+      <Dropdown key={key} trigger='click' position='bottomLeft' render={menu}>
+        <button
+          type='button'
+          style={{
+            ...styles.pillButton,
+            ...(value !== '' && value !== null && value !== undefined
+              ? styles.pillButtonActive
+              : styles.pillButtonMuted),
+            opacity: disabled ? 0.55 : 1,
+            cursor: disabled ? 'not-allowed' : 'pointer',
+          }}
+          disabled={disabled}
+        >
+          <span style={styles.pillButtonLabel}>
+            {label ? `${label} ${displayValue || t('请选择')}` : displayValue || t('请选择')}
+          </span>
+          <IconChevronDown size='small' />
+        </button>
+      </Dropdown>
+    );
+  };
+
+  const renderModelDropdown = (isVideoMode, activeModelLabel) => {
+    const modelOptions = isVideoMode ? enabledVideoModels : enabledImageModels;
+    const selectedValue = isVideoMode ? videoSelectedModel : selectedModel;
+    const handleSelect = (requestModel) => {
+      const model = modelOptions.find((item) => item.request_model === requestModel);
+      if (!model) {
+        return;
+      }
+      if (isVideoMode) {
+        selectVideoModelFromCatalog(model);
+        return;
+      }
+      selectImageModelFromCatalog(model);
+    };
+    const menu = (
+      <Dropdown.Menu style={{ ...styles.darkMenu, minWidth: isMobile ? 280 : 320 }}>
+        {modelOptions.length > 0 ? (
+          modelOptions.map((model) => {
+            const selected = model.request_model === selectedValue;
+            return (
+              <Dropdown.Item
+                key={model.request_model}
+                style={{
+                  ...styles.darkMenuItem,
+                  ...(selected ? styles.darkMenuItemActive : null),
+                }}
+                onClick={() => handleSelect(model.request_model)}
+              >
+                <div style={styles.modelMenuItem}>
+                  <span style={styles.modelMenuTitle}>
+                    {getModelDisplayName(model)}
+                  </span>
+                  <span style={styles.modelMenuMeta}>
+                    {model.request_model}
+                  </span>
+                </div>
+              </Dropdown.Item>
+            );
+          })
+        ) : (
+          <div style={{ ...styles.darkMenuItem, color: 'rgba(226, 232, 240, 0.66)' }}>
+            {isVideoMode ? t('当前没有可用视频模型') : t('当前分组下没有可用图片模型')}
+          </div>
+        )}
+      </Dropdown.Menu>
+    );
+
+    return (
+      <Dropdown trigger='click' position='bottomLeft' render={menu}>
+        <button
+          type='button'
+          style={styles.pillButton}
+          disabled={modelOptions.length === 0}
+        >
+          {isVideoMode ? <IconVideo size='small' /> : <IconImage size='small' />}
+          <span style={{ ...styles.pillButtonLabel, maxWidth: isMobile ? 140 : 260 }}>
+            {activeModelLabel}
+          </span>
+          <IconChevronDown size='small' />
+        </button>
+      </Dropdown>
+    );
+  };
+
+  const renderModeDropdown = (isVideoMode) => (
+    <Dropdown
+      trigger='click'
+      position='bottomLeft'
+      render={renderDarkDropdownMenu(
+        [
+          { value: 'image', label: t('图片生成') },
+          { value: 'video', label: t('视频生成') },
+        ],
+        generationMode,
+        setGenerationMode,
+        t('暂无可用模式'),
+      )}
+    >
+      <button type='button' style={styles.pillButton}>
+        {isVideoMode ? <IconVideo size='small' /> : <IconImage size='small' />}
+        <span style={styles.pillButtonLabel}>
+          {isVideoMode ? t('视频生成') : t('图片生成')}
+        </span>
+        <IconChevronDown size='small' />
+      </button>
+    </Dropdown>
+  );
+
+  const renderCustomSizeInputs = () => (
+    <div style={{ padding: '10px 10px 8px' }}>
+      <div style={{ color: 'rgba(226, 232, 240, 0.7)', fontSize: 12, marginBottom: 8 }}>
+        {t('自定义尺寸')}
+      </div>
+      <div style={styles.customSizeGroup}>
+        <span style={styles.sizeInputLabel}>W</span>
+        <input
+          value={customCanvasWidth}
+          onChange={(event) => setCustomCanvasWidth(event.target.value)}
+          placeholder='1024'
+          style={styles.sizeInput}
+        />
+        <span style={styles.sizeInputLabel}>H</span>
+        <input
+          value={customCanvasHeight}
+          onChange={(event) => setCustomCanvasHeight(event.target.value)}
+          placeholder='1024'
+          style={styles.sizeInput}
+        />
+      </div>
     </div>
   );
 
@@ -2798,202 +3119,214 @@ const ImageGeneration = () => {
       referenceImages.length > 0;
     const videoComposerParameters = [
       showVideoAspectRatioSelector &&
-        renderComposerParameterField(
-          'video-aspect-ratio',
-          t('视频比例'),
-          videoAspectRatio,
-          setVideoAspectRatio,
-          videoAvailableAspectRatios.map((ratio) => ({
+        renderPillDropdown({
+          key: 'video-aspect-ratio',
+          label: t('比例'),
+          value: videoAspectRatio,
+          displayValue: videoAspectRatio,
+          onChange: setVideoAspectRatio,
+          options: videoAvailableAspectRatios.map((ratio) => ({
             value: ratio,
             label: ratio,
           })),
-          false,
-        ),
+          extraContent: renderCustomSizeInputs(),
+        }),
       showVideoResolutionSelector &&
-        renderComposerParameterField(
-          'video-resolution',
-          t('分辨率'),
-          videoResolution,
-          setVideoResolution,
-          videoAvailableResolutions.map((res) => ({
+        renderPillDropdown({
+          key: 'video-resolution',
+          label: t('分辨率'),
+          value: videoResolution,
+          displayValue: videoResolution,
+          onChange: setVideoResolution,
+          options: videoAvailableResolutions.map((res) => ({
             value: res,
             label: res,
           })),
-          false,
-        ),
-      renderComposerParameterField(
-        'video-duration',
-        t('时长'),
-        videoDuration,
-        setVideoDuration,
-        (videoSelectedModelData?.duration_options || []).map((item) => ({
+          extraContent: renderCustomSizeInputs(),
+        }),
+      renderPillDropdown({
+        key: 'video-duration',
+        label: t('时长'),
+        value: videoDuration,
+        displayValue: videoDuration ? `${videoDuration}s` : '',
+        onChange: setVideoDuration,
+        options: (videoSelectedModelData?.duration_options || []).map((item) => ({
           value: item,
           label: `${item}s`,
         })),
-        !videoSelectedModelData?.duration_options?.length,
-      ),
+        disabled: !videoSelectedModelData?.duration_options?.length,
+      }),
     ].filter(Boolean);
     const imageComposerParameters = [
       showImageAspectRatioSelector &&
-        renderComposerParameterField(
-          'image-aspect-ratio',
-          t('生成比例'),
-          aspectRatio,
-          setAspectRatio,
-          availableAspectRatios.map((ratio) => ({
+        renderPillDropdown({
+          key: 'image-aspect-ratio',
+          label: t('比例'),
+          value: aspectRatio,
+          displayValue: aspectRatio,
+          onChange: setAspectRatio,
+          options: availableAspectRatios.map((ratio) => ({
             value: ratio,
             label: ratio,
           })),
-          false,
-        ),
+          extraContent: renderCustomSizeInputs(),
+        }),
       showImageResolutionSelector &&
-        renderComposerParameterField(
-          'image-resolution',
-          t('分辨率'),
-          resolution,
-          setResolution,
-          availableResolutions.map((res) => ({
+        renderPillDropdown({
+          key: 'image-resolution',
+          label: t('分辨率'),
+          value: resolution,
+          displayValue: resolution,
+          onChange: setResolution,
+          options: availableResolutions.map((res) => ({
             value: res,
             label: res,
           })),
-          false,
-        ),
-      renderComposerParameterField(
-        'image-quantity',
-        t('生成数量'),
-        quantity,
-        (val) => setQuantity(normalizeTaskCount(val)),
-        Array.from({ length: DEFAULT_MAX_BATCH_TASKS }, (_, index) => {
+          extraContent: renderCustomSizeInputs(),
+        }),
+      renderPillDropdown({
+        key: 'image-quantity',
+        label: t('数量'),
+        value: quantity,
+        displayValue: String(quantity),
+        onChange: (val) => setQuantity(normalizeTaskCount(val)),
+        options: Array.from({ length: DEFAULT_MAX_BATCH_TASKS }, (_, index) => {
           const value = index + 1;
           return {
             value,
             label: String(value),
           };
         }),
-        false,
-      ),
+      }),
     ].filter(Boolean);
 
     return (
-      <div style={styles.composer}>
-        <div style={styles.composerBox}>
-          <div style={styles.composerTop}>
-            <div style={styles.selectedModelPill}>
-              {generationMode === 'video' ? <IconVideo size='small' /> : <IconImage size='small' />}
-              <Text ellipsis={{ showTooltip: true }} style={{ maxWidth: 360 }}>
-                {activeModelLabel}
-              </Text>
-              {activeModelSeries ? (
-                <Text type='tertiary' size='small'>
-                  {activeModelSeries}
-                </Text>
-              ) : null}
+      <div style={styles.stage}>
+        <div style={styles.stageInner}>
+          <div>
+            <div style={styles.stageTitle}>{t('想创作什么？')}</div>
+            <div style={styles.stageSubtitle}>
+              {isVideoMode
+                ? t('输入视频创意描述，选择模型和生成参数后开始创作')
+                : t('输入创作描述，选择模型和生成参数后开始创作')}
             </div>
-            {isMobile && (
-              <Button
-                size='small'
-                type='tertiary'
-                icon={<IconMenu />}
-                onClick={() => setMobileCatalogVisible(true)}
-              >
-                {t('模型')}
-              </Button>
-            )}
           </div>
 
-          <div style={styles.composerBody}>
-            <div style={styles.textareaWrapper}>
-              <TextArea
-                placeholder={
-                  isVideoMode
-                    ? t('输入视频创意描述...')
-                    : t('输入创作描述...')
-                }
-                value={activePrompt}
-                onChange={isVideoMode ? setVideoPrompt : setInspiration}
-                onKeyDown={handleComposerKeyDown}
-                onCompositionStart={() => {
-                  composerComposingRef.current = true;
-                }}
-                onCompositionEnd={() => {
-                  composerComposingRef.current = false;
-                }}
-                maxLength={5000}
-                showClear
-                borderless
-                autosize={{ minRows: isMobile ? 3 : 4, maxRows: 10 }}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  resize: 'none',
-                  boxShadow: 'none',
-                }}
-              />
-              <div style={styles.composerInlineBar}>
-                <div style={styles.composerAssets}>
-                  {isVideoMode
-                    ? videoSelectedModelSupportsImageToVideo &&
-                      (videoReferenceImage ? (
-                        renderReferenceThumb(videoReferenceImage, handleVideoReferenceRemove)
-                      ) : null)
-                    : selectedModelSupportsEditing &&
-                      referenceImages.map((file) => renderReferenceThumb(file, () => handleImageRemove(file)))}
+          <div style={styles.stagePanelWrap}>
+            <div style={styles.stagePanel}>
+              <div style={styles.promptArea}>
+                <TextArea
+                  placeholder={
+                    isVideoMode
+                      ? t('输入视频创意描述...')
+                      : t('输入创作描述...')
+                  }
+                  value={activePrompt}
+                  onChange={isVideoMode ? setVideoPrompt : setInspiration}
+                  onKeyDown={handleComposerKeyDown}
+                  onCompositionStart={() => {
+                    composerComposingRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    composerComposingRef.current = false;
+                  }}
+                  maxLength={5000}
+                  showClear
+                  borderless
+                  autosize={{ minRows: isMobile ? 4 : 6, maxRows: 12 }}
+                  style={styles.promptInput}
+                />
+                <div style={styles.promptInputHint}>
+                  <span>
+                    {activeModelSeries
+                      ? `${activeModelSeries} · ${activeModelLabel}`
+                      : activeModelLabel}
+                  </span>
+                  <span>{t('Enter 发送，Shift + Enter 换行')}</span>
+                </div>
+              </div>
 
-                  {isVideoMode ? (
-                    videoSelectedModelSupportsImageToVideo && (
-                      <Upload
-                        action=''
-                        accept='image/*'
-                        multiple={false}
-                        fileList={videoReferenceImage ? [videoReferenceImage] : []}
-                        onChange={handleVideoReferenceUpload}
-                        showUploadList={false}
-                        beforeUpload={validateImageSize}
-                      >
-                        <div style={styles.addImageBtn}>
-                          <IconPlus />
-                        </div>
-                      </Upload>
-                    )
-                  ) : selectedModelSupportsEditing ? (
-                    <>
-                      <Upload
-                        action=''
-                        accept='image/*'
-                        multiple
-                        fileList={referenceImages}
-                        onChange={handleImageUpload}
-                        showUploadList={false}
-                        beforeUpload={validateImageSize}
-                        disabled={referenceImageLimitReached}
-                      >
-                        <div
-                          style={{
-                            ...styles.addImageBtn,
-                            opacity: referenceImageLimitReached ? 0.5 : 1,
-                            cursor: referenceImageLimitReached ? 'not-allowed' : 'pointer',
-                          }}
-                        >
-                          <IconPlus />
-                        </div>
-                      </Upload>
-                      {selectedModelSupportsMaskEditing && referenceImages.length > 0 && (
-                        <Button
-                          size='small'
-                          type='tertiary'
-                          icon={<IconSetting />}
-                          onClick={() => setComposerAdvancedVisible((current) => !current)}
-                        >
-                          {t('高级')}
-                        </Button>
-                      )}
-                    </>
-                  ) : null}
+              <div style={styles.footer}>
+                <div style={styles.footerRow}>
+                  <div style={styles.footerRowLeft}>
+                    {renderModeDropdown(isVideoMode)}
+                    {renderModelDropdown(isVideoMode, activeModelLabel)}
+                  </div>
+
+                  <div style={styles.footerRowRight}>
+                    {isVideoMode ? videoComposerParameters : imageComposerParameters}
+                  </div>
                 </div>
 
-                <div style={styles.composerRightTools}>
-                  <div style={styles.composerParams}>
-                    {isVideoMode ? videoComposerParameters : imageComposerParameters}
+                <div style={styles.footerRow}>
+                  <div style={styles.composerAssets}>
+                    {isVideoMode
+                      ? videoSelectedModelSupportsImageToVideo &&
+                        (videoReferenceImage ? (
+                          renderReferenceThumb(videoReferenceImage, handleVideoReferenceRemove)
+                        ) : null)
+                      : selectedModelSupportsEditing &&
+                        referenceImages.map((file) =>
+                          renderReferenceThumb(file, () => handleImageRemove(file)),
+                        )}
+
+                    {isVideoMode ? (
+                      videoSelectedModelSupportsImageToVideo && (
+                        <Upload
+                          action=''
+                          accept='image/*'
+                          multiple={false}
+                          fileList={videoReferenceImage ? [videoReferenceImage] : []}
+                          onChange={handleVideoReferenceUpload}
+                          showUploadList={false}
+                          beforeUpload={validateImageSize}
+                        >
+                          <div style={styles.addImageBtn}>
+                            <IconPlus />
+                          </div>
+                        </Upload>
+                      )
+                    ) : selectedModelSupportsEditing ? (
+                      <>
+                        <Upload
+                          action=''
+                          accept='image/*'
+                          multiple
+                          fileList={referenceImages}
+                          onChange={handleImageUpload}
+                          showUploadList={false}
+                          beforeUpload={validateImageSize}
+                          disabled={referenceImageLimitReached}
+                        >
+                          <div
+                            style={{
+                              ...styles.addImageBtn,
+                              opacity: referenceImageLimitReached ? 0.5 : 1,
+                              cursor: referenceImageLimitReached
+                                ? 'not-allowed'
+                                : 'pointer',
+                            }}
+                          >
+                            <IconPlus />
+                          </div>
+                        </Upload>
+                        {selectedModelSupportsMaskEditing &&
+                          referenceImages.length > 0 && (
+                            <Button
+                              size='small'
+                              type='tertiary'
+                              theme='borderless'
+                              icon={<IconSetting />}
+                              style={{ color: '#cbd5e1' }}
+                              onClick={() =>
+                                setComposerAdvancedVisible((current) => !current)
+                              }
+                            >
+                              {t('高级')}
+                            </Button>
+                          )}
+                      </>
+                    ) : null}
                   </div>
 
                   <button
@@ -3003,12 +3336,12 @@ const ImageGeneration = () => {
                       opacity: submitDisabled ? 0.55 : 1,
                       pointerEvents: submitDisabled ? 'none' : 'auto',
                       background: promptHasContent
-                        ? 'var(--semi-color-primary)'
-                        : 'var(--semi-color-fill-0)',
+                        ? '#f8fafc'
+                        : 'rgba(15, 23, 42, 0.9)',
                       borderColor: promptHasContent
-                        ? 'var(--semi-color-primary)'
-                        : 'var(--semi-color-border)',
-                      color: promptHasContent ? '#fff' : 'var(--semi-color-text-2)',
+                        ? '#f8fafc'
+                        : 'rgba(148, 163, 184, 0.24)',
+                      color: promptHasContent ? '#020617' : '#94a3b8',
                     }}
                     onClick={handleComposerSubmit}
                     disabled={submitDisabled}
@@ -3022,8 +3355,25 @@ const ImageGeneration = () => {
           </div>
 
           {showMaskEditor && composerAdvancedVisible && (
-            <div style={{ borderTop: '1px solid var(--semi-color-border)', padding: '12px' }}>
-              <Text type='tertiary' size='small' style={{ display: 'block', marginBottom: 8 }}>
+            <div
+              style={{
+                width: '100%',
+                maxWidth: 900,
+                margin: '0 auto',
+                border: '1px solid rgba(148, 163, 184, 0.2)',
+                borderRadius: 12,
+                background: 'rgba(8, 10, 15, 0.68)',
+                padding: 12,
+              }}
+            >
+              <Text
+                size='small'
+                style={{
+                  display: 'block',
+                  marginBottom: 8,
+                  color: 'rgba(226, 232, 240, 0.72)',
+                }}
+              >
                 {t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
               </Text>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -3058,27 +3408,14 @@ const ImageGeneration = () => {
 
   const renderModernRightPanel = () => (
     <div style={styles.rightPanel}>
-      <div style={styles.rightContent} />
-
-      <SideSheet
-        placement='left'
-        visible={mobileCatalogVisible}
-        onCancel={() => setMobileCatalogVisible(false)}
-        width='100%'
-        title={t('模型目录')}
-        bodyStyle={{ padding: 0 }}
-      >
-        {renderLeftCatalog()}
-      </SideSheet>
+      <div style={styles.rightContent}>{renderComposer()}</div>
     </div>
   );
 
   return (
     <div style={styles.container}>
-      {!isMobile && renderLeftCatalog()}
       <div style={styles.contentColumn}>
         {renderModernRightPanel()}
-        {renderComposer()}
       </div>
     </div>
   );

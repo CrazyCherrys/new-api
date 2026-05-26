@@ -4334,6 +4334,19 @@
     "画质参数": "Thong so chat luong",
     "消耗配额": "Chi phi quota",
     "生成耗时": "Thoi gian tao",
-    "数量 {{count}}": "So luong {{count}}"
+    "数量 {{count}}": "So luong {{count}}",
+    "暂无可用模式": "Khong co che do kha dung",
+    "图片生成": "Tao anh",
+    "视频生成": "Tao video",
+    "比例": "Ti le",
+    "时长": "Thoi luong",
+    "数量": "So luong",
+    "自定义尺寸": "Kich thuoc tuy chinh",
+    "想创作什么？": "Ban muon tao gi?",
+    "输入视频创意描述，选择模型和生成参数后开始创作": "Nhap y tuong video, sau do chon mo hinh va thong so tao de bat dau.",
+    "输入创作描述，选择模型和生成参数后开始创作": "Nhap mo ta sang tao, sau do chon mo hinh va thong so tao de bat dau.",
+    "Enter 发送，Shift + Enter 换行": "Enter de gui, Shift + Enter de xuong dong",
+    "当前没有可用视频模型": "Khong co mo hinh video kha dung",
+    "当前分组下没有可用图片模型": "Khong co mo hinh anh kha dung trong nhom hien tai"
   }
 }

@@ -3809,6 +3809,19 @@
     "画质参数": "Parametres de qualite",
     "消耗配额": "Cout en quota",
     "生成耗时": "Duree de generation",
-    "数量 {{count}}": "Quantite {{count}}"
+    "数量 {{count}}": "Quantite {{count}}",
+    "暂无可用模式": "Aucun mode disponible",
+    "图片生成": "Generation d'image",
+    "视频生成": "Generation de video",
+    "比例": "Ratio",
+    "时长": "Duree",
+    "数量": "Quantite",
+    "自定义尺寸": "Taille personnalisee",
+    "想创作什么？": "Que voulez-vous creer ?",
+    "输入视频创意描述，选择模型和生成参数后开始创作": "Saisissez une idee de video, puis choisissez un modele et les parametres de generation pour commencer.",
+    "输入创作描述，选择模型和生成参数后开始创作": "Saisissez une description, puis choisissez un modele et les parametres de generation pour commencer.",
+    "Enter 发送，Shift + Enter 换行": "Entree envoie, Maj + Entree ajoute une ligne",
+    "当前没有可用视频模型": "Aucun modele video disponible",
+    "当前分组下没有可用图片模型": "Aucun modele d'image disponible dans le groupe actuel"
   }
 }
