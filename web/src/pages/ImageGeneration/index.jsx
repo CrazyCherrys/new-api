@@ -32,7 +32,6 @@ import {
   SideSheet,
 } from '@douyinfe/semi-ui';
 import {
-  IconPlus,
   IconDelete,
   IconImage,
   IconChevronUp,
@@ -42,6 +41,7 @@ import {
   IconMenu,
   IconVideo,
   IconSetting,
+  IconUpload,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
@@ -2258,8 +2258,8 @@ const ImageGeneration = () => {
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
-      justifyContent: 'center',
-      padding: isMobile ? '20px 12px 12px' : '40px 24px 24px',
+      justifyContent: 'flex-end',
+      padding: isMobile ? '20px 12px 28px' : '56px 24px 76px',
       overflowY: 'auto',
     },
     stageInner: {
@@ -2326,6 +2326,28 @@ const ImageGeneration = () => {
       color: 'rgba(245, 247, 250, 0.48)',
       fontSize: 12,
       lineHeight: 1.4,
+    },
+    promptAssetBar: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: 'wrap',
+      minHeight: 36,
+      marginBottom: 8,
+    },
+    uploadIconBtn: {
+      width: 32,
+      height: 32,
+      minWidth: 32,
+      borderRadius: 8,
+      border: '1px dashed rgba(148, 163, 184, 0.36)',
+      background: 'rgba(15, 23, 42, 0.72)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      cursor: 'pointer',
+      color: '#dbeafe',
+      transition: 'opacity 0.2s, border-color 0.2s, background 0.2s',
     },
     footer: {
       display: 'flex',
@@ -2520,13 +2542,6 @@ const ImageGeneration = () => {
       fontSize: 12,
       lineHeight: 1.4,
       wordBreak: 'break-all',
-    },
-    composerAssets: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 6,
-      flexWrap: 'wrap',
-      minWidth: 0,
     },
     generateIconBtn: {
       width: 36,
@@ -3117,6 +3132,82 @@ const ImageGeneration = () => {
       !isVideoMode &&
       selectedModelSupportsMaskEditing &&
       referenceImages.length > 0;
+    const renderUploadIconButton = ({ disabled = false, title = t('上传图片') } = {}) => (
+      <div
+        aria-label={title}
+        title={title}
+        style={{
+          ...styles.uploadIconBtn,
+          opacity: disabled ? 0.5 : 1,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+        }}
+      >
+        <IconUpload size='small' />
+      </div>
+    );
+    const promptAssetControls = (
+      <>
+        {isVideoMode ? (
+          videoSelectedModelSupportsImageToVideo && (
+            <Upload
+              action=''
+              accept='image/*'
+              multiple={false}
+              fileList={videoReferenceImage ? [videoReferenceImage] : []}
+              onChange={handleVideoReferenceUpload}
+              showUploadList={false}
+              beforeUpload={validateImageSize}
+            >
+              {renderUploadIconButton({ title: t('上传图片') })}
+            </Upload>
+          )
+        ) : selectedModelSupportsEditing ? (
+          <>
+            <Upload
+              action=''
+              accept='image/*'
+              multiple
+              fileList={referenceImages}
+              onChange={handleImageUpload}
+              showUploadList={false}
+              beforeUpload={validateImageSize}
+              disabled={referenceImageLimitReached}
+            >
+              {renderUploadIconButton({
+                disabled: referenceImageLimitReached,
+                title: referenceImageLimitReached ? t('已达到当前模型参考图上限') : t('上传图片'),
+              })}
+            </Upload>
+          </>
+        ) : null}
+
+        {isVideoMode
+          ? videoSelectedModelSupportsImageToVideo &&
+            (videoReferenceImage ? (
+              renderReferenceThumb(videoReferenceImage, handleVideoReferenceRemove)
+            ) : null)
+          : selectedModelSupportsEditing &&
+            referenceImages.map((file) =>
+              renderReferenceThumb(file, () => handleImageRemove(file)),
+            )}
+
+        {!isVideoMode && selectedModelSupportsMaskEditing && referenceImages.length > 0 && (
+          <Button
+            size='small'
+            type='tertiary'
+            theme='borderless'
+            icon={<IconSetting />}
+            style={{ color: '#cbd5e1' }}
+            onClick={() => setComposerAdvancedVisible((current) => !current)}
+          >
+            {t('高级')}
+          </Button>
+        )}
+      </>
+    );
+    const showPromptAssetBar =
+      (isVideoMode && videoSelectedModelSupportsImageToVideo) ||
+      (!isVideoMode && selectedModelSupportsEditing);
     const videoComposerParameters = [
       showVideoAspectRatioSelector &&
         renderPillDropdown({
@@ -3215,6 +3306,9 @@ const ImageGeneration = () => {
           <div style={styles.stagePanelWrap}>
             <div style={styles.stagePanel}>
               <div style={styles.promptArea}>
+                {showPromptAssetBar ? (
+                  <div style={styles.promptAssetBar}>{promptAssetControls}</div>
+                ) : null}
                 <TextArea
                   placeholder={
                     isVideoMode
@@ -3258,77 +3352,7 @@ const ImageGeneration = () => {
                   </div>
                 </div>
 
-                <div style={styles.footerRow}>
-                  <div style={styles.composerAssets}>
-                    {isVideoMode
-                      ? videoSelectedModelSupportsImageToVideo &&
-                        (videoReferenceImage ? (
-                          renderReferenceThumb(videoReferenceImage, handleVideoReferenceRemove)
-                        ) : null)
-                      : selectedModelSupportsEditing &&
-                        referenceImages.map((file) =>
-                          renderReferenceThumb(file, () => handleImageRemove(file)),
-                        )}
-
-                    {isVideoMode ? (
-                      videoSelectedModelSupportsImageToVideo && (
-                        <Upload
-                          action=''
-                          accept='image/*'
-                          multiple={false}
-                          fileList={videoReferenceImage ? [videoReferenceImage] : []}
-                          onChange={handleVideoReferenceUpload}
-                          showUploadList={false}
-                          beforeUpload={validateImageSize}
-                        >
-                          <div style={styles.addImageBtn}>
-                            <IconPlus />
-                          </div>
-                        </Upload>
-                      )
-                    ) : selectedModelSupportsEditing ? (
-                      <>
-                        <Upload
-                          action=''
-                          accept='image/*'
-                          multiple
-                          fileList={referenceImages}
-                          onChange={handleImageUpload}
-                          showUploadList={false}
-                          beforeUpload={validateImageSize}
-                          disabled={referenceImageLimitReached}
-                        >
-                          <div
-                            style={{
-                              ...styles.addImageBtn,
-                              opacity: referenceImageLimitReached ? 0.5 : 1,
-                              cursor: referenceImageLimitReached
-                                ? 'not-allowed'
-                                : 'pointer',
-                            }}
-                          >
-                            <IconPlus />
-                          </div>
-                        </Upload>
-                        {selectedModelSupportsMaskEditing &&
-                          referenceImages.length > 0 && (
-                            <Button
-                              size='small'
-                              type='tertiary'
-                              theme='borderless'
-                              icon={<IconSetting />}
-                              style={{ color: '#cbd5e1' }}
-                              onClick={() =>
-                                setComposerAdvancedVisible((current) => !current)
-                              }
-                            >
-                              {t('高级')}
-                            </Button>
-                          )}
-                      </>
-                    ) : null}
-                  </div>
-
+                <div style={{ ...styles.footerRow, justifyContent: 'flex-end' }}>
                   <button
                     aria-label={isVideoMode ? t('生成视频') : t('生成')}
                     style={{
