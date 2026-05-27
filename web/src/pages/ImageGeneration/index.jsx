@@ -3340,15 +3340,27 @@ const ImageGeneration = () => {
       fontSize: 15,
       lineHeight: 1.55,
     },
-    promptInputHint: {
+    promptControls: {
       display: 'flex',
       justifyContent: 'space-between',
-      gap: 8,
+      gap: 10,
       alignItems: 'center',
-      marginTop: 8,
-      color: 'rgba(245, 247, 250, 0.48)',
-      fontSize: 12,
-      lineHeight: 1.4,
+      marginTop: 6,
+      flexWrap: 'wrap',
+    },
+    promptControlsLeft: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: 'wrap',
+      minWidth: 0,
+      flex: 1,
+    },
+    promptControlsRight: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      minWidth: 36,
     },
     promptAssetBar: {
       display: 'flex',
@@ -3372,39 +3384,11 @@ const ImageGeneration = () => {
       color: '#dbeafe',
       transition: 'opacity 0.2s, border-color 0.2s, background 0.2s',
     },
-    footer: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 10,
-      marginTop: 12,
-    },
-    footerRow: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 12,
-      flexWrap: 'wrap',
-    },
-    footerRowLeft: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      flexWrap: 'wrap',
-      minWidth: 0,
-    },
-    footerRowRight: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      flexWrap: 'wrap',
-      justifyContent: 'flex-end',
-      minWidth: 0,
-    },
     pillButton: {
       minHeight: 34,
       borderRadius: 999,
-      border: '1px solid rgba(148, 163, 184, 0.24)',
-      background: 'rgba(17, 24, 39, 0.88)',
+      border: '1px solid rgba(148, 163, 184, 0.18)',
+      background: 'rgba(255, 255, 255, 0.04)',
       color: '#e5e7eb',
       padding: '0 12px',
       display: 'inline-flex',
@@ -3414,12 +3398,12 @@ const ImageGeneration = () => {
       lineHeight: 1,
     },
     pillButtonActive: {
-      borderColor: 'rgba(99, 102, 241, 0.9)',
-      background: 'rgba(30, 41, 59, 0.96)',
+      borderColor: 'rgba(96, 165, 250, 0.42)',
+      background: 'rgba(59, 130, 246, 0.18)',
       color: '#fff',
     },
     pillButtonMuted: {
-      color: 'rgba(226, 232, 240, 0.82)',
+      color: 'rgba(226, 232, 240, 0.84)',
     },
     pillButtonLabel: {
       maxWidth: 170,
@@ -3668,8 +3652,8 @@ const ImageGeneration = () => {
       gap: 4,
       padding: 4,
       borderRadius: 999,
-      border: '1px solid rgba(148, 163, 184, 0.24)',
-      background: 'rgba(15, 23, 42, 0.72)',
+      border: '1px solid rgba(148, 163, 184, 0.18)',
+      background: 'rgba(255, 255, 255, 0.04)',
     },
     composerModeButton: {
       minHeight: 28,
@@ -3677,7 +3661,7 @@ const ImageGeneration = () => {
       borderRadius: 999,
       padding: isMobile ? '0 8px' : '0 10px',
       background: 'transparent',
-      color: 'rgba(226, 232, 240, 0.82)',
+      color: 'rgba(226, 232, 240, 0.84)',
       display: 'inline-flex',
       alignItems: 'center',
       gap: 6,
@@ -3687,7 +3671,7 @@ const ImageGeneration = () => {
     },
     composerModeButtonActive: {
       color: '#fff',
-      background: 'rgba(59, 130, 246, 0.32)',
+      background: 'rgba(59, 130, 246, 0.24)',
     },
     workspaceBody: {
       flex: 1,
@@ -4536,7 +4520,7 @@ const ImageGeneration = () => {
     if (!selectedCanvasSession) {
       return (
         <div style={styles.detailPanel}>
-          {renderSidebarEmpty(t('空白会话'), t('从底部输入提示词开始'))}
+          {renderSidebarEmpty(t('空白会话'), t('准备好开始了吗？'))}
         </div>
       );
     }
@@ -4565,7 +4549,7 @@ const ImageGeneration = () => {
     if (displayedCanvasMessages.length === 0) {
       return (
         <div style={styles.detailPanel}>
-          {renderSidebarEmpty(t('空会话'), t('从底部输入提示词开始连续生成'))}
+          {renderSidebarEmpty(t('空白会话'), t('准备好开始了吗？'))}
         </div>
       );
     }
@@ -4942,25 +4926,12 @@ const ImageGeneration = () => {
               autosize={{ minRows: isMobile ? 2 : 3, maxRows: 8 }}
               style={styles.promptInput}
             />
-            <div style={styles.promptInputHint}>
-              <span>
-                {isChatMode
-                  ? activeModelLabel
-                  : activeModel?.model_series
-                    ? `${formatModelSeries(activeModel.model_series)} · ${activeModelLabel}`
-                    : activeModelLabel}
-              </span>
-              <span>{t('Enter 发送，Shift + Enter 换行')}</span>
-            </div>
-          </div>
-
-          <div style={styles.footer}>
-            <div style={styles.footerRow}>
-              <div style={styles.footerRowLeft}>
+            <div style={styles.promptControls}>
+              <div style={styles.promptControlsLeft}>
                 {renderComposerModeSwitch()}
                 {activeParameters}
               </div>
-              <div style={styles.footerRowRight}>
+              <div style={styles.promptControlsRight}>
                 <button
                   aria-label={
                     isChatMode
