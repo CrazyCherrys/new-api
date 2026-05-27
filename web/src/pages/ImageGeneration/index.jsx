@@ -54,6 +54,7 @@ import {
   IconAlertTriangle,
   IconPlayCircle,
   IconExternalOpen,
+  IconMore,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
@@ -408,6 +409,33 @@ const ImageGeneration = () => {
       messages: [],
     },
   ]);
+  const [canvasSessions, setCanvasSessions] = useState({
+    [CANVAS_MODE_CHAT]: [],
+    [CANVAS_MODE_IMAGE]: [],
+    [CANVAS_MODE_VIDEO]: [],
+  });
+  const [canvasSessionsLoading, setCanvasSessionsLoading] = useState({
+    [CANVAS_MODE_CHAT]: false,
+    [CANVAS_MODE_IMAGE]: false,
+    [CANVAS_MODE_VIDEO]: false,
+  });
+  const [canvasSessionErrors, setCanvasSessionErrors] = useState({
+    [CANVAS_MODE_CHAT]: '',
+    [CANVAS_MODE_IMAGE]: '',
+    [CANVAS_MODE_VIDEO]: '',
+  });
+  const [selectedCanvasSessionIds, setSelectedCanvasSessionIds] = useState({
+    [CANVAS_MODE_CHAT]: null,
+    [CANVAS_MODE_IMAGE]: null,
+    [CANVAS_MODE_VIDEO]: null,
+  });
+  const [canvasMessagesSessionId, setCanvasMessagesSessionId] = useState(null);
+  const [canvasMessages, setCanvasMessages] = useState([]);
+  const [canvasMessagesLoading, setCanvasMessagesLoading] = useState(false);
+  const [canvasMessagesError, setCanvasMessagesError] = useState('');
+  const [canvasSidebarCollapsed, setCanvasSidebarCollapsed] = useState(false);
+  const [hoveredCanvasSessionId, setHoveredCanvasSessionId] = useState(null);
+  const [deletingCanvasSession, setDeletingCanvasSession] = useState(false);
 
   const [selectedSeries, setSelectedSeries] = useState(() =>
     getStoredValue(STORAGE_KEYS.SERIES, ''),
@@ -511,6 +539,13 @@ const ImageGeneration = () => {
   const taskDetailRequestSeqRef = useRef(0);
   const drawingModelsRequestSeqRef = useRef(0);
   const loadedModelsGroupRef = useRef('');
+  const canvasSessionsRequestSeqRef = useRef({
+    [CANVAS_MODE_CHAT]: 0,
+    [CANVAS_MODE_IMAGE]: 0,
+    [CANVAS_MODE_VIDEO]: 0,
+  });
+  const canvasMessagesRequestSeqRef = useRef(0);
+  const canvasMessagesSessionIdRef = useRef(null);
   const taskUpdatesCompletedSinceRef = useRef(
     Math.floor(Date.now() / 1000) - 60,
   );
@@ -543,6 +578,18 @@ const ImageGeneration = () => {
   );
   const showsReliableTaskTotal = !canUseTaskCursorPagination;
   const hasNextTaskPage = taskHasMore;
+  const currentCanvasSessions = canvasSessions[generationMode] || [];
+  const currentCanvasSessionsLoading =
+    canvasSessionsLoading[generationMode] || false;
+  const currentCanvasSessionError = canvasSessionErrors[generationMode] || '';
+  const selectedCanvasSessionId = selectedCanvasSessionIds[generationMode];
+  const selectedCanvasSession = currentCanvasSessions.find(
+    (session) => session.id === selectedCanvasSessionId,
+  );
+  const displayedCanvasMessages =
+    canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [];
+  const isCurrentCanvasMessageSession = (sessionId) =>
+    String(canvasMessagesSessionIdRef.current || '') === String(sessionId || '');
 
   taskListStateRef.current = {
     page: taskPage,
@@ -752,6 +799,23 @@ const ImageGeneration = () => {
     videoTaskTimeFilter,
   ]);
 
+  useEffect(() => {
+    loadCanvasSessions(generationMode);
+  }, [generationMode]);
+
+  useEffect(() => {
+    if (!selectedCanvasSessionId) {
+      canvasMessagesRequestSeqRef.current += 1;
+      canvasMessagesSessionIdRef.current = null;
+      setCanvasMessagesSessionId(null);
+      setCanvasMessages([]);
+      setCanvasMessagesError('');
+      setCanvasMessagesLoading(false);
+      return;
+    }
+    loadCanvasMessages(selectedCanvasSessionId);
+  }, [selectedCanvasSessionId]);
+
   // 切换任意筛选/排序时回到第一页
   useEffect(() => {
     setTaskPage(1);
@@ -934,6 +998,299 @@ const ImageGeneration = () => {
       showError(message);
     } finally {
       setCanvasAssetsLoading(false);
+    }
+  };
+
+  const setCanvasSessionsForMode = (mode, updater) => {
+    setCanvasSessions((prev) => ({
+      ...prev,
+      [mode]:
+        typeof updater === 'function'
+          ? updater(prev[mode] || [])
+          : updater || [],
+    }));
+  };
+
+  const setCanvasSessionsLoadingForMode = (mode, loading) => {
+    setCanvasSessionsLoading((prev) => ({
+      ...prev,
+      [mode]: loading,
+    }));
+  };
+
+  const setCanvasSessionErrorForMode = (mode, message) => {
+    setCanvasSessionErrors((prev) => ({
+      ...prev,
+      [mode]: message || '',
+    }));
+  };
+
+  const loadCanvasSessions = async (mode = generationMode, options = {}) => {
+    const normalizedMode = CANVAS_MODES.includes(mode) ? mode : CANVAS_MODE_IMAGE;
+    const requestSeq =
+      (canvasSessionsRequestSeqRef.current[normalizedMode] || 0) + 1;
+    canvasSessionsRequestSeqRef.current[normalizedMode] = requestSeq;
+    if (!options.silent) {
+      setCanvasSessionsLoadingForMode(normalizedMode, true);
+    }
+    try {
+      const res = await API.get('/api/canvas/sessions', {
+        params: { mode: normalizedMode },
+      });
+      if (requestSeq !== canvasSessionsRequestSeqRef.current[normalizedMode]) {
+        return [];
+      }
+      if (!res.data.success) {
+        const message = res.data.message || t('加载会话失败');
+        setCanvasSessionErrorForMode(normalizedMode, message);
+        if (!options.silent) {
+          showError(message);
+        }
+        return [];
+      }
+      const sessions = res.data.data || [];
+      setCanvasSessionErrorForMode(normalizedMode, '');
+      setCanvasSessionsForMode(normalizedMode, sessions);
+      setSelectedCanvasSessionIds((prev) => {
+        const currentId = prev[normalizedMode];
+        if (currentId && sessions.some((session) => session.id === currentId)) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [normalizedMode]: sessions[0]?.id || null,
+        };
+      });
+      return sessions;
+    } catch (error) {
+      if (requestSeq !== canvasSessionsRequestSeqRef.current[normalizedMode]) {
+        return [];
+      }
+      const message = error.message || t('加载会话失败');
+      setCanvasSessionErrorForMode(normalizedMode, message);
+      if (!options.silent) {
+        showError(message);
+      }
+      return [];
+    } finally {
+      if (
+        !options.silent &&
+        requestSeq === canvasSessionsRequestSeqRef.current[normalizedMode]
+      ) {
+        setCanvasSessionsLoadingForMode(normalizedMode, false);
+      }
+    }
+  };
+
+  const createCanvasSession = async (mode = generationMode, title = '') => {
+    const normalizedMode = CANVAS_MODES.includes(mode) ? mode : generationMode;
+    canvasSessionsRequestSeqRef.current[normalizedMode] =
+      (canvasSessionsRequestSeqRef.current[normalizedMode] || 0) + 1;
+    setCanvasSessionsLoadingForMode(normalizedMode, false);
+    const res = await API.post('/api/canvas/sessions', {
+      mode: normalizedMode,
+      title,
+    });
+    if (!res.data.success) {
+      throw new Error(res.data.message || t('创建会话失败'));
+    }
+    const session = res.data.data;
+    canvasSessionsRequestSeqRef.current[normalizedMode] =
+      (canvasSessionsRequestSeqRef.current[normalizedMode] || 0) + 1;
+    setCanvasSessionErrorForMode(normalizedMode, '');
+    setCanvasSessionsForMode(normalizedMode, (prev) => [
+      session,
+      ...prev.filter((item) => item.id !== session.id),
+    ]);
+    setSelectedCanvasSessionIds((prev) => ({
+      ...prev,
+      [normalizedMode]: session.id,
+    }));
+    canvasMessagesRequestSeqRef.current += 1;
+    canvasMessagesSessionIdRef.current = session.id;
+    setCanvasMessagesSessionId(session.id);
+    setCanvasMessages([]);
+    setCanvasMessagesError('');
+    setCanvasMessagesLoading(false);
+    setMobileTaskbarVisible(false);
+    return session;
+  };
+
+  const ensureCanvasSession = async (mode = generationMode) => {
+    const existingId = selectedCanvasSessionIds[mode];
+    const existing = (canvasSessions[mode] || []).find(
+      (session) => session.id === existingId,
+    );
+    if (existing) {
+      return existing;
+    }
+    return createCanvasSession(mode);
+  };
+
+  const loadCanvasMessages = async (sessionId, options = {}) => {
+    if (!sessionId) {
+      canvasMessagesRequestSeqRef.current += 1;
+      canvasMessagesSessionIdRef.current = null;
+      setCanvasMessagesSessionId(null);
+      setCanvasMessages([]);
+      return [];
+    }
+    const requestSeq = canvasMessagesRequestSeqRef.current + 1;
+    canvasMessagesRequestSeqRef.current = requestSeq;
+    canvasMessagesSessionIdRef.current = sessionId;
+    setCanvasMessagesSessionId(sessionId);
+    if (!options.silent) {
+      setCanvasMessagesLoading(true);
+    }
+    try {
+      const res = await API.get(`/api/canvas/sessions/${sessionId}/messages`);
+      if (
+        requestSeq !== canvasMessagesRequestSeqRef.current ||
+        !isCurrentCanvasMessageSession(sessionId)
+      ) {
+        return [];
+      }
+      if (!res.data.success) {
+        const message = res.data.message || t('加载消息失败');
+        setCanvasMessagesError(message);
+        if (!options.silent) {
+          showError(message);
+        }
+        return [];
+      }
+      const messages = res.data.data || [];
+      setCanvasMessages(messages);
+      setCanvasMessagesError('');
+      syncSelectedTaskFromCanvasMessages(messages);
+      return messages;
+    } catch (error) {
+      if (
+        requestSeq !== canvasMessagesRequestSeqRef.current ||
+        !isCurrentCanvasMessageSession(sessionId)
+      ) {
+        return [];
+      }
+      const message = error.message || t('加载消息失败');
+      setCanvasMessagesError(message);
+      if (!options.silent) {
+        showError(message);
+      }
+      return [];
+    } finally {
+      if (
+        !options.silent &&
+        requestSeq === canvasMessagesRequestSeqRef.current &&
+        isCurrentCanvasMessageSession(sessionId)
+      ) {
+        setCanvasMessagesLoading(false);
+      }
+    }
+  };
+
+  const appendCanvasMessagesForSession = (sessionId, messages) => {
+    if (!sessionId || !messages?.length || !isCurrentCanvasMessageSession(sessionId)) {
+      return;
+    }
+    setCanvasMessages((prev) => [...prev, ...messages]);
+  };
+
+  const updateCanvasSessionInState = (session) => {
+    if (!session?.mode) {
+      return;
+    }
+    setCanvasSessionsForMode(session.mode, (prev) => {
+      const next = [session, ...prev.filter((item) => item.id !== session.id)];
+      return next.sort((a, b) => {
+        if (a.pinned !== b.pinned) {
+          return a.pinned ? -1 : 1;
+        }
+        return (Number(b.updated_time) || 0) - (Number(a.updated_time) || 0);
+      });
+    });
+  };
+
+  const renameCanvasSession = async (session) => {
+    const currentTitle = session?.title || '';
+    const nextTitle = window.prompt(t('重命名会话'), currentTitle);
+    if (nextTitle === null) {
+      return;
+    }
+    const trimmedTitle = nextTitle.trim();
+    if (!trimmedTitle) {
+      showError(t('标题不能为空'));
+      return;
+    }
+    try {
+      const res = await API.patch(`/api/canvas/sessions/${session.id}`, {
+        title: trimmedTitle,
+      });
+      if (!res.data.success) {
+        showError(res.data.message || t('重命名失败'));
+        return;
+      }
+      updateCanvasSessionInState(res.data.data);
+    } catch (error) {
+      showError(error.message || t('重命名失败'));
+    }
+  };
+
+  const toggleCanvasSessionPin = async (session) => {
+    try {
+      const res = await API.patch(`/api/canvas/sessions/${session.id}`, {
+        pinned: !session.pinned,
+      });
+      if (!res.data.success) {
+        showError(res.data.message || t('更新置顶失败'));
+        return;
+      }
+      updateCanvasSessionInState(res.data.data);
+    } catch (error) {
+      showError(error.message || t('更新置顶失败'));
+    }
+  };
+
+  const deleteCanvasSession = async (session) => {
+    if (!session?.id) {
+      return;
+    }
+    setDeletingCanvasSession(true);
+    try {
+      const res = await API.delete(`/api/canvas/sessions/${session.id}`);
+      if (!res.data.success) {
+        showError(res.data.message || t('删除会话失败'));
+        return;
+      }
+      showSuccess(t('删除成功'));
+      setCanvasSessionsForMode(session.mode, (prev) =>
+        prev.filter((item) => item.id !== session.id),
+      );
+      setSelectedCanvasSessionIds((prev) => {
+        const nextSessions = (canvasSessions[session.mode] || []).filter(
+          (item) => item.id !== session.id,
+        );
+        return {
+          ...prev,
+          [session.mode]: nextSessions[0]?.id || null,
+        };
+      });
+      if (isCurrentCanvasMessageSession(session.id)) {
+        canvasMessagesRequestSeqRef.current += 1;
+        canvasMessagesSessionIdRef.current = null;
+        setCanvasMessagesSessionId(null);
+        setCanvasMessages([]);
+        setCanvasMessagesError('');
+        setCanvasMessagesLoading(false);
+      }
+      if (session.mode === CANVAS_MODE_IMAGE) {
+        loadTasks(true, { forceRefresh: true });
+      }
+      if (session.mode === CANVAS_MODE_VIDEO) {
+        loadVideoTasks();
+      }
+    } catch (error) {
+      showError(error.message || t('删除会话失败'));
+    } finally {
+      setDeletingCanvasSession(false);
     }
   };
 
@@ -1138,6 +1495,9 @@ const ImageGeneration = () => {
       }
       if (res.data.success) {
         const newItems = res.data.data.items || [];
+        newItems.forEach((task) =>
+          updateCanvasMessageTask(task, CANVAS_MODE_IMAGE),
+        );
         const hasTotal = Number.isFinite(res.data.data.total);
         const newTotal = hasTotal ? res.data.data.total : taskTotal;
         setTaskListError('');
@@ -1218,6 +1578,9 @@ const ImageGeneration = () => {
       const res = await API.get('/api/video-generation/tasks', { params });
       if (res.data.success) {
         const newItems = res.data.data.items || [];
+        newItems.forEach((task) =>
+          updateCanvasMessageTask(task, CANVAS_MODE_VIDEO),
+        );
         setVideoTaskListError('');
         setVideoTasks(newItems);
         setVideoTaskTotal(res.data.data.total || 0);
@@ -1251,6 +1614,60 @@ const ImageGeneration = () => {
     setTasks((prevTasks) =>
       mergeTaskCollections(prevTasks, updates, taskPageSize),
     );
+    updates.forEach((task) => updateCanvasMessageTask(task, CANVAS_MODE_IMAGE));
+  };
+
+  const updateCanvasMessageTask = (updatedTask, mode) => {
+    if (!updatedTask?.id) {
+      return;
+    }
+    setCanvasMessages((prevMessages) =>
+      prevMessages.map((message) => {
+        if (!message?.task_id || String(message.task_id) !== String(updatedTask.id)) {
+          return message;
+        }
+        if (mode === CANVAS_MODE_VIDEO && message.task_type !== 'video_generation') {
+          return message;
+        }
+        if (mode === CANVAS_MODE_IMAGE && message.task_type !== 'image_generation') {
+          return message;
+        }
+        if (mode === CANVAS_MODE_VIDEO) {
+          return {
+            ...message,
+            status: updatedTask.status,
+            error_message: updatedTask.fail_reason || message.error_message,
+            video_task: {
+              ...(message.video_task || {}),
+              ...updatedTask,
+            },
+          };
+        }
+        return {
+          ...message,
+          status: updatedTask.status,
+          error_message: updatedTask.error_message || message.error_message,
+          image_task: {
+            ...(message.image_task || {}),
+            ...updatedTask,
+          },
+        };
+      }),
+    );
+  };
+
+  const syncSelectedTaskFromCanvasMessages = (messages) => {
+    const taskMessages = (messages || []).filter((message) => message?.task_id);
+    const lastTaskMessage = taskMessages[taskMessages.length - 1];
+    if (!lastTaskMessage) {
+      return;
+    }
+    if (lastTaskMessage.task_type === 'image_generation' && lastTaskMessage.image_task) {
+      setSelectedTask(lastTaskMessage.image_task);
+    }
+    if (lastTaskMessage.task_type === 'video_generation' && lastTaskMessage.video_task) {
+      setVideoSelectedTask(lastTaskMessage.video_task);
+    }
   };
 
   const loadTaskUpdates = async () => {
@@ -1669,6 +2086,7 @@ const ImageGeneration = () => {
 
   // 更新任务列表中的单个任务
   const updateTaskInList = (updatedTask) => {
+    updateCanvasMessageTask(updatedTask, CANVAS_MODE_IMAGE);
     setTasks((prevTasks) => {
       const index = prevTasks.findIndex((t) => t.id === updatedTask.id);
       if (index !== -1) {
@@ -1696,6 +2114,7 @@ const ImageGeneration = () => {
   };
 
   const updateVideoTaskInList = (updatedTask) => {
+    updateCanvasMessageTask(updatedTask, CANVAS_MODE_VIDEO);
     setVideoTasks((prev) => {
       const index = prev.findIndex((task) => task.id === updatedTask.id);
       if (index === -1) {
@@ -2362,20 +2781,29 @@ const ImageGeneration = () => {
         params: JSON.stringify(params),
       };
 
+      const canvasSession = await ensureCanvasSession(CANVAS_MODE_IMAGE);
       const results = await Promise.allSettled(
         Array.from({ length: taskCount }, () =>
-          API.post('/api/image-generation/tasks', taskPayload),
+          API.post(
+            `/api/canvas/sessions/${canvasSession.id}/messages`,
+            taskPayload,
+          ),
         ),
       );
 
       const createdTasks = [];
+      const createdMessages = [];
       let firstError = '';
 
       results.forEach((result) => {
         if (result.status === 'fulfilled' && result.value.data.success) {
-          if (result.value.data.data) {
-            createdTasks.push(result.value.data.data);
-          }
+          const messages = result.value.data.data || [];
+          createdMessages.push(...messages);
+          messages.forEach((message) => {
+            if (message?.image_task) {
+              createdTasks.push(message.image_task);
+            }
+          });
           return;
         }
 
@@ -2389,6 +2817,8 @@ const ImageGeneration = () => {
       });
 
       if (createdTasks.length > 0) {
+        appendCanvasMessagesForSession(canvasSession.id, createdMessages);
+        loadCanvasSessions(CANVAS_MODE_IMAGE, { silent: true });
         showSuccess(
           createdTasks.length === 1
             ? t('任务已创建，正在生成中...')
@@ -2526,15 +2956,25 @@ const ImageGeneration = () => {
         request_endpoint: videoSelectedModelData.request_endpoint,
         params: JSON.stringify(params),
       };
-      const res = await API.post('/api/video-generation/tasks', taskPayload);
+      const canvasSession = await ensureCanvasSession(CANVAS_MODE_VIDEO);
+      const res = await API.post(
+        `/api/canvas/sessions/${canvasSession.id}/messages`,
+        taskPayload,
+      );
       if (!res.data.success) {
         showError(res.data.message || t('创建视频任务失败'));
         return;
       }
-      const newTask = res.data.data;
+      const createdMessages = res.data.data || [];
+      const newTask =
+        createdMessages.find((message) => message?.video_task)?.video_task ||
+        null;
       showSuccess(t('视频任务已创建，正在生成中...'));
+      appendCanvasMessagesForSession(canvasSession.id, createdMessages);
+      loadCanvasSessions(CANVAS_MODE_VIDEO, { silent: true });
       setVideoSelectedTask(newTask);
       if (
+        newTask &&
         videoTaskPage === 1 &&
         !videoTaskStatusFilter &&
         !videoTaskModelFilter &&
@@ -2544,7 +2984,9 @@ const ImageGeneration = () => {
       } else {
         loadVideoTasks();
       }
-      setVideoTaskTotal((prev) => prev + 1);
+      if (newTask) {
+        setVideoTaskTotal((prev) => prev + 1);
+      }
     } catch (error) {
       showError(
         error.response?.data?.message || error.message || t('创建视频任务失败'),
@@ -2588,78 +3030,58 @@ const ImageGeneration = () => {
     setMobileTaskbarVisible(false);
   };
 
-  const handleCreateChat = () => {
-    const now = Math.floor(Date.now() / 1000);
-    const nextId = `local-chat-${now}-${Math.random().toString(16).slice(2)}`;
-    const nextTask = {
-      id: nextId,
-      title: t('新对话'),
-      summary: t('从底部输入器发送第一条消息'),
-      status: t('草稿'),
-      updated_at: now,
-      messages: [],
-    };
-    setChatTasks((prev) => [nextTask, ...prev]);
-    setSelectedChatId(nextId);
+  const handleCreateChat = async () => {
     setGenerationMode(CANVAS_MODE_CHAT);
-    setMobileTaskbarVisible(false);
+    try {
+      await createCanvasSession(CANVAS_MODE_CHAT);
+    } catch (error) {
+      showError(error.message || t('创建会话失败'));
+    }
   };
 
-  const handleSendChatMessage = () => {
+  const handleSendChatMessage = async () => {
     const prompt = chatPrompt.trim();
     if (!prompt && chatAttachments.length === 0) {
       showError(t('请输入消息'));
       return;
     }
-    const now = Math.floor(Date.now() / 1000);
-    const attachments = chatAttachments.map((asset) => ({ ...asset }));
-    const userMessage = {
-      id: `msg-${now}-${Math.random().toString(16).slice(2)}`,
-      role: 'user',
-      content: prompt,
-      created_at: now,
-      attachments,
-    };
-    const assistantMessage = {
-      id: `msg-${now}-placeholder`,
-      role: 'assistant',
-      content: t('已收到。'),
-      created_at: now,
-      status: 'placeholder',
-    };
-    setChatTasks((prev) =>
-      prev.map((chat) => {
-        if (chat.id !== selectedChatId) {
-          return chat;
-        }
-        const nextMessages = [...(chat.messages || []), userMessage, assistantMessage];
-        return {
-          ...chat,
-          title:
-            chat.title === t('新对话') && prompt
-              ? summarizeText(prompt, t('新对话'))
-              : chat.title,
-          summary: prompt || t('已添加素材引用'),
-          status: t('本地草稿'),
-          updated_at: now,
-          messages: nextMessages,
-        };
-      }),
-    );
-    setChatPrompt('');
-    setChatAttachments([]);
+    try {
+      const canvasSession = await ensureCanvasSession(CANVAS_MODE_CHAT);
+      const res = await API.post(
+        `/api/canvas/sessions/${canvasSession.id}/messages`,
+        { prompt: prompt || t('已添加素材引用') },
+      );
+      if (!res.data.success) {
+        showError(res.data.message || t('发送失败'));
+        return;
+      }
+      appendCanvasMessagesForSession(canvasSession.id, res.data.data || []);
+      loadCanvasSessions(CANVAS_MODE_CHAT, { silent: true });
+      setChatPrompt('');
+      setChatAttachments([]);
+    } catch (error) {
+      showError(error.message || t('发送失败'));
+    }
   };
 
-  const handleNewImageTask = () => {
+  const handleNewImageTask = async () => {
     setGenerationMode(CANVAS_MODE_IMAGE);
     setSelectedTask(null);
-    setMobileTaskbarVisible(false);
+    try {
+      await createCanvasSession(CANVAS_MODE_IMAGE);
+    } catch (error) {
+      showError(error.message || t('创建会话失败'));
+    }
   };
 
-  const handleNewVideoTask = () => {
+  const handleNewVideoTask = async () => {
     setGenerationMode(CANVAS_MODE_VIDEO);
     setVideoSelectedTask(null);
-    setMobileTaskbarVisible(false);
+    try {
+      await createCanvasSession(CANVAS_MODE_VIDEO);
+    } catch (error) {
+      showError(error.message || t('创建会话失败'));
+    }
   };
 
   const downloadAsset = (asset) => {
@@ -2813,6 +3235,12 @@ const ImageGeneration = () => {
       flexDirection: 'column',
       borderRight: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-bg-0)',
+    },
+    leftPanelCollapsed: {
+      width: 48,
+      minWidth: 48,
+      alignItems: 'center',
+      paddingTop: 10,
     },
     leftContent: {
       flex: 1,
@@ -3254,6 +3682,26 @@ const ImageGeneration = () => {
       alignItems: 'center',
       transition: 'border-color 0.16s, background 0.16s',
     },
+    sessionListItem: {
+      minHeight: 42,
+      padding: '8px 8px 8px 10px',
+      gap: 6,
+    },
+    sessionListTitle: {
+      fontSize: 13,
+      fontWeight: 600,
+      lineHeight: 1.35,
+      color: 'var(--semi-color-text-0)',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    },
+    sessionMenuButton: {
+      width: 28,
+      height: 28,
+      minWidth: 28,
+      transition: 'opacity 0.16s',
+    },
     taskListItemActive: {
       borderColor: 'var(--semi-color-primary)',
       background: 'var(--semi-color-primary-light-default)',
@@ -3458,6 +3906,40 @@ const ImageGeneration = () => {
     chatMessageAssistant: {
       alignSelf: 'flex-start',
     },
+    messageResultBody: {
+      marginTop: 8,
+      minWidth: isMobile ? 0 : 260,
+      maxWidth: '100%',
+    },
+    messageResultImage: {
+      display: 'block',
+      width: '100%',
+      maxWidth: isMobile ? '100%' : 520,
+      maxHeight: isMobile ? 420 : 620,
+      objectFit: 'contain',
+      borderRadius: 8,
+      background: 'var(--semi-color-fill-0)',
+      cursor: 'pointer',
+    },
+    messageResultVideo: {
+      display: 'block',
+      width: '100%',
+      maxWidth: isMobile ? '100%' : 560,
+      maxHeight: isMobile ? 420 : 620,
+      borderRadius: 8,
+      background: '#000',
+    },
+    messagePending: {
+      minWidth: 180,
+      minHeight: 96,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      borderRadius: 8,
+      background: 'var(--semi-color-fill-0)',
+      color: 'var(--semi-color-text-2)',
+    },
     assetGrid: {
       display: 'grid',
       gridTemplateColumns: isMobile
@@ -3548,10 +4030,10 @@ const ImageGeneration = () => {
   const selectedChat = chatTasks.find((chat) => chat.id === selectedChatId);
   const currentTaskSidebarTitle =
     generationMode === CANVAS_MODE_CHAT
-      ? t('对话任务')
+      ? t('对话会话')
       : generationMode === CANVAS_MODE_VIDEO
-        ? t('视频任务')
-        : t('图片任务');
+        ? t('视频会话')
+        : t('图片会话');
 
   const renderReferenceThumb = (file, onRemove) => (
     <div key={file.uid || file.name || file.url} style={styles.referenceImageContainer}>
@@ -4021,6 +4503,120 @@ const ImageGeneration = () => {
     );
   };
 
+  const renderCanvasSessionMenu = (session) => (
+    <Dropdown.Menu style={styles.darkMenu}>
+      <Dropdown.Item
+        style={styles.darkMenuItem}
+        onClick={(event) => {
+          event?.domEvent?.stopPropagation?.();
+          renameCanvasSession(session);
+        }}
+      >
+        {t('重命名')}
+      </Dropdown.Item>
+      <Dropdown.Item
+        style={styles.darkMenuItem}
+        onClick={(event) => {
+          event?.domEvent?.stopPropagation?.();
+          toggleCanvasSessionPin(session);
+        }}
+      >
+        {session.pinned ? t('取消置顶') : t('置顶')}
+      </Dropdown.Item>
+      <Dropdown.Item
+        style={{ ...styles.darkMenuItem, color: '#fca5a5' }}
+        onClick={(event) => {
+          event?.domEvent?.stopPropagation?.();
+          if (window.confirm(t('确认删除该会话？'))) {
+            deleteCanvasSession(session);
+          }
+        }}
+      >
+        {t('删除')}
+      </Dropdown.Item>
+    </Dropdown.Menu>
+  );
+
+  const renderCanvasSessionList = () => (
+    <Spin spinning={currentCanvasSessionsLoading || deletingCanvasSession}>
+      <div style={styles.taskList}>
+        {currentCanvasSessionError ? (
+          renderSidebarEmpty(
+            t('会话加载失败'),
+            currentCanvasSessionError,
+            <Button
+              size='small'
+              icon={<IconRefresh />}
+              onClick={() => loadCanvasSessions(generationMode)}
+            >
+              {t('重试')}
+            </Button>,
+          )
+        ) : currentCanvasSessions.length === 0 ? (
+          renderSidebarEmpty(t('暂无会话'), t('点击顶部按钮创建新会话'))
+        ) : (
+          currentCanvasSessions.map((session) => {
+            const active = session.id === selectedCanvasSessionId;
+            const menuVisible =
+              hoveredCanvasSessionId === session.id || active || isMobile;
+            return (
+              <div
+                key={session.id}
+                role='button'
+                tabIndex={0}
+                style={{
+                  ...styles.taskListItem,
+                  ...styles.sessionListItem,
+                  ...(active ? styles.taskListItemActive : null),
+                }}
+                onMouseEnter={() => setHoveredCanvasSessionId(session.id)}
+                onMouseLeave={() => setHoveredCanvasSessionId(null)}
+                onClick={() => {
+                  setSelectedCanvasSessionIds((prev) => ({
+                    ...prev,
+                    [generationMode]: session.id,
+                  }));
+                  setMobileTaskbarVisible(false);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    setSelectedCanvasSessionIds((prev) => ({
+                      ...prev,
+                      [generationMode]: session.id,
+                    }));
+                  }
+                }}
+              >
+                <div style={styles.taskListText}>
+                  <div style={styles.sessionListTitle}>
+                    {summarizeText(session.title, t('新会话'))}
+                  </div>
+                </div>
+                <Dropdown
+                  trigger='click'
+                  position='bottomRight'
+                  render={renderCanvasSessionMenu(session)}
+                >
+                  <Button
+                    size='small'
+                    type='tertiary'
+                    aria-label={t('会话菜单')}
+                    icon={<IconMore />}
+                    style={{
+                      ...styles.sessionMenuButton,
+                      opacity: menuVisible ? 1 : 0,
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                </Dropdown>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </Spin>
+  );
+
   const renderTaskSidebar = () => {
     const createConfig =
       generationMode === CANVAS_MODE_CHAT
@@ -4040,23 +4636,41 @@ const ImageGeneration = () => {
               icon: <IconImage />,
               action: handleNewImageTask,
             };
-    const selectedCount =
-      generationMode === CANVAS_MODE_VIDEO
-        ? videoSelectedTaskIds.size
-        : selectedTaskIds.size;
+    if (canvasSidebarCollapsed && !isMobile) {
+      return (
+        <div
+          style={{ ...styles.leftPanel, ...styles.leftPanelCollapsed }}
+          data-canvas-task-sidebar={generationMode}
+        >
+          <Button
+            type='tertiary'
+            aria-label={t('展开任务栏')}
+            icon={<IconMenu />}
+            onClick={() => setCanvasSidebarCollapsed(false)}
+          />
+        </div>
+      );
+    }
 
     return (
       <div style={styles.leftPanel} data-canvas-task-sidebar={generationMode}>
         <div style={styles.taskbarHeader}>
           <div style={styles.taskbarTitleRow}>
-            <div>
+            <Button
+              size='small'
+              type='tertiary'
+              aria-label={t('折叠任务栏')}
+              icon={<IconMenu />}
+              onClick={() => setCanvasSidebarCollapsed(true)}
+            />
+            <div style={{ minWidth: 0, flex: 1 }}>
               <div style={styles.taskbarTitle}>{currentTaskSidebarTitle}</div>
               <div style={styles.taskbarMeta}>
                 {generationMode === CANVAS_MODE_CHAT
                   ? t('当前模式的对话列表')
                   : generationMode === CANVAS_MODE_VIDEO
-                    ? t('当前模式的视频生成记录')
-                    : t('当前模式的图片生成记录')}
+                    ? t('当前模式的视频会话')
+                    : t('当前模式的图片会话')}
               </div>
             </div>
             <Button
@@ -4084,43 +4698,14 @@ const ImageGeneration = () => {
           ) : null}
         </div>
 
-        {generationMode === CANVAS_MODE_CHAT
-          ? renderChatTaskList()
-          : generationMode === CANVAS_MODE_VIDEO
-            ? renderVideoTaskList()
-            : renderImageTaskList()}
+        {renderCanvasSessionList()}
 
         <div style={styles.sidebarFooter}>
-          {generationMode !== CANVAS_MODE_CHAT && selectedCount > 0 ? (
-            <Button
-              size='small'
-              type='danger'
-              theme='outline'
-              icon={<IconDelete />}
-              loading={
-                generationMode === CANVAS_MODE_VIDEO
-                  ? deletingVideoTasks
-                  : deletingTasks
-              }
-              onClick={
-                generationMode === CANVAS_MODE_VIDEO
-                  ? handleVideoBatchDelete
-                  : handleBatchDelete
-              }
-            >
-              {t('删除 {{count}} 项', { count: selectedCount })}
-            </Button>
-          ) : null}
-          <div
-            style={{
-              marginLeft: 'auto',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            {renderTaskPager()}
-          </div>
+          <Text type='tertiary' size='small'>
+            {t('共 {{count}} 个会话', {
+              count: currentCanvasSessions.length,
+            })}
+          </Text>
         </div>
       </div>
     );
@@ -4419,61 +5004,163 @@ const ImageGeneration = () => {
   };
 
   const renderChatWorkspace = () => {
-    const messages = selectedChat?.messages || [];
     return (
       <div style={styles.chatStream}>
-        {messages.length === 0 ? (
-          <div style={styles.detailPanel}>
-            {renderSidebarEmpty(t('对话工作区'), t('底部输入消息，可附加资产库图片作为上下文'))}
+        {renderCanvasMessageStream()}
+      </div>
+    );
+  };
+
+  const getCanvasResultStatusText = (message) => {
+    if (message.task_type === 'video_generation') {
+      switch (message.status) {
+        case 'queued':
+          return t('排队中');
+        case 'in_progress':
+          return t('生成中');
+        case 'completed':
+          return t('视频');
+        case 'failed':
+          return t('失败');
+        default:
+          return message.status || t('未知');
+      }
+    }
+    switch (message.status) {
+      case 'pending':
+        return t('排队中');
+      case 'generating':
+        return t('生成中');
+      case 'success':
+        return t('图片');
+      case 'failed':
+        return t('失败');
+      case 'placeholder':
+        return t('暂未接入');
+      default:
+        return message.status || t('未知');
+    }
+  };
+
+  const renderCanvasResultContent = (message) => {
+    if (message.task_type === 'image_generation') {
+      const task = message.image_task || {};
+      if (task.status === 'success' && task.image_url) {
+        return (
+          <img
+            src={task.image_url}
+            alt=''
+            style={styles.messageResultImage}
+            onClick={() => setSelectedTask(task)}
+          />
+        );
+      }
+      if (task.status === 'failed') {
+        return <Text type='danger'>{task.error_message || message.error_message || t('生成失败')}</Text>;
+      }
+      return (
+        <div style={styles.messagePending}>
+          {task.status === 'generating' ? <Spin size='small' /> : <IconClock />}
+          <span>{task.status === 'generating' ? t('生成中') : t('排队中')}</span>
+        </div>
+      );
+    }
+    if (message.task_type === 'video_generation') {
+      const task = message.video_task || {};
+      const videoUrl = task.video_url || task.result_url;
+      if (task.status === 'completed' && videoUrl) {
+        return (
+          <video
+            src={videoUrl}
+            poster={task.thumbnail_url}
+            controls
+            style={styles.messageResultVideo}
+            onClick={() => setVideoSelectedTask(task)}
+          />
+        );
+      }
+      if (task.status === 'failed') {
+        return <Text type='danger'>{task.fail_reason || message.error_message || t('生成失败')}</Text>;
+      }
+      return (
+        <div style={styles.messagePending}>
+          {task.status === 'in_progress' ? <Spin size='small' /> : <IconPlayCircle />}
+          <span>{task.status === 'in_progress' ? t('生成中') : t('排队中')}</span>
+        </div>
+      );
+    }
+    return <Text type='tertiary'>{message.prompt || t('暂未接入聊天模型')}</Text>;
+  };
+
+  const renderCanvasMessage = (message) => {
+    const isUser = message.role === 'user';
+    return (
+      <div
+        key={message.id}
+        style={{
+          ...styles.chatMessage,
+          ...(isUser ? styles.chatMessageUser : styles.chatMessageAssistant),
+        }}
+      >
+        <Text type='tertiary' size='small'>
+          {isUser ? t('你') : getCanvasResultStatusText(message)}
+        </Text>
+        {isUser ? (
+          <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+            {message.prompt || t('已添加素材引用')}
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              style={{
-                ...styles.chatMessage,
-                ...(message.role === 'user'
-                  ? styles.chatMessageUser
-                  : styles.chatMessageAssistant),
-              }}
-            >
-              <Text type='tertiary' size='small'>
-                {message.role === 'user' ? t('你') : t('助手')}
-              </Text>
-              <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
-                {message.content || t('已添加素材引用')}
-              </div>
-              {message.attachments?.length ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-                  {message.attachments.map((asset) => (
-                    <img
-                      key={asset.uid || asset.url}
-                      src={asset.url}
-                      alt=''
-                      style={styles.referenceImageThumb}
-                    />
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ))
+          <div style={styles.messageResultBody}>
+            {renderCanvasResultContent(message)}
+          </div>
         )}
       </div>
     );
   };
 
+  const renderCanvasMessageStream = () => {
+    if (!selectedCanvasSession) {
+      return (
+        <div style={styles.detailPanel}>
+          {renderSidebarEmpty(t('选择或创建会话'), t('左侧选择会话，或点击新建会话后在底部输入'))}
+        </div>
+      );
+    }
+    if (canvasMessagesLoading) {
+      return (
+        <div style={styles.detailPanel}>
+          <div style={{ padding: 24, display: 'flex', justifyContent: 'center' }}>
+            <Spin />
+          </div>
+        </div>
+      );
+    }
+    if (canvasMessagesError) {
+      return (
+        <div style={styles.detailPanel}>
+          {renderSidebarEmpty(
+            t('消息加载失败'),
+            canvasMessagesError,
+            <Button size='small' onClick={() => loadCanvasMessages(selectedCanvasSession.id)}>
+              {t('重试')}
+            </Button>,
+          )}
+        </div>
+      );
+    }
+    if (displayedCanvasMessages.length === 0) {
+      return (
+        <div style={styles.detailPanel}>
+          {renderSidebarEmpty(t('空会话'), t('从底部输入提示词开始连续生成'))}
+        </div>
+      );
+    }
+    return displayedCanvasMessages.map(renderCanvasMessage);
+  };
+
   const renderMainContent = () => (
     <div style={styles.mainViewport}>
-      {generationMode === CANVAS_MODE_CHAT ? (
-        renderChatWorkspace()
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {generationMode === CANVAS_MODE_VIDEO
-            ? renderVideoDetail()
-            : renderImageDetail()}
-          {renderRecentTaskGrid()}
-        </div>
-      )}
+      <div style={styles.chatStream}>{renderCanvasMessageStream()}</div>
     </div>
   );
 

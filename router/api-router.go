@@ -89,18 +89,29 @@ func SetApiRouter(router *gin.Engine) {
 			imageGenRoute.GET("/tasks/:id", controller.GetImageGenerationTaskDetail)
 			imageGenRoute.POST("/tasks/:id/retry", controller.RetryImageGenerationTask)
 			imageGenRoute.DELETE("/tasks/:id", controller.DeleteImageGenerationTask)
-			}
+		}
 
-			videoGenRoute := apiRouter.Group("/video-generation")
-			videoGenRoute.Use(middleware.UserAuth())
-			{
-				videoGenRoute.GET("/models", controller.GetVideoGenerationModels)
-				videoGenRoute.POST("/tasks", controller.CreateVideoGenerationTask)
-				videoGenRoute.GET("/tasks", controller.GetVideoGenerationTasks)
-				videoGenRoute.GET("/tasks/:id", controller.GetVideoGenerationTaskDetail)
-				videoGenRoute.POST("/tasks/:id/retry", controller.RetryVideoGenerationTask)
-				videoGenRoute.DELETE("/tasks/:id", controller.DeleteVideoGenerationTask)
-			}
+		videoGenRoute := apiRouter.Group("/video-generation")
+		videoGenRoute.Use(middleware.UserAuth())
+		{
+			videoGenRoute.GET("/models", controller.GetVideoGenerationModels)
+			videoGenRoute.POST("/tasks", controller.CreateVideoGenerationTask)
+			videoGenRoute.GET("/tasks", controller.GetVideoGenerationTasks)
+			videoGenRoute.GET("/tasks/:id", controller.GetVideoGenerationTaskDetail)
+			videoGenRoute.POST("/tasks/:id/retry", controller.RetryVideoGenerationTask)
+			videoGenRoute.DELETE("/tasks/:id", controller.DeleteVideoGenerationTask)
+		}
+
+		canvasRoute := apiRouter.Group("/canvas")
+		canvasRoute.Use(middleware.UserAuth())
+		{
+			canvasRoute.GET("/sessions", controller.ListCanvasSessions)
+			canvasRoute.POST("/sessions", controller.CreateCanvasSession)
+			canvasRoute.PATCH("/sessions/:id", controller.UpdateCanvasSession)
+			canvasRoute.DELETE("/sessions/:id", controller.DeleteCanvasSession)
+			canvasRoute.GET("/sessions/:id/messages", controller.ListCanvasMessages)
+			canvasRoute.POST("/sessions/:id/messages", controller.CreateCanvasMessage)
+		}
 
 		userRoute := apiRouter.Group("/user")
 		{

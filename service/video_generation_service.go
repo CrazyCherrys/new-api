@@ -591,17 +591,31 @@ func buildRetryVideoTaskPayload(task *model.Task) (VideoGenerationParams, string
 }
 
 func deleteVideoTaskStoredAssets(task *model.Task) {
-	if task == nil || strings.TrimSpace(task.Properties.RequestParams) == "" {
-		return
-	}
-	var req relaycommon.TaskSubmitReq
-	if err := common.UnmarshalJsonStr(task.Properties.RequestParams, &req); err != nil {
+	if task == nil {
 		return
 	}
 	cfg := worker_setting.GetWorkerSetting()
-	imageURL := strings.TrimSpace(req.Image)
-	if imageURL != "" {
-		if err := deleteImageFile(imageURL, cfg); err != nil {
+	if strings.TrimSpace(task.Properties.RequestParams) != "" {
+		var req relaycommon.TaskSubmitReq
+		if err := common.UnmarshalJsonStr(task.Properties.RequestParams, &req); err == nil {
+			imageURL := strings.TrimSpace(req.Image)
+			if imageURL == "" {
+				imageURL = strings.TrimSpace(req.InputReference)
+			}
+			if imageURL != "" {
+				if err := deleteImageFile(imageURL, cfg); err != nil {
+					common.SysLog(fmt.Sprintf("Failed to delete video task %d reference image: %v", task.ID, err))
+				}
+			}
+		}
+	}
+	if resultURL := strings.TrimSpace(task.GetResultURL()); resultURL != "" && isImageGenerationStoredAssetURL(resultURL) {
+		if err := deleteImageFile(resultURL, cfg); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to delete video task %d result asset: %v", task.ID, err))
+		}
+	}
+	if thumbnailURL := strings.TrimSpace(model.ExtractTaskThumbnailURL(task)); thumbnailURL != "" && thumbnailURL != strings.TrimSpace(task.GetResultURL()) && isImageGenerationStoredAssetURL(thumbnailURL) {
+		if err := deleteImageFile(thumbnailURL, cfg); err != nil {
 			common.SysLog(fmt.Sprintf("Failed to delete video task %d reference image: %v", task.ID, err))
 		}
 	}
