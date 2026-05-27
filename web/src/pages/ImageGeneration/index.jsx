@@ -30,21 +30,37 @@ import {
   Input,
   TextArea,
   SideSheet,
+  Empty,
+  Checkbox,
+  Tag,
+  Progress,
+  Popconfirm,
 } from '@douyinfe/semi-ui';
 import {
   IconDelete,
   IconImage,
-  IconChevronUp,
   IconChevronDown,
-  IconSearch,
   IconSend,
   IconMenu,
   IconVideo,
   IconSetting,
   IconUpload,
+  IconPlus,
+  IconCommentStroked,
+  IconArchive,
+  IconRefresh,
+  IconDownload,
+  IconClock,
+  IconAlertTriangle,
+  IconPlayCircle,
+  IconExternalOpen,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
+import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
+import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
+import VideoGenerationTaskCard from '../../components/VideoGenerationTaskCard';
+import VideoGenerationTaskModal from '../../components/VideoGenerationTaskModal';
 import {
   getCanvasImageUiState,
   getCanvasImageSelectorVisibility,
@@ -71,7 +87,11 @@ const TASK_PAGE_SIZE_OPTIONS = [10, 21, 50, 100];
 const TASK_LIST_REQUEST_TIMEOUT_MS = 20000;
 const CANVAS_PREFILL_STORAGE_KEY = 'imageGen_canvasPrefill_v1';
 const DEFAULT_VIDEO_PAGE_SIZE = 20;
-const MODEL_CATALOG_ALL_SERIES = 'all';
+const CANVAS_MODE_CHAT = 'chat';
+const CANVAS_MODE_IMAGE = 'image';
+const CANVAS_MODE_VIDEO = 'video';
+const CANVAS_MODES = [CANVAS_MODE_CHAT, CANVAS_MODE_IMAGE, CANVAS_MODE_VIDEO];
+const DEFAULT_ASSET_PAGE_SIZE = 24;
 
 const normalizeImageCapabilities = (raw) => {
   if (Array.isArray(raw)) {
@@ -182,6 +202,10 @@ const ImageGeneration = () => {
   const STORAGE_KEYS = {
     GROUP: 'imageGen_selectedGroup',
     MODE: 'canvas_generation_mode',
+    CHAT_MODEL: 'canvas_chat_model',
+    CHAT_TEMPERATURE: 'canvas_chat_temperature',
+    CHAT_CONTEXT: 'canvas_chat_context',
+    CHAT_TOOLS: 'canvas_chat_tools',
     SERIES: 'imageGen_selectedSeries',
     MODEL: 'imageGen_selectedModel',
     ASPECT_RATIO: 'imageGen_aspectRatio',
@@ -223,23 +247,50 @@ const ImageGeneration = () => {
   const [selectedGroup, setSelectedGroup] = useState(() =>
     getStoredValue(STORAGE_KEYS.GROUP, ''),
   );
-  const [generationMode, setGenerationMode] = useState(() =>
-    getStoredValue(STORAGE_KEYS.MODE, 'image'),
-  );
-  const [modelSeries, setModelSeries] = useState([]);
+  const [generationMode, setGenerationMode] = useState(() => {
+    const storedMode = getStoredValue(STORAGE_KEYS.MODE, CANVAS_MODE_IMAGE);
+    return CANVAS_MODES.includes(storedMode) ? storedMode : CANVAS_MODE_IMAGE;
+  });
   const [models, setModels] = useState([]);
   const [filteredModels, setFilteredModels] = useState([]);
-  const [videoModelSeries, setVideoModelSeries] = useState([]);
   const [videoModels, setVideoModels] = useState([]);
   const [videoFilteredModels, setVideoFilteredModels] = useState([]);
-  const [modelSearchKeyword, setModelSearchKeyword] = useState('');
-  const [catalogSeriesFilter, setCatalogSeriesFilter] = useState(
-    MODEL_CATALOG_ALL_SERIES,
-  );
-  const [imageModelsCollapsed, setImageModelsCollapsed] = useState(false);
-  const [videoModelsCollapsed, setVideoModelsCollapsed] = useState(false);
-  const [mobileCatalogVisible, setMobileCatalogVisible] = useState(false);
+  const [mobileTaskbarVisible, setMobileTaskbarVisible] = useState(false);
   const [composerAdvancedVisible, setComposerAdvancedVisible] = useState(false);
+  const [assetLibraryVisible, setAssetLibraryVisible] = useState(false);
+  const [canvasAssets, setCanvasAssets] = useState([]);
+  const [canvasAssetsLoading, setCanvasAssetsLoading] = useState(false);
+  const [canvasAssetsError, setCanvasAssetsError] = useState('');
+  const [canvasAssetsTotal, setCanvasAssetsTotal] = useState(0);
+  const [canvasAssetPage, setCanvasAssetPage] = useState(1);
+  const [selectedAssetPreview, setSelectedAssetPreview] = useState(null);
+
+  const [chatModels, setChatModels] = useState([]);
+  const [chatModel, setChatModel] = useState(() =>
+    getStoredValue(STORAGE_KEYS.CHAT_MODEL, ''),
+  );
+  const [chatPrompt, setChatPrompt] = useState('');
+  const [chatTemperature, setChatTemperature] = useState(() =>
+    getStoredValue(STORAGE_KEYS.CHAT_TEMPERATURE, '0.7'),
+  );
+  const [chatContext, setChatContext] = useState(() =>
+    getStoredValue(STORAGE_KEYS.CHAT_CONTEXT, '8'),
+  );
+  const [chatToolsEnabled, setChatToolsEnabled] = useState(() =>
+    getStoredValue(STORAGE_KEYS.CHAT_TOOLS, 'false') === 'true',
+  );
+  const [chatAttachments, setChatAttachments] = useState([]);
+  const [selectedChatId, setSelectedChatId] = useState('local-chat-default');
+  const [chatTasks, setChatTasks] = useState(() => [
+    {
+      id: 'local-chat-default',
+      title: t('新对话'),
+      summary: t('从底部输入器发送第一条消息'),
+      status: t('草稿'),
+      updated_at: Math.floor(Date.now() / 1000),
+      messages: [],
+    },
+  ]);
 
   const [selectedSeries, setSelectedSeries] = useState(() =>
     getStoredValue(STORAGE_KEYS.SERIES, ''),
@@ -290,8 +341,6 @@ const ImageGeneration = () => {
   const [videoDuration, setVideoDuration] = useState(() =>
     getStoredNumber(STORAGE_KEYS.VIDEO_DURATION, 0),
   );
-  const [customCanvasWidth, setCustomCanvasWidth] = useState('');
-  const [customCanvasHeight, setCustomCanvasHeight] = useState('');
 
   const {
     showImageAspectRatioSelector,
@@ -319,6 +368,7 @@ const ImageGeneration = () => {
   const [selectedTask, setSelectedTask] = useState(null);
   const [taskModalVisible, setTaskModalVisible] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
+  const [taskListError, setTaskListError] = useState('');
   const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
   const [deletingTasks, setDeletingTasks] = useState(false);
   const [videoTasks, setVideoTasks] = useState([]);
@@ -331,6 +381,7 @@ const ImageGeneration = () => {
   const [videoTaskModelFilter, setVideoTaskModelFilter] = useState('');
   const [videoTaskTimeFilter, setVideoTaskTimeFilter] = useState('');
   const [videoLoadingTasks, setVideoLoadingTasks] = useState(false);
+  const [videoTaskListError, setVideoTaskListError] = useState('');
   const [videoSelectedTask, setVideoSelectedTask] = useState(null);
   const [videoTaskModalVisible, setVideoTaskModalVisible] = useState(false);
   const [videoSelectedTaskIds, setVideoSelectedTaskIds] = useState(new Set());
@@ -434,6 +485,7 @@ const ImageGeneration = () => {
   useEffect(() => {
     loadImageGenerationGroups();
     loadVideoModels();
+    loadChatModels();
     loadWorkerSettings();
     connectSSE();
 
@@ -510,7 +562,8 @@ const ImageGeneration = () => {
           const res = await API.get(`/api/video-generation/tasks/${taskId}`);
           if (res.data.success) {
             setVideoSelectedTask(res.data.data);
-            setVideoTaskModalVisible(true);
+            setGenerationMode(CANVAS_MODE_VIDEO);
+            setVideoTaskModalVisible(false);
           } else {
             showError(res.data.message || t('加载任务详情失败'));
           }
@@ -519,7 +572,8 @@ const ImageGeneration = () => {
         const res = await API.get(`/api/image-generation/tasks/${taskId}`);
         if (res.data.success) {
           setSelectedTask(res.data.data);
-          setTaskModalVisible(true);
+          setGenerationMode(CANVAS_MODE_IMAGE);
+          setTaskModalVisible(false);
         } else {
           showError(res.data.message || t('加载任务详情失败'));
         }
@@ -532,11 +586,13 @@ const ImageGeneration = () => {
   }, [location.search, t]);
 
   useEffect(() => {
-    if (generationMode === 'video') {
+    if (generationMode === CANVAS_MODE_VIDEO) {
       loadVideoTasks();
       return;
     }
-    loadTasks();
+    if (generationMode === CANVAS_MODE_IMAGE) {
+      loadTasks();
+    }
   }, [
     generationMode,
     taskPage,
@@ -626,14 +682,9 @@ const ImageGeneration = () => {
         loadedModelsGroupRef.current = group || '';
         setModels(drawingModels);
 
-        const seriesSet = new Set();
-        drawingModels.forEach((model) => {
-          if (model.model_series) {
-            seriesSet.add(model.model_series);
-          }
-        });
-        const seriesList = Array.from(seriesSet);
-        setModelSeries(seriesList);
+        const seriesList = Array.from(
+          new Set(drawingModels.map((model) => model.model_series).filter(Boolean)),
+        );
         setSelectedSeries((prev) => {
           if (prev === 'all' || (prev && seriesList.includes(prev))) {
             return prev;
@@ -681,7 +732,6 @@ const ImageGeneration = () => {
       const series = Array.from(
         new Set(items.map((item) => item.model_series).filter(Boolean)),
       );
-      setVideoModelSeries(series);
       setVideoSelectedSeries((prev) => {
         if (prev === 'all' || (prev && series.includes(prev))) {
           return prev;
@@ -692,6 +742,64 @@ const ImageGeneration = () => {
       showError(error.message || t('加载视频模型失败'));
     }
   };
+
+  const loadChatModels = async () => {
+    try {
+      const res = await API.get('/api/user/models');
+      if (!res.data.success) {
+        showError(res.data.message || t('加载聊天模型失败'));
+        return;
+      }
+      const items = Array.isArray(res.data.data) ? res.data.data : [];
+      setChatModels(items);
+      setChatModel((current) => {
+        if (current && items.includes(current)) {
+          return current;
+        }
+        return items[0] || '';
+      });
+    } catch (error) {
+      showError(error.message || t('加载聊天模型失败'));
+    }
+  };
+
+  const loadCanvasAssets = async (nextPage = 1) => {
+    setCanvasAssetsLoading(true);
+    setCanvasAssetsError('');
+    try {
+      const res = await API.get('/api/image-generation/assets', {
+        params: {
+          p: nextPage,
+          page_size: DEFAULT_ASSET_PAGE_SIZE,
+          sort_by: 'created_time',
+          sort_order: 'desc',
+        },
+      });
+      if (!res.data.success) {
+        const message = res.data.message || t('加载资产失败');
+        setCanvasAssetsError(message);
+        showError(message);
+        return;
+      }
+      const data = res.data.data || {};
+      setCanvasAssets(data.items || []);
+      setCanvasAssetsTotal(data.total || 0);
+      setCanvasAssetPage(data.page || nextPage);
+    } catch (error) {
+      const message = error.message || t('加载资产失败');
+      setCanvasAssetsError(message);
+      showError(message);
+    } finally {
+      setCanvasAssetsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!assetLibraryVisible) {
+      return;
+    }
+    loadCanvasAssets(canvasAssetPage || 1);
+  }, [assetLibraryVisible]);
 
   useEffect(() => {
     if (!videoSelectedModelData) {
@@ -753,90 +861,26 @@ const ImageGeneration = () => {
   const getModelDisplayName = (model) =>
     model?.display_name || model?.request_model || '';
 
-  const modelMatchesCatalogFilters = (model) => {
-    if (!model) {
-      return false;
-    }
-    if (
-      catalogSeriesFilter !== MODEL_CATALOG_ALL_SERIES &&
-      model.model_series !== catalogSeriesFilter
-    ) {
-      return false;
-    }
-    const keyword = modelSearchKeyword.trim().toLowerCase();
-    if (!keyword) {
-      return true;
-    }
-    return [
-      model.display_name,
-      model.request_model,
-      model.model_series,
-      model.request_endpoint,
-    ]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(keyword));
-  };
-
-  const imageCatalogModels = useMemo(
-    () =>
-      models
-        .filter(
-          (model) =>
-            model.status === undefined ||
-            model.status === null ||
-            model.status === 1,
-        )
-        .filter(modelMatchesCatalogFilters),
-    [models, catalogSeriesFilter, modelSearchKeyword],
-  );
-
-  const videoCatalogModels = useMemo(
-    () =>
-      videoModels
-        .filter(
-          (model) =>
-            model.status === undefined ||
-            model.status === null ||
-            model.status === 1,
-        )
-        .filter(modelMatchesCatalogFilters),
-    [videoModels, catalogSeriesFilter, modelSearchKeyword],
-  );
-
-  const catalogSeriesOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          [...modelSeries, ...videoModelSeries].filter(
-            (series) => typeof series === 'string' && series.trim() !== '',
-          ),
-        ),
-      ),
-    [modelSeries, videoModelSeries],
-  );
-
   const selectImageModelFromCatalog = (model) => {
     if (!model?.request_model) {
       return;
     }
-    setGenerationMode('image');
+    setGenerationMode(CANVAS_MODE_IMAGE);
     if (model.model_series) {
       setSelectedSeries(model.model_series);
     }
     setSelectedModel(model.request_model);
-    setMobileCatalogVisible(false);
   };
 
   const selectVideoModelFromCatalog = (model) => {
     if (!model?.request_model) {
       return;
     }
-    setGenerationMode('video');
+    setGenerationMode(CANVAS_MODE_VIDEO);
     if (model.model_series) {
       setVideoSelectedSeries(model.model_series);
     }
     setVideoSelectedModel(model.request_model);
-    setMobileCatalogVisible(false);
   };
 
   const loadWorkerSettings = async () => {
@@ -953,6 +997,7 @@ const ImageGeneration = () => {
         const newItems = res.data.data.items || [];
         const hasTotal = Number.isFinite(res.data.data.total);
         const newTotal = hasTotal ? res.data.data.total : taskTotal;
+        setTaskListError('');
         // 智能合并：仅当内容实际变化时才更新，避免全量替换导致卡片无效重渲染
         setTasks((prev) => {
           if (prev.length === newItems.length) {
@@ -982,12 +1027,25 @@ const ImageGeneration = () => {
           setTaskNextCursor('');
         }
         setTaskHasMore(res.data.data.has_more === true);
+        setSelectedTask((prev) => {
+          if (prev && newItems.some((task) => task.id === prev.id)) {
+            return {
+              ...prev,
+              ...newItems.find((task) => task.id === prev.id),
+            };
+          }
+          return prev || newItems[0] || null;
+        });
       } else if (!silent) {
-        showError(res.data.message || t('加载任务列表失败'));
+        const message = res.data.message || t('加载任务列表失败');
+        setTaskListError(message);
+        showError(message);
       }
     } catch (error) {
       if (requestSeq === taskListRequestSeqRef.current && !silent) {
-        showError(error.message || t('加载任务列表失败'));
+        const message = error.message || t('加载任务列表失败');
+        setTaskListError(message);
+        showError(message);
       }
     } finally {
       if (!silent && requestSeq === taskListRequestSeqRef.current) {
@@ -1016,13 +1074,28 @@ const ImageGeneration = () => {
       }
       const res = await API.get('/api/video-generation/tasks', { params });
       if (res.data.success) {
-        setVideoTasks(res.data.data.items || []);
+        const newItems = res.data.data.items || [];
+        setVideoTaskListError('');
+        setVideoTasks(newItems);
         setVideoTaskTotal(res.data.data.total || 0);
+        setVideoSelectedTask((prev) => {
+          if (prev && newItems.some((task) => task.id === prev.id)) {
+            return {
+              ...prev,
+              ...newItems.find((task) => task.id === prev.id),
+            };
+          }
+          return prev || newItems[0] || null;
+        });
       } else {
-        showError(res.data.message || t('加载视频任务列表失败'));
+        const message = res.data.message || t('加载视频任务列表失败');
+        setVideoTaskListError(message);
+        showError(message);
       }
     } catch (error) {
-      showError(error.message || t('加载视频任务列表失败'));
+      const message = error.message || t('加载视频任务列表失败');
+      setVideoTaskListError(message);
+      showError(message);
     } finally {
       setVideoLoadingTasks(false);
     }
@@ -1084,7 +1157,7 @@ const ImageGeneration = () => {
     const requestSeq = taskDetailRequestSeqRef.current;
 
     setSelectedTask(task);
-    setTaskModalVisible(true);
+    setTaskModalVisible(false);
 
     try {
       const res = await API.get(`/api/image-generation/tasks/${task.id}`);
@@ -1093,6 +1166,7 @@ const ImageGeneration = () => {
       }
       if (res.data.success) {
         updateTaskInList(res.data.data);
+        setSelectedTask(res.data.data);
       } else {
         showError(res.data.message || t('加载任务详情失败'));
       }
@@ -1107,11 +1181,12 @@ const ImageGeneration = () => {
   const handleVideoTaskCardClick = async (task) => {
     if (!task?.id) return;
     setVideoSelectedTask(task);
-    setVideoTaskModalVisible(true);
+    setVideoTaskModalVisible(false);
     try {
       const res = await API.get(`/api/video-generation/tasks/${task.id}`);
       if (res.data.success) {
         updateVideoTaskInList(res.data.data);
+        setVideoSelectedTask(res.data.data);
       } else {
         showError(res.data.message || t('加载视频任务详情失败'));
       }
@@ -1323,8 +1398,11 @@ const ImageGeneration = () => {
     if (pollingTimerRef.current) return;
 
     pollingTimerRef.current = setInterval(() => {
-      if (generationMode === 'video') {
+      if (generationMode === CANVAS_MODE_VIDEO) {
         loadVideoTasks();
+        return;
+      }
+      if (generationMode !== CANVAS_MODE_IMAGE) {
         return;
       }
       if (isDefaultTaskViewState(taskListStateRef.current)) {
@@ -1335,7 +1413,7 @@ const ImageGeneration = () => {
     }, pollingIntervalRef.current * 1000);
   };
 
-  // ���止轮询
+  // 停止轮询
   const stopPolling = () => {
     if (pollingTimerRef.current) {
       clearInterval(pollingTimerRef.current);
@@ -1345,9 +1423,12 @@ const ImageGeneration = () => {
 
   useEffect(() => {
     const shouldPoll =
-      !sseConnected &&
       isPageVisible &&
-      (generationMode === 'video' ? hasActiveVideoTasks : hasActiveTasks);
+      (generationMode === CANVAS_MODE_VIDEO
+        ? hasActiveVideoTasks
+        : generationMode === CANVAS_MODE_IMAGE
+          ? !sseConnected && hasActiveTasks
+          : false);
     if (!shouldPoll) {
       stopPolling();
       return undefined;
@@ -1656,6 +1737,43 @@ const ImageGeneration = () => {
       }
     }
   }, [videoSelectedModel]);
+
+  useEffect(() => {
+    if (chatModel) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.CHAT_MODEL, chatModel);
+      } catch (e) {
+        console.error('Failed to save chatModel:', e);
+      }
+    }
+  }, [chatModel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.CHAT_TEMPERATURE, chatTemperature);
+    } catch (e) {
+      console.error('Failed to save chatTemperature:', e);
+    }
+  }, [chatTemperature]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.CHAT_CONTEXT, chatContext);
+    } catch (e) {
+      console.error('Failed to save chatContext:', e);
+    }
+  }, [chatContext]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.CHAT_TOOLS,
+        chatToolsEnabled ? 'true' : 'false',
+      );
+    } catch (e) {
+      console.error('Failed to save chatToolsEnabled:', e);
+    }
+  }, [chatToolsEnabled]);
 
   useEffect(() => {
     if (aspectRatio) {
@@ -2080,6 +2198,7 @@ const ImageGeneration = () => {
           }
         }
         setTaskTotal((prev) => prev + createdTasks.length);
+        setSelectedTask(createdTasks[0]);
         loadTasks(false, {
           disableDuplicate: true,
           forceRefresh: true,
@@ -2168,6 +2287,8 @@ const ImageGeneration = () => {
           reader.onerror = reject;
           reader.readAsDataURL(videoReferenceImage.fileInstance);
         });
+      } else if (videoReferenceImage?.url) {
+        base64Image = videoReferenceImage.url;
       }
       const params = {
         duration: videoDuration,
@@ -2190,6 +2311,7 @@ const ImageGeneration = () => {
       }
       const newTask = res.data.data;
       showSuccess(t('视频任务已创建，正在生成中...'));
+      setVideoSelectedTask(newTask);
       if (
         videoTaskPage === 1 &&
         !videoTaskStatusFilter &&
@@ -2208,6 +2330,241 @@ const ImageGeneration = () => {
     } finally {
       setVideoGenerating(false);
     }
+  };
+
+  const formatTimestamp = (timestamp) => {
+    if (!timestamp) {
+      return '-';
+    }
+    const date = new Date(timestamp * 1000);
+    const pad = (value) => String(value).padStart(2, '0');
+    return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(
+      date.getDate(),
+    )} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+
+  const summarizeText = (value, fallback = t('暂无提示词')) => {
+    const text = String(value || '').trim();
+    if (!text) {
+      return fallback;
+    }
+    return text.length > 54 ? `${text.slice(0, 54)}...` : text;
+  };
+
+  const getTaskTitle = (task, fallback) =>
+    summarizeText(task?.prompt || task?.title, fallback);
+
+  const getAssetKey = (asset) => asset?.task_id || asset?.id;
+
+  const getAssetImageUrl = (asset) => asset?.image_url || asset?.thumbnail_url;
+
+  const handleModeChange = (mode) => {
+    if (!CANVAS_MODES.includes(mode)) {
+      return;
+    }
+    setGenerationMode(mode);
+    setMobileTaskbarVisible(false);
+  };
+
+  const handleCreateChat = () => {
+    const now = Math.floor(Date.now() / 1000);
+    const nextId = `local-chat-${now}-${Math.random().toString(16).slice(2)}`;
+    const nextTask = {
+      id: nextId,
+      title: t('新对话'),
+      summary: t('从底部输入器发送第一条消息'),
+      status: t('草稿'),
+      updated_at: now,
+      messages: [],
+    };
+    setChatTasks((prev) => [nextTask, ...prev]);
+    setSelectedChatId(nextId);
+    setGenerationMode(CANVAS_MODE_CHAT);
+    setMobileTaskbarVisible(false);
+  };
+
+  const handleSendChatMessage = () => {
+    const prompt = chatPrompt.trim();
+    if (!prompt && chatAttachments.length === 0) {
+      showError(t('请输入消息'));
+      return;
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const attachments = chatAttachments.map((asset) => ({ ...asset }));
+    const userMessage = {
+      id: `msg-${now}-${Math.random().toString(16).slice(2)}`,
+      role: 'user',
+      content: prompt,
+      created_at: now,
+      attachments,
+    };
+    const assistantMessage = {
+      id: `msg-${now}-placeholder`,
+      role: 'assistant',
+      content: t('已收到。'),
+      created_at: now,
+      status: 'placeholder',
+    };
+    setChatTasks((prev) =>
+      prev.map((chat) => {
+        if (chat.id !== selectedChatId) {
+          return chat;
+        }
+        const nextMessages = [...(chat.messages || []), userMessage, assistantMessage];
+        return {
+          ...chat,
+          title:
+            chat.title === t('新对话') && prompt
+              ? summarizeText(prompt, t('新对话'))
+              : chat.title,
+          summary: prompt || t('已添加素材引用'),
+          status: t('本地草稿'),
+          updated_at: now,
+          messages: nextMessages,
+        };
+      }),
+    );
+    setChatPrompt('');
+    setChatAttachments([]);
+  };
+
+  const handleNewImageTask = () => {
+    setGenerationMode(CANVAS_MODE_IMAGE);
+    setSelectedTask(null);
+    setMobileTaskbarVisible(false);
+  };
+
+  const handleNewVideoTask = () => {
+    setGenerationMode(CANVAS_MODE_VIDEO);
+    setVideoSelectedTask(null);
+    setMobileTaskbarVisible(false);
+  };
+
+  const downloadAsset = (asset) => {
+    const imageUrl = getAssetImageUrl(asset);
+    if (!imageUrl) {
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = imageUrl;
+    link.download = `image-${getAssetKey(asset) || Date.now()}.png`;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const deleteAsset = async (asset) => {
+    const assetKey = getAssetKey(asset);
+    if (!assetKey) {
+      return;
+    }
+    try {
+      const res = await API.delete(`/api/image-generation/tasks/${assetKey}`);
+      if (!res.data.success) {
+        showError(res.data.message || t('删除失败'));
+        return;
+      }
+      showSuccess(t('删除成功'));
+      setCanvasAssets((prev) =>
+        prev.filter((item) => getAssetKey(item) !== assetKey),
+      );
+      setCanvasAssetsTotal((prev) => Math.max(0, prev - 1));
+      if (selectedAssetPreview && getAssetKey(selectedAssetPreview) === assetKey) {
+        setSelectedAssetPreview(null);
+      }
+    } catch (error) {
+      showError(error.message || t('删除失败'));
+    }
+  };
+
+  const addAssetToChat = (asset) => {
+    const imageUrl = getAssetImageUrl(asset);
+    if (!imageUrl) {
+      showError(t('该资产没有可用图片'));
+      return;
+    }
+    const remoteReference = buildRemoteReferenceFile(imageUrl);
+    if (!remoteReference) {
+      return;
+    }
+    setChatAttachments((prev) => [
+      ...prev,
+      {
+        ...remoteReference,
+        uid: `chat-asset-${getAssetKey(asset) || Date.now()}`,
+        name: asset.prompt || t('图片资产'),
+      },
+    ]);
+    showSuccess(t('已插入当前对话'));
+  };
+
+  const addAssetToImageReferences = (asset) => {
+    const imageUrl = getAssetImageUrl(asset);
+    if (!imageUrl) {
+      showError(t('该资产没有可用图片'));
+      return;
+    }
+    if (!selectedModelSupportsEditing) {
+      showError(t('当前模型不支持图像编辑'));
+      return;
+    }
+    const limit = getReferenceImageLimit(selectedModelData);
+    if (limit > 0 && referenceImages.length >= limit) {
+      showError(
+        t('当前模型最多只能上传 {{count}} 张参考图', {
+          count: limit,
+        }),
+      );
+      return;
+    }
+    const remoteReference = buildRemoteReferenceFile(imageUrl);
+    if (!remoteReference) {
+      return;
+    }
+    setReferenceImages((prev) => [
+      ...prev,
+      {
+        ...remoteReference,
+        uid: `asset-${getAssetKey(asset) || Date.now()}`,
+        name: asset.prompt || t('图片资产'),
+      },
+    ]);
+    showSuccess(t('已作为参考图插入图片任务'));
+  };
+
+  const addAssetToVideoReference = (asset) => {
+    const imageUrl = getAssetImageUrl(asset);
+    if (!imageUrl) {
+      showError(t('该资产没有可用图片'));
+      return;
+    }
+    if (!videoSelectedModelSupportsImageToVideo) {
+      showError(t('当前模型不支持图生视频'));
+      return;
+    }
+    const remoteReference = buildRemoteReferenceFile(imageUrl);
+    if (!remoteReference) {
+      return;
+    }
+    setVideoReferenceImage({
+      ...remoteReference,
+      uid: `video-asset-${getAssetKey(asset) || Date.now()}`,
+      name: asset.prompt || t('首帧图'),
+    });
+    showSuccess(t('已作为首帧图插入视频任务'));
+  };
+
+  const insertAssetIntoCurrentMode = (asset) => {
+    if (generationMode === CANVAS_MODE_CHAT) {
+      addAssetToChat(asset);
+      return;
+    }
+    if (generationMode === CANVAS_MODE_VIDEO) {
+      addAssetToVideoReference(asset);
+      return;
+    }
+    addAssetToImageReferences(asset);
   };
 
   const styles = {
@@ -2235,7 +2592,7 @@ const ImageGeneration = () => {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      background: 'linear-gradient(180deg, #15181f 0%, #0f1218 100%)',
+      background: 'var(--semi-color-bg-1)',
       overflow: 'hidden',
     },
     rightContent: {
@@ -2446,26 +2803,6 @@ const ImageGeneration = () => {
     compactField: {
       minWidth: 112,
     },
-    customSizeGroup: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 6,
-      flexWrap: 'wrap',
-    },
-    sizeInput: {
-      width: 76,
-      borderRadius: 8,
-      border: '1px solid rgba(148, 163, 184, 0.24)',
-      background: 'rgba(15, 23, 42, 0.9)',
-      color: '#f8fafc',
-      padding: '6px 8px',
-      fontSize: 12,
-      lineHeight: 1.4,
-    },
-    sizeInputLabel: {
-      color: 'rgba(226, 232, 240, 0.66)',
-      fontSize: 12,
-    },
     label: {
       display: 'block',
       fontSize: 13,
@@ -2642,6 +2979,289 @@ const ImageGeneration = () => {
       alignContent: 'start',
       flexShrink: 0,
     },
+    taskbarHeader: {
+      padding: 14,
+      borderBottom: '1px solid var(--semi-color-border)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+    },
+    taskbarTitleRow: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    taskbarTitle: {
+      fontSize: 15,
+      fontWeight: 650,
+      color: 'var(--semi-color-text-0)',
+    },
+    taskbarMeta: {
+      color: 'var(--semi-color-text-2)',
+      fontSize: 12,
+    },
+    taskList: {
+      flex: 1,
+      minHeight: 0,
+      overflowY: 'auto',
+      padding: 10,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+    },
+    taskListItem: {
+      width: '100%',
+      border: '1px solid var(--semi-color-border)',
+      borderRadius: 8,
+      background: 'var(--semi-color-bg-0)',
+      padding: 10,
+      cursor: 'pointer',
+      textAlign: 'left',
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center',
+      transition: 'border-color 0.16s, background 0.16s',
+    },
+    taskListItemActive: {
+      borderColor: 'var(--semi-color-primary)',
+      background: 'var(--semi-color-primary-light-default)',
+    },
+    taskListText: {
+      flex: 1,
+      minWidth: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 5,
+    },
+    taskListTitle: {
+      fontSize: 13,
+      fontWeight: 600,
+      lineHeight: 1.35,
+      color: 'var(--semi-color-text-0)',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      display: '-webkit-box',
+      WebkitLineClamp: 2,
+      WebkitBoxOrient: 'vertical',
+    },
+    taskListMetaRow: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 6,
+      minWidth: 0,
+      color: 'var(--semi-color-text-2)',
+      fontSize: 12,
+    },
+    taskThumb: {
+      width: 48,
+      height: 48,
+      borderRadius: 8,
+      objectFit: 'cover',
+      flexShrink: 0,
+      background: 'var(--semi-color-fill-0)',
+      border: '1px solid var(--semi-color-border)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'var(--semi-color-text-2)',
+    },
+    sidebarFooter: {
+      padding: '10px 14px',
+      borderTop: '1px solid var(--semi-color-border)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    workspaceTopbar: {
+      height: 56,
+      flexShrink: 0,
+      borderBottom: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      padding: isMobile ? '0 10px' : '0 16px',
+    },
+    workspaceTopbarLeft: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      minWidth: 0,
+    },
+    modeSwitch: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+      padding: 4,
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
+    },
+    modeButton: {
+      minHeight: 32,
+      border: 'none',
+      borderRadius: 6,
+      padding: isMobile ? '0 9px' : '0 12px',
+      background: 'transparent',
+      color: 'var(--semi-color-text-1)',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      cursor: 'pointer',
+      fontSize: 13,
+      whiteSpace: 'nowrap',
+    },
+    modeButtonActive: {
+      color: 'var(--semi-color-primary)',
+      background: 'var(--semi-color-bg-0)',
+      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)',
+    },
+    workspaceBody: {
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    },
+    mainViewport: {
+      flex: 1,
+      minHeight: 0,
+      overflowY: 'auto',
+      padding: isMobile ? 12 : 18,
+      paddingBottom: isMobile ? 12 : 18,
+    },
+    composerDock: {
+      flexShrink: 0,
+      borderTop: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      padding: isMobile ? 10 : 14,
+      boxShadow: '0 -8px 24px rgba(15, 23, 42, 0.06)',
+    },
+    composerShell: {
+      width: '100%',
+      maxWidth: 1080,
+      margin: '0 auto',
+      border: '1px solid var(--semi-color-border)',
+      borderRadius: 8,
+      background: '#10151f',
+      padding: isMobile ? 10 : 12,
+    },
+    detailPanel: {
+      border: '1px solid var(--semi-color-border)',
+      borderRadius: 8,
+      background: 'var(--semi-color-bg-0)',
+      overflow: 'hidden',
+    },
+    detailHeader: {
+      padding: isMobile ? 12 : 16,
+      borderBottom: '1px solid var(--semi-color-border)',
+      display: 'flex',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    detailBody: {
+      padding: isMobile ? 12 : 16,
+      display: 'grid',
+      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.4fr) minmax(280px, 0.6fr)',
+      gap: 16,
+    },
+    previewSurface: {
+      minHeight: isMobile ? 240 : 420,
+      borderRadius: 8,
+      background: 'var(--semi-color-fill-0)',
+      border: '1px solid var(--semi-color-border)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    previewImage: {
+      width: '100%',
+      height: '100%',
+      maxHeight: isMobile ? 420 : 640,
+      objectFit: 'contain',
+      display: 'block',
+    },
+    detailMeta: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      minWidth: 0,
+    },
+    metaBlock: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4,
+      padding: 10,
+      borderRadius: 8,
+      background: 'var(--semi-color-fill-0)',
+    },
+    chatStream: {
+      minHeight: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 12,
+      maxWidth: 960,
+      margin: '0 auto',
+    },
+    chatMessage: {
+      maxWidth: '82%',
+      borderRadius: 8,
+      padding: '10px 12px',
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      color: 'var(--semi-color-text-0)',
+      lineHeight: 1.55,
+      wordBreak: 'break-word',
+    },
+    chatMessageUser: {
+      alignSelf: 'flex-end',
+      background: 'var(--semi-color-primary-light-default)',
+      borderColor: 'var(--semi-color-primary-light-active)',
+    },
+    chatMessageAssistant: {
+      alignSelf: 'flex-start',
+    },
+    assetGrid: {
+      display: 'grid',
+      gridTemplateColumns: isMobile
+        ? 'repeat(2, minmax(0, 1fr))'
+        : 'repeat(3, minmax(0, 1fr))',
+      gap: 10,
+    },
+    assetCard: {
+      border: '1px solid var(--semi-color-border)',
+      borderRadius: 8,
+      overflow: 'hidden',
+      background: 'var(--semi-color-bg-0)',
+      display: 'flex',
+      flexDirection: 'column',
+    },
+    assetThumb: {
+      width: '100%',
+      aspectRatio: '1 / 1',
+      objectFit: 'cover',
+      background: 'var(--semi-color-fill-0)',
+      display: 'block',
+    },
+    assetActions: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 6,
+      padding: 8,
+    },
+    drawerFooterPager: {
+      marginTop: 12,
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 8,
+    },
   };
 
   const selectedGroupHasAvailableToken = !!groupOptions.find(
@@ -2694,176 +3314,13 @@ const ImageGeneration = () => {
   const selectedGroupOption = groupOptions.find(
     (group) => group.group === selectedGroup,
   );
-
-  const renderModelCard = (model, mode) => {
-    const isVideo = mode === 'video';
-    const isActive = isVideo
-      ? videoSelectedModel === model.request_model
-      : selectedModel === model.request_model;
-    const handleClick = isVideo
-      ? () => selectVideoModelFromCatalog(model)
-      : () => selectImageModelFromCatalog(model);
-
-    return (
-      <button
-        type='button'
-        key={model.request_model}
-        style={{
-          ...styles.modelCard,
-          ...(isActive ? styles.modelCardActive : null),
-        }}
-        onClick={handleClick}
-      >
-        <div style={styles.modelCardTitle}>{getModelDisplayName(model)}</div>
-        <div style={styles.modelCardMeta}>{model.request_model}</div>
-      </button>
-    );
-  };
-
-  const renderModelSection = (mode, title, modelsList, collapsed, onToggle) => (
-    <div style={styles.modelSection}>
-      <button type='button' style={styles.modelSectionHeader} onClick={onToggle}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-          {mode === 'image' ? <IconImage size='small' /> : <IconVideo size='small' />}
-          <Text strong style={{ fontSize: 14, color: 'var(--semi-color-text-0)' }}>
-            {title}
-          </Text>
-          <Text type='tertiary' size='small'>
-            {modelsList.length}
-          </Text>
-        </span>
-        {collapsed ? <IconChevronDown /> : <IconChevronUp />}
-      </button>
-      {!collapsed && (
-        <div style={styles.modelList}>
-          {modelsList.length > 0 ? (
-            modelsList.map((model) => renderModelCard(model, mode))
-          ) : (
-            <Text type='tertiary' size='small' style={{ padding: '4px 2px 2px' }}>
-              {mode === 'image' ? t('当前分组下没有可用图片模型') : t('当前没有可用视频模型')}
-            </Text>
-          )}
-        </div>
-      )}
-    </div>
-  );
-
-  const renderLeftCatalog = () => (
-    <div style={styles.leftPanel}>
-      <div style={styles.leftContent}>
-        <Spin spinning={loading || groupLoading}>
-          <div style={styles.catalogHeader}>
-            <div style={{ minWidth: 0 }}>
-              <div style={styles.catalogTitle}>{t('模型目录')}</div>
-              <Text type='tertiary' size='small'>
-                {generationMode === 'video' ? t('当前正在浏览视频模型') : t('当前正在浏览图片模型')}
-              </Text>
-            </div>
-            {isMobile && (
-              <Button
-                size='small'
-                type='tertiary'
-                icon={<IconMenu />}
-                onClick={() => setMobileCatalogVisible(true)}
-              >
-                {t('模型')}
-              </Button>
-            )}
-          </div>
-
-          <div style={styles.catalogTools}>
-            <div style={styles.fieldGroup}>
-              <span style={styles.label}>{t('图片分组')}</span>
-              <Select
-                style={{ width: '100%' }}
-                value={selectedGroup}
-                onChange={setSelectedGroup}
-                disabled={groupLoading || groupOptions.length === 0}
-                placeholder={t('请选择分组')}
-              >
-                {groupOptions.map((group) => (
-                  <Select.Option
-                    key={group.group}
-                    value={group.group}
-                    disabled={group.has_available_token === false}
-                  >
-                    {group.group}
-                    {group.has_available_token === false
-                      ? ` (${t('无可用令牌')})`
-                      : ''}
-                  </Select.Option>
-                ))}
-              </Select>
-              {selectedGroupOption && (
-                <Text
-                  type={selectedGroupOption.has_available_token === false ? 'danger' : 'tertiary'}
-                  size='small'
-                  style={{ display: 'block', marginTop: 8 }}
-                >
-                  {selectedGroupOption.has_available_token === false
-                    ? t('当前分组暂无可用令牌，请前往令牌管理创建或启用')
-                    : t('当前分组可用令牌数：{{count}}', {
-                        count: selectedGroupOption.available_token_count || 0,
-                      })}
-                </Text>
-              )}
-              {selectedGroupOption &&
-                selectedGroupOption.has_available_token === false && (
-                  <Button
-                    size='small'
-                    type='primary'
-                    theme='outline'
-                    style={{ marginTop: 8 }}
-                    onClick={() => navigate('/console/token')}
-                  >
-                    {t('前往令牌管理')}
-                  </Button>
-                )}
-            </div>
-
-            <Input
-              prefix={<IconSearch />}
-              placeholder={t('搜索模型名称或系列')}
-              value={modelSearchKeyword}
-              onChange={setModelSearchKeyword}
-              showClear
-            />
-
-            <Select
-              value={catalogSeriesFilter}
-              onChange={setCatalogSeriesFilter}
-              disabled={catalogSeriesOptions.length === 0}
-              placeholder={t('全部系列')}
-            >
-              <Select.Option value={MODEL_CATALOG_ALL_SERIES}>
-                {t('全部系列')}
-              </Select.Option>
-              {catalogSeriesOptions.map((series) => (
-                <Select.Option key={series} value={series}>
-                  {formatModelSeries(series)}
-                </Select.Option>
-              ))}
-            </Select>
-          </div>
-
-          {renderModelSection(
-            'image',
-            t('图片模型'),
-            imageCatalogModels,
-            imageModelsCollapsed,
-            () => setImageModelsCollapsed((current) => !current),
-          )}
-          {renderModelSection(
-            'video',
-            t('视频模型'),
-            videoCatalogModels,
-            videoModelsCollapsed,
-            () => setVideoModelsCollapsed((current) => !current),
-          )}
-        </Spin>
-      </div>
-    </div>
-  );
+  const selectedChat = chatTasks.find((chat) => chat.id === selectedChatId);
+  const currentTaskSidebarTitle =
+    generationMode === CANVAS_MODE_CHAT
+      ? t('对话任务')
+      : generationMode === CANVAS_MODE_VIDEO
+        ? t('视频任务')
+        : t('图片任务');
 
   const renderReferenceThumb = (file, onRemove) => (
     <div key={file.uid || file.name || file.url} style={styles.referenceImageContainer}>
@@ -2872,41 +3329,15 @@ const ImageGeneration = () => {
         alt=''
         style={styles.referenceImageThumb}
       />
-      <button type='button' style={styles.removeImageBtn} onClick={onRemove}>
+      <button
+        type='button'
+        aria-label={t('移除图片')}
+        style={styles.removeImageBtn}
+        onClick={onRemove}
+      >
         <IconDelete size='extra-small' />
       </button>
     </div>
-  );
-
-  const renderDarkDropdownMenu = (options, currentValue, onChange, emptyText) => (
-    <Dropdown.Menu style={styles.darkMenu}>
-      {options.length > 0 ? (
-        options.map((option) => {
-          const selected = option.value === currentValue;
-          return (
-            <Dropdown.Item
-              key={option.value}
-              style={{
-                ...styles.darkMenuItem,
-                ...(selected ? styles.darkMenuItemActive : null),
-              }}
-              onClick={() => onChange(option.value)}
-            >
-              {option.label}
-            </Dropdown.Item>
-          );
-        })
-      ) : (
-        <div
-          style={{
-            ...styles.darkMenuItem,
-            color: 'rgba(226, 232, 240, 0.66)',
-          }}
-        >
-          {emptyText}
-        </div>
-      )}
-    </Dropdown.Menu>
   );
 
   const renderPillDropdown = ({
@@ -3030,6 +3461,8 @@ const ImageGeneration = () => {
       <Dropdown trigger='click' position='bottomLeft' render={menu}>
         <button
           type='button'
+          aria-label={isVideoMode ? t('选择视频模型') : t('选择图片模型')}
+          data-canvas-model-selector={isVideoMode ? CANVAS_MODE_VIDEO : CANVAS_MODE_IMAGE}
           style={styles.pillButton}
           disabled={modelOptions.length === 0}
         >
@@ -3043,69 +3476,818 @@ const ImageGeneration = () => {
     );
   };
 
-  const renderModeDropdown = (isVideoMode) => (
-    <Dropdown
-      trigger='click'
-      position='bottomLeft'
-      render={renderDarkDropdownMenu(
-        [
-          { value: 'image', label: t('图片生成') },
-          { value: 'video', label: t('视频生成') },
-        ],
-        generationMode,
-        setGenerationMode,
-        t('暂无可用模式'),
-      )}
-    >
-      <button type='button' style={styles.pillButton}>
-        {isVideoMode ? <IconVideo size='small' /> : <IconImage size='small' />}
-        <span style={styles.pillButtonLabel}>
-          {isVideoMode ? t('视频生成') : t('图片生成')}
-        </span>
-        <IconChevronDown size='small' />
-      </button>
-    </Dropdown>
-  );
+  const renderStatusTag = (status, mode) => {
+    const map =
+      mode === CANVAS_MODE_VIDEO
+        ? {
+            completed: { color: 'green', text: t('已完成') },
+            failed: { color: 'red', text: t('失败') },
+            in_progress: { color: 'blue', text: t('生成中') },
+            queued: { color: 'orange', text: t('等待中') },
+          }
+        : {
+            success: { color: 'green', text: t('已完成') },
+            failed: { color: 'red', text: t('失败') },
+            generating: { color: 'blue', text: t('生成中') },
+            pending: { color: 'orange', text: t('等待中') },
+          };
+    const meta = map[status] || { color: 'grey', text: status || t('未知') };
+    return (
+      <Tag color={meta.color} size='small'>
+        {meta.text}
+      </Tag>
+    );
+  };
 
-  const renderCustomSizeInputs = () => (
-    <div style={{ padding: '10px 10px 8px' }}>
-      <div style={{ color: 'rgba(226, 232, 240, 0.7)', fontSize: 12, marginBottom: 8 }}>
-        {t('自定义尺寸')}
-      </div>
-      <div style={styles.customSizeGroup}>
-        <span style={styles.sizeInputLabel}>W</span>
-        <input
-          value={customCanvasWidth}
-          onChange={(event) => setCustomCanvasWidth(event.target.value)}
-          placeholder='1024'
-          style={styles.sizeInput}
-        />
-        <span style={styles.sizeInputLabel}>H</span>
-        <input
-          value={customCanvasHeight}
-          onChange={(event) => setCustomCanvasHeight(event.target.value)}
-          placeholder='1024'
-          style={styles.sizeInput}
-        />
-      </div>
+  const renderSidebarEmpty = (title, description, action = null) => (
+    <div style={{ padding: '28px 10px' }}>
+      <Empty title={title} description={description} />
+      {action ? (
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
+          {action}
+        </div>
+      ) : null}
     </div>
   );
 
+  const renderTaskThumb = (task, mode) => {
+    const imageUrl =
+      mode === CANVAS_MODE_VIDEO
+        ? task.thumbnail_url
+        : task.thumbnail_url || task.image_url;
+    if (imageUrl) {
+      return <img src={imageUrl} alt='' style={styles.taskThumb} />;
+    }
+    return (
+      <div style={styles.taskThumb}>
+        {mode === CANVAS_MODE_VIDEO ? <IconVideo /> : <IconImage />}
+      </div>
+    );
+  };
+
+  const renderChatTaskList = () => (
+    <div style={styles.taskList}>
+      {chatTasks.map((chat) => {
+        const active = chat.id === selectedChatId;
+        return (
+          <div
+            key={chat.id}
+            role='button'
+            tabIndex={0}
+            style={{
+              ...styles.taskListItem,
+              ...(active ? styles.taskListItemActive : null),
+            }}
+            onClick={() => {
+              setSelectedChatId(chat.id);
+              setMobileTaskbarVisible(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                setSelectedChatId(chat.id);
+              }
+            }}
+          >
+            <div style={styles.taskThumb}>
+              <IconCommentStroked />
+            </div>
+            <div style={styles.taskListText}>
+              <div style={styles.taskListTitle}>{chat.title}</div>
+              <div style={styles.taskListMetaRow}>
+                <span>{formatTimestamp(chat.updated_at)}</span>
+                <Tag size='small'>{chat.status}</Tag>
+              </div>
+              <Text type='tertiary' size='small' ellipsis>
+                {chat.summary}
+              </Text>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const renderImageTaskList = () => (
+    <>
+      <div style={{ padding: '0 14px 10px' }}>
+        <Select
+          size='small'
+          style={{ width: '100%' }}
+          value={taskStatusFilter}
+          onChange={setTaskStatusFilter}
+        >
+          <Select.Option value=''>{t('全部状态')}</Select.Option>
+          <Select.Option value='pending'>{t('等待中')}</Select.Option>
+          <Select.Option value='generating'>{t('生成中')}</Select.Option>
+          <Select.Option value='success'>{t('已完成')}</Select.Option>
+          <Select.Option value='failed'>{t('失败')}</Select.Option>
+        </Select>
+      </div>
+      <Spin spinning={loadingTasks}>
+        <div style={styles.taskList}>
+          {taskListError
+            ? renderSidebarEmpty(
+                t('图片任务加载失败'),
+                taskListError,
+                <Button size='small' icon={<IconRefresh />} onClick={() => loadTasks()}>
+                  {t('重试')}
+                </Button>,
+              )
+            : tasks.length === 0
+              ? renderSidebarEmpty(t('暂无图片任务'), t('使用底部输入器创建图片任务'))
+              : tasks.map((task) => {
+                  const active = selectedTask?.id === task.id;
+                  return (
+                    <div
+                      key={task.id}
+                      role='button'
+                      tabIndex={0}
+                      style={{
+                        ...styles.taskListItem,
+                        ...(active ? styles.taskListItemActive : null),
+                      }}
+                      onClick={() => {
+                        handleTaskCardClick(task);
+                        setMobileTaskbarVisible(false);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          handleTaskCardClick(task);
+                        }
+                      }}
+                    >
+                      <div onClick={(event) => event.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedTaskIds.has(task.id)}
+                          onChange={(event) =>
+                            handleTaskSelect(task.id, event.target.checked)
+                          }
+                        />
+                      </div>
+                      {renderTaskThumb(task, CANVAS_MODE_IMAGE)}
+                      <div style={styles.taskListText}>
+                        <div style={styles.taskListTitle}>
+                          {getTaskTitle(task, t('图片任务'))}
+                        </div>
+                        <div style={styles.taskListMetaRow}>
+                          <span>{formatTimestamp(task.created_time)}</span>
+                          {renderStatusTag(task.status, CANVAS_MODE_IMAGE)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+        </div>
+      </Spin>
+    </>
+  );
+
+  const renderVideoTaskList = () => (
+    <>
+      <div style={{ padding: '0 14px 10px' }}>
+        <Select
+          size='small'
+          style={{ width: '100%' }}
+          value={videoTaskStatusFilter}
+          onChange={setVideoTaskStatusFilter}
+        >
+          <Select.Option value=''>{t('全部状态')}</Select.Option>
+          <Select.Option value='queued'>{t('等待中')}</Select.Option>
+          <Select.Option value='in_progress'>{t('生成中')}</Select.Option>
+          <Select.Option value='completed'>{t('已完成')}</Select.Option>
+          <Select.Option value='failed'>{t('失败')}</Select.Option>
+        </Select>
+      </div>
+      <Spin spinning={videoLoadingTasks}>
+        <div style={styles.taskList}>
+          {videoTaskListError
+            ? renderSidebarEmpty(
+                t('视频任务加载失败'),
+                videoTaskListError,
+                <Button
+                  size='small'
+                  icon={<IconRefresh />}
+                  onClick={() => loadVideoTasks()}
+                >
+                  {t('重试')}
+                </Button>,
+              )
+            : videoTasks.length === 0
+              ? renderSidebarEmpty(t('暂无视频任务'), t('使用底部输入器创建视频任务'))
+              : videoTasks.map((task) => {
+                  const active = videoSelectedTask?.id === task.id;
+                  return (
+                    <div
+                      key={task.id}
+                      role='button'
+                      tabIndex={0}
+                      style={{
+                        ...styles.taskListItem,
+                        ...(active ? styles.taskListItemActive : null),
+                      }}
+                      onClick={() => {
+                        handleVideoTaskCardClick(task);
+                        setMobileTaskbarVisible(false);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          handleVideoTaskCardClick(task);
+                        }
+                      }}
+                    >
+                      <div onClick={(event) => event.stopPropagation()}>
+                        <Checkbox
+                          checked={videoSelectedTaskIds.has(task.id)}
+                          onChange={(event) =>
+                            handleVideoTaskSelect(task.id, event.target.checked)
+                          }
+                        />
+                      </div>
+                      {renderTaskThumb(task, CANVAS_MODE_VIDEO)}
+                      <div style={styles.taskListText}>
+                        <div style={styles.taskListTitle}>
+                          {getTaskTitle(task, t('视频任务'))}
+                        </div>
+                        <div style={styles.taskListMetaRow}>
+                          <span>{formatTimestamp(task.created_time)}</span>
+                          {renderStatusTag(task.status, CANVAS_MODE_VIDEO)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+        </div>
+      </Spin>
+    </>
+  );
+
+  const renderTaskPager = () => {
+    if (generationMode === CANVAS_MODE_CHAT) {
+      return (
+        <Text type='tertiary' size='small'>
+          {t('共 {{count}} 个对话', { count: chatTasks.length })}
+        </Text>
+      );
+    }
+    if (generationMode === CANVAS_MODE_VIDEO) {
+      return (
+        <>
+          <Text type='tertiary' size='small'>
+            {t('第 {{page}} 页 / 共 {{count}} 个', {
+              page: videoTaskPage,
+              count: videoTaskTotal,
+            })}
+          </Text>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Button
+              size='small'
+              disabled={videoTaskPage <= 1 || videoLoadingTasks}
+              onClick={() => setVideoTaskPage((page) => Math.max(1, page - 1))}
+            >
+              {t('上一页')}
+            </Button>
+            <Button
+              size='small'
+              disabled={
+                videoLoadingTasks ||
+                videoTaskPage * videoTaskPageSize >= videoTaskTotal
+              }
+              onClick={() => setVideoTaskPage((page) => page + 1)}
+            >
+              {t('下一页')}
+            </Button>
+          </div>
+        </>
+      );
+    }
+    return (
+      <>
+        <Text type='tertiary' size='small'>
+          {showsReliableTaskTotal
+            ? t('第 {{page}} 页 / 共 {{count}} 个', {
+                page: taskPage,
+                count: taskTotal,
+              })
+            : t('第 {{page}} 页', { page: taskPage })}
+        </Text>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Button
+            size='small'
+            disabled={taskPage <= 1 || loadingTasks}
+            onClick={() => setTaskPage((page) => Math.max(1, page - 1))}
+          >
+            {t('上一页')}
+          </Button>
+          <Button
+            size='small'
+            disabled={loadingTasks || !hasNextTaskPage}
+            onClick={() => setTaskPage((page) => page + 1)}
+          >
+            {t('下一页')}
+          </Button>
+        </div>
+      </>
+    );
+  };
+
+  const renderTaskSidebar = () => {
+    const createConfig =
+      generationMode === CANVAS_MODE_CHAT
+        ? {
+            text: t('新建对话'),
+            icon: <IconCommentStroked />,
+            action: handleCreateChat,
+          }
+        : generationMode === CANVAS_MODE_VIDEO
+          ? {
+              text: t('新建视频任务'),
+              icon: <IconVideo />,
+              action: handleNewVideoTask,
+            }
+          : {
+              text: t('新建图片任务'),
+              icon: <IconImage />,
+              action: handleNewImageTask,
+            };
+    const selectedCount =
+      generationMode === CANVAS_MODE_VIDEO
+        ? videoSelectedTaskIds.size
+        : selectedTaskIds.size;
+
+    return (
+      <div style={styles.leftPanel} data-canvas-task-sidebar={generationMode}>
+        <div style={styles.taskbarHeader}>
+          <div style={styles.taskbarTitleRow}>
+            <div>
+              <div style={styles.taskbarTitle}>{currentTaskSidebarTitle}</div>
+              <div style={styles.taskbarMeta}>
+                {generationMode === CANVAS_MODE_CHAT
+                  ? t('当前模式的对话列表')
+                  : generationMode === CANVAS_MODE_VIDEO
+                    ? t('当前模式的视频生成记录')
+                    : t('当前模式的图片生成记录')}
+              </div>
+            </div>
+            <Button
+              size='small'
+              type='primary'
+              icon={<IconPlus />}
+              onClick={createConfig.action}
+            >
+              {createConfig.text}
+            </Button>
+          </div>
+          {generationMode === CANVAS_MODE_IMAGE && selectedGroupOption ? (
+            <Text
+              type={
+                selectedGroupOption.has_available_token === false
+                  ? 'danger'
+                  : 'tertiary'
+              }
+              size='small'
+            >
+              {selectedGroupOption.has_available_token === false
+                ? t('当前图片分组暂无可用令牌')
+                : t('图片分组：{{group}}', { group: selectedGroup })}
+            </Text>
+          ) : null}
+        </div>
+
+        {generationMode === CANVAS_MODE_CHAT
+          ? renderChatTaskList()
+          : generationMode === CANVAS_MODE_VIDEO
+            ? renderVideoTaskList()
+            : renderImageTaskList()}
+
+        <div style={styles.sidebarFooter}>
+          {generationMode !== CANVAS_MODE_CHAT && selectedCount > 0 ? (
+            <Button
+              size='small'
+              type='danger'
+              theme='outline'
+              icon={<IconDelete />}
+              loading={
+                generationMode === CANVAS_MODE_VIDEO
+                  ? deletingVideoTasks
+                  : deletingTasks
+              }
+              onClick={
+                generationMode === CANVAS_MODE_VIDEO
+                  ? handleVideoBatchDelete
+                  : handleBatchDelete
+              }
+            >
+              {t('删除 {{count}} 项', { count: selectedCount })}
+            </Button>
+          ) : null}
+          <div
+            style={{
+              marginLeft: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            {renderTaskPager()}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMetaBlock = (label, value) => (
+    <div style={styles.metaBlock}>
+      <Text type='tertiary' size='small'>
+        {label}
+      </Text>
+      <Text style={{ wordBreak: 'break-word' }}>{value || '-'}</Text>
+    </div>
+  );
+
+  const renderReferenceStrip = (title, files) => {
+    const visibleFiles = (files || []).filter(Boolean);
+    if (visibleFiles.length === 0) {
+      return null;
+    }
+    return (
+      <div style={styles.metaBlock}>
+        <Text type='tertiary' size='small'>
+          {title}
+        </Text>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {visibleFiles.map((file) => (
+            <img
+              key={file.uid || file.name || file.url}
+              src={file.url || (file.fileInstance && URL.createObjectURL(file.fileInstance))}
+              alt=''
+              style={styles.referenceImageThumb}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderImagePreview = (task) => {
+    if (!task) {
+      return null;
+    }
+    if (task.status === 'success' && task.image_url) {
+      return <img src={task.image_url} alt='' style={styles.previewImage} />;
+    }
+    if (task.status === 'failed') {
+      return (
+        <div style={styles.emptyState}>
+          <IconAlertTriangle size='extra-large' />
+          <Text type='danger'>{task.error_message || t('生成失败')}</Text>
+        </div>
+      );
+    }
+    return (
+      <div style={styles.emptyState}>
+        {task.status === 'generating' ? <Spin size='large' /> : <IconClock size='extra-large' />}
+        <Text type='tertiary'>
+          {task.status === 'generating' ? t('生成中') : t('等待中')}
+        </Text>
+        {task.status === 'generating' ? (
+          <Progress
+            percent={Number(task.progress) || 0}
+            showInfo
+            style={{ width: 220 }}
+          />
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderImageDetail = () => {
+    if (!selectedTask) {
+      return (
+        <div style={styles.detailPanel}>
+          {renderSidebarEmpty(t('选择或创建图片任务'), t('左侧选择历史任务，或直接在底部输入器创建新图片'))}
+        </div>
+      );
+    }
+    return (
+      <div style={styles.detailPanel}>
+        <div style={styles.detailHeader}>
+          <div style={{ minWidth: 0 }}>
+            <Text strong style={{ display: 'block', fontSize: 16 }}>
+              {getTaskTitle(selectedTask, t('图片任务'))}
+            </Text>
+            <Text type='tertiary' size='small'>
+              {formatTimestamp(selectedTask.created_time)}
+            </Text>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {renderStatusTag(selectedTask.status, CANVAS_MODE_IMAGE)}
+            <Button size='small' onClick={() => setTaskModalVisible(true)}>
+              {t('详情')}
+            </Button>
+            {selectedTask.image_url ? (
+              <Button
+                size='small'
+                icon={<IconDownload />}
+                onClick={() =>
+                  downloadAsset({
+                    id: selectedTask.id,
+                    image_url: selectedTask.image_url,
+                  })
+                }
+              >
+                {t('下载')}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <div style={styles.detailBody}>
+          <div style={styles.previewSurface}>{renderImagePreview(selectedTask)}</div>
+          <div style={styles.detailMeta}>
+            {renderMetaBlock(t('模型'), selectedTask.display_name || selectedTask.model_id)}
+            {renderMetaBlock(t('提示词'), selectedTask.prompt)}
+            {selectedTask.error_message
+              ? renderMetaBlock(t('失败信息'), selectedTask.error_message)
+              : null}
+            {renderReferenceStrip(t('当前参考图'), referenceImages)}
+            {renderReferenceStrip(t('当前遮罩'), maskImage ? [maskImage] : [])}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderVideoPreview = (task) => {
+    if (!task) {
+      return null;
+    }
+    const videoUrl = task.video_url || task.result_url;
+    if (task.status === 'completed' && videoUrl) {
+      return (
+        <video
+          src={videoUrl}
+          poster={task.thumbnail_url}
+          controls
+          style={{ width: '100%', height: '100%', maxHeight: 640, background: '#000' }}
+        />
+      );
+    }
+    if (task.status === 'failed') {
+      return (
+        <div style={styles.emptyState}>
+          <IconAlertTriangle size='extra-large' />
+          <Text type='danger'>{task.fail_reason || t('生成失败')}</Text>
+        </div>
+      );
+    }
+    return (
+      <div style={styles.emptyState}>
+        {task.status === 'in_progress' ? <Spin size='large' /> : <IconPlayCircle size='extra-large' />}
+        <Text type='tertiary'>
+          {task.status === 'in_progress' ? t('生成中') : t('等待中')}
+        </Text>
+        <Progress
+          percent={parseInt(String(task.progress || '0').replace('%', ''), 10) || 0}
+          showInfo
+          style={{ width: 220 }}
+        />
+      </div>
+    );
+  };
+
+  const renderVideoDetail = () => {
+    if (!videoSelectedTask) {
+      return (
+        <div style={styles.detailPanel}>
+          {renderSidebarEmpty(t('选择或创建视频任务'), t('左侧选择历史任务，或直接在底部输入器创建新视频'))}
+        </div>
+      );
+    }
+    const videoUrl = videoSelectedTask.video_url || videoSelectedTask.result_url;
+    return (
+      <div style={styles.detailPanel}>
+        <div style={styles.detailHeader}>
+          <div style={{ minWidth: 0 }}>
+            <Text strong style={{ display: 'block', fontSize: 16 }}>
+              {getTaskTitle(videoSelectedTask, t('视频任务'))}
+            </Text>
+            <Text type='tertiary' size='small'>
+              {formatTimestamp(videoSelectedTask.created_time)}
+            </Text>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {renderStatusTag(videoSelectedTask.status, CANVAS_MODE_VIDEO)}
+            <Button size='small' onClick={() => setVideoTaskModalVisible(true)}>
+              {t('详情')}
+            </Button>
+            {videoUrl ? (
+              <Button
+                size='small'
+                icon={<IconExternalOpen />}
+                onClick={() => window.open(videoUrl, '_blank')}
+              >
+                {t('打开')}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <div style={styles.detailBody}>
+          <div style={styles.previewSurface}>{renderVideoPreview(videoSelectedTask)}</div>
+          <div style={styles.detailMeta}>
+            {renderMetaBlock(
+              t('模型'),
+              videoSelectedTask.display_name || videoSelectedTask.model_id,
+            )}
+            {renderMetaBlock(t('提示词'), videoSelectedTask.prompt)}
+            {renderMetaBlock(t('时长'), videoSelectedTask.duration ? `${videoSelectedTask.duration}s` : '-')}
+            {videoSelectedTask.fail_reason
+              ? renderMetaBlock(t('失败信息'), videoSelectedTask.fail_reason)
+              : null}
+            {renderReferenceStrip(
+              t('当前首帧图 / 参考图'),
+              videoReferenceImage ? [videoReferenceImage] : [],
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderRecentTaskGrid = () => {
+    if (generationMode === CANVAS_MODE_VIDEO) {
+      if (videoTasks.length === 0) {
+        return null;
+      }
+      return (
+        <div style={{ ...styles.tasksGrid, gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', padding: 0 }}>
+          {videoTasks.map((task) => (
+            <VideoGenerationTaskCard
+              key={task.id}
+              task={task}
+              selected={videoSelectedTaskIds.has(task.id)}
+              onSelectChange={handleVideoTaskSelect}
+              onClick={() => handleVideoTaskCardClick(task)}
+            />
+          ))}
+        </div>
+      );
+    }
+    if (tasks.length === 0) {
+      return null;
+    }
+    return (
+      <div style={{ ...styles.tasksGrid, gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', padding: 0 }}>
+        {tasks.map((task) => (
+          <ImageGenerationTaskCard
+            key={task.id}
+            task={task}
+            selected={selectedTaskIds.has(task.id)}
+            onSelectChange={handleTaskSelect}
+            onClick={() => handleTaskCardClick(task)}
+          />
+        ))}
+      </div>
+    );
+  };
+
+  const renderChatWorkspace = () => {
+    const messages = selectedChat?.messages || [];
+    return (
+      <div style={styles.chatStream}>
+        {messages.length === 0 ? (
+          <div style={styles.detailPanel}>
+            {renderSidebarEmpty(t('对话工作区'), t('底部输入消息，可附加资产库图片作为上下文'))}
+          </div>
+        ) : (
+          messages.map((message) => (
+            <div
+              key={message.id}
+              style={{
+                ...styles.chatMessage,
+                ...(message.role === 'user'
+                  ? styles.chatMessageUser
+                  : styles.chatMessageAssistant),
+              }}
+            >
+              <Text type='tertiary' size='small'>
+                {message.role === 'user' ? t('你') : t('助手')}
+              </Text>
+              <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                {message.content || t('已添加素材引用')}
+              </div>
+              {message.attachments?.length ? (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                  {message.attachments.map((asset) => (
+                    <img
+                      key={asset.uid || asset.url}
+                      src={asset.url}
+                      alt=''
+                      style={styles.referenceImageThumb}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
+      </div>
+    );
+  };
+
+  const renderMainContent = () => (
+    <div style={styles.mainViewport}>
+      {generationMode === CANVAS_MODE_CHAT ? (
+        renderChatWorkspace()
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {generationMode === CANVAS_MODE_VIDEO
+            ? renderVideoDetail()
+            : renderImageDetail()}
+          {renderRecentTaskGrid()}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderModeSwitch = () => {
+    const options = [
+      {
+        value: CANVAS_MODE_CHAT,
+        label: t('对话'),
+        icon: <IconCommentStroked size='small' />,
+      },
+      {
+        value: CANVAS_MODE_IMAGE,
+        label: t('图片'),
+        icon: <IconImage size='small' />,
+      },
+      {
+        value: CANVAS_MODE_VIDEO,
+        label: t('视频'),
+        icon: <IconVideo size='small' />,
+      },
+    ];
+    return (
+      <div style={styles.modeSwitch}>
+        {options.map((option) => {
+          const active = generationMode === option.value;
+          return (
+            <button
+              key={option.value}
+              type='button'
+              aria-label={t('切换到{{mode}}模式', { mode: option.label })}
+              aria-pressed={active}
+              data-canvas-mode-button={option.value}
+              style={{
+                ...styles.modeButton,
+                ...(active ? styles.modeButtonActive : null),
+              }}
+              onClick={() => handleModeChange(option.value)}
+            >
+              {option.icon}
+              <span>{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
   const renderComposer = () => {
-    const isVideoMode = generationMode === 'video';
+    const isChatMode = generationMode === CANVAS_MODE_CHAT;
+    const isVideoMode = generationMode === CANVAS_MODE_VIDEO;
+    const isImageMode = generationMode === CANVAS_MODE_IMAGE;
     const activeModel = isVideoMode ? videoSelectedModelData : selectedModelData;
-    const activeModelLabel = activeModel ? getModelDisplayName(activeModel) : t('请选择模型');
-    const activeModelSeries = activeModel?.model_series
-      ? formatModelSeries(activeModel.model_series)
-      : '';
-    const activePrompt = isVideoMode ? videoPrompt : inspiration;
-    const promptHasContent = activePrompt.trim().length > 0;
-    const submitLoading = isVideoMode ? videoGenerating : generating;
-    const submitDisabled = isVideoMode
-      ? videoGenerating || !canGenerateVideo
-      : generating || !canGenerate;
+    const activeModelLabel = isChatMode
+      ? chatModel || t('请选择模型')
+      : activeModel
+        ? getModelDisplayName(activeModel)
+        : t('请选择模型');
+    const activePrompt = isChatMode
+      ? chatPrompt
+      : isVideoMode
+        ? videoPrompt
+        : inspiration;
+    const promptHasContent =
+      activePrompt.trim().length > 0 ||
+      (isChatMode && chatAttachments.length > 0);
+    const submitLoading = isVideoMode ? videoGenerating : isImageMode ? generating : false;
+    const submitDisabled = isChatMode
+      ? !promptHasContent
+      : isVideoMode
+        ? videoGenerating || !canGenerateVideo
+        : generating || !canGenerate;
+    const placeholder = isChatMode
+      ? t('输入消息...')
+      : isVideoMode
+        ? t('描述镜头、动作、风格、时长...')
+        : t('输入提示词，生成图片或继续当前图片任务...');
+
     const handleComposerSubmit = () => {
       if (submitDisabled) {
+        return;
+      }
+      if (isChatMode) {
+        handleSendChatMessage();
         return;
       }
       if (isVideoMode) {
@@ -3128,11 +4310,10 @@ const ImageGeneration = () => {
       event.preventDefault();
       handleComposerSubmit();
     };
-    const showMaskEditor =
-      !isVideoMode &&
-      selectedModelSupportsMaskEditing &&
-      referenceImages.length > 0;
-    const renderUploadIconButton = ({ disabled = false, title = t('上传图片') } = {}) => (
+    const renderUploadIconButton = ({
+      disabled = false,
+      title = t('上传图片'),
+    } = {}) => (
       <div
         aria-label={title}
         title={title}
@@ -3145,70 +4326,125 @@ const ImageGeneration = () => {
         <IconUpload size='small' />
       </div>
     );
-    const promptAssetControls = (
-      <>
-        {isVideoMode ? (
-          videoSelectedModelSupportsImageToVideo && (
-            <Upload
-              action=''
-              accept='image/*'
-              multiple={false}
-              fileList={videoReferenceImage ? [videoReferenceImage] : []}
-              onChange={handleVideoReferenceUpload}
-              showUploadList={false}
-              beforeUpload={validateImageSize}
-            >
-              {renderUploadIconButton({ title: t('上传图片') })}
-            </Upload>
-          )
-        ) : selectedModelSupportsEditing ? (
-          <>
-            <Upload
-              action=''
-              accept='image/*'
-              multiple
-              fileList={referenceImages}
-              onChange={handleImageUpload}
-              showUploadList={false}
-              beforeUpload={validateImageSize}
-              disabled={referenceImageLimitReached}
-            >
-              {renderUploadIconButton({
-                disabled: referenceImageLimitReached,
-                title: referenceImageLimitReached ? t('已达到当前模型参考图上限') : t('上传图片'),
-              })}
-            </Upload>
-          </>
-        ) : null}
-
-        {isVideoMode
-          ? videoSelectedModelSupportsImageToVideo &&
-            (videoReferenceImage ? (
-              renderReferenceThumb(videoReferenceImage, handleVideoReferenceRemove)
-            ) : null)
-          : selectedModelSupportsEditing &&
-            referenceImages.map((file) =>
-              renderReferenceThumb(file, () => handleImageRemove(file)),
-            )}
-
-        {!isVideoMode && selectedModelSupportsMaskEditing && referenceImages.length > 0 && (
-          <Button
-            size='small'
-            type='tertiary'
-            theme='borderless'
-            icon={<IconSetting />}
-            style={{ color: '#cbd5e1' }}
+    const chatComposerParameters = [
+      renderPillDropdown({
+        key: 'chat-model',
+        label: t('模型'),
+        value: chatModel,
+        displayValue: chatModel,
+        onChange: setChatModel,
+        options: chatModels.map((model) => ({ value: model, label: model })),
+        disabled: chatModels.length === 0,
+      }),
+      renderPillDropdown({
+        key: 'chat-temperature',
+        label: t('温度'),
+        value: chatTemperature,
+        displayValue: chatTemperature,
+        onChange: setChatTemperature,
+        options: ['0', '0.2', '0.7', '1', '1.5'].map((item) => ({
+          value: item,
+          label: item,
+        })),
+      }),
+      renderPillDropdown({
+        key: 'chat-context',
+        label: t('上下文'),
+        value: chatContext,
+        displayValue: chatContext,
+        onChange: setChatContext,
+        options: ['4', '8', '16', '32'].map((item) => ({
+          value: item,
+          label: item,
+        })),
+      }),
+      <label
+        key='chat-tools'
+        style={{
+          ...styles.pillButton,
+          ...(chatToolsEnabled ? styles.pillButtonActive : styles.pillButtonMuted),
+          cursor: 'pointer',
+        }}
+      >
+        <Checkbox
+          checked={chatToolsEnabled}
+          onChange={(event) => setChatToolsEnabled(event.target.checked)}
+        />
+        <span>{t('工具')}</span>
+      </label>,
+    ];
+    const imageComposerParameters = [
+      renderPillDropdown({
+        key: 'image-group',
+        label: t('分组'),
+        value: selectedGroup,
+        displayValue: selectedGroup,
+        onChange: setSelectedGroup,
+        options: groupOptions
+          .filter((group) => group.has_available_token !== false)
+          .map((group) => ({
+            value: group.group,
+            label: group.group,
+          })),
+        disabled: groupLoading || groupOptions.length === 0,
+      }),
+      renderModelDropdown(false, activeModelLabel),
+      showImageAspectRatioSelector &&
+        renderPillDropdown({
+          key: 'image-aspect-ratio',
+          label: t('比例'),
+          value: aspectRatio,
+          displayValue: aspectRatio,
+          onChange: setAspectRatio,
+          options: availableAspectRatios.map((ratio) => ({
+            value: ratio,
+            label: ratio,
+          })),
+        }),
+      showImageResolutionSelector &&
+        renderPillDropdown({
+          key: 'image-resolution',
+          label: t('分辨率'),
+          value: resolution,
+          displayValue: resolution,
+          onChange: setResolution,
+          options: availableResolutions.map((res) => ({
+            value: res,
+            label: res,
+          })),
+        }),
+      renderPillDropdown({
+        key: 'image-quantity',
+        label: t('数量'),
+        value: quantity,
+        displayValue: String(quantity),
+        onChange: (val) => setQuantity(normalizeTaskCount(val)),
+        options: Array.from({ length: DEFAULT_MAX_BATCH_TASKS }, (_, index) => {
+          const value = index + 1;
+          return { value, label: String(value) };
+        }),
+      }),
+      selectedModelSupportsMaskEditing &&
+        referenceImages.length > 0 && (
+          <button
+            key='image-advanced'
+            type='button'
+            style={{
+              ...styles.pillButton,
+              ...(composerAdvancedVisible
+                ? styles.pillButtonActive
+                : styles.pillButtonMuted),
+              cursor: 'pointer',
+            }}
             onClick={() => setComposerAdvancedVisible((current) => !current)}
           >
-            {t('高级')}
-          </Button>
-        )}
-      </>
-    );
-    const showPromptAssetBar =
-      (isVideoMode && videoSelectedModelSupportsImageToVideo) ||
-      (!isVideoMode && selectedModelSupportsEditing);
+            <IconSetting size='small' />
+            <span>{t('高级')}</span>
+          </button>
+        ),
+    ].filter(Boolean);
     const videoComposerParameters = [
+      renderModelDropdown(true, activeModelLabel),
       showVideoAspectRatioSelector &&
         renderPillDropdown({
           key: 'video-aspect-ratio',
@@ -3220,7 +4456,6 @@ const ImageGeneration = () => {
             value: ratio,
             label: ratio,
           })),
-          extraContent: renderCustomSizeInputs(),
         }),
       showVideoResolutionSelector &&
         renderPillDropdown({
@@ -3233,7 +4468,6 @@ const ImageGeneration = () => {
             value: res,
             label: res,
           })),
-          extraContent: renderCustomSizeInputs(),
         }),
       renderPillDropdown({
         key: 'video-duration',
@@ -3248,199 +4482,404 @@ const ImageGeneration = () => {
         disabled: !videoSelectedModelData?.duration_options?.length,
       }),
     ].filter(Boolean);
-    const imageComposerParameters = [
-      showImageAspectRatioSelector &&
-        renderPillDropdown({
-          key: 'image-aspect-ratio',
-          label: t('比例'),
-          value: aspectRatio,
-          displayValue: aspectRatio,
-          onChange: setAspectRatio,
-          options: availableAspectRatios.map((ratio) => ({
-            value: ratio,
-            label: ratio,
-          })),
-          extraContent: renderCustomSizeInputs(),
-        }),
-      showImageResolutionSelector &&
-        renderPillDropdown({
-          key: 'image-resolution',
-          label: t('分辨率'),
-          value: resolution,
-          displayValue: resolution,
-          onChange: setResolution,
-          options: availableResolutions.map((res) => ({
-            value: res,
-            label: res,
-          })),
-          extraContent: renderCustomSizeInputs(),
-        }),
-      renderPillDropdown({
-        key: 'image-quantity',
-        label: t('数量'),
-        value: quantity,
-        displayValue: String(quantity),
-        onChange: (val) => setQuantity(normalizeTaskCount(val)),
-        options: Array.from({ length: DEFAULT_MAX_BATCH_TASKS }, (_, index) => {
-          const value = index + 1;
-          return {
-            value,
-            label: String(value),
-          };
-        }),
-      }),
-    ].filter(Boolean);
+    const activeParameters = isChatMode
+      ? chatComposerParameters
+      : isVideoMode
+        ? videoComposerParameters
+        : imageComposerParameters;
+    const showPromptAssetBar =
+      (isChatMode && chatAttachments.length > 0) ||
+      (isVideoMode && videoSelectedModelSupportsImageToVideo) ||
+      (isImageMode && selectedModelSupportsEditing);
 
     return (
-      <div style={styles.stage}>
-        <div style={styles.stageInner}>
-          <div>
-            <div style={styles.stageTitle}>{t('想创作什么？')}</div>
-            <div style={styles.stageSubtitle}>
-              {isVideoMode
-                ? t('输入视频创意描述，选择模型和生成参数后开始创作')
-                : t('输入创作描述，选择模型和生成参数后开始创作')}
-            </div>
-          </div>
-
-          <div style={styles.stagePanelWrap}>
-            <div style={styles.stagePanel}>
-              <div style={styles.promptArea}>
-                {showPromptAssetBar ? (
-                  <div style={styles.promptAssetBar}>{promptAssetControls}</div>
-                ) : null}
-                <TextArea
-                  placeholder={
-                    isVideoMode
-                      ? t('输入视频创意描述...')
-                      : t('输入创作描述...')
-                  }
-                  value={activePrompt}
-                  onChange={isVideoMode ? setVideoPrompt : setInspiration}
-                  onKeyDown={handleComposerKeyDown}
-                  onCompositionStart={() => {
-                    composerComposingRef.current = true;
-                  }}
-                  onCompositionEnd={() => {
-                    composerComposingRef.current = false;
-                  }}
-                  maxLength={5000}
-                  showClear
-                  borderless
-                  autosize={{ minRows: isMobile ? 4 : 6, maxRows: 12 }}
-                  style={styles.promptInput}
-                />
-                <div style={styles.promptInputHint}>
-                  <span>
-                    {activeModelSeries
-                      ? `${activeModelSeries} · ${activeModelLabel}`
-                      : activeModelLabel}
-                  </span>
-                  <span>{t('Enter 发送，Shift + Enter 换行')}</span>
-                </div>
-              </div>
-
-              <div style={styles.footer}>
-                <div style={styles.footerRow}>
-                  <div style={styles.footerRowLeft}>
-                    {renderModeDropdown(isVideoMode)}
-                    {renderModelDropdown(isVideoMode, activeModelLabel)}
-                  </div>
-
-                  <div style={styles.footerRowRight}>
-                    {isVideoMode ? videoComposerParameters : imageComposerParameters}
-                  </div>
-                </div>
-
-                <div style={{ ...styles.footerRow, justifyContent: 'flex-end' }}>
-                  <button
-                    aria-label={isVideoMode ? t('生成视频') : t('生成')}
-                    style={{
-                      ...styles.generateIconBtn,
-                      opacity: submitDisabled ? 0.55 : 1,
-                      pointerEvents: submitDisabled ? 'none' : 'auto',
-                      background: promptHasContent
-                        ? '#f8fafc'
-                        : 'rgba(15, 23, 42, 0.9)',
-                      borderColor: promptHasContent
-                        ? '#f8fafc'
-                        : 'rgba(148, 163, 184, 0.24)',
-                      color: promptHasContent ? '#020617' : '#94a3b8',
-                    }}
-                    onClick={handleComposerSubmit}
-                    disabled={submitDisabled}
-                    type='button'
+      <div style={styles.composerDock}>
+        <div style={styles.composerShell} data-canvas-composer={generationMode}>
+          <div style={styles.promptArea}>
+            {showPromptAssetBar ? (
+              <div style={styles.promptAssetBar}>
+                {isChatMode
+                  ? chatAttachments.map((file) =>
+                      renderReferenceThumb(file, () =>
+                        setChatAttachments((prev) =>
+                          prev.filter((item) => item.uid !== file.uid),
+                        ),
+                      ),
+                    )
+                  : null}
+                {isImageMode && selectedModelSupportsEditing ? (
+                  <Upload
+                    action=''
+                    accept='image/*'
+                    multiple
+                    fileList={referenceImages}
+                    onChange={handleImageUpload}
+                    showUploadList={false}
+                    beforeUpload={validateImageSize}
+                    disabled={referenceImageLimitReached}
                   >
-                    {submitLoading ? <Spin size='small' /> : <IconSend size='small' />}
-                  </button>
-                </div>
+                    {renderUploadIconButton({
+                      disabled: referenceImageLimitReached,
+                      title: referenceImageLimitReached
+                        ? t('已达到当前模型参考图上限')
+                        : t('上传图片'),
+                    })}
+                  </Upload>
+                ) : null}
+                {isImageMode && selectedModelSupportsEditing
+                  ? referenceImages.map((file) =>
+                      renderReferenceThumb(file, () => handleImageRemove(file)),
+                    )
+                  : null}
+                {isVideoMode && videoSelectedModelSupportsImageToVideo ? (
+                  <Upload
+                    action=''
+                    accept='image/*'
+                    multiple={false}
+                    fileList={videoReferenceImage ? [videoReferenceImage] : []}
+                    onChange={handleVideoReferenceUpload}
+                    showUploadList={false}
+                    beforeUpload={validateImageSize}
+                  >
+                    {renderUploadIconButton({ title: t('上传图片') })}
+                  </Upload>
+                ) : null}
+                {isVideoMode &&
+                videoSelectedModelSupportsImageToVideo &&
+                videoReferenceImage
+                  ? renderReferenceThumb(videoReferenceImage, handleVideoReferenceRemove)
+                  : null}
               </div>
+            ) : null}
+            <TextArea
+              aria-label={placeholder}
+              data-canvas-prompt-input={generationMode}
+              placeholder={placeholder}
+              value={activePrompt}
+              onChange={
+                isChatMode ? setChatPrompt : isVideoMode ? setVideoPrompt : setInspiration
+              }
+              onKeyDown={handleComposerKeyDown}
+              onCompositionStart={() => {
+                composerComposingRef.current = true;
+              }}
+              onCompositionEnd={() => {
+                composerComposingRef.current = false;
+              }}
+              maxLength={5000}
+              showClear
+              borderless
+              autosize={{ minRows: isMobile ? 2 : 3, maxRows: 8 }}
+              style={styles.promptInput}
+            />
+            <div style={styles.promptInputHint}>
+              <span>
+                {isChatMode
+                  ? activeModelLabel
+                  : activeModel?.model_series
+                    ? `${formatModelSeries(activeModel.model_series)} · ${activeModelLabel}`
+                    : activeModelLabel}
+              </span>
+              <span>{t('Enter 发送，Shift + Enter 换行')}</span>
             </div>
           </div>
 
-          {showMaskEditor && composerAdvancedVisible && (
-            <div
-              style={{
-                width: '100%',
-                maxWidth: 900,
-                margin: '0 auto',
-                border: '1px solid rgba(148, 163, 184, 0.2)',
-                borderRadius: 12,
-                background: 'rgba(8, 10, 15, 0.68)',
-                padding: 12,
-              }}
-            >
-              <Text
-                size='small'
+          <div style={styles.footer}>
+            <div style={styles.footerRow}>
+              <div style={styles.footerRowLeft}>{activeParameters}</div>
+              <div style={styles.footerRowRight}>
+                <button
+                  aria-label={
+                    isChatMode
+                      ? t('发送消息')
+                      : isVideoMode
+                        ? t('生成视频')
+                        : t('生成图片')
+                  }
+                  style={{
+                    ...styles.generateIconBtn,
+                    opacity: submitDisabled ? 0.55 : 1,
+                    pointerEvents: submitDisabled ? 'none' : 'auto',
+                    background: promptHasContent
+                      ? '#f8fafc'
+                      : 'rgba(15, 23, 42, 0.9)',
+                    borderColor: promptHasContent
+                      ? '#f8fafc'
+                      : 'rgba(148, 163, 184, 0.24)',
+                    color: promptHasContent ? '#020617' : '#94a3b8',
+                  }}
+                  onClick={handleComposerSubmit}
+                  disabled={submitDisabled}
+                  type='button'
+                >
+                  {submitLoading ? <Spin size='small' /> : <IconSend size='small' />}
+                </button>
+              </div>
+            </div>
+
+            {isImageMode &&
+            selectedModelSupportsMaskEditing &&
+            referenceImages.length > 0 &&
+            composerAdvancedVisible ? (
+              <div
                 style={{
-                  display: 'block',
-                  marginBottom: 8,
-                  color: 'rgba(226, 232, 240, 0.72)',
+                  borderTop: '1px solid rgba(148, 163, 184, 0.16)',
+                  paddingTop: 10,
                 }}
               >
-                {t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
-              </Text>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                {maskImage ? renderReferenceThumb(maskImage, handleMaskRemove) : null}
-                <Upload
-                  action=''
-                  accept='image/*'
-                  multiple={false}
-                  fileList={maskImage ? [maskImage] : []}
-                  onChange={handleMaskUpload}
-                  showUploadList={false}
-                  beforeUpload={validateImageSize}
-                  disabled={referenceImages.length === 0}
+                <Text
+                  size='small'
+                  style={{
+                    display: 'block',
+                    marginBottom: 8,
+                    color: 'rgba(226, 232, 240, 0.72)',
+                  }}
                 >
-                  <div
-                    style={{
-                      ...styles.addImageBtn,
-                      opacity: referenceImages.length === 0 ? 0.5 : 1,
-                      cursor: referenceImages.length === 0 ? 'not-allowed' : 'pointer',
-                    }}
+                  {t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
+                </Text>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {maskImage ? renderReferenceThumb(maskImage, handleMaskRemove) : null}
+                  <Upload
+                    action=''
+                    accept='image/*'
+                    multiple={false}
+                    fileList={maskImage ? [maskImage] : []}
+                    onChange={handleMaskUpload}
+                    showUploadList={false}
+                    beforeUpload={validateImageSize}
+                    disabled={referenceImages.length === 0}
                   >
-                    <IconSetting size='large' />
-                  </div>
-                </Upload>
+                    <div
+                      style={{
+                        ...styles.addImageBtn,
+                        opacity: referenceImages.length === 0 ? 0.5 : 1,
+                        cursor:
+                          referenceImages.length === 0 ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      <IconSetting size='large' />
+                    </div>
+                  </Upload>
+                </div>
               </div>
-            </div>
-          )}
+            ) : null}
+          </div>
         </div>
       </div>
     );
   };
 
-  const renderModernRightPanel = () => (
+  const renderAssetCard = (asset) => {
+    const imageUrl = getAssetImageUrl(asset);
+    return (
+      <div key={getAssetKey(asset)} style={styles.assetCard} data-canvas-asset-card='true'>
+        {imageUrl ? (
+          <img src={imageUrl} alt='' style={styles.assetThumb} />
+        ) : (
+          <div style={{ ...styles.assetThumb, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <IconImage size='large' />
+          </div>
+        )}
+        <div style={{ padding: '8px 8px 0' }}>
+          <Text size='small' ellipsis={{ rows: 2 }}>
+            {asset.prompt || t('图片资产')}
+          </Text>
+        </div>
+        <div style={styles.assetActions}>
+          <Button size='small' type='primary' onClick={() => insertAssetIntoCurrentMode(asset)}>
+            {generationMode === CANVAS_MODE_CHAT
+              ? t('插入')
+              : generationMode === CANVAS_MODE_VIDEO
+                ? t('首帧')
+                : t('参考图')}
+          </Button>
+          <Button size='small' onClick={() => setSelectedAssetPreview(asset)}>
+            {t('预览')}
+          </Button>
+          <Button
+            size='small'
+            aria-label={t('下载图片')}
+            icon={<IconDownload />}
+            onClick={() => downloadAsset(asset)}
+          />
+          <Popconfirm
+            title={t('确认删除该资产？')}
+            content={t('删除后无法恢复，请确认是否继续')}
+            okType='danger'
+            onConfirm={() => deleteAsset(asset)}
+          >
+            <Button
+              size='small'
+              type='danger'
+              theme='borderless'
+              aria-label={t('删除资产')}
+              icon={<IconDelete />}
+            />
+          </Popconfirm>
+        </div>
+      </div>
+    );
+  };
+
+  const renderAssetDrawer = () => (
+    <SideSheet
+      visible={assetLibraryVisible}
+      title={t('资产库')}
+      width={isMobile ? '100%' : 560}
+      onCancel={() => setAssetLibraryVisible(false)}
+      bodyStyle={{ padding: isMobile ? 12 : 16 }}
+      data-canvas-asset-drawer='true'
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {selectedAssetPreview ? (
+          <div style={styles.detailPanel}>
+            <div style={styles.detailHeader}>
+              <Text strong>{t('资产预览')}</Text>
+              <Button size='small' onClick={() => setSelectedAssetPreview(null)}>
+                {t('收起')}
+              </Button>
+            </div>
+            <div style={{ padding: 12 }}>
+              <img
+                src={getAssetImageUrl(selectedAssetPreview)}
+                alt=''
+                style={{ width: '100%', maxHeight: 360, objectFit: 'contain' }}
+              />
+              <Text type='tertiary' size='small' style={{ display: 'block', marginTop: 8 }}>
+                {selectedAssetPreview.prompt || t('暂无提示词')}
+              </Text>
+            </div>
+          </div>
+        ) : null}
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+          <Text type='tertiary' size='small'>
+            {t('资产总数')}：{canvasAssetsTotal}
+          </Text>
+          <Button
+            size='small'
+            icon={<IconRefresh />}
+            onClick={() => loadCanvasAssets(canvasAssetPage || 1)}
+          >
+            {t('刷新')}
+          </Button>
+        </div>
+        <Spin spinning={canvasAssetsLoading}>
+          {canvasAssetsError ? (
+            renderSidebarEmpty(
+              t('加载资产失败'),
+              canvasAssetsError,
+              <Button size='small' onClick={() => loadCanvasAssets(1)}>
+                {t('重试')}
+              </Button>,
+            )
+          ) : canvasAssets.length === 0 ? (
+            renderSidebarEmpty(t('暂无图片资产'), t('完成图片生成后会出现在这里'))
+          ) : (
+            <div style={styles.assetGrid}>{canvasAssets.map(renderAssetCard)}</div>
+          )}
+        </Spin>
+        <div style={styles.drawerFooterPager}>
+          <Button
+            size='small'
+            disabled={canvasAssetPage <= 1 || canvasAssetsLoading}
+            onClick={() => loadCanvasAssets(Math.max(1, canvasAssetPage - 1))}
+          >
+            {t('上一页')}
+          </Button>
+          <Text type='tertiary' size='small'>
+            {t('第 {{page}} 页', { page: canvasAssetPage })}
+          </Text>
+          <Button
+            size='small'
+            disabled={
+              canvasAssetsLoading ||
+              canvasAssetPage * DEFAULT_ASSET_PAGE_SIZE >= canvasAssetsTotal
+            }
+            onClick={() => loadCanvasAssets(canvasAssetPage + 1)}
+          >
+            {t('下一页')}
+          </Button>
+        </div>
+      </div>
+    </SideSheet>
+  );
+
+  const renderWorkspace = () => (
     <div style={styles.rightPanel}>
-      <div style={styles.rightContent}>{renderComposer()}</div>
+      <div style={styles.workspaceTopbar}>
+        <div style={styles.workspaceTopbarLeft}>
+          {isMobile ? (
+            <Button
+              type='tertiary'
+              aria-label={t('打开任务栏')}
+              data-canvas-mobile-taskbar-trigger='true'
+              icon={<IconMenu />}
+              onClick={() => setMobileTaskbarVisible(true)}
+            />
+          ) : null}
+          {renderModeSwitch()}
+        </div>
+        <Button
+          icon={<IconArchive />}
+          type='tertiary'
+          aria-label={t('打开资产库')}
+          data-canvas-asset-library-trigger='true'
+          onClick={() => setAssetLibraryVisible(true)}
+        >
+          {t('资产库')}
+        </Button>
+      </div>
+      <div style={styles.workspaceBody}>
+        {renderMainContent()}
+        {renderComposer()}
+      </div>
     </div>
   );
 
   return (
     <div style={styles.container}>
-      <div style={styles.contentColumn}>
-        {renderModernRightPanel()}
-      </div>
+      {!isMobile ? renderTaskSidebar() : null}
+      {renderWorkspace()}
+      {isMobile ? (
+        <SideSheet
+          visible={mobileTaskbarVisible}
+          title={currentTaskSidebarTitle}
+          width='100%'
+          onCancel={() => setMobileTaskbarVisible(false)}
+          bodyStyle={{ padding: 0 }}
+        >
+          {renderTaskSidebar()}
+        </SideSheet>
+      ) : null}
+      {renderAssetDrawer()}
+      <ImageGenerationTaskModal
+        visible={taskModalVisible}
+        task={selectedTask}
+        onClose={() => setTaskModalVisible(false)}
+        onRetrySuccess={(task) => {
+          updateTaskInList(task);
+          setSelectedTask(task);
+        }}
+        onDeleted={(taskId) => {
+          setTasks((prev) => prev.filter((task) => task.id !== taskId));
+          setSelectedTask(null);
+          setTaskModalVisible(false);
+        }}
+      />
+      <VideoGenerationTaskModal
+        visible={videoTaskModalVisible}
+        task={videoSelectedTask}
+        onClose={() => setVideoTaskModalVisible(false)}
+        onRetrySuccess={(task) => {
+          updateVideoTaskInList(task);
+          setVideoSelectedTask(task);
+        }}
+        onDeleted={(taskId) => {
+          setVideoTasks((prev) => prev.filter((task) => task.id !== taskId));
+          setVideoSelectedTask(null);
+          setVideoTaskModalVisible(false);
+        }}
+      />
     </div>
   );
 };
