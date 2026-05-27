@@ -5191,15 +5191,6 @@ const ImageGeneration = () => {
             />
           ) : null}
         </div>
-        <Button
-          icon={<IconArchive />}
-          type='tertiary'
-          aria-label={t('打开资产库')}
-          data-canvas-asset-library-trigger='true'
-          onClick={() => setAssetLibraryVisible(true)}
-        >
-          {t('资产库')}
-        </Button>
       </div>
       <div style={styles.workspaceBody}>
         {renderMainContent()}
