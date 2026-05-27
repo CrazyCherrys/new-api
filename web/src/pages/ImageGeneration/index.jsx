@@ -192,6 +192,123 @@ const mergeTaskCollections = (baseTasks, incomingTasks, maxItems) => {
   return mergedTasks;
 };
 
+const normalizeComparableId = (value) => {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  return String(value);
+};
+
+const buildComparableIdSet = (values) => {
+  const list =
+    values instanceof Set ? Array.from(values) : [].concat(values || []);
+  return new Set(
+    list
+      .map(normalizeComparableId)
+      .filter((value) => value !== ''),
+  );
+};
+
+const parseCanvasTaskParams = (params) => {
+  if (!params) {
+    return {};
+  }
+  if (typeof params === 'object' && !Array.isArray(params)) {
+    return params;
+  }
+  if (typeof params !== 'string') {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(params);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+const collectTaskReferenceValues = (raw) => {
+  const values = [];
+  const append = (item) => {
+    if (!item) {
+      return;
+    }
+    if (typeof item === 'string') {
+      const trimmed = item.trim();
+      if (trimmed) {
+        values.push(trimmed);
+      }
+      return;
+    }
+    if (typeof item === 'object') {
+      append(item.url || item.image_url || item.thumbnail_url);
+    }
+  };
+
+  if (Array.isArray(raw)) {
+    raw.forEach(append);
+  } else {
+    append(raw);
+  }
+
+  return Array.from(new Set(values));
+};
+
+const buildTaskReferenceFiles = (values, prefix) =>
+  values.map((url, index) => ({
+    uid: `${prefix}-${index}`,
+    name: `${prefix}-${index + 1}`,
+    url,
+  }));
+
+const getImageTaskReferenceMeta = (task) => {
+  const params = parseCanvasTaskParams(task?.params);
+  const referenceValues = [
+    ...collectTaskReferenceValues(params.reference_image),
+    ...collectTaskReferenceValues(params.reference_images),
+  ];
+  const maskValues = collectTaskReferenceValues(params.mask);
+  const referenceCount =
+    referenceValues.length || Math.max(0, Number(task?.reference_count) || 0);
+
+  return {
+    referenceFiles: buildTaskReferenceFiles(referenceValues, 'task-reference'),
+    referenceCount,
+    maskFiles: buildTaskReferenceFiles(maskValues, 'task-mask'),
+    hasMask:
+      maskValues.length > 0 ||
+      task?.has_mask === true ||
+      task?.has_mask === 'true',
+  };
+};
+
+const VIDEO_REFERENCE_REQUEST_TYPES = new Set([
+  'image_to_video',
+  'reference_video',
+  'first_tail_video',
+  'remix_video',
+]);
+
+const getVideoTaskReferenceMeta = (task) => {
+  const params = parseCanvasTaskParams(task?.params || task?.request_params);
+  const referenceValues = [
+    ...collectTaskReferenceValues(task?.reference_image),
+    ...collectTaskReferenceValues(task?.reference_images),
+    ...collectTaskReferenceValues(params.reference_image),
+    ...collectTaskReferenceValues(params.reference_images),
+  ];
+  const hasReference =
+    referenceValues.length > 0 ||
+    VIDEO_REFERENCE_REQUEST_TYPES.has(task?.request_type);
+
+  return {
+    referenceFiles: buildTaskReferenceFiles(referenceValues, 'video-reference'),
+    hasReference,
+  };
+};
+
 const ImageGeneration = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -437,6 +554,32 @@ const ImageGeneration = () => {
     sortOrder: taskSortOrder,
   };
   pollingIntervalRef.current = pollingIntervalSeconds;
+
+  const taskMatchesTimeFilter = (task, timeFilter) => {
+    if (!timeFilter) {
+      return true;
+    }
+    const createdTime = Number(task?.created_time) || 0;
+    if (createdTime <= 0) {
+      return false;
+    }
+    const { start, end } = computeTimeRange(timeFilter);
+    return start > 0 && createdTime >= start && (!end || createdTime <= end);
+  };
+
+  const imageTaskMatchesCurrentTaskFilters = (task) => {
+    if (!task) {
+      return false;
+    }
+    if (taskStatusFilter && task.status !== taskStatusFilter) {
+      return false;
+    }
+    if (taskModelFilter && task.model_id !== taskModelFilter) {
+      return false;
+    }
+    return taskMatchesTimeFilter(task, taskTimeFilter);
+  };
+
   useEffect(() => {
     const latestCompletedTime = tasks.reduce((latest, task) => {
       const completedAt = Number(task?.completed_time) || 0;
@@ -1150,6 +1293,93 @@ const ImageGeneration = () => {
     }
   };
 
+  const removeImageTasksFromLocalState = (taskIds, options = {}) => {
+    const idSet = buildComparableIdSet(taskIds);
+    if (idSet.size === 0) {
+      return;
+    }
+    const hasExplicitDecrementTotal = Object.prototype.hasOwnProperty.call(
+      options,
+      'decrementTotal',
+    );
+    const parsedDecrementTotal = Number(options.decrementTotal);
+    const fallbackDecrementTotal = tasks.filter((task) =>
+      idSet.has(normalizeComparableId(task.id)),
+    ).length;
+    const decrementTotal =
+      hasExplicitDecrementTotal && Number.isFinite(parsedDecrementTotal)
+        ? parsedDecrementTotal
+        : fallbackDecrementTotal;
+    const selectedTaskRemoved =
+      selectedTask && idSet.has(normalizeComparableId(selectedTask.id));
+
+    setTasks((prevTasks) =>
+      prevTasks.filter((task) => !idSet.has(normalizeComparableId(task.id))),
+    );
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      idSet.forEach((taskId) => {
+        next.delete(taskId);
+        next.delete(Number(taskId));
+      });
+      return next;
+    });
+    setTaskTotal((prev) => Math.max(0, prev - decrementTotal));
+    if (selectedTaskRemoved) {
+      taskDetailRequestSeqRef.current += 1;
+      setTaskModalVisible(false);
+    }
+    setSelectedTask((prev) => {
+      if (!prev || !idSet.has(normalizeComparableId(prev.id))) {
+        return prev;
+      }
+      return null;
+    });
+  };
+
+  const removeVideoTasksFromLocalState = (taskIds, options = {}) => {
+    const idSet = buildComparableIdSet(taskIds);
+    if (idSet.size === 0) {
+      return;
+    }
+    const hasExplicitDecrementTotal = Object.prototype.hasOwnProperty.call(
+      options,
+      'decrementTotal',
+    );
+    const parsedDecrementTotal = Number(options.decrementTotal);
+    const fallbackDecrementTotal = videoTasks.filter((task) =>
+      idSet.has(normalizeComparableId(task.id)),
+    ).length;
+    const decrementTotal =
+      hasExplicitDecrementTotal && Number.isFinite(parsedDecrementTotal)
+        ? parsedDecrementTotal
+        : fallbackDecrementTotal;
+    const selectedTaskRemoved =
+      videoSelectedTask && idSet.has(normalizeComparableId(videoSelectedTask.id));
+
+    setVideoTasks((prevTasks) =>
+      prevTasks.filter((task) => !idSet.has(normalizeComparableId(task.id))),
+    );
+    setVideoSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      idSet.forEach((taskId) => {
+        next.delete(taskId);
+        next.delete(Number(taskId));
+      });
+      return next;
+    });
+    setVideoTaskTotal((prev) => Math.max(0, prev - decrementTotal));
+    if (selectedTaskRemoved) {
+      setVideoTaskModalVisible(false);
+    }
+    setVideoSelectedTask((prev) => {
+      if (!prev || !idSet.has(normalizeComparableId(prev.id))) {
+        return prev;
+      }
+      return null;
+    });
+  };
+
   const handleTaskCardClick = async (task) => {
     if (!task?.id) return;
 
@@ -1272,28 +1502,23 @@ const ImageGeneration = () => {
       );
 
       const results = await Promise.allSettled(deletePromises);
-      const successCount = results.filter(
-        (r) => r.status === 'fulfilled',
-      ).length;
-      const failCount = results.filter((r) => r.status === 'rejected').length;
+      const successfulResultIndexes = results
+        .map((result, index) =>
+          result.status === 'fulfilled' && result.value.data?.success
+            ? index
+            : -1,
+        )
+        .filter((index) => index >= 0);
+      const successCount = successfulResultIndexes.length;
+      const failCount = results.length - successCount;
 
       if (successCount > 0) {
         showSuccess(t('成功删除 {{count}} 个任务', { count: successCount }));
+        const selectedIds = Array.from(selectedTaskIds);
         const deletedTaskIds = new Set(
-          Array.from(selectedTaskIds).filter(
-            (taskId, index) => results[index]?.status === 'fulfilled',
-          ),
+          successfulResultIndexes.map((index) => selectedIds[index]),
         );
-        setTasks((prevTasks) =>
-          prevTasks.filter((task) => !deletedTaskIds.has(task.id)),
-        );
-        setTaskTotal((prev) => Math.max(0, prev - successCount));
-        if (selectedTask && deletedTaskIds.has(selectedTask.id)) {
-          taskDetailRequestSeqRef.current += 1;
-          setTaskModalVisible(false);
-          setSelectedTask(null);
-        }
-        setSelectedTaskIds(new Set());
+        removeImageTasksFromLocalState(deletedTaskIds);
       }
 
       if (failCount > 0) {
@@ -1329,18 +1554,16 @@ const ImageGeneration = () => {
           API.delete(`/api/video-generation/tasks/${taskId}`),
         ),
       );
+      const selectedIds = Array.from(videoSelectedTaskIds);
       const successIds = new Set(
-        Array.from(videoSelectedTaskIds).filter(
-          (taskId, index) => results[index]?.status === 'fulfilled',
-        ),
+        selectedIds.filter((taskId, index) => {
+          const result = results[index];
+          return result?.status === 'fulfilled' && result.value.data?.success;
+        }),
       );
       if (successIds.size > 0) {
         showSuccess(t('成功删除 {{count}} 个任务', { count: successIds.size }));
-        setVideoTasks((prev) =>
-          prev.filter((task) => !successIds.has(task.id)),
-        );
-        setVideoTaskTotal((prev) => Math.max(0, prev - successIds.size));
-        setVideoSelectedTaskIds(new Set());
+        removeVideoTasksFromLocalState(successIds);
       }
     } catch (error) {
       showError(error.message || t('批量删除失败'));
@@ -1374,13 +1597,12 @@ const ImageGeneration = () => {
         eventSource.close();
         sseRef.current = null;
         setSseConnected(false);
-        startPolling();
       };
 
       sseRef.current = eventSource;
     } catch (error) {
       console.error('Failed to connect SSE:', error);
-      startPolling();
+      setSseConnected(false);
     }
   };
 
@@ -2470,6 +2692,15 @@ const ImageGeneration = () => {
         prev.filter((item) => getAssetKey(item) !== assetKey),
       );
       setCanvasAssetsTotal((prev) => Math.max(0, prev - 1));
+      removeImageTasksFromLocalState([assetKey], {
+        decrementTotal: imageTaskMatchesCurrentTaskFilters({
+          ...asset,
+          id: assetKey,
+          status: 'success',
+        })
+          ? 1
+          : 0,
+      });
       if (selectedAssetPreview && getAssetKey(selectedAssetPreview) === assetKey) {
         setSelectedAssetPreview(null);
       }
@@ -3928,6 +4159,20 @@ const ImageGeneration = () => {
     );
   };
 
+  const renderTaskReferenceSummary = (title, summary) => {
+    if (!summary) {
+      return null;
+    }
+    return (
+      <div style={styles.metaBlock}>
+        <Text type='tertiary' size='small'>
+          {title}
+        </Text>
+        <Text style={{ wordBreak: 'break-word' }}>{summary}</Text>
+      </div>
+    );
+  };
+
   const renderImagePreview = (task) => {
     if (!task) {
       return null;
@@ -3968,6 +4213,7 @@ const ImageGeneration = () => {
         </div>
       );
     }
+    const taskReferenceMeta = getImageTaskReferenceMeta(selectedTask);
     return (
       <div style={styles.detailPanel}>
         <div style={styles.detailHeader}>
@@ -4008,8 +4254,25 @@ const ImageGeneration = () => {
             {selectedTask.error_message
               ? renderMetaBlock(t('失败信息'), selectedTask.error_message)
               : null}
-            {renderReferenceStrip(t('当前参考图'), referenceImages)}
-            {renderReferenceStrip(t('当前遮罩'), maskImage ? [maskImage] : [])}
+            {taskReferenceMeta.referenceFiles.length > 0
+              ? renderReferenceStrip(
+                  t('任务参考图'),
+                  taskReferenceMeta.referenceFiles,
+                )
+              : renderTaskReferenceSummary(
+                  t('任务参考图'),
+                  taskReferenceMeta.referenceCount > 0
+                    ? t('参考图 {{count}} 张', {
+                        count: taskReferenceMeta.referenceCount,
+                      })
+                    : null,
+                )}
+            {taskReferenceMeta.maskFiles.length > 0
+              ? renderReferenceStrip(t('任务遮罩'), taskReferenceMeta.maskFiles)
+              : renderTaskReferenceSummary(
+                  t('任务遮罩'),
+                  taskReferenceMeta.hasMask ? t('含遮罩') : null,
+                )}
           </div>
         </div>
       </div>
@@ -4063,6 +4326,7 @@ const ImageGeneration = () => {
       );
     }
     const videoUrl = videoSelectedTask.video_url || videoSelectedTask.result_url;
+    const videoReferenceMeta = getVideoTaskReferenceMeta(videoSelectedTask);
     return (
       <div style={styles.detailPanel}>
         <div style={styles.detailHeader}>
@@ -4102,10 +4366,15 @@ const ImageGeneration = () => {
             {videoSelectedTask.fail_reason
               ? renderMetaBlock(t('失败信息'), videoSelectedTask.fail_reason)
               : null}
-            {renderReferenceStrip(
-              t('当前首帧图 / 参考图'),
-              videoReferenceImage ? [videoReferenceImage] : [],
-            )}
+            {videoReferenceMeta.referenceFiles.length > 0
+              ? renderReferenceStrip(
+                  t('任务首帧图 / 参考图'),
+                  videoReferenceMeta.referenceFiles,
+                )
+              : renderTaskReferenceSummary(
+                  t('任务首帧图 / 参考图'),
+                  videoReferenceMeta.hasReference ? t('含参考图') : null,
+                )}
           </div>
         </div>
       </div>
@@ -4861,9 +5130,7 @@ const ImageGeneration = () => {
           setSelectedTask(task);
         }}
         onDeleted={(taskId) => {
-          setTasks((prev) => prev.filter((task) => task.id !== taskId));
-          setSelectedTask(null);
-          setTaskModalVisible(false);
+          removeImageTasksFromLocalState([taskId]);
         }}
       />
       <VideoGenerationTaskModal
@@ -4875,9 +5142,7 @@ const ImageGeneration = () => {
           setVideoSelectedTask(task);
         }}
         onDeleted={(taskId) => {
-          setVideoTasks((prev) => prev.filter((task) => task.id !== taskId));
-          setVideoSelectedTask(null);
-          setVideoTaskModalVisible(false);
+          removeVideoTasksFromLocalState([taskId]);
         }}
       />
     </div>
