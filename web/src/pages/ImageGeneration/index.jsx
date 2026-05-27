@@ -27,7 +27,6 @@ import {
   Upload,
   Spin,
   Typography,
-  Input,
   TextArea,
   SideSheet,
   Empty,
@@ -45,7 +44,6 @@ import {
   IconVideo,
   IconSetting,
   IconUpload,
-  IconPlus,
   IconCommentStroked,
   IconArchive,
   IconRefresh,
@@ -54,7 +52,6 @@ import {
   IconAlertTriangle,
   IconPlayCircle,
   IconExternalOpen,
-  IconMore,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
@@ -398,17 +395,6 @@ const ImageGeneration = () => {
     getStoredValue(STORAGE_KEYS.CHAT_TOOLS, 'false') === 'true',
   );
   const [chatAttachments, setChatAttachments] = useState([]);
-  const [selectedChatId, setSelectedChatId] = useState('local-chat-default');
-  const [chatTasks, setChatTasks] = useState(() => [
-    {
-      id: 'local-chat-default',
-      title: t('新对话'),
-      summary: t('从底部输入器发送第一条消息'),
-      status: t('草稿'),
-      updated_at: Math.floor(Date.now() / 1000),
-      messages: [],
-    },
-  ]);
   const [canvasSessions, setCanvasSessions] = useState({
     [CANVAS_MODE_CHAT]: [],
     [CANVAS_MODE_IMAGE]: [],
@@ -433,9 +419,6 @@ const ImageGeneration = () => {
   const [canvasMessages, setCanvasMessages] = useState([]);
   const [canvasMessagesLoading, setCanvasMessagesLoading] = useState(false);
   const [canvasMessagesError, setCanvasMessagesError] = useState('');
-  const [canvasSidebarCollapsed, setCanvasSidebarCollapsed] = useState(false);
-  const [hoveredCanvasSessionId, setHoveredCanvasSessionId] = useState(null);
-  const [deletingCanvasSession, setDeletingCanvasSession] = useState(false);
 
   const [selectedSeries, setSelectedSeries] = useState(() =>
     getStoredValue(STORAGE_KEYS.SERIES, ''),
@@ -553,6 +536,7 @@ const ImageGeneration = () => {
   const pendingCanvasPrefillRef = useRef(null);
   const prefillGroupFallbackNoticeShownRef = useRef(false);
   const composerComposingRef = useRef(false);
+  const blankCanvasSelectionModesRef = useRef({});
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
   const [userCustomWorkerKeyEnabled, setUserCustomWorkerKeyEnabled] =
     useState(false);
@@ -579,9 +563,6 @@ const ImageGeneration = () => {
   const showsReliableTaskTotal = !canUseTaskCursorPagination;
   const hasNextTaskPage = taskHasMore;
   const currentCanvasSessions = canvasSessions[generationMode] || [];
-  const currentCanvasSessionsLoading =
-    canvasSessionsLoading[generationMode] || false;
-  const currentCanvasSessionError = canvasSessionErrors[generationMode] || '';
   const selectedCanvasSessionId = selectedCanvasSessionIds[generationMode];
   const selectedCanvasSession = currentCanvasSessions.find(
     (session) => session.id === selectedCanvasSessionId,
@@ -1056,6 +1037,12 @@ const ImageGeneration = () => {
         if (currentId && sessions.some((session) => session.id === currentId)) {
           return prev;
         }
+        if (blankCanvasSelectionModesRef.current[normalizedMode]) {
+          return {
+            ...prev,
+            [normalizedMode]: null,
+          };
+        }
         return {
           ...prev,
           [normalizedMode]: sessions[0]?.id || null,
@@ -1095,6 +1082,7 @@ const ImageGeneration = () => {
       throw new Error(res.data.message || t('创建会话失败'));
     }
     const session = res.data.data;
+    blankCanvasSelectionModesRef.current[normalizedMode] = false;
     canvasSessionsRequestSeqRef.current[normalizedMode] =
       (canvasSessionsRequestSeqRef.current[normalizedMode] || 0) + 1;
     setCanvasSessionErrorForMode(normalizedMode, '');
@@ -3030,13 +3018,20 @@ const ImageGeneration = () => {
     setMobileTaskbarVisible(false);
   };
 
-  const handleCreateChat = async () => {
+  const handleNewBlankChat = () => {
+    blankCanvasSelectionModesRef.current[CANVAS_MODE_CHAT] = true;
     setGenerationMode(CANVAS_MODE_CHAT);
-    try {
-      await createCanvasSession(CANVAS_MODE_CHAT);
-    } catch (error) {
-      showError(error.message || t('创建会话失败'));
-    }
+    setSelectedCanvasSessionIds((prev) => ({
+      ...prev,
+      [CANVAS_MODE_CHAT]: null,
+    }));
+    setChatPrompt('');
+    setChatAttachments([]);
+    setMobileTaskbarVisible(false);
+  };
+
+  const handleProjectEntryClick = () => {
+    showError(t('暂未开放'));
   };
 
   const handleSendChatMessage = async () => {
@@ -3061,26 +3056,6 @@ const ImageGeneration = () => {
       setChatAttachments([]);
     } catch (error) {
       showError(error.message || t('发送失败'));
-    }
-  };
-
-  const handleNewImageTask = async () => {
-    setGenerationMode(CANVAS_MODE_IMAGE);
-    setSelectedTask(null);
-    try {
-      await createCanvasSession(CANVAS_MODE_IMAGE);
-    } catch (error) {
-      showError(error.message || t('创建会话失败'));
-    }
-  };
-
-  const handleNewVideoTask = async () => {
-    setGenerationMode(CANVAS_MODE_VIDEO);
-    setVideoSelectedTask(null);
-    try {
-      await createCanvasSession(CANVAS_MODE_VIDEO);
-    } catch (error) {
-      showError(error.message || t('创建会话失败'));
     }
   };
 
@@ -3236,16 +3211,48 @@ const ImageGeneration = () => {
       borderRight: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-bg-0)',
     },
-    leftPanelCollapsed: {
-      width: 48,
-      minWidth: 48,
-      alignItems: 'center',
-      paddingTop: 10,
+    sidebarNav: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+      padding: 12,
     },
-    leftContent: {
-      flex: 1,
-      overflowY: 'auto',
-      padding: 16,
+    sidebarNavItem: {
+      width: '100%',
+      minHeight: 42,
+      border: '1px solid transparent',
+      borderRadius: 8,
+      background: 'transparent',
+      color: 'var(--semi-color-text-0)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '0 12px',
+      cursor: 'pointer',
+      textAlign: 'left',
+      fontSize: 14,
+      transition: 'background 0.16s, border-color 0.16s, color 0.16s',
+    },
+    sidebarNavItemActive: {
+      borderColor: 'var(--semi-color-primary-light-default)',
+      background: 'var(--semi-color-primary-light-default)',
+      color: 'var(--semi-color-primary)',
+    },
+    sidebarNavItemMuted: {
+      color: 'var(--semi-color-text-2)',
+    },
+    sidebarNavIcon: {
+      width: 18,
+      minWidth: 18,
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sidebarNavLabel: {
+      minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
     },
     rightPanel: {
       flex: 1,
@@ -3638,122 +3645,6 @@ const ImageGeneration = () => {
       alignContent: 'start',
       flexShrink: 0,
     },
-    taskbarHeader: {
-      padding: 14,
-      borderBottom: '1px solid var(--semi-color-border)',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 10,
-    },
-    taskbarTitleRow: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 8,
-    },
-    taskbarTitle: {
-      fontSize: 15,
-      fontWeight: 650,
-      color: 'var(--semi-color-text-0)',
-    },
-    taskbarMeta: {
-      color: 'var(--semi-color-text-2)',
-      fontSize: 12,
-    },
-    taskList: {
-      flex: 1,
-      minHeight: 0,
-      overflowY: 'auto',
-      padding: 10,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 8,
-    },
-    taskListItem: {
-      width: '100%',
-      border: '1px solid var(--semi-color-border)',
-      borderRadius: 8,
-      background: 'var(--semi-color-bg-0)',
-      padding: 10,
-      cursor: 'pointer',
-      textAlign: 'left',
-      display: 'flex',
-      gap: 10,
-      alignItems: 'center',
-      transition: 'border-color 0.16s, background 0.16s',
-    },
-    sessionListItem: {
-      minHeight: 42,
-      padding: '8px 8px 8px 10px',
-      gap: 6,
-    },
-    sessionListTitle: {
-      fontSize: 13,
-      fontWeight: 600,
-      lineHeight: 1.35,
-      color: 'var(--semi-color-text-0)',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap',
-    },
-    sessionMenuButton: {
-      width: 28,
-      height: 28,
-      minWidth: 28,
-      transition: 'opacity 0.16s',
-    },
-    taskListItemActive: {
-      borderColor: 'var(--semi-color-primary)',
-      background: 'var(--semi-color-primary-light-default)',
-    },
-    taskListText: {
-      flex: 1,
-      minWidth: 0,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 5,
-    },
-    taskListTitle: {
-      fontSize: 13,
-      fontWeight: 600,
-      lineHeight: 1.35,
-      color: 'var(--semi-color-text-0)',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      display: '-webkit-box',
-      WebkitLineClamp: 2,
-      WebkitBoxOrient: 'vertical',
-    },
-    taskListMetaRow: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 6,
-      minWidth: 0,
-      color: 'var(--semi-color-text-2)',
-      fontSize: 12,
-    },
-    taskThumb: {
-      width: 48,
-      height: 48,
-      borderRadius: 8,
-      objectFit: 'cover',
-      flexShrink: 0,
-      background: 'var(--semi-color-fill-0)',
-      border: '1px solid var(--semi-color-border)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      color: 'var(--semi-color-text-2)',
-    },
-    sidebarFooter: {
-      padding: '10px 14px',
-      borderTop: '1px solid var(--semi-color-border)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 8,
-    },
     workspaceTopbar: {
       height: 56,
       flexShrink: 0,
@@ -3771,33 +3662,32 @@ const ImageGeneration = () => {
       gap: 8,
       minWidth: 0,
     },
-    modeSwitch: {
+    composerModeSwitch: {
       display: 'inline-flex',
       alignItems: 'center',
       gap: 4,
       padding: 4,
-      borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
+      borderRadius: 999,
+      border: '1px solid rgba(148, 163, 184, 0.24)',
+      background: 'rgba(15, 23, 42, 0.72)',
     },
-    modeButton: {
-      minHeight: 32,
+    composerModeButton: {
+      minHeight: 28,
       border: 'none',
-      borderRadius: 6,
-      padding: isMobile ? '0 9px' : '0 12px',
+      borderRadius: 999,
+      padding: isMobile ? '0 8px' : '0 10px',
       background: 'transparent',
-      color: 'var(--semi-color-text-1)',
+      color: 'rgba(226, 232, 240, 0.82)',
       display: 'inline-flex',
       alignItems: 'center',
       gap: 6,
       cursor: 'pointer',
-      fontSize: 13,
+      fontSize: 12,
       whiteSpace: 'nowrap',
     },
-    modeButtonActive: {
-      color: 'var(--semi-color-primary)',
-      background: 'var(--semi-color-bg-0)',
-      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)',
+    composerModeButtonActive: {
+      color: '#fff',
+      background: 'rgba(59, 130, 246, 0.32)',
     },
     workspaceBody: {
       flex: 1,
@@ -4027,14 +3917,6 @@ const ImageGeneration = () => {
   const selectedGroupOption = groupOptions.find(
     (group) => group.group === selectedGroup,
   );
-  const selectedChat = chatTasks.find((chat) => chat.id === selectedChatId);
-  const currentTaskSidebarTitle =
-    generationMode === CANVAS_MODE_CHAT
-      ? t('对话会话')
-      : generationMode === CANVAS_MODE_VIDEO
-        ? t('视频会话')
-        : t('图片会话');
-
   const renderReferenceThumb = (file, onRemove) => (
     <div key={file.uid || file.name || file.url} style={styles.referenceImageContainer}>
       <img
@@ -4223,493 +4105,59 @@ const ImageGeneration = () => {
     </div>
   );
 
-  const renderTaskThumb = (task, mode) => {
-    const imageUrl =
-      mode === CANVAS_MODE_VIDEO
-        ? task.thumbnail_url
-        : task.thumbnail_url || task.image_url;
-    if (imageUrl) {
-      return <img src={imageUrl} alt='' style={styles.taskThumb} />;
-    }
-    return (
-      <div style={styles.taskThumb}>
-        {mode === CANVAS_MODE_VIDEO ? <IconVideo /> : <IconImage />}
-      </div>
-    );
-  };
+  const renderSidebarNavItem = ({
+    key,
+    label,
+    icon,
+    active = false,
+    muted = false,
+    onClick,
+  }) => (
+    <button
+      key={key}
+      type='button'
+      style={{
+        ...styles.sidebarNavItem,
+        ...(active ? styles.sidebarNavItemActive : null),
+        ...(muted ? styles.sidebarNavItemMuted : null),
+      }}
+      onClick={onClick}
+    >
+      <span style={styles.sidebarNavIcon}>{icon}</span>
+      <span style={styles.sidebarNavLabel}>{label}</span>
+    </button>
+  );
 
-  const renderChatTaskList = () => (
-    <div style={styles.taskList}>
-      {chatTasks.map((chat) => {
-        const active = chat.id === selectedChatId;
-        return (
-          <div
-            key={chat.id}
-            role='button'
-            tabIndex={0}
-            style={{
-              ...styles.taskListItem,
-              ...(active ? styles.taskListItemActive : null),
-            }}
-            onClick={() => {
-              setSelectedChatId(chat.id);
-              setMobileTaskbarVisible(false);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                setSelectedChatId(chat.id);
-              }
-            }}
-          >
-            <div style={styles.taskThumb}>
-              <IconCommentStroked />
-            </div>
-            <div style={styles.taskListText}>
-              <div style={styles.taskListTitle}>{chat.title}</div>
-              <div style={styles.taskListMetaRow}>
-                <span>{formatTimestamp(chat.updated_at)}</span>
-                <Tag size='small'>{chat.status}</Tag>
-              </div>
-              <Text type='tertiary' size='small' ellipsis>
-                {chat.summary}
-              </Text>
-            </div>
-          </div>
-        );
-      })}
+  const renderTaskSidebar = () => (
+    <div style={styles.leftPanel} data-canvas-task-sidebar='navigation'>
+      <div style={styles.sidebarNav}>
+        {renderSidebarNavItem({
+          key: 'asset-library',
+          label: t('资产库'),
+          icon: <IconArchive />,
+          onClick: () => {
+            setAssetLibraryVisible(true);
+            setMobileTaskbarVisible(false);
+          },
+        })}
+        {renderSidebarNavItem({
+          key: 'projects',
+          label: t('项目'),
+          icon: <IconExternalOpen />,
+          muted: true,
+          onClick: handleProjectEntryClick,
+        })}
+        {renderSidebarNavItem({
+          key: 'new-chat',
+          label: t('新聊天'),
+          icon: <IconCommentStroked />,
+          active:
+            generationMode === CANVAS_MODE_CHAT && !selectedCanvasSessionId,
+          onClick: handleNewBlankChat,
+        })}
+      </div>
     </div>
   );
-
-  const renderImageTaskList = () => (
-    <>
-      <div style={{ padding: '0 14px 10px' }}>
-        <Select
-          size='small'
-          style={{ width: '100%' }}
-          value={taskStatusFilter}
-          onChange={setTaskStatusFilter}
-        >
-          <Select.Option value=''>{t('全部状态')}</Select.Option>
-          <Select.Option value='pending'>{t('等待中')}</Select.Option>
-          <Select.Option value='generating'>{t('生成中')}</Select.Option>
-          <Select.Option value='success'>{t('已完成')}</Select.Option>
-          <Select.Option value='failed'>{t('失败')}</Select.Option>
-        </Select>
-      </div>
-      <Spin spinning={loadingTasks}>
-        <div style={styles.taskList}>
-          {taskListError
-            ? renderSidebarEmpty(
-                t('图片任务加载失败'),
-                taskListError,
-                <Button size='small' icon={<IconRefresh />} onClick={() => loadTasks()}>
-                  {t('重试')}
-                </Button>,
-              )
-            : tasks.length === 0
-              ? renderSidebarEmpty(t('暂无图片任务'), t('使用底部输入器创建图片任务'))
-              : tasks.map((task) => {
-                  const active = selectedTask?.id === task.id;
-                  return (
-                    <div
-                      key={task.id}
-                      role='button'
-                      tabIndex={0}
-                      style={{
-                        ...styles.taskListItem,
-                        ...(active ? styles.taskListItemActive : null),
-                      }}
-                      onClick={() => {
-                        handleTaskCardClick(task);
-                        setMobileTaskbarVisible(false);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          handleTaskCardClick(task);
-                        }
-                      }}
-                    >
-                      <div onClick={(event) => event.stopPropagation()}>
-                        <Checkbox
-                          checked={selectedTaskIds.has(task.id)}
-                          onChange={(event) =>
-                            handleTaskSelect(task.id, event.target.checked)
-                          }
-                        />
-                      </div>
-                      {renderTaskThumb(task, CANVAS_MODE_IMAGE)}
-                      <div style={styles.taskListText}>
-                        <div style={styles.taskListTitle}>
-                          {getTaskTitle(task, t('图片任务'))}
-                        </div>
-                        <div style={styles.taskListMetaRow}>
-                          <span>{formatTimestamp(task.created_time)}</span>
-                          {renderStatusTag(task.status, CANVAS_MODE_IMAGE)}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-        </div>
-      </Spin>
-    </>
-  );
-
-  const renderVideoTaskList = () => (
-    <>
-      <div style={{ padding: '0 14px 10px' }}>
-        <Select
-          size='small'
-          style={{ width: '100%' }}
-          value={videoTaskStatusFilter}
-          onChange={setVideoTaskStatusFilter}
-        >
-          <Select.Option value=''>{t('全部状态')}</Select.Option>
-          <Select.Option value='queued'>{t('等待中')}</Select.Option>
-          <Select.Option value='in_progress'>{t('生成中')}</Select.Option>
-          <Select.Option value='completed'>{t('已完成')}</Select.Option>
-          <Select.Option value='failed'>{t('失败')}</Select.Option>
-        </Select>
-      </div>
-      <Spin spinning={videoLoadingTasks}>
-        <div style={styles.taskList}>
-          {videoTaskListError
-            ? renderSidebarEmpty(
-                t('视频任务加载失败'),
-                videoTaskListError,
-                <Button
-                  size='small'
-                  icon={<IconRefresh />}
-                  onClick={() => loadVideoTasks()}
-                >
-                  {t('重试')}
-                </Button>,
-              )
-            : videoTasks.length === 0
-              ? renderSidebarEmpty(t('暂无视频任务'), t('使用底部输入器创建视频任务'))
-              : videoTasks.map((task) => {
-                  const active = videoSelectedTask?.id === task.id;
-                  return (
-                    <div
-                      key={task.id}
-                      role='button'
-                      tabIndex={0}
-                      style={{
-                        ...styles.taskListItem,
-                        ...(active ? styles.taskListItemActive : null),
-                      }}
-                      onClick={() => {
-                        handleVideoTaskCardClick(task);
-                        setMobileTaskbarVisible(false);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          handleVideoTaskCardClick(task);
-                        }
-                      }}
-                    >
-                      <div onClick={(event) => event.stopPropagation()}>
-                        <Checkbox
-                          checked={videoSelectedTaskIds.has(task.id)}
-                          onChange={(event) =>
-                            handleVideoTaskSelect(task.id, event.target.checked)
-                          }
-                        />
-                      </div>
-                      {renderTaskThumb(task, CANVAS_MODE_VIDEO)}
-                      <div style={styles.taskListText}>
-                        <div style={styles.taskListTitle}>
-                          {getTaskTitle(task, t('视频任务'))}
-                        </div>
-                        <div style={styles.taskListMetaRow}>
-                          <span>{formatTimestamp(task.created_time)}</span>
-                          {renderStatusTag(task.status, CANVAS_MODE_VIDEO)}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-        </div>
-      </Spin>
-    </>
-  );
-
-  const renderTaskPager = () => {
-    if (generationMode === CANVAS_MODE_CHAT) {
-      return (
-        <Text type='tertiary' size='small'>
-          {t('共 {{count}} 个对话', { count: chatTasks.length })}
-        </Text>
-      );
-    }
-    if (generationMode === CANVAS_MODE_VIDEO) {
-      return (
-        <>
-          <Text type='tertiary' size='small'>
-            {t('第 {{page}} 页 / 共 {{count}} 个', {
-              page: videoTaskPage,
-              count: videoTaskTotal,
-            })}
-          </Text>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <Button
-              size='small'
-              disabled={videoTaskPage <= 1 || videoLoadingTasks}
-              onClick={() => setVideoTaskPage((page) => Math.max(1, page - 1))}
-            >
-              {t('上一页')}
-            </Button>
-            <Button
-              size='small'
-              disabled={
-                videoLoadingTasks ||
-                videoTaskPage * videoTaskPageSize >= videoTaskTotal
-              }
-              onClick={() => setVideoTaskPage((page) => page + 1)}
-            >
-              {t('下一页')}
-            </Button>
-          </div>
-        </>
-      );
-    }
-    return (
-      <>
-        <Text type='tertiary' size='small'>
-          {showsReliableTaskTotal
-            ? t('第 {{page}} 页 / 共 {{count}} 个', {
-                page: taskPage,
-                count: taskTotal,
-              })
-            : t('第 {{page}} 页', { page: taskPage })}
-        </Text>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <Button
-            size='small'
-            disabled={taskPage <= 1 || loadingTasks}
-            onClick={() => setTaskPage((page) => Math.max(1, page - 1))}
-          >
-            {t('上一页')}
-          </Button>
-          <Button
-            size='small'
-            disabled={loadingTasks || !hasNextTaskPage}
-            onClick={() => setTaskPage((page) => page + 1)}
-          >
-            {t('下一页')}
-          </Button>
-        </div>
-      </>
-    );
-  };
-
-  const renderCanvasSessionMenu = (session) => (
-    <Dropdown.Menu style={styles.darkMenu}>
-      <Dropdown.Item
-        style={styles.darkMenuItem}
-        onClick={(event) => {
-          event?.domEvent?.stopPropagation?.();
-          renameCanvasSession(session);
-        }}
-      >
-        {t('重命名')}
-      </Dropdown.Item>
-      <Dropdown.Item
-        style={styles.darkMenuItem}
-        onClick={(event) => {
-          event?.domEvent?.stopPropagation?.();
-          toggleCanvasSessionPin(session);
-        }}
-      >
-        {session.pinned ? t('取消置顶') : t('置顶')}
-      </Dropdown.Item>
-      <Dropdown.Item
-        style={{ ...styles.darkMenuItem, color: '#fca5a5' }}
-        onClick={(event) => {
-          event?.domEvent?.stopPropagation?.();
-          if (window.confirm(t('确认删除该会话？'))) {
-            deleteCanvasSession(session);
-          }
-        }}
-      >
-        {t('删除')}
-      </Dropdown.Item>
-    </Dropdown.Menu>
-  );
-
-  const renderCanvasSessionList = () => (
-    <Spin spinning={currentCanvasSessionsLoading || deletingCanvasSession}>
-      <div style={styles.taskList}>
-        {currentCanvasSessionError ? (
-          renderSidebarEmpty(
-            t('会话加载失败'),
-            currentCanvasSessionError,
-            <Button
-              size='small'
-              icon={<IconRefresh />}
-              onClick={() => loadCanvasSessions(generationMode)}
-            >
-              {t('重试')}
-            </Button>,
-          )
-        ) : currentCanvasSessions.length === 0 ? (
-          renderSidebarEmpty(t('暂无会话'), t('点击顶部按钮创建新会话'))
-        ) : (
-          currentCanvasSessions.map((session) => {
-            const active = session.id === selectedCanvasSessionId;
-            const menuVisible =
-              hoveredCanvasSessionId === session.id || active || isMobile;
-            return (
-              <div
-                key={session.id}
-                role='button'
-                tabIndex={0}
-                style={{
-                  ...styles.taskListItem,
-                  ...styles.sessionListItem,
-                  ...(active ? styles.taskListItemActive : null),
-                }}
-                onMouseEnter={() => setHoveredCanvasSessionId(session.id)}
-                onMouseLeave={() => setHoveredCanvasSessionId(null)}
-                onClick={() => {
-                  setSelectedCanvasSessionIds((prev) => ({
-                    ...prev,
-                    [generationMode]: session.id,
-                  }));
-                  setMobileTaskbarVisible(false);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    setSelectedCanvasSessionIds((prev) => ({
-                      ...prev,
-                      [generationMode]: session.id,
-                    }));
-                  }
-                }}
-              >
-                <div style={styles.taskListText}>
-                  <div style={styles.sessionListTitle}>
-                    {summarizeText(session.title, t('新会话'))}
-                  </div>
-                </div>
-                <Dropdown
-                  trigger='click'
-                  position='bottomRight'
-                  render={renderCanvasSessionMenu(session)}
-                >
-                  <Button
-                    size='small'
-                    type='tertiary'
-                    aria-label={t('会话菜单')}
-                    icon={<IconMore />}
-                    style={{
-                      ...styles.sessionMenuButton,
-                      opacity: menuVisible ? 1 : 0,
-                    }}
-                    onClick={(event) => event.stopPropagation()}
-                  />
-                </Dropdown>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </Spin>
-  );
-
-  const renderTaskSidebar = () => {
-    const createConfig =
-      generationMode === CANVAS_MODE_CHAT
-        ? {
-            text: t('新建对话'),
-            icon: <IconCommentStroked />,
-            action: handleCreateChat,
-          }
-        : generationMode === CANVAS_MODE_VIDEO
-          ? {
-              text: t('新建视频任务'),
-              icon: <IconVideo />,
-              action: handleNewVideoTask,
-            }
-          : {
-              text: t('新建图片任务'),
-              icon: <IconImage />,
-              action: handleNewImageTask,
-            };
-    if (canvasSidebarCollapsed && !isMobile) {
-      return (
-        <div
-          style={{ ...styles.leftPanel, ...styles.leftPanelCollapsed }}
-          data-canvas-task-sidebar={generationMode}
-        >
-          <Button
-            type='tertiary'
-            aria-label={t('展开任务栏')}
-            icon={<IconMenu />}
-            onClick={() => setCanvasSidebarCollapsed(false)}
-          />
-        </div>
-      );
-    }
-
-    return (
-      <div style={styles.leftPanel} data-canvas-task-sidebar={generationMode}>
-        <div style={styles.taskbarHeader}>
-          <div style={styles.taskbarTitleRow}>
-            <Button
-              size='small'
-              type='tertiary'
-              aria-label={t('折叠任务栏')}
-              icon={<IconMenu />}
-              onClick={() => setCanvasSidebarCollapsed(true)}
-            />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={styles.taskbarTitle}>{currentTaskSidebarTitle}</div>
-              <div style={styles.taskbarMeta}>
-                {generationMode === CANVAS_MODE_CHAT
-                  ? t('当前模式的对话列表')
-                  : generationMode === CANVAS_MODE_VIDEO
-                    ? t('当前模式的视频会话')
-                    : t('当前模式的图片会话')}
-              </div>
-            </div>
-            <Button
-              size='small'
-              type='primary'
-              icon={<IconPlus />}
-              onClick={createConfig.action}
-            >
-              {createConfig.text}
-            </Button>
-          </div>
-          {generationMode === CANVAS_MODE_IMAGE && selectedGroupOption ? (
-            <Text
-              type={
-                selectedGroupOption.has_available_token === false
-                  ? 'danger'
-                  : 'tertiary'
-              }
-              size='small'
-            >
-              {selectedGroupOption.has_available_token === false
-                ? t('当前图片分组暂无可用令牌')
-                : t('图片分组：{{group}}', { group: selectedGroup })}
-            </Text>
-          ) : null}
-        </div>
-
-        {renderCanvasSessionList()}
-
-        <div style={styles.sidebarFooter}>
-          <Text type='tertiary' size='small'>
-            {t('共 {{count}} 个会话', {
-              count: currentCanvasSessions.length,
-            })}
-          </Text>
-        </div>
-      </div>
-    );
-  };
 
   const renderMetaBlock = (label, value) => (
     <div style={styles.metaBlock}>
@@ -5011,37 +4459,6 @@ const ImageGeneration = () => {
     );
   };
 
-  const getCanvasResultStatusText = (message) => {
-    if (message.task_type === 'video_generation') {
-      switch (message.status) {
-        case 'queued':
-          return t('排队中');
-        case 'in_progress':
-          return t('生成中');
-        case 'completed':
-          return t('视频');
-        case 'failed':
-          return t('失败');
-        default:
-          return message.status || t('未知');
-      }
-    }
-    switch (message.status) {
-      case 'pending':
-        return t('排队中');
-      case 'generating':
-        return t('生成中');
-      case 'success':
-        return t('图片');
-      case 'failed':
-        return t('失败');
-      case 'placeholder':
-        return t('暂未接入');
-      default:
-        return message.status || t('未知');
-    }
-  };
-
   const renderCanvasResultContent = (message) => {
     if (message.task_type === 'image_generation') {
       const task = message.image_task || {};
@@ -5102,11 +4519,8 @@ const ImageGeneration = () => {
           ...(isUser ? styles.chatMessageUser : styles.chatMessageAssistant),
         }}
       >
-        <Text type='tertiary' size='small'>
-          {isUser ? t('你') : getCanvasResultStatusText(message)}
-        </Text>
         {isUser ? (
-          <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+          <div style={{ whiteSpace: 'pre-wrap' }}>
             {message.prompt || t('已添加素材引用')}
           </div>
         ) : (
@@ -5122,7 +4536,7 @@ const ImageGeneration = () => {
     if (!selectedCanvasSession) {
       return (
         <div style={styles.detailPanel}>
-          {renderSidebarEmpty(t('选择或创建会话'), t('左侧选择会话，或点击新建会话后在底部输入'))}
+          {renderSidebarEmpty(t('空白会话'), t('从底部输入提示词开始'))}
         </div>
       );
     }
@@ -5164,7 +4578,7 @@ const ImageGeneration = () => {
     </div>
   );
 
-  const renderModeSwitch = () => {
+  const renderComposerModeSwitch = () => {
     const options = [
       {
         value: CANVAS_MODE_CHAT,
@@ -5183,7 +4597,7 @@ const ImageGeneration = () => {
       },
     ];
     return (
-      <div style={styles.modeSwitch}>
+      <div style={styles.composerModeSwitch}>
         {options.map((option) => {
           const active = generationMode === option.value;
           return (
@@ -5194,8 +4608,8 @@ const ImageGeneration = () => {
               aria-pressed={active}
               data-canvas-mode-button={option.value}
               style={{
-                ...styles.modeButton,
-                ...(active ? styles.modeButtonActive : null),
+                ...styles.composerModeButton,
+                ...(active ? styles.composerModeButtonActive : null),
               }}
               onClick={() => handleModeChange(option.value)}
             >
@@ -5542,7 +4956,10 @@ const ImageGeneration = () => {
 
           <div style={styles.footer}>
             <div style={styles.footerRow}>
-              <div style={styles.footerRowLeft}>{activeParameters}</div>
+              <div style={styles.footerRowLeft}>
+                {renderComposerModeSwitch()}
+                {activeParameters}
+              </div>
               <div style={styles.footerRowRight}>
                 <button
                   aria-label={
@@ -5773,7 +5190,6 @@ const ImageGeneration = () => {
               onClick={() => setMobileTaskbarVisible(true)}
             />
           ) : null}
-          {renderModeSwitch()}
         </div>
         <Button
           icon={<IconArchive />}
@@ -5799,7 +5215,7 @@ const ImageGeneration = () => {
       {isMobile ? (
         <SideSheet
           visible={mobileTaskbarVisible}
-          title={currentTaskSidebarTitle}
+          title={t('导航')}
           width='100%'
           onCancel={() => setMobileTaskbarVisible(false)}
           bodyStyle={{ padding: 0 }}
