@@ -3098,7 +3098,7 @@ const ImageGeneration = () => {
   };
 
   const getAssetDisplayName = (asset) =>
-    asset?.display_name || asset?.model_name || asset?.model_id || '-';
+    asset?.display_name || asset?.model_name || '-';
 
   const getAssetTaskIdText = (asset) => {
     const taskId = asset?.task_id;
@@ -5344,9 +5344,6 @@ const ImageGeneration = () => {
         <div style={styles.assetCardMeta}>
           <Text size='small' strong ellipsis={{ rows: 1 }}>
             {getAssetDisplayName(asset)}
-          </Text>
-          <Text type='tertiary' size='small' ellipsis={{ rows: 1 }}>
-            {asset.model_id || '-'}
           </Text>
         </div>
         <div style={styles.assetActions}>
