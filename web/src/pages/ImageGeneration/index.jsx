@@ -52,6 +52,7 @@ import {
   IconAlertTriangle,
   IconPlayCircle,
   IconExternalOpen,
+  IconMore,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
@@ -419,6 +420,7 @@ const ImageGeneration = () => {
     [CANVAS_MODE_IMAGE]: null,
     [CANVAS_MODE_VIDEO]: null,
   });
+  const [deletingCanvasSession, setDeletingCanvasSession] = useState(false);
   const [canvasMessagesSessionId, setCanvasMessagesSessionId] = useState(null);
   const [canvasMessages, setCanvasMessages] = useState([]);
   const [canvasMessagesLoading, setCanvasMessagesLoading] = useState(false);
@@ -567,10 +569,25 @@ const ImageGeneration = () => {
   const showsReliableTaskTotal = !canUseTaskCursorPagination;
   const hasNextTaskPage = taskHasMore;
   const currentCanvasSessions = canvasSessions[generationMode] || [];
+  const currentCanvasSessionsLoading =
+    canvasSessionsLoading[generationMode] || false;
+  const currentCanvasSessionError = canvasSessionErrors[generationMode] || '';
   const selectedCanvasSessionId = selectedCanvasSessionIds[generationMode];
   const selectedCanvasSession = currentCanvasSessions.find(
     (session) => session.id === selectedCanvasSessionId,
   );
+  const currentCanvasSidebarTitle =
+    generationMode === CANVAS_MODE_CHAT
+      ? t('对话')
+      : generationMode === CANVAS_MODE_VIDEO
+        ? t('视频')
+        : t('图片');
+  const currentCanvasSidebarSubtitle =
+    generationMode === CANVAS_MODE_CHAT
+      ? t('当前模式的对话列表')
+      : generationMode === CANVAS_MODE_VIDEO
+        ? t('当前模式的视频会话')
+        : t('当前模式的图片会话');
   const displayedCanvasMessages =
     canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [];
   const isCurrentCanvasMessageSession = (sessionId) =>
@@ -1110,8 +1127,9 @@ const ImageGeneration = () => {
   };
 
   const ensureCanvasSession = async (mode = generationMode) => {
+    const sessions = canvasSessions[mode] || [];
     const existingId = selectedCanvasSessionIds[mode];
-    const existing = (canvasSessions[mode] || []).find(
+    const existing = sessions.find(
       (session) => session.id === existingId,
     );
     if (existing) {
@@ -3433,6 +3451,7 @@ const ImageGeneration = () => {
       flexDirection: 'column',
       borderRight: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-bg-0)',
+      overflow: 'hidden',
     },
     sidebarNav: {
       display: 'flex',
@@ -3476,6 +3495,101 @@ const ImageGeneration = () => {
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
+    },
+    taskbarHeader: {
+      padding: '12px 12px 8px',
+      borderTop: '1px solid var(--semi-color-border)',
+    },
+    taskbarTitleRow: {
+      display: 'flex',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 8,
+      minWidth: 0,
+    },
+    taskbarTitle: {
+      fontSize: 15,
+      fontWeight: 650,
+      color: 'var(--semi-color-text-0)',
+      lineHeight: 1.35,
+    },
+    taskbarMeta: {
+      marginTop: 4,
+      fontSize: 12,
+      lineHeight: 1.4,
+      color: 'var(--semi-color-text-2)',
+    },
+    taskList: {
+      flex: 1,
+      minHeight: 0,
+      overflowY: 'auto',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+      padding: '0 12px 12px',
+    },
+    taskListItem: {
+      width: '100%',
+      minHeight: 56,
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-1)',
+      padding: '10px 12px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      textAlign: 'left',
+      cursor: 'pointer',
+      transition: 'border-color 0.16s, background 0.16s',
+    },
+    taskListItemActive: {
+      borderColor: 'var(--semi-color-primary)',
+      background: 'var(--semi-color-primary-light-default)',
+    },
+    taskListText: {
+      minWidth: 0,
+      flex: 1,
+    },
+    taskListTitle: {
+      fontSize: 14,
+      fontWeight: 600,
+      color: 'var(--semi-color-text-0)',
+      lineHeight: 1.35,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    },
+    taskListMetaRow: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 4,
+      fontSize: 12,
+      color: 'var(--semi-color-text-2)',
+      minWidth: 0,
+    },
+    sessionListItem: {
+      paddingRight: 8,
+    },
+    sessionListTitle: {
+      fontSize: 14,
+      fontWeight: 600,
+      color: 'var(--semi-color-text-0)',
+      lineHeight: 1.35,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    },
+    sessionMenuButton: {
+      width: 28,
+      height: 28,
+      minWidth: 28,
+      borderRadius: 8,
+      flexShrink: 0,
+    },
+    sidebarFooter: {
+      padding: '8px 12px 12px',
+      borderTop: '1px solid var(--semi-color-border)',
     },
     rightPanel: {
       flex: 1,
@@ -4410,8 +4524,123 @@ const ImageGeneration = () => {
     </button>
   );
 
+  const renderCanvasSessionMenu = (session) => (
+    <Dropdown.Menu style={styles.darkMenu}>
+      <Dropdown.Item
+        style={styles.darkMenuItem}
+        onClick={(event) => {
+          event?.domEvent?.stopPropagation?.();
+          renameCanvasSession(session);
+        }}
+      >
+        {t('重命名')}
+      </Dropdown.Item>
+      <Dropdown.Item
+        style={styles.darkMenuItem}
+        onClick={(event) => {
+          event?.domEvent?.stopPropagation?.();
+          toggleCanvasSessionPin(session);
+        }}
+      >
+        {session.pinned ? t('取消置顶') : t('置顶')}
+      </Dropdown.Item>
+      <Dropdown.Item
+        style={{ ...styles.darkMenuItem, color: '#fca5a5' }}
+        onClick={(event) => {
+          event?.domEvent?.stopPropagation?.();
+          if (window.confirm(t('确认删除该会话？'))) {
+            deleteCanvasSession(session);
+          }
+        }}
+      >
+        {t('删除')}
+      </Dropdown.Item>
+    </Dropdown.Menu>
+  );
+
+  const renderCanvasSessionList = () => (
+    <Spin spinning={currentCanvasSessionsLoading || deletingCanvasSession}>
+      <div style={styles.taskList}>
+        {currentCanvasSessionError ? (
+          renderSidebarEmpty(
+            t('会话加载失败'),
+            currentCanvasSessionError,
+            <Button
+              size='small'
+              icon={<IconRefresh />}
+              onClick={() => loadCanvasSessions(generationMode)}
+            >
+              {t('重试')}
+            </Button>,
+          )
+        ) : currentCanvasSessions.length === 0 ? (
+          renderSidebarEmpty(
+            t('暂无会话'),
+            t('发送第一条消息后会自动创建当前模式的会话'),
+          )
+        ) : (
+          currentCanvasSessions.map((session) => {
+            const active = session.id === selectedCanvasSessionId;
+            return (
+              <div
+                key={session.id}
+                role='button'
+                tabIndex={0}
+                style={{
+                  ...styles.taskListItem,
+                  ...styles.sessionListItem,
+                  ...(active ? styles.taskListItemActive : null),
+                }}
+                onClick={() => {
+                  setSelectedCanvasSessionIds((prev) => ({
+                    ...prev,
+                    [generationMode]: session.id,
+                  }));
+                  setMobileTaskbarVisible(false);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    setSelectedCanvasSessionIds((prev) => ({
+                      ...prev,
+                      [generationMode]: session.id,
+                    }));
+                    setMobileTaskbarVisible(false);
+                  }
+                }}
+              >
+                <div style={styles.taskListText}>
+                  <div style={styles.sessionListTitle}>
+                    {summarizeText(session.title, t('新会话'))}
+                  </div>
+                  <div style={styles.taskListMetaRow}>
+                    <span>{formatTimestamp(session.updated_time)}</span>
+                    {session.pinned ? <Tag color='blue' size='small'>{t('置顶')}</Tag> : null}
+                  </div>
+                </div>
+                <Dropdown
+                  trigger='click'
+                  position='bottomRight'
+                  render={renderCanvasSessionMenu(session)}
+                >
+                  <Button
+                    size='small'
+                    type='tertiary'
+                    aria-label={t('会话菜单')}
+                    icon={<IconMore />}
+                    style={styles.sessionMenuButton}
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                </Dropdown>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </Spin>
+  );
+
   const renderTaskSidebar = () => (
-    <div style={styles.leftPanel} data-canvas-task-sidebar='navigation'>
+    <div style={styles.leftPanel} data-canvas-task-sidebar={generationMode}>
       <div style={styles.sidebarNav}>
         {renderSidebarNavItem({
           key: 'asset-library',
@@ -4437,6 +4666,25 @@ const ImageGeneration = () => {
             generationMode === CANVAS_MODE_CHAT && !selectedCanvasSessionId,
           onClick: handleNewBlankChat,
         })}
+      </div>
+
+      <div style={styles.taskbarHeader}>
+        <div style={styles.taskbarTitleRow}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={styles.taskbarTitle}>{currentCanvasSidebarTitle}</div>
+            <div style={styles.taskbarMeta}>{currentCanvasSidebarSubtitle}</div>
+          </div>
+        </div>
+      </div>
+
+      {renderCanvasSessionList()}
+
+      <div style={styles.sidebarFooter}>
+        <Text type='tertiary' size='small'>
+          {t('共 {{count}} 个会话', {
+            count: currentCanvasSessions.length,
+          })}
+        </Text>
       </div>
     </div>
   );
