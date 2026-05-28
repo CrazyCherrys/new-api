@@ -3853,15 +3853,15 @@ const ImageGeneration = () => {
       flexShrink: 0,
     },
     workspaceTopbar: {
-      height: 56,
+      height: isMobile ? 44 : 0,
       flexShrink: 0,
-      borderBottom: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
+      borderBottom: 'none',
+      background: 'var(--semi-color-bg-1)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 12,
-      padding: isMobile ? '0 10px' : '0 16px',
+      padding: isMobile ? '0 10px' : 0,
     },
     workspaceTopbarLeft: {
       display: 'flex',
@@ -3907,15 +3907,14 @@ const ImageGeneration = () => {
       flex: 1,
       minHeight: 0,
       overflowY: 'auto',
-      padding: isMobile ? 12 : 18,
-      paddingBottom: isMobile ? 12 : 18,
+      padding: isMobile ? '10px 10px 6px' : '14px 18px 8px',
     },
     composerDock: {
       flexShrink: 0,
-      borderTop: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
-      padding: isMobile ? 10 : 14,
-      boxShadow: '0 -8px 24px rgba(15, 23, 42, 0.06)',
+      borderTop: 'none',
+      background: 'var(--semi-color-bg-1)',
+      padding: isMobile ? '6px 10px 10px' : '8px 14px 12px',
+      boxShadow: '0 -4px 18px rgba(15, 23, 42, 0.04)',
     },
     composerShell: {
       width: '100%',
@@ -5599,9 +5598,9 @@ const ImageGeneration = () => {
 
   const renderWorkspace = () => (
     <div style={styles.rightPanel}>
-      <div style={styles.workspaceTopbar}>
-        <div style={styles.workspaceTopbarLeft}>
-          {isMobile ? (
+      {isMobile ? (
+        <div style={styles.workspaceTopbar}>
+          <div style={styles.workspaceTopbarLeft}>
             <Button
               type='tertiary'
               aria-label={t('打开任务栏')}
@@ -5609,9 +5608,9 @@ const ImageGeneration = () => {
               icon={<IconMenu />}
               onClick={() => setMobileTaskbarVisible(true)}
             />
-          ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
       <div style={styles.workspaceBody}>
         {renderMainContent()}
         {renderComposer()}
