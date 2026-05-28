@@ -569,25 +569,31 @@ const ImageGeneration = () => {
   const showsReliableTaskTotal = !canUseTaskCursorPagination;
   const hasNextTaskPage = taskHasMore;
   const currentCanvasSessions = canvasSessions[generationMode] || [];
-  const currentCanvasSessionsLoading =
-    canvasSessionsLoading[generationMode] || false;
-  const currentCanvasSessionError = canvasSessionErrors[generationMode] || '';
   const selectedCanvasSessionId = selectedCanvasSessionIds[generationMode];
   const selectedCanvasSession = currentCanvasSessions.find(
     (session) => session.id === selectedCanvasSessionId,
   );
-  const currentCanvasSidebarTitle =
-    generationMode === CANVAS_MODE_CHAT
-      ? t('对话')
-      : generationMode === CANVAS_MODE_VIDEO
-        ? t('视频')
-        : t('图片');
-  const currentCanvasSidebarSubtitle =
-    generationMode === CANVAS_MODE_CHAT
-      ? t('当前模式的对话列表')
-      : generationMode === CANVAS_MODE_VIDEO
-        ? t('当前模式的视频会话')
-        : t('当前模式的图片会话');
+  const unifiedCanvasSessions = useMemo(
+    () =>
+      CANVAS_MODES.flatMap((mode) =>
+        (canvasSessions[mode] || []).map((session) => ({
+          ...session,
+          mode: session.mode || mode,
+        })),
+      ).sort((a, b) => {
+        if (!!a.pinned !== !!b.pinned) {
+          return a.pinned ? -1 : 1;
+        }
+        return (Number(b.updated_time) || 0) - (Number(a.updated_time) || 0);
+      }),
+    [canvasSessions],
+  );
+  const unifiedCanvasSessionsLoading = CANVAS_MODES.some(
+    (mode) => canvasSessionsLoading[mode],
+  );
+  const unifiedCanvasSessionError = CANVAS_MODES.map(
+    (mode) => canvasSessionErrors[mode],
+  ).find(Boolean);
   const displayedCanvasMessages =
     canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [];
   const isCurrentCanvasMessageSession = (sessionId) =>
@@ -802,8 +808,10 @@ const ImageGeneration = () => {
   ]);
 
   useEffect(() => {
-    loadCanvasSessions(generationMode);
-  }, [generationMode]);
+    CANVAS_MODES.forEach((mode) => {
+      loadCanvasSessions(mode);
+    });
+  }, []);
 
   useEffect(() => {
     if (!selectedCanvasSessionId) {
@@ -1276,6 +1284,9 @@ const ImageGeneration = () => {
         prev.filter((item) => item.id !== session.id),
       );
       setSelectedCanvasSessionIds((prev) => {
+        if (prev[session.mode] !== session.id) {
+          return prev;
+        }
         const nextSessions = (canvasSessions[session.mode] || []).filter(
           (item) => item.id !== session.id,
         );
@@ -3239,6 +3250,22 @@ const ImageGeneration = () => {
     setMobileTaskbarVisible(false);
   };
 
+  const selectCanvasSession = (session) => {
+    const mode = CANVAS_MODES.includes(session?.mode)
+      ? session.mode
+      : CANVAS_MODE_IMAGE;
+    if (!session?.id) {
+      return;
+    }
+    blankCanvasSelectionModesRef.current[mode] = false;
+    setGenerationMode(mode);
+    setSelectedCanvasSessionIds((prev) => ({
+      ...prev,
+      [mode]: session.id,
+    }));
+    setMobileTaskbarVisible(false);
+  };
+
   const handleNewBlankChat = () => {
     blankCanvasSelectionModesRef.current[CANVAS_MODE_CHAT] = true;
     setGenerationMode(CANVAS_MODE_CHAT);
@@ -3496,29 +3523,6 @@ const ImageGeneration = () => {
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
     },
-    taskbarHeader: {
-      padding: '12px 12px 8px',
-      borderTop: '1px solid var(--semi-color-border)',
-    },
-    taskbarTitleRow: {
-      display: 'flex',
-      alignItems: 'flex-start',
-      justifyContent: 'space-between',
-      gap: 8,
-      minWidth: 0,
-    },
-    taskbarTitle: {
-      fontSize: 15,
-      fontWeight: 650,
-      color: 'var(--semi-color-text-0)',
-      lineHeight: 1.35,
-    },
-    taskbarMeta: {
-      marginTop: 4,
-      fontSize: 12,
-      lineHeight: 1.4,
-      color: 'var(--semi-color-text-2)',
-    },
     taskList: {
       flex: 1,
       minHeight: 0,
@@ -3530,11 +3534,11 @@ const ImageGeneration = () => {
     },
     taskListItem: {
       width: '100%',
-      minHeight: 56,
+      minHeight: 44,
       borderRadius: 8,
       border: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-bg-1)',
-      padding: '10px 12px',
+      padding: '8px 10px',
       display: 'flex',
       alignItems: 'center',
       gap: 10,
@@ -3559,17 +3563,19 @@ const ImageGeneration = () => {
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
     },
-    taskListMetaRow: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      marginTop: 4,
-      fontSize: 12,
-      color: 'var(--semi-color-text-2)',
-      minWidth: 0,
-    },
     sessionListItem: {
       paddingRight: 8,
+    },
+    sessionTypeIcon: {
+      width: 22,
+      minWidth: 22,
+      height: 22,
+      borderRadius: 6,
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'var(--semi-color-text-2)',
+      background: 'var(--semi-color-fill-0)',
     },
     sessionListTitle: {
       fontSize: 14,
@@ -3586,10 +3592,6 @@ const ImageGeneration = () => {
       minWidth: 28,
       borderRadius: 8,
       flexShrink: 0,
-    },
-    sidebarFooter: {
-      padding: '8px 12px 12px',
-      borderTop: '1px solid var(--semi-color-border)',
     },
     rightPanel: {
       flex: 1,
@@ -4558,29 +4560,48 @@ const ImageGeneration = () => {
     </Dropdown.Menu>
   );
 
+  const renderCanvasSessionIcon = (mode) => {
+    if (mode === CANVAS_MODE_CHAT) {
+      return <IconCommentStroked size='small' />;
+    }
+    if (mode === CANVAS_MODE_VIDEO) {
+      return <IconVideo size='small' />;
+    }
+    return <IconImage size='small' />;
+  };
+
   const renderCanvasSessionList = () => (
-    <Spin spinning={currentCanvasSessionsLoading || deletingCanvasSession}>
+    <Spin spinning={unifiedCanvasSessionsLoading || deletingCanvasSession}>
       <div style={styles.taskList}>
-        {currentCanvasSessionError ? (
+        {unifiedCanvasSessionError ? (
           renderSidebarEmpty(
             t('会话加载失败'),
-            currentCanvasSessionError,
+            unifiedCanvasSessionError,
             <Button
               size='small'
               icon={<IconRefresh />}
-              onClick={() => loadCanvasSessions(generationMode)}
+              onClick={() => {
+                CANVAS_MODES.forEach((mode) => {
+                  loadCanvasSessions(mode);
+                });
+              }}
             >
               {t('重试')}
             </Button>,
           )
-        ) : currentCanvasSessions.length === 0 ? (
+        ) : unifiedCanvasSessions.length === 0 ? (
           renderSidebarEmpty(
-            t('暂无会话'),
-            t('发送第一条消息后会自动创建当前模式的会话'),
+            t('暂无内容'),
+            t('开始对话或生成图片、视频后会出现在这里'),
           )
         ) : (
-          currentCanvasSessions.map((session) => {
-            const active = session.id === selectedCanvasSessionId;
+          unifiedCanvasSessions.map((session) => {
+            const sessionMode = CANVAS_MODES.includes(session.mode)
+              ? session.mode
+              : CANVAS_MODE_IMAGE;
+            const active =
+              generationMode === sessionMode &&
+              session.id === selectedCanvasSessionIds[sessionMode];
             return (
               <div
                 key={session.id}
@@ -4591,30 +4612,20 @@ const ImageGeneration = () => {
                   ...styles.sessionListItem,
                   ...(active ? styles.taskListItemActive : null),
                 }}
-                onClick={() => {
-                  setSelectedCanvasSessionIds((prev) => ({
-                    ...prev,
-                    [generationMode]: session.id,
-                  }));
-                  setMobileTaskbarVisible(false);
-                }}
+                onClick={() => selectCanvasSession(session)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
-                    setSelectedCanvasSessionIds((prev) => ({
-                      ...prev,
-                      [generationMode]: session.id,
-                    }));
-                    setMobileTaskbarVisible(false);
+                    event.preventDefault();
+                    selectCanvasSession(session);
                   }
                 }}
               >
+                <span style={styles.sessionTypeIcon}>
+                  {renderCanvasSessionIcon(sessionMode)}
+                </span>
                 <div style={styles.taskListText}>
                   <div style={styles.sessionListTitle}>
                     {summarizeText(session.title, t('新会话'))}
-                  </div>
-                  <div style={styles.taskListMetaRow}>
-                    <span>{formatTimestamp(session.updated_time)}</span>
-                    {session.pinned ? <Tag color='blue' size='small'>{t('置顶')}</Tag> : null}
                   </div>
                 </div>
                 <Dropdown
@@ -4668,24 +4679,7 @@ const ImageGeneration = () => {
         })}
       </div>
 
-      <div style={styles.taskbarHeader}>
-        <div style={styles.taskbarTitleRow}>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={styles.taskbarTitle}>{currentCanvasSidebarTitle}</div>
-            <div style={styles.taskbarMeta}>{currentCanvasSidebarSubtitle}</div>
-          </div>
-        </div>
-      </div>
-
       {renderCanvasSessionList()}
-
-      <div style={styles.sidebarFooter}>
-        <Text type='tertiary' size='small'>
-          {t('共 {{count}} 个会话', {
-            count: currentCanvasSessions.length,
-          })}
-        </Text>
-      </div>
     </div>
   );
 
