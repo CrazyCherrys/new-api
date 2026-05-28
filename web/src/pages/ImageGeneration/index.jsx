@@ -379,6 +379,10 @@ const ImageGeneration = () => {
   const [canvasAssetsTotal, setCanvasAssetsTotal] = useState(0);
   const [canvasAssetPage, setCanvasAssetPage] = useState(1);
   const [selectedAssetPreview, setSelectedAssetPreview] = useState(null);
+  const [selectedCanvasAssetIds, setSelectedCanvasAssetIds] = useState(
+    new Set(),
+  );
+  const [assetBatchDeleting, setAssetBatchDeleting] = useState(false);
 
   const [chatModels, setChatModels] = useState([]);
   const [chatModel, setChatModel] = useState(() =>
@@ -973,6 +977,7 @@ const ImageGeneration = () => {
       setCanvasAssets(data.items || []);
       setCanvasAssetsTotal(data.total || 0);
       setCanvasAssetPage(data.page || nextPage);
+      setSelectedCanvasAssetIds(new Set());
     } catch (error) {
       const message = error.message || t('加载资产失败');
       setCanvasAssetsError(message);
@@ -3010,6 +3015,204 @@ const ImageGeneration = () => {
 
   const getAssetImageUrl = (asset) => asset?.image_url || asset?.thumbnail_url;
 
+  const getAssetComparableKey = (asset) =>
+    normalizeComparableId(getAssetKey(asset));
+
+  const currentCanvasAssetIds = canvasAssets
+    .map((asset) => getAssetComparableKey(asset))
+    .filter((assetId) => assetId !== '');
+  const selectedCanvasAssets = canvasAssets.filter((asset) =>
+    selectedCanvasAssetIds.has(getAssetComparableKey(asset)),
+  );
+  const selectedCanvasAssetCount = selectedCanvasAssets.length;
+  const allCurrentCanvasAssetsSelected =
+    currentCanvasAssetIds.length > 0 &&
+    currentCanvasAssetIds.every((assetId) =>
+      selectedCanvasAssetIds.has(assetId),
+    );
+  const partiallyCurrentCanvasAssetsSelected =
+    selectedCanvasAssetCount > 0 && !allCurrentCanvasAssetsSelected;
+
+  const readAssetStringValue = (sources, keys) => {
+    for (const source of sources) {
+      if (!source || typeof source !== 'object') {
+        continue;
+      }
+      for (const key of keys) {
+        const value = source[key];
+        if (value === undefined || value === null) {
+          continue;
+        }
+        const text = String(value).trim();
+        if (text) {
+          return text;
+        }
+      }
+    }
+    return '';
+  };
+
+  const readAssetPositiveNumber = (sources, keys) => {
+    const value = readAssetStringValue(sources, keys);
+    if (!value) {
+      return 0;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+  };
+
+  const parseAssetDimensionText = (value) => {
+    const match = String(value || '')
+      .trim()
+      .match(/^(\d+)\s*[xX*×]\s*(\d+)$/);
+    if (!match) {
+      return '';
+    }
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!Number.isFinite(width) || !Number.isFinite(height)) {
+      return '';
+    }
+    return width > 0 && height > 0 ? `${width}x${height}` : '';
+  };
+
+  const joinAssetMetaParts = (parts) => {
+    const seen = new Set();
+    return parts
+      .map((part) => String(part || '').trim())
+      .filter((part) => {
+        if (!part || seen.has(part)) {
+          return false;
+        }
+        seen.add(part);
+        return true;
+      })
+      .join(' · ');
+  };
+
+  const getAssetMetadataSources = (asset) => {
+    const params = parseCanvasTaskParams(asset?.params);
+    const metadata = parseCanvasTaskParams(asset?.image_metadata);
+    const metadataDetails = parseCanvasTaskParams(metadata.metadata);
+    return { params, metadata, metadataDetails };
+  };
+
+  const getAssetDisplayName = (asset) =>
+    asset?.display_name || asset?.model_name || asset?.model_id || '-';
+
+  const getAssetTaskIdText = (asset) => {
+    const taskId = asset?.task_id;
+    const id = asset?.id;
+    if (taskId && id && taskId !== id) {
+      return `${taskId} / ${id}`;
+    }
+    return taskId || id || '-';
+  };
+
+  const getAssetSizeText = (asset) => {
+    const { params, metadata, metadataDetails } = getAssetMetadataSources(asset);
+    const metadataSources = [metadata, metadataDetails];
+    const allSources = [params, metadata, metadataDetails];
+    const width = readAssetPositiveNumber(metadataSources, [
+      'width',
+      'output_width',
+      'image_width',
+      'outputWidth',
+      'imageWidth',
+    ]);
+    const height = readAssetPositiveNumber(metadataSources, [
+      'height',
+      'output_height',
+      'image_height',
+      'outputHeight',
+      'imageHeight',
+    ]);
+    if (width > 0 && height > 0) {
+      return `${width}x${height}`;
+    }
+
+    const dimensionText = parseAssetDimensionText(
+      readAssetStringValue(metadataSources, [
+        'size',
+        'output_size',
+        'dimensions',
+        'outputSize',
+      ]),
+    );
+    if (dimensionText) {
+      return dimensionText;
+    }
+
+    return (
+      joinAssetMetaParts([
+        readAssetStringValue(allSources, ['aspect_ratio', 'aspectRatio']),
+        readAssetStringValue([params], ['resolution', 'image_size', 'imageSize']),
+        readAssetStringValue(allSources, [
+          'size',
+          'output_size',
+          'dimensions',
+          'outputSize',
+        ]),
+      ]) || '-'
+    );
+  };
+
+  const handleCanvasAssetSelect = (asset, checked) => {
+    const assetId = getAssetComparableKey(asset);
+    if (!assetId) {
+      return;
+    }
+    setSelectedCanvasAssetIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(assetId);
+      } else {
+        next.delete(assetId);
+      }
+      return next;
+    });
+  };
+
+  const handleCanvasAssetSelectAll = (checked) => {
+    setSelectedCanvasAssetIds(checked ? new Set(currentCanvasAssetIds) : new Set());
+  };
+
+  const removeDeletedCanvasAssetsFromState = (deletedAssets) => {
+    const deletedList = [].concat(deletedAssets || []);
+    const deletedIds = deletedList
+      .map((asset) => getAssetComparableKey(asset))
+      .filter((assetId) => assetId !== '');
+    if (deletedIds.length === 0) {
+      return;
+    }
+    const deletedIdSet = new Set(deletedIds);
+
+    setCanvasAssets((prev) =>
+      prev.filter((item) => !deletedIdSet.has(getAssetComparableKey(item))),
+    );
+    setCanvasAssetsTotal((prev) => Math.max(0, prev - deletedIdSet.size));
+    setSelectedCanvasAssetIds((prev) => {
+      const next = new Set(prev);
+      deletedIdSet.forEach((assetId) => next.delete(assetId));
+      return next;
+    });
+    setSelectedAssetPreview((prev) => {
+      if (!prev || !deletedIdSet.has(getAssetComparableKey(prev))) {
+        return prev;
+      }
+      return null;
+    });
+    removeImageTasksFromLocalState(deletedIds, {
+      decrementTotal: deletedList.filter((asset) =>
+        imageTaskMatchesCurrentTaskFilters({
+          ...asset,
+          id: getAssetKey(asset),
+          status: 'success',
+        }),
+      ).length,
+    });
+  };
+
   const handleModeChange = (mode) => {
     if (!CANVAS_MODES.includes(mode)) {
       return;
@@ -3085,24 +3288,44 @@ const ImageGeneration = () => {
         return;
       }
       showSuccess(t('删除成功'));
-      setCanvasAssets((prev) =>
-        prev.filter((item) => getAssetKey(item) !== assetKey),
-      );
-      setCanvasAssetsTotal((prev) => Math.max(0, prev - 1));
-      removeImageTasksFromLocalState([assetKey], {
-        decrementTotal: imageTaskMatchesCurrentTaskFilters({
-          ...asset,
-          id: assetKey,
-          status: 'success',
-        })
-          ? 1
-          : 0,
-      });
-      if (selectedAssetPreview && getAssetKey(selectedAssetPreview) === assetKey) {
-        setSelectedAssetPreview(null);
-      }
+      removeDeletedCanvasAssetsFromState([asset]);
     } catch (error) {
       showError(error.message || t('删除失败'));
+    }
+  };
+
+  const deleteSelectedCanvasAssets = async () => {
+    if (selectedCanvasAssets.length === 0) {
+      showError(t('请先选择要删除的资产'));
+      return;
+    }
+    setAssetBatchDeleting(true);
+    try {
+      const results = await Promise.allSettled(
+        selectedCanvasAssets.map((asset) =>
+          API.delete(`/api/image-generation/tasks/${getAssetKey(asset)}`),
+        ),
+      );
+      const successfulAssets = [];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value?.data?.success) {
+          successfulAssets.push(selectedCanvasAssets[index]);
+        }
+      });
+      const successCount = successfulAssets.length;
+      const failCount = results.length - successCount;
+
+      if (successCount > 0) {
+        removeDeletedCanvasAssetsFromState(successfulAssets);
+        showSuccess(t('删除成功 {{count}} 个任务', { count: successCount }));
+      }
+      if (failCount > 0) {
+        showError(t('删除失败 {{count}} 个任务', { count: failCount }));
+      }
+    } catch (error) {
+      showError(error.message || t('批量删除失败'));
+    } finally {
+      setAssetBatchDeleting(false);
     }
   };
 
@@ -3822,12 +4045,25 @@ const ImageGeneration = () => {
       gap: 10,
     },
     assetCard: {
+      position: 'relative',
       border: '1px solid var(--semi-color-border)',
       borderRadius: 8,
       overflow: 'hidden',
       background: 'var(--semi-color-bg-0)',
       display: 'flex',
       flexDirection: 'column',
+      cursor: 'pointer',
+      minWidth: 0,
+    },
+    assetSelect: {
+      position: 'absolute',
+      top: 6,
+      left: 6,
+      zIndex: 1,
+      padding: 3,
+      borderRadius: 6,
+      background: 'rgba(0, 0, 0, 0.48)',
+      lineHeight: 1,
     },
     assetThumb: {
       width: '100%',
@@ -3841,6 +4077,69 @@ const ImageGeneration = () => {
       flexWrap: 'wrap',
       gap: 6,
       padding: 8,
+    },
+    assetCardMeta: {
+      padding: '8px 8px 0',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 2,
+      minWidth: 0,
+    },
+    assetPreviewOverlay: {
+      position: 'fixed',
+      inset: 0,
+      zIndex: 1200,
+      padding: isMobile ? 12 : 24,
+      background: 'rgba(15, 23, 42, 0.62)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    assetPreviewPanel: {
+      width: 'min(100%, 980px)',
+      maxHeight: 'calc(100vh - 48px)',
+      display: 'grid',
+      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.35fr) minmax(280px, 0.65fr)',
+      gap: 0,
+      overflow: 'hidden',
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      boxShadow: '0 24px 80px rgba(15, 23, 42, 0.35)',
+    },
+    assetPreviewImagePane: {
+      minHeight: isMobile ? 220 : 520,
+      maxHeight: isMobile ? '48vh' : 'calc(100vh - 48px)',
+      background: 'var(--semi-color-fill-0)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    assetPreviewImage: {
+      width: '100%',
+      height: '100%',
+      maxHeight: isMobile ? '48vh' : 'calc(100vh - 48px)',
+      objectFit: 'contain',
+      display: 'block',
+    },
+    assetPreviewInfo: {
+      padding: isMobile ? 12 : 16,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      overflowY: 'auto',
+      maxHeight: isMobile ? '44vh' : 'calc(100vh - 48px)',
+      minWidth: 0,
+    },
+    assetPreviewMetaItem: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 3,
+      padding: 10,
+      borderRadius: 8,
+      background: 'var(--semi-color-fill-0)',
+      minWidth: 0,
     },
     drawerFooterPager: {
       marginTop: 12,
@@ -5015,8 +5314,27 @@ const ImageGeneration = () => {
 
   const renderAssetCard = (asset) => {
     const imageUrl = getAssetImageUrl(asset);
+    const assetId = getAssetComparableKey(asset);
+    const isSelected = selectedCanvasAssetIds.has(assetId);
+    const stopCardActionPropagation = (event) => {
+      event.stopPropagation();
+    };
     return (
-      <div key={getAssetKey(asset)} style={styles.assetCard} data-canvas-asset-card='true'>
+      <div
+        key={getAssetKey(asset)}
+        style={styles.assetCard}
+        data-canvas-asset-card='true'
+        onClick={() => setSelectedAssetPreview(asset)}
+      >
+        <div style={styles.assetSelect} onClick={stopCardActionPropagation}>
+          <Checkbox
+            checked={isSelected}
+            onChange={(event) =>
+              handleCanvasAssetSelect(asset, event.target.checked)
+            }
+            aria-label={t('选择资产')}
+          />
+        </div>
         {imageUrl ? (
           <img src={imageUrl} alt='' style={styles.assetThumb} />
         ) : (
@@ -5024,42 +5342,148 @@ const ImageGeneration = () => {
             <IconImage size='large' />
           </div>
         )}
-        <div style={{ padding: '8px 8px 0' }}>
-          <Text size='small' ellipsis={{ rows: 2 }}>
-            {asset.prompt || t('图片资产')}
+        <div style={styles.assetCardMeta}>
+          <Text size='small' strong ellipsis={{ rows: 1 }}>
+            {getAssetDisplayName(asset)}
+          </Text>
+          <Text type='tertiary' size='small' ellipsis={{ rows: 1 }}>
+            {asset.model_id || '-'}
           </Text>
         </div>
         <div style={styles.assetActions}>
-          <Button size='small' type='primary' onClick={() => insertAssetIntoCurrentMode(asset)}>
+          <Button
+            size='small'
+            type='primary'
+            onClick={(event) => {
+              event.stopPropagation();
+              insertAssetIntoCurrentMode(asset);
+            }}
+          >
             {generationMode === CANVAS_MODE_CHAT
               ? t('插入')
               : generationMode === CANVAS_MODE_VIDEO
                 ? t('首帧')
                 : t('参考图')}
           </Button>
-          <Button size='small' onClick={() => setSelectedAssetPreview(asset)}>
-            {t('预览')}
-          </Button>
           <Button
             size='small'
             aria-label={t('下载图片')}
             icon={<IconDownload />}
-            onClick={() => downloadAsset(asset)}
+            onClick={(event) => {
+              event.stopPropagation();
+              downloadAsset(asset);
+            }}
           />
-          <Popconfirm
-            title={t('确认删除该资产？')}
-            content={t('删除后无法恢复，请确认是否继续')}
-            okType='danger'
-            onConfirm={() => deleteAsset(asset)}
-          >
-            <Button
-              size='small'
-              type='danger'
-              theme='borderless'
-              aria-label={t('删除资产')}
-              icon={<IconDelete />}
-            />
-          </Popconfirm>
+          <span onClick={stopCardActionPropagation}>
+            <Popconfirm
+              title={t('确认删除该资产？')}
+              content={t('删除后无法恢复，请确认是否继续')}
+              okType='danger'
+              onConfirm={() => deleteAsset(asset)}
+            >
+              <Button
+                size='small'
+                type='danger'
+                theme='borderless'
+                aria-label={t('删除资产')}
+                icon={<IconDelete />}
+              />
+            </Popconfirm>
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  const renderAssetPreviewMeta = (label, value) => (
+    <div style={styles.assetPreviewMetaItem}>
+      <Text type='tertiary' size='small'>
+        {label}
+      </Text>
+      <Text size='small' style={{ wordBreak: 'break-word' }}>
+        {value || '-'}
+      </Text>
+    </div>
+  );
+
+  const renderAssetPreviewOverlay = () => {
+    if (!selectedAssetPreview) {
+      return null;
+    }
+    const imageUrl = getAssetImageUrl(selectedAssetPreview);
+    return (
+      <div
+        style={styles.assetPreviewOverlay}
+        onClick={() => setSelectedAssetPreview(null)}
+        data-canvas-asset-preview='true'
+      >
+        <div
+          style={styles.assetPreviewPanel}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div style={styles.assetPreviewImagePane}>
+            {imageUrl ? (
+              <img
+                src={imageUrl}
+                alt=''
+                style={styles.assetPreviewImage}
+              />
+            ) : (
+              <IconImage size='extra-large' />
+            )}
+          </div>
+          <div style={styles.assetPreviewInfo}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ minWidth: 0 }}>
+                <Text strong ellipsis={{ rows: 2 }}>
+                  {getAssetDisplayName(selectedAssetPreview)}
+                </Text>
+                <Text
+                  type='tertiary'
+                  size='small'
+                  ellipsis={{ rows: 1 }}
+                  style={{ display: 'block', marginTop: 4 }}
+                >
+                  {selectedAssetPreview.model_id || '-'}
+                </Text>
+              </div>
+              <Button
+                size='small'
+                type='tertiary'
+                onClick={() => setSelectedAssetPreview(null)}
+              >
+                {t('关闭')}
+              </Button>
+            </div>
+            {renderAssetPreviewMeta(
+              t('显示名称'),
+              getAssetDisplayName(selectedAssetPreview),
+            )}
+            {renderAssetPreviewMeta(
+              'model_id',
+              selectedAssetPreview.model_id || '-',
+            )}
+            {renderAssetPreviewMeta(
+              t('创建时间'),
+              formatTimestamp(selectedAssetPreview.created_time),
+            )}
+            {renderAssetPreviewMeta(
+              t('完成时间'),
+              formatTimestamp(selectedAssetPreview.completed_time),
+            )}
+            {renderAssetPreviewMeta(
+              t('尺寸/比例'),
+              getAssetSizeText(selectedAssetPreview),
+            )}
+            {renderAssetPreviewMeta(
+              'task_id/id',
+              getAssetTaskIdText(selectedAssetPreview),
+            )}
+            {renderAssetPreviewMeta(
+              t('提示词'),
+              selectedAssetPreview.prompt || '-',
+            )}
+          </div>
         </div>
       </div>
     );
@@ -5075,37 +5499,62 @@ const ImageGeneration = () => {
       data-canvas-asset-drawer='true'
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {selectedAssetPreview ? (
-          <div style={styles.detailPanel}>
-            <div style={styles.detailHeader}>
-              <Text strong>{t('资产预览')}</Text>
-              <Button size='small' onClick={() => setSelectedAssetPreview(null)}>
-                {t('收起')}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <Text type='tertiary' size='small'>
+              {t('资产总数')}：{canvasAssetsTotal}
+            </Text>
+            <Button
+              size='small'
+              icon={<IconRefresh />}
+              onClick={() => loadCanvasAssets(canvasAssetPage || 1)}
+            >
+              {t('刷新')}
+            </Button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <Checkbox
+              checked={allCurrentCanvasAssetsSelected}
+              indeterminate={partiallyCurrentCanvasAssetsSelected}
+              disabled={canvasAssets.length === 0 || canvasAssetsLoading}
+              onChange={(event) =>
+                handleCanvasAssetSelectAll(event.target.checked)
+              }
+            >
+              {allCurrentCanvasAssetsSelected
+                ? t('取消选择当前页')
+                : t('选择当前页')}
+            </Checkbox>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Tag color={selectedCanvasAssetCount > 0 ? 'blue' : 'grey'}>
+                {t('已选 {{count}} 项', { count: selectedCanvasAssetCount })}
+              </Tag>
+              <Button
+                size='small'
+                type='tertiary'
+                disabled={selectedCanvasAssetCount === 0 || assetBatchDeleting}
+                onClick={() => setSelectedCanvasAssetIds(new Set())}
+              >
+                {t('取消选择')}
               </Button>
-            </div>
-            <div style={{ padding: 12 }}>
-              <img
-                src={getAssetImageUrl(selectedAssetPreview)}
-                alt=''
-                style={{ width: '100%', maxHeight: 360, objectFit: 'contain' }}
-              />
-              <Text type='tertiary' size='small' style={{ display: 'block', marginTop: 8 }}>
-                {selectedAssetPreview.prompt || t('暂无提示词')}
-              </Text>
+              <Popconfirm
+                title={t('确认删除选中资产？')}
+                content={t('删除后无法恢复，请确认是否继续')}
+                okType='danger'
+                onConfirm={deleteSelectedCanvasAssets}
+              >
+                <Button
+                  size='small'
+                  type='danger'
+                  icon={<IconDelete />}
+                  loading={assetBatchDeleting}
+                  disabled={selectedCanvasAssetCount === 0}
+                >
+                  {t('删除选中')}
+                </Button>
+              </Popconfirm>
             </div>
           </div>
-        ) : null}
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-          <Text type='tertiary' size='small'>
-            {t('资产总数')}：{canvasAssetsTotal}
-          </Text>
-          <Button
-            size='small'
-            icon={<IconRefresh />}
-            onClick={() => loadCanvasAssets(canvasAssetPage || 1)}
-          >
-            {t('刷新')}
-          </Button>
         </div>
         <Spin spinning={canvasAssetsLoading}>
           {canvasAssetsError ? (
@@ -5186,6 +5635,7 @@ const ImageGeneration = () => {
         </SideSheet>
       ) : null}
       {renderAssetDrawer()}
+      {renderAssetPreviewOverlay()}
       <ImageGenerationTaskModal
         visible={taskModalVisible}
         task={selectedTask}
