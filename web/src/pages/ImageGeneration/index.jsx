@@ -32,7 +32,6 @@ import {
   Empty,
   Checkbox,
   Tag,
-  Progress,
   Popconfirm,
 } from '@douyinfe/semi-ui';
 import {
@@ -49,7 +48,6 @@ import {
   IconRefresh,
   IconDownload,
   IconClock,
-  IconAlertTriangle,
   IconPlayCircle,
   IconExternalOpen,
   IconMore,
@@ -253,59 +251,6 @@ const collectTaskReferenceValues = (raw) => {
   }
 
   return Array.from(new Set(values));
-};
-
-const buildTaskReferenceFiles = (values, prefix) =>
-  values.map((url, index) => ({
-    uid: `${prefix}-${index}`,
-    name: `${prefix}-${index + 1}`,
-    url,
-  }));
-
-const getImageTaskReferenceMeta = (task) => {
-  const params = parseCanvasTaskParams(task?.params);
-  const referenceValues = [
-    ...collectTaskReferenceValues(params.reference_image),
-    ...collectTaskReferenceValues(params.reference_images),
-  ];
-  const maskValues = collectTaskReferenceValues(params.mask);
-  const referenceCount =
-    referenceValues.length || Math.max(0, Number(task?.reference_count) || 0);
-
-  return {
-    referenceFiles: buildTaskReferenceFiles(referenceValues, 'task-reference'),
-    referenceCount,
-    maskFiles: buildTaskReferenceFiles(maskValues, 'task-mask'),
-    hasMask:
-      maskValues.length > 0 ||
-      task?.has_mask === true ||
-      task?.has_mask === 'true',
-  };
-};
-
-const VIDEO_REFERENCE_REQUEST_TYPES = new Set([
-  'image_to_video',
-  'reference_video',
-  'first_tail_video',
-  'remix_video',
-]);
-
-const getVideoTaskReferenceMeta = (task) => {
-  const params = parseCanvasTaskParams(task?.params || task?.request_params);
-  const referenceValues = [
-    ...collectTaskReferenceValues(task?.reference_image),
-    ...collectTaskReferenceValues(task?.reference_images),
-    ...collectTaskReferenceValues(params.reference_image),
-    ...collectTaskReferenceValues(params.reference_images),
-  ];
-  const hasReference =
-    referenceValues.length > 0 ||
-    VIDEO_REFERENCE_REQUEST_TYPES.has(task?.request_type);
-
-  return {
-    referenceFiles: buildTaskReferenceFiles(referenceValues, 'video-reference'),
-    hasReference,
-  };
 };
 
 const ImageGeneration = () => {
@@ -520,6 +465,10 @@ const ImageGeneration = () => {
   const [videoTaskModalVisible, setVideoTaskModalVisible] = useState(false);
   const [videoSelectedTaskIds, setVideoSelectedTaskIds] = useState(new Set());
   const [deletingVideoTasks, setDeletingVideoTasks] = useState(false);
+  const [selectedCanvasMessageId, setSelectedCanvasMessageId] = useState(null);
+  const canvasMessageViewportRef = useRef(null);
+  const canvasMessageDetailCacheRef = useRef(new Map());
+  const canvasMessageDetailRequestSeqRef = useRef(new Map());
   const sseRef = useRef(null);
   const pollingTimerRef = useRef(null);
   const pollingIntervalRef = useRef(DEFAULT_POLLING_INTERVAL_SECONDS);
@@ -598,6 +547,18 @@ const ImageGeneration = () => {
     canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [];
   const isCurrentCanvasMessageSession = (sessionId) =>
     String(canvasMessagesSessionIdRef.current || '') === String(sessionId || '');
+
+  useEffect(() => {
+    const container = canvasMessageViewportRef.current;
+    if (!container) {
+      return;
+    }
+    container.scrollTop = container.scrollHeight;
+  }, [canvasMessagesSessionId, displayedCanvasMessages.length, generationMode]);
+
+  useEffect(() => {
+    setSelectedCanvasMessageId(null);
+  }, [selectedCanvasSessionId, generationMode]);
 
   taskListStateRef.current = {
     page: taskPage,
@@ -1697,6 +1658,125 @@ const ImageGeneration = () => {
     }
   };
 
+  const getCanvasMessageReferenceFiles = (message) => {
+    if (!message) {
+      return [];
+    }
+    const task = message.image_task || message.video_task || null;
+    const params = parseCanvasTaskParams(task?.params || task?.request_params);
+    const references = [];
+    const seen = new Set();
+    const addFiles = (values, prefix) => {
+      collectTaskReferenceValues(values).forEach((url, index) => {
+        if (seen.has(url)) {
+          return;
+        }
+        seen.add(url);
+        references.push({
+          uid: `${prefix}-${message.id || task?.id || 'message'}-${index}`,
+          name: `${prefix}-${index + 1}`,
+          url,
+        });
+      });
+    };
+
+    addFiles(message.reference_images || message.reference_image, 'message-reference');
+    addFiles(params.reference_images || params.reference_image, 'task-reference');
+    if (message.task_type === 'video_generation') {
+      addFiles(task?.reference_images, 'video-reference');
+    }
+    return references;
+  };
+
+  const getCanvasMessageMedia = (message) => {
+    if (!message) {
+      return null;
+    }
+    if (message.task_type === 'image_generation') {
+      const task = message.image_task || {};
+      return {
+        kind: 'image',
+        status: task.status || message.status,
+        src: task.thumbnail_url || task.image_url || '',
+        error: task.error_message || message.error_message || '',
+      };
+    }
+    if (message.task_type === 'video_generation') {
+      const task = message.video_task || {};
+      return {
+        kind: 'video',
+        status: task.status || message.status,
+        src: task.thumbnail_url || task.video_url || task.result_url || '',
+        videoUrl: task.video_url || task.result_url || '',
+        error: task.fail_reason || message.error_message || '',
+      };
+    }
+    return null;
+  };
+
+  const loadCanvasMessageTaskDetail = async (message) => {
+    const task = message?.image_task || message?.video_task || null;
+    const taskId = task?.id;
+    if (!taskId) {
+      return task;
+    }
+
+    const cacheKey = `${message.task_type || 'task'}:${taskId}`;
+    if (canvasMessageDetailCacheRef.current.has(cacheKey)) {
+      return canvasMessageDetailCacheRef.current.get(cacheKey);
+    }
+
+    const requestSeq =
+      (canvasMessageDetailRequestSeqRef.current.get(cacheKey) || 0) + 1;
+    canvasMessageDetailRequestSeqRef.current.set(cacheKey, requestSeq);
+
+    try {
+      const endpoint =
+        message.task_type === 'video_generation'
+          ? `/api/video-generation/tasks/${taskId}`
+          : `/api/image-generation/tasks/${taskId}`;
+      const res = await API.get(endpoint);
+      if (
+        requestSeq !== canvasMessageDetailRequestSeqRef.current.get(cacheKey)
+      ) {
+        return task;
+      }
+      if (res.data.success && res.data.data) {
+        canvasMessageDetailCacheRef.current.set(cacheKey, res.data.data);
+        return res.data.data;
+      }
+    } catch (error) {
+      console.error('Failed to load canvas message task detail:', error);
+    }
+
+    canvasMessageDetailCacheRef.current.set(cacheKey, task);
+    return task;
+  };
+
+  const attachPendingReferencesToMessages = (messages, referenceFiles) => {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return messages || [];
+    }
+    const files = (referenceFiles || []).filter((file) => file?.url);
+    if (files.length === 0) {
+      return messages;
+    }
+
+    return messages.map((message) => {
+      if (!message?.task_id || message.role === 'user') {
+        return message;
+      }
+      return {
+        ...message,
+        reference_images: files.map((file) => ({
+          uid: file.uid || file.name || file.url,
+          name: file.name || t('参考图'),
+          url: file.url,
+        })),
+      };
+    });
+  };
+
   const loadTaskUpdates = async () => {
     if (!isDefaultTaskViewState(taskListStateRef.current)) {
       return;
@@ -2766,6 +2846,7 @@ const ImageGeneration = () => {
 
       // 准备参数对象
       const params = {};
+      let canvasReferenceFiles = [];
 
       if (aspectRatio) {
         params.aspect_ratio = aspectRatio;
@@ -2789,6 +2870,13 @@ const ImageGeneration = () => {
         });
         const base64Images = await Promise.all(imagePromises);
         params.reference_images = base64Images;
+        canvasReferenceFiles = base64Images
+          .map((url, index) => ({
+            uid: referenceImages[index]?.uid || `reference-${index}`,
+            name: referenceImages[index]?.name || `${t('参考图')}-${index + 1}`,
+            url,
+          }))
+          .filter((file) => file.url);
       }
       if (modelSupportsMaskEditing(selectedModelData) && maskImage?.fileInstance) {
         params.mask = await new Promise((resolve, reject) => {
@@ -2844,7 +2932,10 @@ const ImageGeneration = () => {
       });
 
       if (createdTasks.length > 0) {
-        appendCanvasMessagesForSession(canvasSession.id, createdMessages);
+        appendCanvasMessagesForSession(
+          canvasSession.id,
+          attachPendingReferencesToMessages(createdMessages, canvasReferenceFiles),
+        );
         loadCanvasSessions(CANVAS_MODE_IMAGE, { silent: true });
         showSuccess(
           createdTasks.length === 1
@@ -2959,6 +3050,7 @@ const ImageGeneration = () => {
     setVideoGenerating(true);
     try {
       let base64Image = '';
+      let canvasReferenceFiles = [];
       if (videoReferenceImage?.fileInstance) {
         base64Image = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -2968,6 +3060,15 @@ const ImageGeneration = () => {
         });
       } else if (videoReferenceImage?.url) {
         base64Image = videoReferenceImage.url;
+      }
+      if (base64Image) {
+        canvasReferenceFiles = [
+          {
+            uid: videoReferenceImage.uid || 'video-reference-0',
+            name: videoReferenceImage.name || t('首帧图'),
+            url: base64Image,
+          },
+        ];
       }
       const params = {
         duration: videoDuration,
@@ -2997,7 +3098,10 @@ const ImageGeneration = () => {
         createdMessages.find((message) => message?.video_task)?.video_task ||
         null;
       showSuccess(t('视频任务已创建，正在生成中...'));
-      appendCanvasMessagesForSession(canvasSession.id, createdMessages);
+      appendCanvasMessagesForSession(
+        canvasSession.id,
+        attachPendingReferencesToMessages(createdMessages, canvasReferenceFiles),
+      );
       loadCanvasSessions(CANVAS_MODE_VIDEO, { silent: true });
       setVideoSelectedTask(newTask);
       if (
@@ -4053,58 +4157,6 @@ const ImageGeneration = () => {
       background: 'transparent',
       padding: 0,
     },
-    detailPanel: {
-      border: '1px solid var(--semi-color-border)',
-      borderRadius: 10,
-      background: 'var(--semi-color-bg-0)',
-      overflow: 'hidden',
-      boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
-    },
-    detailHeader: {
-      padding: isMobile ? 12 : '14px 16px',
-      borderBottom: '1px solid var(--semi-color-border)',
-      display: 'flex',
-      alignItems: 'flex-start',
-      justifyContent: 'space-between',
-      gap: 12,
-    },
-    detailBody: {
-      padding: isMobile ? 12 : 16,
-      display: 'grid',
-      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.65fr) minmax(260px, 0.55fr)',
-      gap: 16,
-    },
-    previewSurface: {
-      minHeight: isMobile ? 240 : 460,
-      borderRadius: 10,
-      background: 'var(--semi-color-fill-0)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      overflow: 'hidden',
-    },
-    previewImage: {
-      width: '100%',
-      height: '100%',
-      maxHeight: isMobile ? 420 : 640,
-      objectFit: 'contain',
-      display: 'block',
-    },
-    detailMeta: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 8,
-      minWidth: 0,
-    },
-    metaBlock: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 3,
-      padding: 0,
-      borderRadius: 0,
-      background: 'transparent',
-      minWidth: 0,
-    },
     chatStream: {
       minHeight: '100%',
       display: 'flex',
@@ -4112,11 +4164,25 @@ const ImageGeneration = () => {
       gap: isMobile ? 10 : 12,
       maxWidth: 1080,
       margin: '0 auto',
+      padding: isMobile ? '8px 0 12px' : '12px 0 18px',
+      width: '100%',
     },
-    chatMessage: {
-      maxWidth: '82%',
-      borderRadius: 8,
-      padding: '10px 12px',
+    canvasStreamEmpty: {
+      maxWidth: 1080,
+      margin: '0 auto',
+      width: '100%',
+      padding: isMobile ? '8px 0 12px' : '12px 0 18px',
+    },
+    canvasMessageList: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: isMobile ? 10 : 12,
+      width: '100%',
+    },
+    canvasMessageRow: {
+      width: '100%',
+      borderRadius: 10,
+      padding: '12px 14px',
       border: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-bg-0)',
       color: 'var(--semi-color-text-0)',
@@ -4124,17 +4190,55 @@ const ImageGeneration = () => {
       wordBreak: 'break-word',
       boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
     },
-    chatMessageUser: {
-      alignSelf: 'flex-end',
+    canvasMessageRowUser: {
       background: 'var(--semi-color-primary-light-default)',
       borderColor: 'var(--semi-color-primary-light-default)',
     },
-    chatMessageAssistant: {
-      alignSelf: 'flex-start',
+    canvasMessageRowAssistant: {
+      background: 'var(--semi-color-bg-0)',
     },
-    messageResultBody: {
-      marginTop: 8,
-      minWidth: isMobile ? 0 : 260,
+    canvasMessageRowSelected: {
+      boxShadow: '0 0 0 1px var(--semi-color-primary)',
+    },
+    canvasMessageHead: {
+      display: 'flex',
+      justifyContent: 'flex-start',
+      gap: 12,
+      marginBottom: 8,
+    },
+    canvasMessageBody: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+    },
+    canvasMessagePrompt: {
+      whiteSpace: 'pre-wrap',
+      color: 'var(--semi-color-text-0)',
+    },
+    canvasMessageRefs: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    canvasReferenceThumbWrap: {
+      width: 140,
+    },
+    canvasReferenceThumb: {
+      display: 'block',
+      width: '100%',
+      height: 96,
+      objectFit: 'cover',
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
+    },
+    canvasMessageResult: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+      alignItems: 'flex-start',
+    },
+    canvasMessageResultFrame: {
       maxWidth: '100%',
     },
     messageResultImage: {
@@ -4487,29 +4591,6 @@ const ImageGeneration = () => {
     );
   };
 
-  const renderStatusTag = (status, mode) => {
-    const map =
-      mode === CANVAS_MODE_VIDEO
-        ? {
-            completed: { color: 'green', text: t('已完成') },
-            failed: { color: 'red', text: t('失败') },
-            in_progress: { color: 'blue', text: t('生成中') },
-            queued: { color: 'orange', text: t('等待中') },
-          }
-        : {
-            success: { color: 'green', text: t('已完成') },
-            failed: { color: 'red', text: t('失败') },
-            generating: { color: 'blue', text: t('生成中') },
-            pending: { color: 'orange', text: t('等待中') },
-          };
-    const meta = map[status] || { color: 'grey', text: status || t('未知') };
-    return (
-      <Tag color={meta.color} size='small'>
-        {meta.text}
-      </Tag>
-    );
-  };
-
   const renderSidebarEmpty = (title, description, action = null) => (
     <div style={{ padding: '28px 10px' }}>
       <Empty title={title} description={description} />
@@ -4701,17 +4782,6 @@ const ImageGeneration = () => {
     </div>
   );
 
-  const renderMetaBlock = (label, value) => (
-    <div style={styles.metaBlock}>
-      <Text type='tertiary' size='small'>
-        {label}
-      </Text>
-      <Text size='small' style={{ wordBreak: 'break-word' }}>
-        {value || '-'}
-      </Text>
-    </div>
-  );
-
   const renderWeakDetails = (title, children) => (
     <details
       style={{
@@ -4742,279 +4812,6 @@ const ImageGeneration = () => {
       </div>
     </details>
   );
-
-  const renderReferenceStrip = (title, files) => {
-    const visibleFiles = (files || []).filter(Boolean);
-    if (visibleFiles.length === 0) {
-      return null;
-    }
-    return (
-      <div style={styles.metaBlock}>
-        <Text type='tertiary' size='small'>
-          {title}
-        </Text>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {visibleFiles.map((file) => (
-            <img
-              key={file.uid || file.name || file.url}
-              src={file.url || (file.fileInstance && URL.createObjectURL(file.fileInstance))}
-              alt=''
-              style={styles.referenceImageThumb}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const renderTaskReferenceSummary = (title, summary) => {
-    if (!summary) {
-      return null;
-    }
-    return (
-      <div style={styles.metaBlock}>
-        <Text type='tertiary' size='small'>
-          {title}
-        </Text>
-        <Text style={{ wordBreak: 'break-word' }}>{summary}</Text>
-      </div>
-    );
-  };
-
-  const renderImagePreview = (task) => {
-    if (!task) {
-      return null;
-    }
-    if (task.status === 'success' && task.image_url) {
-      return <img src={task.image_url} alt='' style={styles.previewImage} />;
-    }
-    if (task.status === 'failed') {
-      return (
-        <div style={styles.emptyState}>
-          <IconAlertTriangle size='extra-large' />
-          <Text type='danger'>{task.error_message || t('生成失败')}</Text>
-        </div>
-      );
-    }
-    return (
-      <div style={styles.emptyState}>
-        {task.status === 'generating' ? <Spin size='large' /> : <IconClock size='extra-large' />}
-        <Text type='tertiary'>
-          {task.status === 'generating' ? t('生成中') : t('等待中')}
-        </Text>
-        {task.status === 'generating' ? (
-          <Progress
-            percent={Number(task.progress) || 0}
-            showInfo
-            style={{ width: 220 }}
-          />
-        ) : null}
-      </div>
-    );
-  };
-
-  const renderImageDetail = () => {
-    if (!selectedTask) {
-      return (
-        <div style={styles.detailPanel}>
-          {renderSidebarEmpty(t('选择或创建图片任务'), t('左侧选择历史任务，或直接在底部输入器创建新图片'))}
-        </div>
-      );
-    }
-    const taskReferenceMeta = getImageTaskReferenceMeta(selectedTask);
-    return (
-      <div style={styles.detailPanel}>
-        <div style={styles.detailHeader}>
-          <div style={{ minWidth: 0 }}>
-            <Text strong style={{ display: 'block', fontSize: 16 }}>
-              {getTaskTitle(selectedTask, t('图片任务'))}
-            </Text>
-            <Text type='tertiary' size='small'>
-              {formatTimestamp(selectedTask.created_time)}
-            </Text>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {renderStatusTag(selectedTask.status, CANVAS_MODE_IMAGE)}
-            <Button size='small' onClick={() => setTaskModalVisible(true)}>
-              {t('详情')}
-            </Button>
-            {selectedTask.image_url ? (
-              <Button
-                size='small'
-                icon={<IconDownload />}
-                onClick={() =>
-                  downloadAsset({
-                    id: selectedTask.id,
-                    image_url: selectedTask.image_url,
-                  })
-                }
-              >
-                {t('下载')}
-              </Button>
-            ) : null}
-          </div>
-        </div>
-        <div style={styles.detailBody}>
-          <div style={styles.previewSurface}>{renderImagePreview(selectedTask)}</div>
-          <div style={styles.detailMeta}>
-            {renderMetaBlock(t('名称'), getTaskTitle(selectedTask, t('图片任务')))}
-            {renderMetaBlock('model_id', selectedTask.model_id)}
-            {renderMetaBlock(t('尺寸/比例'), selectedTask.size_text || selectedTask.output_size_text)}
-            {renderMetaBlock(t('任务 ID'), selectedTask.id)}
-            {selectedTask.error_message
-              ? renderMetaBlock(t('失败信息'), selectedTask.error_message)
-              : null}
-            {renderWeakDetails(
-              t('更多信息'),
-              <>
-                {renderMetaBlock(t('提示词'), selectedTask.prompt)}
-                {renderMetaBlock(t('模型'), selectedTask.display_name || selectedTask.model_id)}
-                {renderMetaBlock(t('创建时间'), formatTimestamp(selectedTask.created_time))}
-                {renderMetaBlock(t('完成时间'), formatTimestamp(selectedTask.completed_time))}
-                {taskReferenceMeta.referenceFiles.length > 0
-                  ? renderReferenceStrip(
-                      t('任务参考图'),
-                      taskReferenceMeta.referenceFiles,
-                    )
-                  : renderTaskReferenceSummary(
-                      t('任务参考图'),
-                      taskReferenceMeta.referenceCount > 0
-                        ? t('参考图 {{count}} 张', {
-                            count: taskReferenceMeta.referenceCount,
-                          })
-                        : null,
-                    )}
-                {taskReferenceMeta.maskFiles.length > 0
-                  ? renderReferenceStrip(t('任务遮罩'), taskReferenceMeta.maskFiles)
-                  : renderTaskReferenceSummary(
-                      t('任务遮罩'),
-                      taskReferenceMeta.hasMask ? t('含遮罩') : null,
-                    )}
-              </>,
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderVideoPreview = (task) => {
-    if (!task) {
-      return null;
-    }
-    const videoUrl = task.video_url || task.result_url;
-    if (task.status === 'completed' && videoUrl) {
-      return (
-        <video
-          src={videoUrl}
-          poster={task.thumbnail_url}
-          controls
-          style={{ width: '100%', height: '100%', maxHeight: 640, background: '#000' }}
-        />
-      );
-    }
-    if (task.status === 'failed') {
-      return (
-        <div style={styles.emptyState}>
-          <IconAlertTriangle size='extra-large' />
-          <Text type='danger'>{task.fail_reason || t('生成失败')}</Text>
-        </div>
-      );
-    }
-    return (
-      <div style={styles.emptyState}>
-        {task.status === 'in_progress' ? <Spin size='large' /> : <IconPlayCircle size='extra-large' />}
-        <Text type='tertiary'>
-          {task.status === 'in_progress' ? t('生成中') : t('等待中')}
-        </Text>
-        <Progress
-          percent={parseInt(String(task.progress || '0').replace('%', ''), 10) || 0}
-          showInfo
-          style={{ width: 220 }}
-        />
-      </div>
-    );
-  };
-
-  const renderVideoDetail = () => {
-    if (!videoSelectedTask) {
-      return (
-        <div style={styles.detailPanel}>
-          {renderSidebarEmpty(t('选择或创建视频任务'), t('左侧选择历史任务，或直接在底部输入器创建新视频'))}
-        </div>
-      );
-    }
-    const videoUrl = videoSelectedTask.video_url || videoSelectedTask.result_url;
-    const videoReferenceMeta = getVideoTaskReferenceMeta(videoSelectedTask);
-    return (
-      <div style={styles.detailPanel}>
-        <div style={styles.detailHeader}>
-          <div style={{ minWidth: 0 }}>
-            <Text strong style={{ display: 'block', fontSize: 16 }}>
-              {getTaskTitle(videoSelectedTask, t('视频任务'))}
-            </Text>
-            <Text type='tertiary' size='small'>
-              {formatTimestamp(videoSelectedTask.created_time)}
-            </Text>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {renderStatusTag(videoSelectedTask.status, CANVAS_MODE_VIDEO)}
-            <Button size='small' onClick={() => setVideoTaskModalVisible(true)}>
-              {t('详情')}
-            </Button>
-            {videoUrl ? (
-              <Button
-                size='small'
-                icon={<IconExternalOpen />}
-                onClick={() => window.open(videoUrl, '_blank')}
-              >
-                {t('打开')}
-              </Button>
-            ) : null}
-          </div>
-        </div>
-        <div style={styles.detailBody}>
-          <div style={styles.previewSurface}>{renderVideoPreview(videoSelectedTask)}</div>
-          <div style={styles.detailMeta}>
-            {renderMetaBlock(t('名称'), getTaskTitle(videoSelectedTask, t('视频任务')))}
-            {renderMetaBlock('model_id', videoSelectedTask.model_id)}
-            {renderMetaBlock(
-              t('尺寸/比例'),
-              [videoSelectedTask.resolution, videoSelectedTask.aspect_ratio]
-                .filter(Boolean)
-                .join(' / ') || '-',
-            )}
-            {renderMetaBlock(t('任务 ID'), videoSelectedTask.id)}
-            {videoSelectedTask.fail_reason
-              ? renderMetaBlock(t('失败信息'), videoSelectedTask.fail_reason)
-              : null}
-            {renderWeakDetails(
-              t('更多信息'),
-              <>
-                {renderMetaBlock(t('提示词'), videoSelectedTask.prompt)}
-                {renderMetaBlock(
-                  t('模型'),
-                  videoSelectedTask.display_name || videoSelectedTask.model_id,
-                )}
-                {renderMetaBlock(t('时长'), videoSelectedTask.duration ? `${videoSelectedTask.duration}s` : '-')}
-                {renderMetaBlock(t('创建时间'), formatTimestamp(videoSelectedTask.created_time))}
-                {renderMetaBlock(t('完成时间'), formatTimestamp(videoSelectedTask.completed_time))}
-                {videoReferenceMeta.referenceFiles.length > 0
-                  ? renderReferenceStrip(
-                      t('任务首帧图 / 参考图'),
-                      videoReferenceMeta.referenceFiles,
-                    )
-                  : renderTaskReferenceSummary(
-                      t('任务首帧图 / 参考图'),
-                      videoReferenceMeta.hasReference ? t('含参考图') : null,
-                    )}
-              </>,
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   const renderRecentTaskGrid = () => {
     if (generationMode === CANVAS_MODE_VIDEO) {
@@ -5061,75 +4858,134 @@ const ImageGeneration = () => {
     );
   };
 
-  const renderCanvasResultContent = (message) => {
-    if (message.task_type === 'image_generation') {
-      const task = message.image_task || {};
-      if (task.status === 'success' && task.image_url) {
+  const renderCanvasReferenceThumb = (file, fallbackLabel) => (
+    <div
+      key={file.uid}
+      data-canvas-reference-thumb='true'
+      style={styles.canvasReferenceThumbWrap}
+    >
+      <img src={file.url} alt='' style={styles.canvasReferenceThumb} />
+      <Text type='tertiary' size='small' style={{ display: 'block', marginTop: 4 }}>
+        {fallbackLabel}
+      </Text>
+    </div>
+  );
+
+  const renderCanvasMessageResult = (message) => {
+    const media = getCanvasMessageMedia(message);
+    if (!media) {
+      return null;
+    }
+    if (media.kind === 'image') {
+      if (media.status === 'success' && media.src) {
         return (
-          <img
-            src={task.image_url}
-            alt=''
-            style={styles.messageResultImage}
-            onClick={() => setSelectedTask(task)}
-          />
+          <div style={styles.canvasMessageResultFrame}>
+            <img
+              data-canvas-message-result='image'
+              src={media.src}
+              alt=''
+              style={styles.messageResultImage}
+              onClick={() => setSelectedTask(message.image_task || null)}
+            />
+          </div>
         );
       }
-      if (task.status === 'failed') {
-        return <Text type='danger'>{task.error_message || message.error_message || t('生成失败')}</Text>;
+      if (media.status === 'failed') {
+        return <Text type='danger'>{media.error || t('生成失败')}</Text>;
       }
       return (
         <div style={styles.messagePending}>
-          {task.status === 'generating' ? <Spin size='small' /> : <IconClock />}
-          <span>{task.status === 'generating' ? t('生成中') : t('排队中')}</span>
+          {media.status === 'generating' ? <Spin size='small' /> : <IconClock />}
+          <span>{media.status === 'generating' ? t('生成中') : t('排队中')}</span>
         </div>
       );
     }
-    if (message.task_type === 'video_generation') {
-      const task = message.video_task || {};
-      const videoUrl = task.video_url || task.result_url;
-      if (task.status === 'completed' && videoUrl) {
+    if (media.kind === 'video') {
+      if (media.status === 'completed' && media.videoUrl) {
         return (
-          <video
-            src={videoUrl}
-            poster={task.thumbnail_url}
-            controls
-            style={styles.messageResultVideo}
-            onClick={() => setVideoSelectedTask(task)}
-          />
+          <div style={styles.canvasMessageResultFrame}>
+            <video
+              data-canvas-message-result='video'
+              src={media.videoUrl}
+              poster={media.src}
+              controls
+              style={styles.messageResultVideo}
+              onClick={() => setVideoSelectedTask(message.video_task || null)}
+            />
+          </div>
         );
       }
-      if (task.status === 'failed') {
-        return <Text type='danger'>{task.fail_reason || message.error_message || t('生成失败')}</Text>;
+      if (media.status === 'failed') {
+        return <Text type='danger'>{media.error || t('生成失败')}</Text>;
       }
       return (
         <div style={styles.messagePending}>
-          {task.status === 'in_progress' ? <Spin size='small' /> : <IconPlayCircle />}
-          <span>{task.status === 'in_progress' ? t('生成中') : t('排队中')}</span>
+          {media.status === 'in_progress' ? <Spin size='small' /> : <IconPlayCircle />}
+          <span>{media.status === 'in_progress' ? t('生成中') : t('排队中')}</span>
         </div>
       );
     }
-    return <Text type='tertiary'>{message.prompt || t('暂未接入聊天模型')}</Text>;
+    return null;
   };
 
   const renderCanvasMessage = (message) => {
     const isUser = message.role === 'user';
+    const references = getCanvasMessageReferenceFiles(message);
+    const media = getCanvasMessageMedia(message);
+    const isSelected = selectedCanvasMessageId === message.id;
+    const handleMessageClick = async () => {
+      setSelectedCanvasMessageId(message.id);
+      if (isUser || references.length > 0) {
+        return;
+      }
+      const detail = await loadCanvasMessageTaskDetail(message);
+      if (!detail) {
+        return;
+      }
+      const updatedMessage =
+        message.task_type === 'video_generation'
+          ? { ...message, video_task: detail }
+          : { ...message, image_task: detail };
+      setCanvasMessages((prev) =>
+        prev.map((item) =>
+          item.id === message.id ? updatedMessage : item,
+        ),
+      );
+    };
     return (
       <div
         key={message.id}
+        data-canvas-message-row='true'
         style={{
-          ...styles.chatMessage,
-          ...(isUser ? styles.chatMessageUser : styles.chatMessageAssistant),
+          ...styles.canvasMessageRow,
+          ...(isUser ? styles.canvasMessageRowUser : styles.canvasMessageRowAssistant),
+          ...(isSelected ? styles.canvasMessageRowSelected : null),
         }}
+        onClick={handleMessageClick}
       >
-        {isUser ? (
-          <div style={{ whiteSpace: 'pre-wrap' }}>
-            {message.prompt || t('已添加素材引用')}
-          </div>
-        ) : (
-          <div style={styles.messageResultBody}>
-            {renderCanvasResultContent(message)}
-          </div>
-        )}
+        <div style={styles.canvasMessageHead}>
+          <Text type='tertiary' size='small'>
+            {isUser ? t('你') : t('生成')}
+          </Text>
+        </div>
+        <div style={styles.canvasMessageBody}>
+          {isUser ? (
+            <div style={styles.canvasMessagePrompt}>{message.prompt || t('已添加素材引用')}</div>
+          ) : null}
+          {references.length > 0 ? (
+            <div style={styles.canvasMessageRefs}>
+              {references.map((file) => renderCanvasReferenceThumb(file, t('参考图')))}
+            </div>
+          ) : null}
+          {!isUser ? (
+            <div style={styles.canvasMessageResult}>{renderCanvasMessageResult(message)}</div>
+          ) : null}
+          {media?.status === 'failed' && message.error_message ? (
+            <Text type='danger' size='small'>
+              {message.error_message}
+            </Text>
+          ) : null}
+        </div>
       </div>
     );
   };
@@ -5137,14 +4993,14 @@ const ImageGeneration = () => {
   const renderCanvasMessageStream = () => {
     if (!selectedCanvasSession) {
       return (
-        <div style={styles.detailPanel}>
+        <div style={styles.canvasStreamEmpty}>
           {renderSidebarEmpty(t('空白会话'), t('准备好开始了吗？'))}
         </div>
       );
     }
     if (canvasMessagesLoading) {
       return (
-        <div style={styles.detailPanel}>
+        <div style={styles.canvasStreamEmpty}>
           <div style={{ padding: 24, display: 'flex', justifyContent: 'center' }}>
             <Spin />
           </div>
@@ -5153,7 +5009,7 @@ const ImageGeneration = () => {
     }
     if (canvasMessagesError) {
       return (
-        <div style={styles.detailPanel}>
+        <div style={styles.canvasStreamEmpty}>
           {renderSidebarEmpty(
             t('消息加载失败'),
             canvasMessagesError,
@@ -5166,24 +5022,14 @@ const ImageGeneration = () => {
     }
     if (displayedCanvasMessages.length === 0) {
       return (
-        <div style={styles.detailPanel}>
+        <div style={styles.canvasStreamEmpty}>
           {renderSidebarEmpty(t('空白会话'), t('准备好开始了吗？'))}
         </div>
       );
     }
-    return displayedCanvasMessages.map(renderCanvasMessage);
-  };
-
-  const renderMainContent = () => {
-    const workspaceContent =
-      generationMode === CANVAS_MODE_IMAGE
-        ? renderImageDetail()
-        : generationMode === CANVAS_MODE_VIDEO
-          ? renderVideoDetail()
-          : renderChatWorkspace();
     return (
-      <div style={styles.mainViewport}>
-        {workspaceContent}
+      <div style={styles.canvasMessageList}>
+        {displayedCanvasMessages.map(renderCanvasMessage)}
       </div>
     );
   };
@@ -5943,7 +5789,11 @@ const ImageGeneration = () => {
         </div>
       ) : null}
       <div style={styles.workspaceBody}>
-        {renderMainContent()}
+        <div ref={canvasMessageViewportRef} style={styles.mainViewport}>
+          {generationMode === CANVAS_MODE_CHAT
+            ? renderChatWorkspace()
+            : renderCanvasMessageStream()}
+        </div>
         {renderComposer()}
       </div>
     </div>
