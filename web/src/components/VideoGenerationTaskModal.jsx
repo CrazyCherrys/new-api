@@ -108,30 +108,33 @@ const VideoGenerationTaskModal = ({
     return null;
   }
 
+  const videoName = task.title || task.prompt || t('视频任务');
+
   const styles = {
     body: {
       display: 'grid',
-      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.2fr) minmax(320px, 0.8fr)',
-      gap: 20,
-      alignItems: 'stretch',
+      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.55fr) minmax(280px, 0.65fr)',
+      gap: isMobile ? 12 : 18,
+      padding: isMobile ? 12 : 18,
+      alignItems: 'start',
     },
     previewPanel: {
       minHeight: isMobile ? 240 : 420,
-      borderRadius: 14,
-      background: '#0f172a',
+      borderRadius: 10,
+      background: 'var(--semi-color-fill-0)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       overflow: 'hidden',
     },
     infoPanel: {
-      borderRadius: 14,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
-      padding: 18,
+      borderRadius: 0,
+      border: 'none',
+      background: 'transparent',
+      padding: 0,
       display: 'flex',
       flexDirection: 'column',
-      gap: 12,
+      gap: 10,
     },
     infoRow: {
       display: 'flex',
@@ -148,9 +151,9 @@ const VideoGenerationTaskModal = ({
       wordBreak: 'break-word',
     },
     promptBox: {
-      borderRadius: 10,
-      background: 'var(--semi-color-fill-0)',
-      padding: 12,
+      borderRadius: 0,
+      background: 'transparent',
+      padding: 0,
       whiteSpace: 'pre-wrap',
       lineHeight: 1.6,
     },
@@ -159,7 +162,9 @@ const VideoGenerationTaskModal = ({
       justifyContent: 'space-between',
       gap: 12,
       flexWrap: 'wrap',
-      marginTop: 20,
+      marginTop: 0,
+      paddingTop: 12,
+      borderTop: '1px solid var(--semi-color-border)',
     },
     actions: {
       display: 'flex',
@@ -193,12 +198,12 @@ const VideoGenerationTaskModal = ({
 
         <div style={styles.infoPanel}>
           <div style={styles.infoRow}>
-            <span style={styles.label}>{t('状态')}</span>
-            <span style={styles.value}>{statusText}</span>
+            <span style={styles.label}>{t('名称')}</span>
+            <span style={styles.value}>{videoName}</span>
           </div>
           <div style={styles.infoRow}>
-            <span style={styles.label}>{t('模型')}</span>
-            <span style={styles.value}>{task.display_name || task.model_id || '-'}</span>
+            <span style={styles.label}>model_id</span>
+            <span style={styles.value}>{task.model_id || '-'}</span>
           </div>
           <div style={styles.infoRow}>
             <span style={styles.label}>{t('时长')}</span>
@@ -217,23 +222,49 @@ const VideoGenerationTaskModal = ({
             <span style={styles.value}>{task.quota ?? '-'}</span>
           </div>
           <div style={styles.infoRow}>
-            <span style={styles.label}>{t('创建时间')}</span>
-            <span style={styles.value}>{formatTime(task.created_time)}</span>
+            <span style={styles.label}>{t('任务 ID')}</span>
+            <span style={styles.value}>{task.id}</span>
           </div>
-          <div style={styles.infoRow}>
-            <span style={styles.label}>{t('完成时间')}</span>
-            <span style={styles.value}>{formatTime(task.completed_time)}</span>
-          </div>
-          <div>
-            <Text strong>{t('提示词')}</Text>
-            <div style={styles.promptBox}>{task.prompt || '-'}</div>
-          </div>
-          {task.fail_reason ? (
-            <div>
-              <Text strong>{t('失败原因')}</Text>
-              <div style={styles.promptBox}>{task.fail_reason}</div>
+          <details style={{ borderTop: '1px solid var(--semi-color-border)', paddingTop: 10 }}>
+            <summary
+              style={{
+                cursor: 'pointer',
+                color: 'var(--semi-color-text-2)',
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              {t('更多信息')}
+            </summary>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+              <div style={styles.infoRow}>
+                <span style={styles.label}>{t('状态')}</span>
+                <span style={styles.value}>{statusText}</span>
+              </div>
+              <div style={styles.infoRow}>
+                <span style={styles.label}>{t('模型')}</span>
+                <span style={styles.value}>{task.display_name || task.model_id || '-'}</span>
+              </div>
+              <div style={styles.infoRow}>
+                <span style={styles.label}>{t('创建时间')}</span>
+                <span style={styles.value}>{formatTime(task.created_time)}</span>
+              </div>
+              <div style={styles.infoRow}>
+                <span style={styles.label}>{t('完成时间')}</span>
+                <span style={styles.value}>{formatTime(task.completed_time)}</span>
+              </div>
+              <div>
+                <Text strong>{t('提示词')}</Text>
+                <div style={styles.promptBox}>{task.prompt || '-'}</div>
+              </div>
+              {task.fail_reason ? (
+                <div>
+                  <Text strong>{t('失败原因')}</Text>
+                  <div style={styles.promptBox}>{task.fail_reason}</div>
+                </div>
+              ) : null}
             </div>
-          ) : null}
+          </details>
         </div>
       </div>
 

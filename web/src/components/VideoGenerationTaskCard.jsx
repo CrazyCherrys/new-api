@@ -56,15 +56,15 @@ const VideoGenerationTaskCard = ({
 
   const statusMeta = (() => {
     if (isSuccess) {
-      return { color: '#3ecf8e', text: t('已完成') };
+      return { color: '#18a058', text: t('已完成') };
     }
     if (isFailed) {
-      return { color: '#ef4444', text: t('失败') };
+      return { color: '#d92d20', text: t('失败') };
     }
     if (isGenerating) {
-      return { color: '#22d3ee', text: t('生成中') };
+      return { color: '#2563eb', text: t('生成中') };
     }
-    return { color: '#f59e0b', text: t('等待中') };
+    return { color: '#b7791f', text: t('等待中') };
   })();
 
   const styles = {
@@ -72,17 +72,18 @@ const VideoGenerationTaskCard = ({
       position: 'relative',
       width: '100%',
       aspectRatio: '16 / 9',
-      borderRadius: 14,
+      borderRadius: 10,
       overflow: 'hidden',
       cursor: 'pointer',
-      background:
-        'linear-gradient(180deg, rgba(10,18,32,0.92) 0%, rgba(24,32,48,0.96) 100%)',
-      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      border: selected
+        ? '1px solid var(--semi-color-primary)'
+        : '1px solid var(--semi-color-border)',
       boxShadow: hovered
-        ? '0 16px 32px -18px rgba(15, 23, 42, 0.48)'
-        : '0 10px 22px -16px rgba(15, 23, 42, 0.36)',
-      transition: 'box-shadow 0.2s ease, transform 0.2s ease',
-      transform: hovered ? 'translateY(-1px)' : 'none',
+        ? '0 10px 24px rgba(15, 23, 42, 0.12)'
+        : '0 1px 2px rgba(15, 23, 42, 0.04)',
+      transition: 'border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease',
+      transform: hovered ? 'translateY(-1px)' : 'translateY(0)',
     },
     poster: {
       position: 'absolute',
@@ -90,37 +91,53 @@ const VideoGenerationTaskCard = ({
       width: '100%',
       height: '100%',
       objectFit: 'cover',
-      opacity: isSuccess ? 1 : 0.3,
-      background: '#111827',
+      opacity: isSuccess ? 1 : 0.56,
+      background: 'var(--semi-color-fill-0)',
     },
     overlay: {
       position: 'absolute',
       inset: 0,
       background:
-        'linear-gradient(to top, rgba(3,7,18,0.88), rgba(3,7,18,0.18) 55%, rgba(3,7,18,0.45))',
+        'linear-gradient(180deg, rgba(0,0,0,0.28), transparent 34%, transparent 58%, rgba(0,0,0,0.72))',
     },
     checkboxWrap: {
       position: 'absolute',
       top: 8,
       left: 8,
       zIndex: 6,
-      padding: 4,
-      borderRadius: 6,
-      background: hovered || selected ? 'rgba(0,0,0,0.35)' : 'transparent',
+      width: 28,
+      height: 28,
+      borderRadius: 8,
+      background: hovered || selected ? 'rgba(0,0,0,0.42)' : 'rgba(0,0,0,0.24)',
       display: 'flex',
       alignItems: 'center',
+      justifyContent: 'center',
+      backdropFilter: 'blur(6px)',
     },
     statusBadge: {
       position: 'absolute',
       top: 8,
       right: 8,
       zIndex: 6,
-      padding: '2px 8px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      maxWidth: 'calc(100% - 52px)',
+      padding: '3px 8px',
       borderRadius: 999,
-      fontSize: 11,
-      fontWeight: 500,
+      background: 'rgba(0,0,0,0.48)',
       color: '#fff',
+      fontSize: 11,
+      fontWeight: 600,
+      lineHeight: 1.2,
+      backdropFilter: 'blur(6px)',
+    },
+    statusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: '50%',
       background: statusMeta.color,
+      flexShrink: 0,
     },
     centerWrap: {
       position: 'absolute',
@@ -136,22 +153,21 @@ const VideoGenerationTaskCard = ({
       left: 0,
       right: 0,
       bottom: 0,
-      padding: '12px 14px',
+      padding: '30px 10px 10px',
       zIndex: 3,
       display: 'flex',
       flexDirection: 'column',
-      gap: 6,
+      gap: 3,
     },
     prompt: {
       color: '#fff',
       fontSize: 13,
+      fontWeight: 600,
       lineHeight: 1.35,
-      maxHeight: 36,
       overflow: 'hidden',
       textOverflow: 'ellipsis',
-      display: '-webkit-box',
-      WebkitLineClamp: 2,
-      WebkitBoxOrient: 'vertical',
+      whiteSpace: 'nowrap',
+      textShadow: '0 1px 2px rgba(0,0,0,0.22)',
     },
     metaRow: {
       display: 'flex',
@@ -159,10 +175,22 @@ const VideoGenerationTaskCard = ({
       gap: 8,
       fontSize: 12,
       color: 'rgba(255,255,255,0.78)',
+      overflow: 'hidden',
+      whiteSpace: 'nowrap',
+    },
+    metaText: {
+      minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
     },
     progressWrap: {
-      width: '62%',
-      minWidth: 180,
+      width: '72%',
+      minWidth: 148,
+      padding: '12px 14px',
+      borderRadius: 10,
+      background: 'rgba(255,255,255,0.88)',
+      border: '1px solid rgba(255,255,255,0.72)',
+      boxShadow: '0 8px 24px rgba(15, 23, 42, 0.10)',
     },
   };
 
@@ -184,7 +212,7 @@ const VideoGenerationTaskCard = ({
         />
       ) : (
         <div style={{ ...styles.poster, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <IconVideo size='extra-large' style={{ color: 'rgba(255,255,255,0.5)' }} />
+          <IconVideo size='extra-large' style={{ color: 'var(--semi-color-text-3)' }} />
         </div>
       )}
       <div style={styles.overlay} />
@@ -196,7 +224,10 @@ const VideoGenerationTaskCard = ({
         />
       </div>
 
-      <span style={styles.statusBadge}>{statusMeta.text}</span>
+      <span style={styles.statusBadge}>
+        <span style={styles.statusDot} />
+        {statusMeta.text}
+      </span>
 
       <div style={styles.centerWrap}>
         {isSuccess ? (
@@ -215,7 +246,7 @@ const VideoGenerationTaskCard = ({
             <Text
               type='tertiary'
               size='small'
-              style={{ color: 'rgba(255,255,255,0.7)', marginTop: 8, display: 'block' }}
+              style={{ color: 'var(--semi-color-text-2)', marginTop: 8, display: 'block' }}
             >
               {formatWaitTime(waitTime)}
             </Text>
@@ -226,7 +257,7 @@ const VideoGenerationTaskCard = ({
       <div style={styles.footer}>
         <div style={styles.prompt}>{task.prompt || t('暂无提示词')}</div>
         <div style={styles.metaRow}>
-          <span>{task.display_name || task.model_id || '-'}</span>
+          <span style={styles.metaText}>{task.display_name || task.model_id || '-'}</span>
           <span>{task.duration ? `${task.duration}s` : '-'}</span>
         </div>
       </div>

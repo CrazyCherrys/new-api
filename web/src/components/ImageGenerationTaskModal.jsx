@@ -259,14 +259,13 @@ const ImageGenerationTaskModal = ({
       transition: 'background 0.15s',
     },
     body: {
-      display: 'flex',
-      flexDirection: isMobile ? 'column' : 'row',
-      gap: isMobile ? 12 : 20,
-      padding: isMobile ? 12 : 24,
-      alignItems: isMobile ? 'stretch' : 'flex-start',
+      display: 'grid',
+      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.55fr) minmax(280px, 0.65fr)',
+      gap: isMobile ? 12 : 18,
+      padding: isMobile ? 12 : 18,
+      alignItems: 'start',
     },
     previewCol: {
-      flex: isMobile ? 'none' : isTallImage ? '0 1 460px' : '1 1 0',
       minWidth: 0,
       display: 'flex',
       flexDirection: 'column',
@@ -274,15 +273,14 @@ const ImageGenerationTaskModal = ({
     },
     previewCard: {
       width: '100%',
-      padding: isMobile ? 12 : 16,
-      borderRadius: 16,
-      border: '1px solid var(--semi-color-border)',
+      padding: 0,
+      borderRadius: 10,
+      border: 'none',
       background: 'var(--semi-color-fill-0)',
-      boxShadow:
-        '0 18px 40px -22px rgba(34, 211, 238, 0.45), inset 0 0 0 1px rgba(255,255,255,0.02)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
+      overflow: 'hidden',
     },
     previewFrame: {
       position: 'relative',
@@ -291,8 +289,8 @@ const ImageGenerationTaskModal = ({
       maxHeight: previewMaxHeight,
       minHeight: isMobile ? 220 : 280,
       aspectRatio: isSuccess && task.image_url ? normalizedPreviewRatio : undefined,
-      borderRadius: 14,
-      background: 'rgba(255,255,255,0.02)',
+      borderRadius: 10,
+      background: 'var(--semi-color-fill-0)',
       overflow: 'hidden',
       display: 'flex',
       alignItems: 'center',
@@ -311,9 +309,9 @@ const ImageGenerationTaskModal = ({
       width: 28,
       height: 28,
       borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'rgba(0,0,0,0.25)',
-      color: 'var(--semi-color-text-1)',
+      border: '1px solid rgba(255,255,255,0.28)',
+      background: 'rgba(0,0,0,0.48)',
+      color: '#fff',
       cursor: 'pointer',
       display: 'inline-flex',
       alignItems: 'center',
@@ -322,31 +320,31 @@ const ImageGenerationTaskModal = ({
       backdropFilter: 'blur(6px)',
     },
     sideCol: {
-      width: isMobile ? '100%' : 320,
-      minWidth: isMobile ? 0 : 320,
+      width: '100%',
+      minWidth: 0,
       display: 'flex',
       flexDirection: 'column',
-      gap: 12,
+      gap: 10,
     },
     statusCard: {
-      padding: '12px 14px',
-      borderRadius: 12,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
+      padding: 0,
+      borderRadius: 0,
+      border: 'none',
+      background: 'transparent',
       display: 'flex',
       flexDirection: 'column',
       gap: 8,
     },
     metaGrid: {
       display: 'grid',
-      gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
-      gap: 10,
+      gridTemplateColumns: '1fr',
+      gap: 8,
     },
     metaCard: {
-      padding: '10px 12px',
-      borderRadius: 12,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
+      padding: 0,
+      borderRadius: 0,
+      border: 'none',
+      background: 'transparent',
     },
     infoBlock: {
       display: 'flex',
@@ -382,6 +380,8 @@ const ImageGenerationTaskModal = ({
       display: 'grid',
       gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
       gap: 8,
+      paddingTop: 10,
+      borderTop: '1px solid var(--semi-color-border)',
     },
     sideActionBtn: {
       width: '100%',
@@ -524,6 +524,7 @@ const ImageGenerationTaskModal = ({
           .join(' · ')
       : task.quality_text || '-';
   const sizeText = task.size_text || '';
+  const imageName = task.title || task.prompt || t('图片任务');
 
   return (
     <Modal
@@ -604,74 +605,113 @@ const ImageGenerationTaskModal = ({
           <div style={styles.metaGrid}>
             <div style={styles.metaCard}>
               <div style={styles.infoBlock}>
-                <span style={styles.infoLabel}>{t('模型')}</span>
-                <span style={styles.infoValue}>{displayName}</span>
+                <span style={styles.infoLabel}>{t('名称')}</span>
+                <span style={styles.infoValue}>{imageName}</span>
               </div>
             </div>
-            {task.selected_group && (
-              <div style={styles.metaCard}>
-                <div style={styles.infoBlock}>
-                  <span style={styles.infoLabel}>{t('使用分组')}</span>
-                  <span style={styles.infoValue}>{task.selected_group}</span>
+            <div style={styles.metaCard}>
+              <div style={styles.infoBlock}>
+                <span style={styles.infoLabel}>model_id</span>
+                <span style={styles.infoValue}>{task.model_id || '-'}</span>
+              </div>
+            </div>
+            <div style={styles.metaCard}>
+              <div style={styles.infoBlock}>
+                <span style={styles.infoLabel}>{t('尺寸/比例')}</span>
+                <span style={styles.infoValue}>
+                  {[outputSizeText, sizeText].filter(Boolean).join(' / ') || '-'}
+                </span>
+              </div>
+            </div>
+            <div style={styles.metaCard}>
+              <div style={styles.infoBlock}>
+                <span style={styles.infoLabel}>{t('任务 ID')}</span>
+                <span style={styles.infoValue}>{task.id}</span>
+              </div>
+            </div>
+            <details style={{ borderTop: '1px solid var(--semi-color-border)', paddingTop: 10 }}>
+              <summary
+                style={{
+                  cursor: 'pointer',
+                  color: 'var(--semi-color-text-2)',
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                }}
+              >
+                {t('更多信息')}
+              </summary>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr',
+                  gap: 8,
+                  marginTop: 10,
+                }}
+              >
+                <div style={styles.metaCard}>
+                  <div style={styles.infoBlock}>
+                    <span style={styles.infoLabel}>{t('模型')}</span>
+                    <span style={styles.infoValue}>{displayName}</span>
+                  </div>
+                </div>
+                {task.selected_group && (
+                  <div style={styles.metaCard}>
+                    <div style={styles.infoBlock}>
+                      <span style={styles.infoLabel}>{t('使用分组')}</span>
+                      <span style={styles.infoValue}>{task.selected_group}</span>
+                    </div>
+                  </div>
+                )}
+                <div style={styles.metaCard}>
+                  <div style={styles.infoBlock}>
+                    <span style={styles.infoLabel}>{t('请求类型')}</span>
+                    <span style={styles.infoValue}>{requestTypeText}</span>
+                  </div>
+                </div>
+                <div style={styles.metaCard}>
+                  <div style={styles.infoBlock}>
+                    <span style={styles.infoLabel}>{t('画质参数')}</span>
+                    <span style={styles.infoValue}>{qualityText}</span>
+                  </div>
+                </div>
+                <div style={styles.metaCard}>
+                  <div style={styles.infoBlock}>
+                    <span style={styles.infoLabel}>{t('消耗配额')}</span>
+                    <span style={styles.infoValue}>
+                      {Number.isFinite(task.cost) ? task.cost : '-'}
+                    </span>
+                  </div>
+                </div>
+                <div style={styles.metaCard}>
+                  <div style={styles.infoBlock}>
+                    <span style={styles.infoLabel}>{t('创建时间')}</span>
+                    <span style={styles.infoValue}>
+                      {formatTime(task.created_time)}
+                    </span>
+                  </div>
+                </div>
+                <div style={styles.metaCard}>
+                  <div style={styles.infoBlock}>
+                    <span style={styles.infoLabel}>{t('完成时间')}</span>
+                    <span style={styles.infoValue}>
+                      {formatTime(task.completed_time)}
+                    </span>
+                  </div>
+                </div>
+                <div style={styles.metaCard}>
+                  <div style={styles.infoBlock}>
+                    <span style={styles.infoLabel}>{t('生成耗时')}</span>
+                    <span style={styles.infoValue}>{generationDuration}</span>
+                  </div>
+                </div>
+                <div style={styles.metaCard}>
+                  <div style={styles.infoBlock}>
+                    <span style={styles.infoLabel}>{t('提示词')}</span>
+                    <span style={styles.infoValue}>{task.prompt || '-'}</span>
+                  </div>
                 </div>
               </div>
-            )}
-            {sizeText && (
-              <div style={styles.metaCard}>
-                <div style={styles.infoBlock}>
-                  <span style={styles.infoLabel}>{t('尺寸')}</span>
-                  <span style={styles.infoValue}>{sizeText}</span>
-                </div>
-              </div>
-            )}
-            <div style={styles.metaCard}>
-              <div style={styles.infoBlock}>
-                <span style={styles.infoLabel}>{t('实际输出尺寸')}</span>
-                <span style={styles.infoValue}>{outputSizeText}</span>
-              </div>
-            </div>
-            <div style={styles.metaCard}>
-              <div style={styles.infoBlock}>
-                <span style={styles.infoLabel}>{t('请求类型')}</span>
-                <span style={styles.infoValue}>{requestTypeText}</span>
-              </div>
-            </div>
-            <div style={styles.metaCard}>
-              <div style={styles.infoBlock}>
-                <span style={styles.infoLabel}>{t('画质参数')}</span>
-                <span style={styles.infoValue}>{qualityText}</span>
-              </div>
-            </div>
-            <div style={styles.metaCard}>
-              <div style={styles.infoBlock}>
-                <span style={styles.infoLabel}>{t('消耗配额')}</span>
-                <span style={styles.infoValue}>
-                  {Number.isFinite(task.cost) ? task.cost : '-'}
-                </span>
-              </div>
-            </div>
-            <div style={styles.metaCard}>
-              <div style={styles.infoBlock}>
-                <span style={styles.infoLabel}>{t('创建时间')}</span>
-                <span style={styles.infoValue}>
-                  {formatTime(task.created_time)}
-                </span>
-              </div>
-            </div>
-            <div style={styles.metaCard}>
-              <div style={styles.infoBlock}>
-                <span style={styles.infoLabel}>{t('完成时间')}</span>
-                <span style={styles.infoValue}>
-                  {formatTime(task.completed_time)}
-                </span>
-              </div>
-            </div>
-            <div style={styles.metaCard}>
-              <div style={styles.infoBlock}>
-                <span style={styles.infoLabel}>{t('生成耗时')}</span>
-                <span style={styles.infoValue}>{generationDuration}</span>
-              </div>
-            </div>
+            </details>
           </div>
 
           <div style={styles.sideActions}>

@@ -1059,7 +1059,12 @@ const ImageGeneration = () => {
         }
         return [];
       }
-      const sessions = res.data.data || [];
+      const sessions = (res.data.data || [])
+        .map((session) => ({
+          ...session,
+          mode: session.mode || normalizedMode,
+        }))
+        .filter((session) => session.mode === normalizedMode);
       setCanvasSessionErrorForMode(normalizedMode, '');
       setCanvasSessionsForMode(normalizedMode, sessions);
       setSelectedCanvasSessionIds((prev) => {
@@ -3469,7 +3474,7 @@ const ImageGeneration = () => {
       height: 'calc(100vh - 60px)',
       marginTop: 60,
       overflow: 'hidden',
-      background: 'var(--semi-color-bg-1)',
+      background: 'var(--semi-color-fill-0)',
     },
     leftPanel: {
       width: isMobile ? '100%' : 300,
@@ -3483,8 +3488,8 @@ const ImageGeneration = () => {
     sidebarNav: {
       display: 'flex',
       flexDirection: 'column',
-      gap: 8,
-      padding: 12,
+      gap: 6,
+      padding: 10,
     },
     sidebarNavItem: {
       width: '100%',
@@ -3529,25 +3534,25 @@ const ImageGeneration = () => {
       overflowY: 'auto',
       display: 'flex',
       flexDirection: 'column',
-      gap: 8,
-      padding: '0 12px 12px',
+      gap: 6,
+      padding: '0 10px 10px',
     },
     taskListItem: {
       width: '100%',
       minHeight: 44,
       borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-1)',
+      border: '1px solid transparent',
+      background: 'transparent',
       padding: '8px 10px',
       display: 'flex',
       alignItems: 'center',
       gap: 10,
       textAlign: 'left',
       cursor: 'pointer',
-      transition: 'border-color 0.16s, background 0.16s',
+      transition: 'border-color 0.16s, background 0.16s, color 0.16s',
     },
     taskListItemActive: {
-      borderColor: 'var(--semi-color-primary)',
+      borderColor: 'var(--semi-color-primary-light-default)',
       background: 'var(--semi-color-primary-light-default)',
     },
     taskListText: {
@@ -3597,7 +3602,7 @@ const ImageGeneration = () => {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      background: 'var(--semi-color-bg-1)',
+      background: 'var(--semi-color-fill-0)',
       overflow: 'hidden',
     },
     rightContent: {
@@ -3665,32 +3670,32 @@ const ImageGeneration = () => {
     },
     promptArea: {
       borderRadius: 10,
-      border: '1px solid rgba(148, 163, 184, 0.18)',
-      background: 'rgba(13, 18, 28, 0.95)',
-      padding: isMobile ? '10px 10px 12px' : '12px 12px 14px',
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      padding: isMobile ? '10px' : '12px',
     },
     promptInput: {
       border: 'none',
       background: 'transparent',
       resize: 'none',
       boxShadow: 'none',
-      color: '#f5f7fa',
-      caretColor: '#fff',
+      color: 'var(--semi-color-text-0)',
+      caretColor: 'var(--semi-color-primary)',
       fontSize: 15,
       lineHeight: 1.55,
     },
     promptControls: {
       display: 'flex',
       justifyContent: 'space-between',
-      gap: 10,
-      alignItems: 'center',
-      marginTop: 6,
+      gap: 8,
+      alignItems: 'flex-end',
+      marginTop: 8,
       flexWrap: 'wrap',
     },
     promptControlsLeft: {
       display: 'flex',
       alignItems: 'center',
-      gap: 8,
+      gap: 6,
       flexWrap: 'wrap',
       minWidth: 0,
       flex: 1,
@@ -3700,6 +3705,7 @@ const ImageGeneration = () => {
       alignItems: 'center',
       justifyContent: 'flex-end',
       minWidth: 36,
+      marginLeft: 'auto',
     },
     promptAssetBar: {
       display: 'flex',
@@ -3707,29 +3713,29 @@ const ImageGeneration = () => {
       gap: 8,
       flexWrap: 'wrap',
       minHeight: 36,
-      marginBottom: 8,
+      marginBottom: 6,
     },
     uploadIconBtn: {
       width: 32,
       height: 32,
       minWidth: 32,
       borderRadius: 8,
-      border: '1px dashed rgba(148, 163, 184, 0.36)',
-      background: 'rgba(15, 23, 42, 0.72)',
+      border: '1px dashed var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       cursor: 'pointer',
-      color: '#dbeafe',
+      color: 'var(--semi-color-text-2)',
       transition: 'opacity 0.2s, border-color 0.2s, background 0.2s',
     },
     pillButton: {
-      minHeight: 34,
-      borderRadius: 999,
-      border: '1px solid rgba(148, 163, 184, 0.18)',
-      background: 'rgba(255, 255, 255, 0.04)',
-      color: '#e5e7eb',
-      padding: '0 12px',
+      minHeight: 32,
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
+      color: 'var(--semi-color-text-1)',
+      padding: '0 10px',
       display: 'inline-flex',
       alignItems: 'center',
       gap: 6,
@@ -3737,15 +3743,15 @@ const ImageGeneration = () => {
       lineHeight: 1,
     },
     pillButtonActive: {
-      borderColor: 'rgba(96, 165, 250, 0.42)',
-      background: 'rgba(59, 130, 246, 0.18)',
-      color: '#fff',
+      borderColor: 'var(--semi-color-primary-light-active)',
+      background: 'var(--semi-color-primary-light-default)',
+      color: 'var(--semi-color-primary)',
     },
     pillButtonMuted: {
-      color: 'rgba(226, 232, 240, 0.84)',
+      color: 'var(--semi-color-text-2)',
     },
     pillButtonLabel: {
-      maxWidth: 170,
+      maxWidth: isMobile ? 126 : 170,
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
@@ -3753,22 +3759,22 @@ const ImageGeneration = () => {
     darkMenu: {
       minWidth: 240,
       maxWidth: 340,
-      border: '1px solid rgba(148, 163, 184, 0.2)',
-      borderRadius: 12,
-      background: '#0f172a',
-      boxShadow: '0 24px 60px rgba(0, 0, 0, 0.45)',
+      border: '1px solid var(--semi-color-border)',
+      borderRadius: 10,
+      background: 'var(--semi-color-bg-0)',
+      boxShadow: '0 16px 40px rgba(15, 23, 42, 0.16)',
       padding: 6,
     },
     darkMenuItem: {
-      color: '#e5e7eb',
+      color: 'var(--semi-color-text-0)',
       borderRadius: 8,
       margin: 0,
       padding: '8px 10px',
       whiteSpace: 'nowrap',
     },
     darkMenuItemActive: {
-      background: 'rgba(59, 130, 246, 0.18)',
-      color: '#fff',
+      background: 'var(--semi-color-primary-light-default)',
+      color: 'var(--semi-color-primary)',
     },
     modelMenuItem: {
       display: 'flex',
@@ -3786,7 +3792,7 @@ const ImageGeneration = () => {
     modelMenuMeta: {
       fontSize: 11,
       lineHeight: 1.4,
-      color: 'rgba(226, 232, 240, 0.66)',
+      color: 'var(--semi-color-text-2)',
       wordBreak: 'break-all',
     },
     compactField: {
@@ -3886,12 +3892,12 @@ const ImageGeneration = () => {
       height: 36,
       borderRadius: 8,
       border: '1px dashed var(--semi-color-border)',
-      background: 'rgba(15, 23, 42, 0.9)',
+      background: 'var(--semi-color-fill-0)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       cursor: 'pointer',
-      color: '#cbd5e1',
+      color: 'var(--semi-color-text-2)',
       transition: 'border-color 0.2s',
     },
     emptyState: {
@@ -3955,15 +3961,22 @@ const ImageGeneration = () => {
       gap: 8,
       flexWrap: 'wrap',
     },
+    composerParameterRow: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      flexWrap: 'wrap',
+      minWidth: 0,
+    },
     filterLabel: {
       fontSize: 13,
       color: 'var(--semi-color-text-2)',
     },
     tasksGrid: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-      gap: 20,
-      padding: isMobile ? 12 : 20,
+      gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+      gap: isMobile ? 10 : 12,
+      padding: 0,
       width: '100%',
       alignContent: 'start',
       flexShrink: 0,
@@ -3972,7 +3985,7 @@ const ImageGeneration = () => {
       height: isMobile ? 44 : 0,
       flexShrink: 0,
       borderBottom: 'none',
-      background: 'var(--semi-color-bg-1)',
+      background: 'var(--semi-color-fill-0)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -3988,19 +4001,19 @@ const ImageGeneration = () => {
     composerModeSwitch: {
       display: 'inline-flex',
       alignItems: 'center',
-      gap: 4,
-      padding: 4,
-      borderRadius: 999,
-      border: '1px solid rgba(148, 163, 184, 0.18)',
-      background: 'rgba(255, 255, 255, 0.04)',
+      gap: 3,
+      padding: 3,
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
     },
     composerModeButton: {
-      minHeight: 28,
+      minHeight: 26,
       border: 'none',
-      borderRadius: 999,
+      borderRadius: 6,
       padding: isMobile ? '0 8px' : '0 10px',
       background: 'transparent',
-      color: 'rgba(226, 232, 240, 0.84)',
+      color: 'var(--semi-color-text-2)',
       display: 'inline-flex',
       alignItems: 'center',
       gap: 6,
@@ -4009,8 +4022,8 @@ const ImageGeneration = () => {
       whiteSpace: 'nowrap',
     },
     composerModeButtonActive: {
-      color: '#fff',
-      background: 'rgba(59, 130, 246, 0.24)',
+      color: 'var(--semi-color-primary)',
+      background: 'var(--semi-color-primary-light-default)',
     },
     workspaceBody: {
       flex: 1,
@@ -4023,32 +4036,32 @@ const ImageGeneration = () => {
       flex: 1,
       minHeight: 0,
       overflowY: 'auto',
-      padding: isMobile ? '10px 10px 6px' : '14px 18px 8px',
+      padding: isMobile ? '10px 10px 6px' : '16px 18px 8px',
     },
     composerDock: {
       flexShrink: 0,
       borderTop: 'none',
-      background: 'var(--semi-color-bg-1)',
-      padding: isMobile ? '6px 10px 10px' : '8px 14px 12px',
-      boxShadow: '0 -4px 18px rgba(15, 23, 42, 0.04)',
+      background: 'var(--semi-color-fill-0)',
+      padding: isMobile ? '6px 10px 10px' : '8px 18px 14px',
     },
     composerShell: {
       width: '100%',
       maxWidth: 1080,
       margin: '0 auto',
-      border: '1px solid var(--semi-color-border)',
-      borderRadius: 8,
-      background: '#10151f',
-      padding: isMobile ? 10 : 12,
+      border: 'none',
+      borderRadius: 0,
+      background: 'transparent',
+      padding: 0,
     },
     detailPanel: {
       border: '1px solid var(--semi-color-border)',
-      borderRadius: 8,
+      borderRadius: 10,
       background: 'var(--semi-color-bg-0)',
       overflow: 'hidden',
+      boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
     },
     detailHeader: {
-      padding: isMobile ? 12 : 16,
+      padding: isMobile ? 12 : '14px 16px',
       borderBottom: '1px solid var(--semi-color-border)',
       display: 'flex',
       alignItems: 'flex-start',
@@ -4058,14 +4071,13 @@ const ImageGeneration = () => {
     detailBody: {
       padding: isMobile ? 12 : 16,
       display: 'grid',
-      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.4fr) minmax(280px, 0.6fr)',
+      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.65fr) minmax(260px, 0.55fr)',
       gap: 16,
     },
     previewSurface: {
-      minHeight: isMobile ? 240 : 420,
-      borderRadius: 8,
+      minHeight: isMobile ? 240 : 460,
+      borderRadius: 10,
       background: 'var(--semi-color-fill-0)',
-      border: '1px solid var(--semi-color-border)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -4081,23 +4093,24 @@ const ImageGeneration = () => {
     detailMeta: {
       display: 'flex',
       flexDirection: 'column',
-      gap: 10,
+      gap: 8,
       minWidth: 0,
     },
     metaBlock: {
       display: 'flex',
       flexDirection: 'column',
-      gap: 4,
-      padding: 10,
-      borderRadius: 8,
-      background: 'var(--semi-color-fill-0)',
+      gap: 3,
+      padding: 0,
+      borderRadius: 0,
+      background: 'transparent',
+      minWidth: 0,
     },
     chatStream: {
       minHeight: '100%',
       display: 'flex',
       flexDirection: 'column',
-      gap: 12,
-      maxWidth: 960,
+      gap: isMobile ? 10 : 12,
+      maxWidth: 1080,
       margin: '0 auto',
     },
     chatMessage: {
@@ -4109,11 +4122,12 @@ const ImageGeneration = () => {
       color: 'var(--semi-color-text-0)',
       lineHeight: 1.55,
       wordBreak: 'break-word',
+      boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
     },
     chatMessageUser: {
       alignSelf: 'flex-end',
       background: 'var(--semi-color-primary-light-default)',
-      borderColor: 'var(--semi-color-primary-light-active)',
+      borderColor: 'var(--semi-color-primary-light-default)',
     },
     chatMessageAssistant: {
       alignSelf: 'flex-start',
@@ -4157,18 +4171,19 @@ const ImageGeneration = () => {
       gridTemplateColumns: isMobile
         ? 'repeat(2, minmax(0, 1fr))'
         : 'repeat(3, minmax(0, 1fr))',
-      gap: 10,
+      gap: 12,
     },
     assetCard: {
       position: 'relative',
       border: '1px solid var(--semi-color-border)',
-      borderRadius: 8,
+      borderRadius: 10,
       overflow: 'hidden',
       background: 'var(--semi-color-bg-0)',
       display: 'flex',
       flexDirection: 'column',
       cursor: 'pointer',
       minWidth: 0,
+      transition: 'border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease',
     },
     assetSelect: {
       position: 'absolute',
@@ -4192,9 +4207,10 @@ const ImageGeneration = () => {
       flexWrap: 'wrap',
       gap: 6,
       padding: 8,
+      borderTop: '1px solid var(--semi-color-border)',
     },
     assetCardMeta: {
-      padding: '8px 8px 0',
+      padding: '8px',
       display: 'flex',
       flexDirection: 'column',
       gap: 2,
@@ -4205,7 +4221,7 @@ const ImageGeneration = () => {
       inset: 0,
       zIndex: 1200,
       padding: isMobile ? 12 : 24,
-      background: 'rgba(15, 23, 42, 0.62)',
+      background: 'rgba(15, 23, 42, 0.52)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -4217,10 +4233,10 @@ const ImageGeneration = () => {
       gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.35fr) minmax(280px, 0.65fr)',
       gap: 0,
       overflow: 'hidden',
-      borderRadius: 8,
+      borderRadius: 10,
       border: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-bg-0)',
-      boxShadow: '0 24px 80px rgba(15, 23, 42, 0.35)',
+      boxShadow: '0 24px 72px rgba(15, 23, 42, 0.26)',
     },
     assetPreviewImagePane: {
       minHeight: isMobile ? 220 : 520,
@@ -4242,7 +4258,7 @@ const ImageGeneration = () => {
       padding: isMobile ? 12 : 16,
       display: 'flex',
       flexDirection: 'column',
-      gap: 10,
+      gap: 8,
       overflowY: 'auto',
       maxHeight: isMobile ? '44vh' : 'calc(100vh - 48px)',
       minWidth: 0,
@@ -4251,9 +4267,9 @@ const ImageGeneration = () => {
       display: 'flex',
       flexDirection: 'column',
       gap: 3,
-      padding: 10,
-      borderRadius: 8,
-      background: 'var(--semi-color-fill-0)',
+      padding: 0,
+      borderRadius: 0,
+      background: 'transparent',
       minWidth: 0,
     },
     drawerFooterPager: {
@@ -4312,9 +4328,6 @@ const ImageGeneration = () => {
     ((!!videoReferenceImage && videoSelectedModelSupportsImageToVideo) ||
       (!videoReferenceImage && videoSelectedModelSupportsTextToVideo));
 
-  const selectedGroupOption = groupOptions.find(
-    (group) => group.group === selectedGroup,
-  );
   const renderReferenceThumb = (file, onRemove) => (
     <div key={file.uid || file.name || file.url} style={styles.referenceImageContainer}>
       <img
@@ -4451,7 +4464,12 @@ const ImageGeneration = () => {
     );
 
     return (
-      <Dropdown trigger='click' position='bottomLeft' render={menu}>
+      <Dropdown
+        key={isVideoMode ? 'video-model' : 'image-model'}
+        trigger='click'
+        position='bottomLeft'
+        render={menu}
+      >
         <button
           type='button'
           aria-label={isVideoMode ? t('选择视频模型') : t('选择图片模型')}
@@ -4688,8 +4706,41 @@ const ImageGeneration = () => {
       <Text type='tertiary' size='small'>
         {label}
       </Text>
-      <Text style={{ wordBreak: 'break-word' }}>{value || '-'}</Text>
+      <Text size='small' style={{ wordBreak: 'break-word' }}>
+        {value || '-'}
+      </Text>
     </div>
+  );
+
+  const renderWeakDetails = (title, children) => (
+    <details
+      style={{
+        borderTop: '1px solid var(--semi-color-border)',
+        paddingTop: 10,
+        marginTop: 2,
+      }}
+    >
+      <summary
+        style={{
+          cursor: 'pointer',
+          color: 'var(--semi-color-text-2)',
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}
+      >
+        {title}
+      </summary>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          marginTop: 10,
+        }}
+      >
+        {children}
+      </div>
+    </details>
   );
 
   const renderReferenceStrip = (title, files) => {
@@ -4806,30 +4857,41 @@ const ImageGeneration = () => {
         <div style={styles.detailBody}>
           <div style={styles.previewSurface}>{renderImagePreview(selectedTask)}</div>
           <div style={styles.detailMeta}>
-            {renderMetaBlock(t('模型'), selectedTask.display_name || selectedTask.model_id)}
-            {renderMetaBlock(t('提示词'), selectedTask.prompt)}
+            {renderMetaBlock(t('名称'), getTaskTitle(selectedTask, t('图片任务')))}
+            {renderMetaBlock('model_id', selectedTask.model_id)}
+            {renderMetaBlock(t('尺寸/比例'), selectedTask.size_text || selectedTask.output_size_text)}
+            {renderMetaBlock(t('任务 ID'), selectedTask.id)}
             {selectedTask.error_message
               ? renderMetaBlock(t('失败信息'), selectedTask.error_message)
               : null}
-            {taskReferenceMeta.referenceFiles.length > 0
-              ? renderReferenceStrip(
-                  t('任务参考图'),
-                  taskReferenceMeta.referenceFiles,
-                )
-              : renderTaskReferenceSummary(
-                  t('任务参考图'),
-                  taskReferenceMeta.referenceCount > 0
-                    ? t('参考图 {{count}} 张', {
-                        count: taskReferenceMeta.referenceCount,
-                      })
-                    : null,
-                )}
-            {taskReferenceMeta.maskFiles.length > 0
-              ? renderReferenceStrip(t('任务遮罩'), taskReferenceMeta.maskFiles)
-              : renderTaskReferenceSummary(
-                  t('任务遮罩'),
-                  taskReferenceMeta.hasMask ? t('含遮罩') : null,
-                )}
+            {renderWeakDetails(
+              t('更多信息'),
+              <>
+                {renderMetaBlock(t('提示词'), selectedTask.prompt)}
+                {renderMetaBlock(t('模型'), selectedTask.display_name || selectedTask.model_id)}
+                {renderMetaBlock(t('创建时间'), formatTimestamp(selectedTask.created_time))}
+                {renderMetaBlock(t('完成时间'), formatTimestamp(selectedTask.completed_time))}
+                {taskReferenceMeta.referenceFiles.length > 0
+                  ? renderReferenceStrip(
+                      t('任务参考图'),
+                      taskReferenceMeta.referenceFiles,
+                    )
+                  : renderTaskReferenceSummary(
+                      t('任务参考图'),
+                      taskReferenceMeta.referenceCount > 0
+                        ? t('参考图 {{count}} 张', {
+                            count: taskReferenceMeta.referenceCount,
+                          })
+                        : null,
+                    )}
+                {taskReferenceMeta.maskFiles.length > 0
+                  ? renderReferenceStrip(t('任务遮罩'), taskReferenceMeta.maskFiles)
+                  : renderTaskReferenceSummary(
+                      t('任务遮罩'),
+                      taskReferenceMeta.hasMask ? t('含遮罩') : null,
+                    )}
+              </>,
+            )}
           </div>
         </div>
       </div>
@@ -4914,24 +4976,40 @@ const ImageGeneration = () => {
         <div style={styles.detailBody}>
           <div style={styles.previewSurface}>{renderVideoPreview(videoSelectedTask)}</div>
           <div style={styles.detailMeta}>
+            {renderMetaBlock(t('名称'), getTaskTitle(videoSelectedTask, t('视频任务')))}
+            {renderMetaBlock('model_id', videoSelectedTask.model_id)}
             {renderMetaBlock(
-              t('模型'),
-              videoSelectedTask.display_name || videoSelectedTask.model_id,
+              t('尺寸/比例'),
+              [videoSelectedTask.resolution, videoSelectedTask.aspect_ratio]
+                .filter(Boolean)
+                .join(' / ') || '-',
             )}
-            {renderMetaBlock(t('提示词'), videoSelectedTask.prompt)}
-            {renderMetaBlock(t('时长'), videoSelectedTask.duration ? `${videoSelectedTask.duration}s` : '-')}
+            {renderMetaBlock(t('任务 ID'), videoSelectedTask.id)}
             {videoSelectedTask.fail_reason
               ? renderMetaBlock(t('失败信息'), videoSelectedTask.fail_reason)
               : null}
-            {videoReferenceMeta.referenceFiles.length > 0
-              ? renderReferenceStrip(
-                  t('任务首帧图 / 参考图'),
-                  videoReferenceMeta.referenceFiles,
-                )
-              : renderTaskReferenceSummary(
-                  t('任务首帧图 / 参考图'),
-                  videoReferenceMeta.hasReference ? t('含参考图') : null,
+            {renderWeakDetails(
+              t('更多信息'),
+              <>
+                {renderMetaBlock(t('提示词'), videoSelectedTask.prompt)}
+                {renderMetaBlock(
+                  t('模型'),
+                  videoSelectedTask.display_name || videoSelectedTask.model_id,
                 )}
+                {renderMetaBlock(t('时长'), videoSelectedTask.duration ? `${videoSelectedTask.duration}s` : '-')}
+                {renderMetaBlock(t('创建时间'), formatTimestamp(videoSelectedTask.created_time))}
+                {renderMetaBlock(t('完成时间'), formatTimestamp(videoSelectedTask.completed_time))}
+                {videoReferenceMeta.referenceFiles.length > 0
+                  ? renderReferenceStrip(
+                      t('任务首帧图 / 参考图'),
+                      videoReferenceMeta.referenceFiles,
+                    )
+                  : renderTaskReferenceSummary(
+                      t('任务首帧图 / 参考图'),
+                      videoReferenceMeta.hasReference ? t('含参考图') : null,
+                    )}
+              </>,
+            )}
           </div>
         </div>
       </div>
@@ -5096,11 +5174,19 @@ const ImageGeneration = () => {
     return displayedCanvasMessages.map(renderCanvasMessage);
   };
 
-  const renderMainContent = () => (
-    <div style={styles.mainViewport}>
-      <div style={styles.chatStream}>{renderCanvasMessageStream()}</div>
-    </div>
-  );
+  const renderMainContent = () => {
+    const workspaceContent =
+      generationMode === CANVAS_MODE_IMAGE
+        ? renderImageDetail()
+        : generationMode === CANVAS_MODE_VIDEO
+          ? renderVideoDetail()
+          : renderChatWorkspace();
+    return (
+      <div style={styles.mainViewport}>
+        {workspaceContent}
+      </div>
+    );
+  };
 
   const renderComposerModeSwitch = () => {
     const options = [
@@ -5469,7 +5555,7 @@ const ImageGeneration = () => {
             <div style={styles.promptControls}>
               <div style={styles.promptControlsLeft}>
                 {renderComposerModeSwitch()}
-                {activeParameters}
+                <div style={styles.composerParameterRow}>{activeParameters}</div>
               </div>
               <div style={styles.promptControlsRight}>
                 <button
@@ -5485,12 +5571,12 @@ const ImageGeneration = () => {
                     opacity: submitDisabled ? 0.55 : 1,
                     pointerEvents: submitDisabled ? 'none' : 'auto',
                     background: promptHasContent
-                      ? '#f8fafc'
-                      : 'rgba(15, 23, 42, 0.9)',
+                      ? 'var(--semi-color-primary)'
+                      : 'var(--semi-color-fill-0)',
                     borderColor: promptHasContent
-                      ? '#f8fafc'
-                      : 'rgba(148, 163, 184, 0.24)',
-                    color: promptHasContent ? '#020617' : '#94a3b8',
+                      ? 'var(--semi-color-primary)'
+                      : 'var(--semi-color-border)',
+                    color: promptHasContent ? '#fff' : 'var(--semi-color-text-2)',
                   }}
                   onClick={handleComposerSubmit}
                   disabled={submitDisabled}
@@ -5507,8 +5593,9 @@ const ImageGeneration = () => {
             composerAdvancedVisible ? (
               <div
                 style={{
-                  borderTop: '1px solid rgba(148, 163, 184, 0.16)',
+                  borderTop: '1px solid var(--semi-color-border)',
                   paddingTop: 10,
+                  marginTop: 8,
                 }}
               >
                 <Text
@@ -5516,7 +5603,7 @@ const ImageGeneration = () => {
                   style={{
                     display: 'block',
                     marginBottom: 8,
-                    color: 'rgba(226, 232, 240, 0.72)',
+                    color: 'var(--semi-color-text-2)',
                   }}
                 >
                   {t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
@@ -5694,7 +5781,7 @@ const ImageGeneration = () => {
               </Button>
             </div>
             {renderAssetPreviewMeta(
-              t('显示名称'),
+              t('名称'),
               getAssetDisplayName(selectedAssetPreview),
             )}
             {renderAssetPreviewMeta(
@@ -5702,24 +5789,29 @@ const ImageGeneration = () => {
               selectedAssetPreview.model_id || '-',
             )}
             {renderAssetPreviewMeta(
-              t('创建时间'),
-              formatTimestamp(selectedAssetPreview.created_time),
-            )}
-            {renderAssetPreviewMeta(
-              t('完成时间'),
-              formatTimestamp(selectedAssetPreview.completed_time),
-            )}
-            {renderAssetPreviewMeta(
               t('尺寸/比例'),
               getAssetSizeText(selectedAssetPreview),
             )}
             {renderAssetPreviewMeta(
-              'task_id/id',
+              t('任务 ID'),
               getAssetTaskIdText(selectedAssetPreview),
             )}
-            {renderAssetPreviewMeta(
-              t('提示词'),
-              selectedAssetPreview.prompt || '-',
+            {renderWeakDetails(
+              t('更多信息'),
+              <>
+                {renderAssetPreviewMeta(
+                  t('创建时间'),
+                  formatTimestamp(selectedAssetPreview.created_time),
+                )}
+                {renderAssetPreviewMeta(
+                  t('完成时间'),
+                  formatTimestamp(selectedAssetPreview.completed_time),
+                )}
+                {renderAssetPreviewMeta(
+                  t('提示词'),
+                  selectedAssetPreview.prompt || '-',
+                )}
+              </>,
             )}
           </div>
         </div>
