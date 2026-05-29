@@ -226,6 +226,28 @@ const parseCanvasTaskParams = (params) => {
   }
 };
 
+const getCanvasMessageTaskType = (message) =>
+  message?.task_type ||
+  (message?.video_task
+    ? 'video_generation'
+    : message?.image_task
+      ? 'image_generation'
+      : '');
+
+const normalizeAspectRatioText = (value) => {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+  const match = text.match(
+    /^(\d+(?:\.\d+)?)\s*[:/xX×]\s*(\d+(?:\.\d+)?)$/,
+  );
+  if (!match) {
+    return '';
+  }
+  return `${match[1]} / ${match[2]}`;
+};
+
 const collectTaskReferenceValues = (raw) => {
   const values = [];
   const append = (item) => {
@@ -469,6 +491,8 @@ const ImageGeneration = () => {
   const canvasMessageViewportRef = useRef(null);
   const canvasMessageDetailCacheRef = useRef(new Map());
   const canvasMessageDetailRequestSeqRef = useRef(new Map());
+  const canvasMessageHydrationAttemptRef = useRef(new Set());
+  const canvasMessageClientRequestSeqRef = useRef(0);
   const sseRef = useRef(null);
   const pollingTimerRef = useRef(null);
   const pollingIntervalRef = useRef(DEFAULT_POLLING_INTERVAL_SECONDS);
@@ -559,6 +583,70 @@ const ImageGeneration = () => {
   useEffect(() => {
     setSelectedCanvasMessageId(null);
   }, [selectedCanvasSessionId, generationMode]);
+
+  useEffect(() => {
+    if (
+      generationMode === CANVAS_MODE_CHAT ||
+      displayedCanvasMessages.length === 0
+    ) {
+      return;
+    }
+    displayedCanvasMessages.forEach((message) => {
+      if (message?.role === 'user' || !message?.task_id) {
+        return;
+      }
+      const taskType = getCanvasMessageTaskType(message);
+      const task = message.image_task || message.video_task || null;
+      const taskId = String(task?.id || message.task_id || '');
+      if (message?.client_request_id || taskId.startsWith('pending-')) {
+        return;
+      }
+      if (
+        (task?.params || task?.request_params) &&
+        (message.reference_images || message.reference_image)
+      ) {
+        return;
+      }
+      const cacheKey = `${taskType}:${taskId}`;
+      if (canvasMessageHydrationAttemptRef.current.has(cacheKey)) {
+        return;
+      }
+      canvasMessageHydrationAttemptRef.current.add(cacheKey);
+      loadCanvasMessageTaskDetail(message).then((detail) => {
+        if (!detail) {
+          return;
+        }
+        const mergedMessage = mergeCanvasMessageTaskDetail(message, detail);
+        if (taskType === 'video_generation') {
+          setCanvasMessages((prev) =>
+            prev.map((item) =>
+              item.id === message.id
+                ? {
+                    ...mergedMessage,
+                    canvas_aspect_ratio:
+                      mergedMessage.canvas_aspect_ratio ||
+                      getCanvasMessageAspectRatio(mergedMessage),
+                  }
+                : item,
+            ),
+          );
+          return;
+        }
+        setCanvasMessages((prev) =>
+          prev.map((item) =>
+            item.id === message.id
+              ? {
+                  ...mergedMessage,
+                  canvas_aspect_ratio:
+                    mergedMessage.canvas_aspect_ratio ||
+                    getCanvasMessageAspectRatio(mergedMessage),
+                }
+              : item,
+          ),
+        );
+      });
+    });
+  }, [displayedCanvasMessages, generationMode]);
 
   taskListStateRef.current = {
     page: taskPage,
@@ -1179,6 +1267,56 @@ const ImageGeneration = () => {
     setCanvasMessages((prev) => [...prev, ...messages]);
   };
 
+  const replaceCanvasMessagesForSession = (
+    sessionId,
+    requestId,
+    messages,
+    options = {},
+  ) => {
+    if (
+      !sessionId ||
+      !requestId ||
+      !messages?.length ||
+      !isCurrentCanvasMessageSession(sessionId)
+    ) {
+      return;
+    }
+    const nextMessages = messages.map((message) => ({
+      ...message,
+      client_request_id: requestId,
+      canvas_aspect_ratio:
+        message.canvas_aspect_ratio || options.canvasAspectRatio || '',
+    }));
+    setCanvasMessages((prev) => {
+      const insertionIndex = prev.findIndex(
+        (message) => message?.client_request_id === requestId,
+      );
+      const filtered = prev.filter(
+        (message) => message?.client_request_id !== requestId,
+      );
+      if (insertionIndex < 0) {
+        return [...filtered, ...nextMessages];
+      }
+      const before = filtered.slice(0, insertionIndex);
+      const after = filtered.slice(insertionIndex);
+      return [...before, ...nextMessages, ...after];
+    });
+  };
+
+  const generateCanvasClientRequestId = () => {
+    canvasMessageClientRequestSeqRef.current += 1;
+    return `canvas-client-${Date.now()}-${canvasMessageClientRequestSeqRef.current}`;
+  };
+
+  const removeCanvasMessagesForRequest = (sessionId, requestId) => {
+    if (!sessionId || !requestId || !isCurrentCanvasMessageSession(sessionId)) {
+      return;
+    }
+    setCanvasMessages((prev) =>
+      prev.filter((message) => message?.client_request_id !== requestId),
+    );
+  };
+
   const updateCanvasSessionInState = (session) => {
     if (!session?.mode) {
       return;
@@ -1614,17 +1752,21 @@ const ImageGeneration = () => {
         if (!message?.task_id || String(message.task_id) !== String(updatedTask.id)) {
           return message;
         }
-        if (mode === CANVAS_MODE_VIDEO && message.task_type !== 'video_generation') {
+        const messageTaskType = getCanvasMessageTaskType(message);
+        if (mode === CANVAS_MODE_VIDEO && messageTaskType !== 'video_generation') {
           return message;
         }
-        if (mode === CANVAS_MODE_IMAGE && message.task_type !== 'image_generation') {
+        if (mode === CANVAS_MODE_IMAGE && messageTaskType !== 'image_generation') {
           return message;
         }
         if (mode === CANVAS_MODE_VIDEO) {
           return {
             ...message,
             status: updatedTask.status,
-            error_message: updatedTask.fail_reason || message.error_message,
+            error_message:
+              updatedTask.error_message ||
+              updatedTask.fail_reason ||
+              message.error_message,
             video_task: {
               ...(message.video_task || {}),
               ...updatedTask,
@@ -1634,7 +1776,10 @@ const ImageGeneration = () => {
         return {
           ...message,
           status: updatedTask.status,
-          error_message: updatedTask.error_message || message.error_message,
+          error_message:
+            updatedTask.error_message ||
+            updatedTask.fail_reason ||
+            message.error_message,
           image_task: {
             ...(message.image_task || {}),
             ...updatedTask,
@@ -1650,10 +1795,11 @@ const ImageGeneration = () => {
     if (!lastTaskMessage) {
       return;
     }
-    if (lastTaskMessage.task_type === 'image_generation' && lastTaskMessage.image_task) {
+    const taskType = getCanvasMessageTaskType(lastTaskMessage);
+    if (taskType === 'image_generation' && lastTaskMessage.image_task) {
       setSelectedTask(lastTaskMessage.image_task);
     }
-    if (lastTaskMessage.task_type === 'video_generation' && lastTaskMessage.video_task) {
+    if (taskType === 'video_generation' && lastTaskMessage.video_task) {
       setVideoSelectedTask(lastTaskMessage.video_task);
     }
   };
@@ -1662,6 +1808,7 @@ const ImageGeneration = () => {
     if (!message) {
       return [];
     }
+    const taskType = getCanvasMessageTaskType(message);
     const task = message.image_task || message.video_task || null;
     const params = parseCanvasTaskParams(task?.params || task?.request_params);
     const references = [];
@@ -1682,9 +1829,10 @@ const ImageGeneration = () => {
 
     addFiles(message.reference_images || message.reference_image, 'message-reference');
     addFiles(params.reference_images || params.reference_image, 'task-reference');
-    if (message.task_type === 'video_generation') {
-      addFiles(task?.reference_images, 'video-reference');
-    }
+    addFiles(
+      task?.reference_images || task?.reference_image,
+      taskType === 'video_generation' ? 'video-reference' : 'task-reference',
+    );
     return references;
   };
 
@@ -1692,26 +1840,84 @@ const ImageGeneration = () => {
     if (!message) {
       return null;
     }
-    if (message.task_type === 'image_generation') {
+    const taskType = getCanvasMessageTaskType(message);
+    if (taskType === 'image_generation') {
       const task = message.image_task || {};
       return {
         kind: 'image',
         status: task.status || message.status,
         src: task.thumbnail_url || task.image_url || '',
-        error: task.error_message || message.error_message || '',
+        error:
+          task.error_message ||
+          task.fail_reason ||
+          message.error_message ||
+          '',
       };
     }
-    if (message.task_type === 'video_generation') {
+    if (taskType === 'video_generation') {
       const task = message.video_task || {};
       return {
         kind: 'video',
         status: task.status || message.status,
         src: task.thumbnail_url || task.video_url || task.result_url || '',
         videoUrl: task.video_url || task.result_url || '',
-        error: task.fail_reason || message.error_message || '',
+        error:
+          task.error_message ||
+          task.fail_reason ||
+          message.error_message ||
+          '',
       };
     }
     return null;
+  };
+
+  const getCanvasMessageAspectRatio = (message) => {
+    const taskType = getCanvasMessageTaskType(message);
+    const task = message?.image_task || message?.video_task || {};
+    const params = parseCanvasTaskParams(task?.params || task?.request_params);
+    const candidates = [
+      message?.canvas_aspect_ratio,
+      params.aspect_ratio,
+      params.aspectRatio,
+      task?.aspect_ratio,
+      task?.aspectRatio,
+      task?.resolution,
+      task?.image_size,
+      task?.imageSize,
+      params.resolution,
+      params.image_size,
+      params.imageSize,
+    ];
+    for (const candidate of candidates) {
+      const normalized = normalizeAspectRatioText(candidate);
+      if (normalized) {
+        return normalized;
+      }
+    }
+    const fallback = message?.canvas_aspect_ratio || task?.aspect_ratio || '';
+    return normalizeAspectRatioText(fallback) || '1 / 1';
+  };
+
+  const mergeCanvasMessageTaskDetail = (message, detail) => {
+    if (!detail) {
+      return message;
+    }
+    if (getCanvasMessageTaskType(message) === 'video_generation') {
+      return {
+        ...message,
+        video_task: {
+          ...(message.video_task || {}),
+          ...detail,
+        },
+      };
+    }
+    return {
+      ...message,
+      image_task: {
+        ...(message.image_task || {}),
+        ...detail,
+      },
+    };
   };
 
   const loadCanvasMessageTaskDetail = async (message) => {
@@ -1721,7 +1927,8 @@ const ImageGeneration = () => {
       return task;
     }
 
-    const cacheKey = `${message.task_type || 'task'}:${taskId}`;
+    const taskType = getCanvasMessageTaskType(message);
+    const cacheKey = `${taskType || 'task'}:${taskId}`;
     if (canvasMessageDetailCacheRef.current.has(cacheKey)) {
       return canvasMessageDetailCacheRef.current.get(cacheKey);
     }
@@ -1732,7 +1939,7 @@ const ImageGeneration = () => {
 
     try {
       const endpoint =
-        message.task_type === 'video_generation'
+        taskType === 'video_generation'
           ? `/api/video-generation/tasks/${taskId}`
           : `/api/image-generation/tasks/${taskId}`;
       const res = await API.get(endpoint);
@@ -2897,6 +3104,40 @@ const ImageGeneration = () => {
       };
 
       const canvasSession = await ensureCanvasSession(CANVAS_MODE_IMAGE);
+      const clientRequestId = generateCanvasClientRequestId();
+      replaceCanvasMessagesForSession(canvasSession.id, clientRequestId, [
+        {
+          id: `${clientRequestId}-user`,
+          role: 'user',
+          prompt: inspiration.trim(),
+          created_time: Math.floor(Date.now() / 1000),
+          client_request_id: clientRequestId,
+          canvas_aspect_ratio: aspectRatio || '',
+        },
+        {
+          id: `${clientRequestId}-assistant`,
+          role: 'assistant',
+          prompt: inspiration.trim(),
+          status: 'generating',
+          task_type: 'image_generation',
+          created_time: Math.floor(Date.now() / 1000),
+          client_request_id: clientRequestId,
+          canvas_aspect_ratio: aspectRatio || '',
+          image_task: {
+            id: `pending-${clientRequestId}`,
+            status: 'generating',
+            prompt: inspiration.trim(),
+            model_id: selectedModel,
+            selected_group: selectedGroup,
+            aspect_ratio: aspectRatio || '',
+            thumbnail_url: '',
+            image_url: '',
+            error_message: '',
+          },
+        },
+      ], {
+        canvasAspectRatio: aspectRatio || '',
+      });
       const results = await Promise.allSettled(
         Array.from({ length: taskCount }, () =>
           API.post(
@@ -2932,9 +3173,11 @@ const ImageGeneration = () => {
       });
 
       if (createdTasks.length > 0) {
-        appendCanvasMessagesForSession(
+        replaceCanvasMessagesForSession(
           canvasSession.id,
+          clientRequestId,
           attachPendingReferencesToMessages(createdMessages, canvasReferenceFiles),
+          { canvasAspectRatio: aspectRatio || '' },
         );
         loadCanvasSessions(CANVAS_MODE_IMAGE, { silent: true });
         showSuccess(
@@ -2976,6 +3219,7 @@ const ImageGeneration = () => {
       }
 
       if (createdTasks.length === 0) {
+        removeCanvasMessagesForRequest(canvasSession.id, clientRequestId);
         showError(firstError || t('创建任务失败'));
       } else if (createdTasks.length < taskCount) {
         showError(
@@ -3048,6 +3292,8 @@ const ImageGeneration = () => {
     }
 
     setVideoGenerating(true);
+    let canvasSession = null;
+    let clientRequestId = '';
     try {
       let base64Image = '';
       let canvasReferenceFiles = [];
@@ -3084,12 +3330,54 @@ const ImageGeneration = () => {
         request_endpoint: videoSelectedModelData.request_endpoint,
         params: JSON.stringify(params),
       };
-      const canvasSession = await ensureCanvasSession(CANVAS_MODE_VIDEO);
+      canvasSession = await ensureCanvasSession(CANVAS_MODE_VIDEO);
+      clientRequestId = generateCanvasClientRequestId();
+      replaceCanvasMessagesForSession(
+        canvasSession.id,
+        clientRequestId,
+        [
+          {
+            id: `${clientRequestId}-user`,
+            role: 'user',
+            prompt: videoPrompt.trim(),
+            created_time: Math.floor(Date.now() / 1000),
+            client_request_id: clientRequestId,
+            canvas_aspect_ratio: videoAspectRatio || '',
+          },
+          {
+            id: `${clientRequestId}-assistant`,
+            role: 'assistant',
+            prompt: videoPrompt.trim(),
+            status: 'queued',
+            task_type: 'video_generation',
+            created_time: Math.floor(Date.now() / 1000),
+            client_request_id: clientRequestId,
+            canvas_aspect_ratio: videoAspectRatio || '',
+            reference_images: canvasReferenceFiles,
+            video_task: {
+              id: `pending-${clientRequestId}`,
+              status: 'queued',
+              prompt: videoPrompt.trim(),
+              model_id: videoSelectedModel,
+              aspect_ratio: videoAspectRatio || '',
+              resolution: videoResolution || '',
+              duration: videoDuration || 0,
+              thumbnail_url: '',
+              video_url: '',
+              fail_reason: '',
+            },
+          },
+        ],
+        {
+          canvasAspectRatio: videoAspectRatio || '',
+        },
+      );
       const res = await API.post(
         `/api/canvas/sessions/${canvasSession.id}/messages`,
         taskPayload,
       );
       if (!res.data.success) {
+        removeCanvasMessagesForRequest(canvasSession.id, clientRequestId);
         showError(res.data.message || t('创建视频任务失败'));
         return;
       }
@@ -3098,9 +3386,11 @@ const ImageGeneration = () => {
         createdMessages.find((message) => message?.video_task)?.video_task ||
         null;
       showSuccess(t('视频任务已创建，正在生成中...'));
-      appendCanvasMessagesForSession(
+      replaceCanvasMessagesForSession(
         canvasSession.id,
+        clientRequestId,
         attachPendingReferencesToMessages(createdMessages, canvasReferenceFiles),
+        { canvasAspectRatio: videoAspectRatio || '' },
       );
       loadCanvasSessions(CANVAS_MODE_VIDEO, { silent: true });
       setVideoSelectedTask(newTask);
@@ -3119,6 +3409,9 @@ const ImageGeneration = () => {
         setVideoTaskTotal((prev) => prev + 1);
       }
     } catch (error) {
+      if (canvasSession?.id && clientRequestId) {
+        removeCanvasMessagesForRequest(canvasSession.id, clientRequestId);
+      }
       showError(
         error.response?.data?.message || error.message || t('创建视频任务失败'),
       );
@@ -4200,6 +4493,16 @@ const ImageGeneration = () => {
       alignSelf: 'flex-start',
       background: 'var(--semi-color-bg-0)',
     },
+    canvasGenerationRow: {
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      alignItems: 'flex-start',
+    },
+    canvasGenerationRowUser: {
+      alignItems: 'flex-end',
+    },
     canvasMessageRowSelected: {
       boxShadow: '0 0 0 1px var(--semi-color-primary)',
     },
@@ -4213,8 +4516,10 @@ const ImageGeneration = () => {
       display: 'flex',
       flexDirection: 'column',
       gap: 10,
+      width: '100%',
     },
     canvasMessagePrompt: {
+      maxWidth: isMobile ? '92%' : 640,
       whiteSpace: 'pre-wrap',
       color: 'var(--semi-color-text-0)',
     },
@@ -4234,6 +4539,50 @@ const ImageGeneration = () => {
       borderRadius: 8,
       border: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-fill-0)',
+    },
+    canvasGenerationCardWrap: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      alignItems: 'flex-start',
+      width: '100%',
+    },
+    canvasMediaCard: {
+      width: '100%',
+      minWidth: 0,
+      maxWidth: isMobile ? '100%' : 640,
+      position: 'relative',
+      overflow: 'hidden',
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+    },
+    canvasMediaFrame: {
+      position: 'absolute',
+      inset: 0,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    canvasMediaContent: {
+      width: '100%',
+      height: '100%',
+      objectFit: 'contain',
+      display: 'block',
+      background: 'var(--semi-color-fill-0)',
+    },
+    canvasMediaStatusBody: {
+      width: '100%',
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      color: 'var(--semi-color-text-2)',
+      padding: 16,
     },
     canvasMessageResult: {
       display: 'flex',
@@ -4874,6 +5223,75 @@ const ImageGeneration = () => {
     </div>
   );
 
+  const renderCanvasMediaCard = (message) => {
+    const media = getCanvasMessageMedia(message);
+    const taskType = getCanvasMessageTaskType(message);
+    const isVideo = taskType === 'video_generation';
+    const aspectRatio = getCanvasMessageAspectRatio(message);
+    const task = message?.image_task || message?.video_task || null;
+    const status = media?.status || task?.status || message?.status || '';
+    const isDone =
+      (isVideo && (status === 'completed' || status === 'success')) ||
+      (!isVideo && status === 'success');
+    const isFailed = status === 'failed';
+
+    let content = (
+      <div style={styles.canvasMediaStatusBody}>
+        <Spin size='small' />
+        <Text type='tertiary' size='small'>
+          {isVideo ? t('正在生成视频') : t('正在生成图片')}
+        </Text>
+      </div>
+    );
+
+    if (isFailed) {
+      content = (
+        <div style={styles.canvasMediaStatusBody}>
+          <IconClock size='small' />
+          <Text type='danger' size='small'>
+            {media?.error || message.error_message || t('生成失败')}
+          </Text>
+        </div>
+      );
+    } else if (isDone && media?.kind === 'image' && media.src) {
+      content = (
+        <img
+          data-canvas-message-result='image'
+          src={media.src}
+          alt=''
+          style={styles.canvasMediaContent}
+          onClick={() => setSelectedTask(message.image_task || null)}
+        />
+      );
+    } else if (isDone && media?.kind === 'video' && media.videoUrl) {
+      content = (
+        <video
+          data-canvas-message-result='video'
+          src={media.videoUrl}
+          poster={media.src}
+          controls
+          style={styles.canvasMediaContent}
+          onClick={() => setVideoSelectedTask(message.video_task || null)}
+        />
+      );
+    }
+
+    return (
+      <div
+        style={{
+          ...styles.canvasMediaCard,
+          aspectRatio,
+        }}
+      >
+        {content}
+      </div>
+    );
+  };
+
+  const renderCanvasGenerationCard = (message) => {
+    return renderCanvasMediaCard(message);
+  };
+
   const renderCanvasMessageResult = (message) => {
     const media = getCanvasMessageMedia(message);
     if (!media) {
@@ -4936,57 +5354,115 @@ const ImageGeneration = () => {
     const references = getCanvasMessageReferenceFiles(message);
     const media = getCanvasMessageMedia(message);
     const isSelected = selectedCanvasMessageId === message.id;
+    const isChatMode = generationMode === CANVAS_MODE_CHAT;
     const handleMessageClick = async () => {
       setSelectedCanvasMessageId(message.id);
-      if (isUser || references.length > 0) {
+      if (isUser || references.length > 0 || isChatMode) {
         return;
       }
       const detail = await loadCanvasMessageTaskDetail(message);
       if (!detail) {
         return;
       }
-      const updatedMessage =
-        message.task_type === 'video_generation'
-          ? { ...message, video_task: detail }
-          : { ...message, image_task: detail };
       setCanvasMessages((prev) =>
         prev.map((item) =>
-          item.id === message.id ? updatedMessage : item,
+          item.id === message.id ? mergeCanvasMessageTaskDetail(item, detail) : item,
         ),
       );
     };
+
+    if (isChatMode) {
+      return (
+        <div
+          key={message.id}
+          data-canvas-message-row='true'
+          style={{
+            ...styles.canvasMessageRow,
+            ...(isUser
+              ? styles.canvasMessageRowUser
+              : styles.canvasMessageRowAssistant),
+            ...(isSelected ? styles.canvasMessageRowSelected : null),
+          }}
+          onClick={handleMessageClick}
+        >
+          <div style={styles.canvasMessageHead}>
+            <Text type='tertiary' size='small'>
+              {isUser ? t('你') : t('生成')}
+            </Text>
+          </div>
+          <div style={styles.canvasMessageBody}>
+            {isUser ? (
+              <div style={styles.canvasMessagePrompt}>
+                {message.prompt || t('已添加素材引用')}
+              </div>
+            ) : null}
+            {references.length > 0 ? (
+              <div style={styles.canvasMessageRefs}>
+                {references.map((file) =>
+                  renderCanvasReferenceThumb(file, t('参考图')),
+                )}
+              </div>
+            ) : null}
+            {!isUser ? (
+              <div style={styles.canvasMessageResult}>
+                {renderCanvasMessageResult(message)}
+              </div>
+            ) : null}
+            {media?.status === 'failed' && message.error_message ? (
+              <Text type='danger' size='small'>
+                {message.error_message}
+              </Text>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    if (isUser) {
+      return (
+        <div
+          key={message.id}
+          data-canvas-message-row='true'
+          style={{
+            ...styles.canvasMessageRow,
+            ...styles.canvasMessageRowUser,
+            ...(isSelected ? styles.canvasMessageRowSelected : null),
+          }}
+        >
+          <div style={styles.canvasMessageBody}>
+            <div style={styles.canvasMessagePrompt}>
+              {message.prompt || t('已添加素材引用')}
+            </div>
+            {references.length > 0 ? (
+              <div style={styles.canvasMessageRefs}>
+                {references.map((file) =>
+                  renderCanvasReferenceThumb(file, t('参考图')),
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         key={message.id}
         data-canvas-message-row='true'
         style={{
-          ...styles.canvasMessageRow,
-          ...(isUser ? styles.canvasMessageRowUser : styles.canvasMessageRowAssistant),
+          ...styles.canvasGenerationRow,
           ...(isSelected ? styles.canvasMessageRowSelected : null),
         }}
         onClick={handleMessageClick}
       >
-        <div style={styles.canvasMessageHead}>
-          <Text type='tertiary' size='small'>
-            {isUser ? t('你') : t('生成')}
-          </Text>
-        </div>
-        <div style={styles.canvasMessageBody}>
-          {isUser ? (
-            <div style={styles.canvasMessagePrompt}>{message.prompt || t('已添加素材引用')}</div>
-          ) : null}
+        <div style={styles.canvasGenerationCardWrap}>
+          {renderCanvasGenerationCard(message)}
           {references.length > 0 ? (
             <div style={styles.canvasMessageRefs}>
-              {references.map((file) => renderCanvasReferenceThumb(file, t('参考图')))}
+              {references.map((file) =>
+                renderCanvasReferenceThumb(file, t('参考图')),
+              )}
             </div>
-          ) : null}
-          {!isUser ? (
-            <div style={styles.canvasMessageResult}>{renderCanvasMessageResult(message)}</div>
-          ) : null}
-          {media?.status === 'failed' && message.error_message ? (
-            <Text type='danger' size='small'>
-              {message.error_message}
-            </Text>
           ) : null}
         </div>
       </div>
