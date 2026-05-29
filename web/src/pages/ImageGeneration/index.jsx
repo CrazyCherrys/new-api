@@ -4522,7 +4522,12 @@ const ImageGeneration = () => {
       alignItems: 'flex-end',
     },
     canvasMessageRowSelected: {
-      boxShadow: '0 0 0 1px var(--semi-color-primary)',
+      borderColor: 'var(--semi-color-border)',
+      background: 'var(--semi-color-primary-light-default)',
+      boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
+    },
+    canvasGenerationRowSelected: {
+      filter: 'drop-shadow(0 8px 18px rgba(15, 23, 42, 0.1))',
     },
     canvasMessageHead: {
       display: 'flex',
@@ -5527,7 +5532,7 @@ const ImageGeneration = () => {
         data-canvas-message-row='true'
         style={{
           ...styles.canvasGenerationRow,
-          ...(isSelected ? styles.canvasMessageRowSelected : null),
+          ...(isSelected ? styles.canvasGenerationRowSelected : null),
         }}
         onClick={handleMessageClick}
       >
