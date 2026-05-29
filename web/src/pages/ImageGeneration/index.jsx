@@ -347,6 +347,7 @@ const ImageGeneration = () => {
   const [canvasAssetsTotal, setCanvasAssetsTotal] = useState(0);
   const [canvasAssetPage, setCanvasAssetPage] = useState(1);
   const [selectedAssetPreview, setSelectedAssetPreview] = useState(null);
+  const [selectedCanvasImagePreview, setSelectedCanvasImagePreview] = useState(null);
   const [selectedCanvasAssetIds, setSelectedCanvasAssetIds] = useState(
     new Set(),
   );
@@ -1847,6 +1848,7 @@ const ImageGeneration = () => {
         kind: 'image',
         status: task.status || message.status,
         src: task.thumbnail_url || task.image_url || '',
+        previewSrc: task.image_url || task.thumbnail_url || '',
         error:
           task.error_message ||
           task.fail_reason ||
@@ -1896,6 +1898,22 @@ const ImageGeneration = () => {
     }
     const fallback = message?.canvas_aspect_ratio || task?.aspect_ratio || '';
     return normalizeAspectRatioText(fallback) || '1 / 1';
+  };
+
+  const getCanvasMediaCardSize = (aspectRatio) => {
+    const match = String(aspectRatio || '').match(
+      /^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/,
+    );
+    const ratio = match ? Number(match[1]) / Number(match[2]) : 1;
+    const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+    const maxWidth = isMobile ? 320 : 420;
+    const maxHeight = isMobile ? 280 : 360;
+    const width = Math.min(maxWidth, Math.round(maxHeight * safeRatio));
+    return {
+      width: `${width}px`,
+      maxWidth: '100%',
+      aspectRatio,
+    };
   };
 
   const mergeCanvasMessageTaskDetail = (message, detail) => {
@@ -4550,13 +4568,17 @@ const ImageGeneration = () => {
     canvasMediaCard: {
       width: '100%',
       minWidth: 0,
-      maxWidth: isMobile ? '100%' : 640,
+      maxWidth: isMobile ? 320 : 420,
+      maxHeight: isMobile ? 280 : 360,
       position: 'relative',
       overflow: 'hidden',
       borderRadius: 8,
       border: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-bg-0)',
       boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+    },
+    canvasMediaCardClickable: {
+      cursor: 'zoom-in',
     },
     canvasMediaFrame: {
       position: 'absolute',
@@ -4571,6 +4593,26 @@ const ImageGeneration = () => {
       height: '100%',
       objectFit: 'contain',
       display: 'block',
+      background: 'var(--semi-color-fill-0)',
+    },
+    canvasImagePreviewPanel: {
+      maxWidth: isMobile ? 'calc(100vw - 24px)' : 'calc(100vw - 48px)',
+      maxHeight: 'calc(100vh - 48px)',
+      overflow: 'hidden',
+      borderRadius: 10,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      boxShadow: '0 24px 72px rgba(15, 23, 42, 0.26)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+    },
+    canvasImagePreviewImage: {
+      display: 'block',
+      maxWidth: '100%',
+      maxHeight: 'calc(100vh - 48px)',
+      objectFit: 'contain',
       background: 'var(--semi-color-fill-0)',
     },
     canvasMediaStatusBody: {
@@ -5223,6 +5265,31 @@ const ImageGeneration = () => {
     </div>
   );
 
+  const openCanvasImagePreview = async (message, media) => {
+    const initialSrc = media?.previewSrc || media?.src || '';
+    if (initialSrc) {
+      setSelectedCanvasImagePreview({ src: initialSrc });
+    }
+
+    const task = message?.image_task || null;
+    if (!task?.id || task?.image_url) {
+      return;
+    }
+
+    const detail = await loadCanvasMessageTaskDetail(message);
+    const detailSrc = detail?.image_url || detail?.thumbnail_url || '';
+    if (!detailSrc || detailSrc === initialSrc) {
+      return;
+    }
+
+    setCanvasMessages((prev) =>
+      prev.map((item) =>
+        item.id === message.id ? mergeCanvasMessageTaskDetail(item, detail) : item,
+      ),
+    );
+    setSelectedCanvasImagePreview({ src: detailSrc });
+  };
+
   const renderCanvasMediaCard = (message) => {
     const media = getCanvasMessageMedia(message);
     const taskType = getCanvasMessageTaskType(message);
@@ -5234,6 +5301,7 @@ const ImageGeneration = () => {
       (isVideo && (status === 'completed' || status === 'success')) ||
       (!isVideo && status === 'success');
     const isFailed = status === 'failed';
+    const canPreviewImage = isDone && media?.kind === 'image' && media.src;
 
     let content = (
       <div style={styles.canvasMediaStatusBody}>
@@ -5260,7 +5328,6 @@ const ImageGeneration = () => {
           src={media.src}
           alt=''
           style={styles.canvasMediaContent}
-          onClick={() => setSelectedTask(message.image_task || null)}
         />
       );
     } else if (isDone && media?.kind === 'video' && media.videoUrl) {
@@ -5280,8 +5347,17 @@ const ImageGeneration = () => {
       <div
         style={{
           ...styles.canvasMediaCard,
-          aspectRatio,
+          ...(canPreviewImage ? styles.canvasMediaCardClickable : null),
+          ...getCanvasMediaCardSize(aspectRatio),
         }}
+        onClick={
+          canPreviewImage
+            ? (event) => {
+                event.stopPropagation();
+                openCanvasImagePreview(message, media);
+              }
+            : undefined
+        }
       >
         {content}
       </div>
@@ -6144,6 +6220,30 @@ const ImageGeneration = () => {
     );
   };
 
+  const renderCanvasImagePreviewOverlay = () => {
+    if (!selectedCanvasImagePreview?.src) {
+      return null;
+    }
+    return (
+      <div
+        style={styles.assetPreviewOverlay}
+        onClick={() => setSelectedCanvasImagePreview(null)}
+        data-canvas-image-preview='true'
+      >
+        <div
+          style={styles.canvasImagePreviewPanel}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <img
+            src={selectedCanvasImagePreview.src}
+            alt=''
+            style={styles.canvasImagePreviewImage}
+          />
+        </div>
+      </div>
+    );
+  };
+
   const renderAssetDrawer = () => (
     <SideSheet
       visible={assetLibraryVisible}
@@ -6295,6 +6395,7 @@ const ImageGeneration = () => {
       ) : null}
       {renderAssetDrawer()}
       {renderAssetPreviewOverlay()}
+      {renderCanvasImagePreviewOverlay()}
       <ImageGenerationTaskModal
         visible={taskModalVisible}
         task={selectedTask}
