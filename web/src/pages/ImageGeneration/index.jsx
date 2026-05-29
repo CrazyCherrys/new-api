@@ -4180,9 +4180,10 @@ const ImageGeneration = () => {
       width: '100%',
     },
     canvasMessageRow: {
-      width: '100%',
-      borderRadius: 10,
-      padding: '12px 14px',
+      width: 'fit-content',
+      maxWidth: isMobile ? '92%' : '72%',
+      borderRadius: 8,
+      padding: '10px 12px',
       border: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-bg-0)',
       color: 'var(--semi-color-text-0)',
@@ -4191,10 +4192,12 @@ const ImageGeneration = () => {
       boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
     },
     canvasMessageRowUser: {
-      background: 'var(--semi-color-primary-light-default)',
-      borderColor: 'var(--semi-color-primary-light-default)',
+      alignSelf: 'flex-end',
+      background: 'var(--semi-color-bg-0)',
+      borderColor: 'var(--semi-color-border)',
     },
     canvasMessageRowAssistant: {
+      alignSelf: 'flex-start',
       background: 'var(--semi-color-bg-0)',
     },
     canvasMessageRowSelected: {
@@ -4204,7 +4207,7 @@ const ImageGeneration = () => {
       display: 'flex',
       justifyContent: 'flex-start',
       gap: 12,
-      marginBottom: 8,
+      marginBottom: 6,
     },
     canvasMessageBody: {
       display: 'flex',
