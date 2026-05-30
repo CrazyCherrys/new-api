@@ -24,6 +24,7 @@ type CanvasSession struct {
 	UserId           int    `json:"user_id" gorm:"index:idx_canvas_sessions_user_mode_deleted,priority:1;index:idx_canvas_sessions_user_updated,priority:1;not null"`
 	Mode             string `json:"mode" gorm:"size:16;index:idx_canvas_sessions_user_mode_deleted,priority:2;not null"`
 	Title            string `json:"title" gorm:"size:255;not null;default:''"`
+	CurrentModel     string `json:"current_model" gorm:"size:255;not null;default:''"`
 	Pinned           bool   `json:"pinned" gorm:"index;default:false"`
 	TitleManuallySet bool   `json:"title_manually_set" gorm:"default:false"`
 	CreatedTime      int64  `json:"created_time" gorm:"bigint;index"`

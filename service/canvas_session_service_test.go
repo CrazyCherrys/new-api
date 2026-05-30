@@ -97,11 +97,12 @@ func TestCanvasSessionCreateRenamePinSortAndModeFilter(t *testing.T) {
 	}
 	pinned := true
 	renamed := "renamed old image"
-	updated, err := UpdateCanvasSession(1, imageOld.Id, UpdateCanvasSessionInput{Title: &renamed, Pinned: &pinned})
+	currentModel := "gpt-image-session"
+	updated, err := UpdateCanvasSession(1, imageOld.Id, UpdateCanvasSessionInput{Title: &renamed, Pinned: &pinned, CurrentModel: &currentModel})
 	if err != nil {
 		t.Fatalf("failed to update image session: %v", err)
 	}
-	if updated.Title != renamed || !updated.Pinned || !updated.TitleManuallySet {
+	if updated.Title != renamed || !updated.Pinned || !updated.TitleManuallySet || updated.CurrentModel != currentModel {
 		t.Fatalf("unexpected updated session: %#v", updated)
 	}
 
@@ -175,7 +176,7 @@ func TestCreateCanvasImageMessagesPersistsTaskMessagesAndAutoTitle(t *testing.T)
 	if err != nil {
 		t.Fatalf("failed to reload session: %v", err)
 	}
-	if reloadedSession.Title != "first image prompt" || reloadedSession.TitleManuallySet {
+	if reloadedSession.Title != "first image prompt" || reloadedSession.TitleManuallySet || reloadedSession.CurrentModel != "gpt-image-test" {
 		t.Fatalf("expected auto title from first prompt without manual flag, got %#v", reloadedSession)
 	}
 
@@ -203,6 +204,9 @@ func TestCreateCanvasImageMessagesPersistsTaskMessagesAndAutoTitle(t *testing.T)
 	reloadedSession, _ = model.GetCanvasSessionByID(1, session.Id)
 	if reloadedSession.Title != manualTitle {
 		t.Fatalf("manual title should not be overwritten, got %q", reloadedSession.Title)
+	}
+	if reloadedSession.CurrentModel != "gpt-image-test" {
+		t.Fatalf("expected current model to remain latest image model, got %q", reloadedSession.CurrentModel)
 	}
 }
 
@@ -256,6 +260,13 @@ func TestCreateCanvasVideoMessagePersistsTaskMessage(t *testing.T) {
 	}
 	if created[1].Status != dto.VideoStatusQueued {
 		t.Fatalf("expected queued video status, got %q", created[1].Status)
+	}
+	reloadedSession, err := model.GetCanvasSessionByID(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload video session: %v", err)
+	}
+	if reloadedSession.CurrentModel != "sora-test" {
+		t.Fatalf("expected current video model to be persisted, got %q", reloadedSession.CurrentModel)
 	}
 }
 

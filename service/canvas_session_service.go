@@ -18,13 +18,15 @@ type CanvasMessageWithTask struct {
 }
 
 type CreateCanvasSessionInput struct {
-	Mode  string
-	Title string
+	Mode         string
+	Title        string
+	CurrentModel string
 }
 
 type UpdateCanvasSessionInput struct {
-	Title  *string
-	Pinned *bool
+	Title        *string
+	Pinned       *bool
+	CurrentModel *string
 }
 
 type CreateCanvasMessageInput struct {
@@ -61,6 +63,7 @@ func CreateCanvasSession(userId int, input CreateCanvasSessionInput) (*model.Can
 		UserId:           userId,
 		Mode:             mode,
 		Title:            truncateCanvasTitle(title),
+		CurrentModel:     strings.TrimSpace(input.CurrentModel),
 		TitleManuallySet: strings.TrimSpace(input.Title) != "",
 	}
 	if err := model.CreateCanvasSession(session); err != nil {
@@ -89,6 +92,9 @@ func UpdateCanvasSession(userId int, id int, input UpdateCanvasSessionInput) (*m
 	}
 	if input.Pinned != nil {
 		updates["pinned"] = *input.Pinned
+	}
+	if input.CurrentModel != nil {
+		updates["current_model"] = strings.TrimSpace(*input.CurrentModel)
 	}
 	if err := model.UpdateCanvasSessionFields(userId, id, updates); err != nil {
 		return nil, err
@@ -225,9 +231,15 @@ func CreateCanvasMessage(userId int, sessionId int, input CreateCanvasMessageInp
 		}
 		createdMessages = append(createdMessages, taskMessage)
 
+		sessionUpdates := map[string]interface{}{
+			"updated_time": now,
+		}
+		if strings.TrimSpace(input.ModelId) != "" {
+			sessionUpdates["current_model"] = strings.TrimSpace(input.ModelId)
+		}
 		return tx.Model(&model.CanvasSession{}).
 			Where("id = ? AND user_id = ? AND deleted_time = 0", sessionId, userId).
-			Update("updated_time", now).Error
+			Updates(sessionUpdates).Error
 	})
 	if err != nil {
 		if cleanupCreatedTask != nil {

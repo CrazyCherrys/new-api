@@ -10,13 +10,15 @@ import (
 )
 
 type createCanvasSessionRequest struct {
-	Mode  string `json:"mode"`
-	Title string `json:"title"`
+	Mode         string `json:"mode"`
+	Title        string `json:"title"`
+	CurrentModel string `json:"current_model"`
 }
 
 type updateCanvasSessionRequest struct {
-	Title  *string `json:"title"`
-	Pinned *bool   `json:"pinned"`
+	Title        *string `json:"title"`
+	Pinned       *bool   `json:"pinned"`
+	CurrentModel *string `json:"current_model"`
 }
 
 type createCanvasMessageRequest struct {
@@ -56,8 +58,9 @@ func CreateCanvasSession(c *gin.Context) {
 	}
 
 	session, err := service.CreateCanvasSession(userId, service.CreateCanvasSessionInput{
-		Mode:  req.Mode,
-		Title: req.Title,
+		Mode:         req.Mode,
+		Title:        req.Title,
+		CurrentModel: req.CurrentModel,
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -85,8 +88,9 @@ func UpdateCanvasSession(c *gin.Context) {
 	}
 
 	session, err := service.UpdateCanvasSession(userId, sessionId, service.UpdateCanvasSessionInput{
-		Title:  req.Title,
-		Pinned: req.Pinned,
+		Title:        req.Title,
+		Pinned:       req.Pinned,
+		CurrentModel: req.CurrentModel,
 	})
 	if err != nil {
 		common.ApiError(c, err)

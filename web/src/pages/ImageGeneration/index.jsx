@@ -441,10 +441,7 @@ const ImageGeneration = () => {
   const [selectedGroup, setSelectedGroup] = useState(() =>
     getStoredValue(STORAGE_KEYS.GROUP, ''),
   );
-  const [generationMode, setGenerationMode] = useState(() => {
-    const storedMode = getStoredValue(STORAGE_KEYS.MODE, CANVAS_MODE_IMAGE);
-    return CANVAS_MODES.includes(storedMode) ? storedMode : CANVAS_MODE_IMAGE;
-  });
+  const [generationMode, setGenerationMode] = useState(CANVAS_MODE_CHAT);
   const [models, setModels] = useState([]);
   const [filteredModels, setFilteredModels] = useState([]);
   const [videoModels, setVideoModels] = useState([]);
@@ -684,6 +681,34 @@ const ImageGeneration = () => {
     canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [];
   const isCurrentCanvasMessageSession = (sessionId) =>
     String(canvasMessagesSessionIdRef.current || '') === String(sessionId || '');
+  const updateCurrentCanvasSessionModel = async (mode, modelId) => {
+    const normalizedMode = CANVAS_MODES.includes(mode) ? mode : generationMode;
+    const sessionId = selectedCanvasSessionIds[normalizedMode];
+    const session = (canvasSessions[normalizedMode] || []).find(
+      (item) => item.id === sessionId,
+    );
+    if (!session?.id) {
+      return;
+    }
+    const currentModel = String(modelId || '').trim();
+    setCanvasSessionsForMode(normalizedMode, (prev) =>
+      prev.map((item) =>
+        item.id === session.id ? { ...item, current_model: currentModel } : item,
+      ),
+    );
+    try {
+      const res = await API.patch(`/api/canvas/sessions/${session.id}`, {
+        current_model: currentModel,
+      });
+      if (res.data.success && res.data.data) {
+        updateCanvasSessionInState(res.data.data);
+      } else {
+        showError(res.data.message || t('更新会话模型失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('更新会话模型失败'));
+    }
+  };
 
   useEffect(() => {
     const container = canvasMessageViewportRef.current;
@@ -880,6 +905,7 @@ const ImageGeneration = () => {
     if (prefillFromState) {
       pendingCanvasPrefillRef.current = prefillFromState;
       prefillGroupFallbackNoticeShownRef.current = false;
+      setGenerationMode(CANVAS_MODE_IMAGE);
       try {
         sessionStorage.setItem(
           CANVAS_PREFILL_STORAGE_KEY,
@@ -901,6 +927,7 @@ const ImageGeneration = () => {
         if (parsed?.source === 'inspiration' && parsed?.payload) {
           pendingCanvasPrefillRef.current = parsed.payload;
           prefillGroupFallbackNoticeShownRef.current = false;
+          setGenerationMode(CANVAS_MODE_IMAGE);
         } else {
           sessionStorage.removeItem(CANVAS_PREFILL_STORAGE_KEY);
         }
@@ -1609,6 +1636,7 @@ const ImageGeneration = () => {
       setSelectedSeries(model.model_series);
     }
     setSelectedModel(model.request_model);
+    updateCurrentCanvasSessionModel(CANVAS_MODE_IMAGE, model.request_model);
   };
 
   const selectVideoModelFromCatalog = (model) => {
@@ -1620,6 +1648,7 @@ const ImageGeneration = () => {
       setVideoSelectedSeries(model.model_series);
     }
     setVideoSelectedModel(model.request_model);
+    updateCurrentCanvasSessionModel(CANVAS_MODE_VIDEO, model.request_model);
   };
 
   const loadWorkerSettings = async () => {
@@ -3805,6 +3834,83 @@ const ImageGeneration = () => {
     setMobileTaskbarVisible(false);
   };
 
+  useEffect(() => {
+    if (
+      generationMode !== CANVAS_MODE_IMAGE ||
+      selectedCanvasSession?.mode !== CANVAS_MODE_IMAGE ||
+      !selectedCanvasSession.current_model ||
+      models.length === 0
+    ) {
+      return;
+    }
+    const model = models.find(
+      (item) => item.request_model === selectedCanvasSession.current_model,
+    );
+    if (!model) {
+      return;
+    }
+    if (model.model_series) {
+      setSelectedSeries(model.model_series);
+    }
+    setSelectedModel(model.request_model);
+  }, [
+    generationMode,
+    models,
+    selectedCanvasSession?.id,
+    selectedCanvasSession?.current_model,
+    selectedCanvasSession?.mode,
+  ]);
+
+  useEffect(() => {
+    if (
+      generationMode !== CANVAS_MODE_VIDEO ||
+      selectedCanvasSession?.mode !== CANVAS_MODE_VIDEO ||
+      !selectedCanvasSession.current_model ||
+      videoModels.length === 0
+    ) {
+      return;
+    }
+    const model = videoModels.find(
+      (item) => item.request_model === selectedCanvasSession.current_model,
+    );
+    if (!model) {
+      return;
+    }
+    if (model.model_series) {
+      setVideoSelectedSeries(model.model_series);
+    }
+    setVideoSelectedModel(model.request_model);
+  }, [
+    generationMode,
+    selectedCanvasSession?.id,
+    selectedCanvasSession?.current_model,
+    selectedCanvasSession?.mode,
+    videoModels,
+  ]);
+
+  useEffect(() => {
+    if (
+      generationMode !== CANVAS_MODE_CHAT ||
+      selectedCanvasSession?.mode !== CANVAS_MODE_CHAT ||
+      !selectedCanvasSession.current_model
+    ) {
+      return;
+    }
+    if (
+      chatModels.length > 0 &&
+      !chatModels.includes(selectedCanvasSession.current_model)
+    ) {
+      return;
+    }
+    setChatModel(selectedCanvasSession.current_model);
+  }, [
+    chatModels,
+    generationMode,
+    selectedCanvasSession?.id,
+    selectedCanvasSession?.current_model,
+    selectedCanvasSession?.mode,
+  ]);
+
   const handleNewBlankChat = () => {
     blankCanvasSelectionModesRef.current[CANVAS_MODE_CHAT] = true;
     setGenerationMode(CANVAS_MODE_CHAT);
@@ -3831,7 +3937,7 @@ const ImageGeneration = () => {
       const canvasSession = await ensureCanvasSession(CANVAS_MODE_CHAT);
       const res = await API.post(
         `/api/canvas/sessions/${canvasSession.id}/messages`,
-        { prompt: prompt || t('已添加素材引用') },
+        { prompt: prompt || t('已添加素材引用'), model_id: chatModel },
       );
       if (!res.data.success) {
         showError(res.data.message || t('发送失败'));
@@ -4549,33 +4655,6 @@ const ImageGeneration = () => {
       gap: 8,
       minWidth: 0,
     },
-    composerModeSwitch: {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 3,
-      padding: 3,
-      borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
-    },
-    composerModeButton: {
-      minHeight: 26,
-      border: 'none',
-      borderRadius: 6,
-      padding: isMobile ? '0 8px' : '0 10px',
-      background: 'transparent',
-      color: 'var(--semi-color-text-2)',
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 6,
-      cursor: 'pointer',
-      fontSize: 12,
-      whiteSpace: 'nowrap',
-    },
-    composerModeButtonActive: {
-      color: 'var(--semi-color-primary)',
-      background: 'var(--semi-color-primary-light-default)',
-    },
     workspaceBody: {
       flex: 1,
       minHeight: 0,
@@ -5291,10 +5370,7 @@ const ImageGeneration = () => {
             </Button>,
           )
         ) : unifiedCanvasSessions.length === 0 ? (
-          renderSidebarEmpty(
-            t('暂无内容'),
-            t('开始对话或生成图片、视频后会出现在这里'),
-          )
+          <div style={{ minHeight: 28 }} />
         ) : (
           unifiedCanvasSessions.map((session) => {
             const sessionMode = CANVAS_MODES.includes(session.mode)
@@ -5896,29 +5972,17 @@ const ImageGeneration = () => {
         icon: <IconVideo size='small' />,
       },
     ];
+    const activeOption =
+      options.find((option) => option.value === generationMode) || options[0];
     return (
-      <div style={styles.composerModeSwitch}>
-        {options.map((option) => {
-          const active = generationMode === option.value;
-          return (
-            <button
-              key={option.value}
-              type='button'
-              aria-label={t('切换到{{mode}}模式', { mode: option.label })}
-              aria-pressed={active}
-              data-canvas-mode-button={option.value}
-              style={{
-                ...styles.composerModeButton,
-                ...(active ? styles.composerModeButtonActive : null),
-              }}
-              onClick={() => handleModeChange(option.value)}
-            >
-              {option.icon}
-              <span>{option.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      renderPillDropdown({
+        key: 'composer-mode',
+        label: '',
+        value: generationMode,
+        displayValue: activeOption.label,
+        onChange: handleModeChange,
+        options,
+      })
     );
   };
 
@@ -6002,7 +6066,10 @@ const ImageGeneration = () => {
         label: t('模型'),
         value: chatModel,
         displayValue: chatModel,
-        onChange: setChatModel,
+        onChange: (value) => {
+          setChatModel(value);
+          updateCurrentCanvasSessionModel(CANVAS_MODE_CHAT, value);
+        },
         options: chatModels.map((model) => ({ value: model, label: model })),
         disabled: chatModels.length === 0,
       }),
