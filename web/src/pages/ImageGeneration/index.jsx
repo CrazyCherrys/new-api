@@ -48,7 +48,12 @@ import {
   IconRefresh,
   IconDownload,
   IconClock,
+  IconGridRectangle,
+  IconHash,
+  IconLayers,
   IconPlayCircle,
+  IconRealSizeStroked,
+  IconText,
   IconExternalOpen,
   IconMore,
 } from '@douyinfe/semi-icons';
@@ -4407,6 +4412,13 @@ const ImageGeneration = () => {
     pillButtonMuted: {
       color: 'var(--semi-color-text-2)',
     },
+    pillButtonIcon: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flex: '0 0 auto',
+      color: 'currentColor',
+    },
     pillButtonLabel: {
       maxWidth: isMobile ? 126 : 170,
       overflow: 'hidden',
@@ -4429,9 +4441,29 @@ const ImageGeneration = () => {
       padding: '8px 10px',
       whiteSpace: 'nowrap',
     },
+    darkMenuItemContent: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 8,
+      minWidth: 0,
+    },
     darkMenuItemActive: {
       background: 'var(--semi-color-primary-light-default)',
       color: 'var(--semi-color-primary)',
+    },
+    modelMenuOption: {
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: 8,
+      minWidth: 0,
+    },
+    modelMenuIcon: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flex: '0 0 auto',
+      marginTop: 1,
+      color: 'currentColor',
     },
     modelMenuItem: {
       display: 'flex',
@@ -5100,6 +5132,7 @@ const ImageGeneration = () => {
   const renderPillDropdown = ({
     key,
     label,
+    icon = null,
     value,
     displayValue,
     options,
@@ -5131,7 +5164,12 @@ const ImageGeneration = () => {
                   closeDropdown();
                 }}
               >
-                {option.label}
+                <span style={styles.darkMenuItemContent}>
+                  {option.icon ? (
+                    <span style={styles.pillButtonIcon}>{option.icon}</span>
+                  ) : null}
+                  <span>{option.label}</span>
+                </span>
               </Dropdown.Item>
             );
           })
@@ -5178,6 +5216,7 @@ const ImageGeneration = () => {
           }}
           disabled={disabled}
         >
+          {icon ? <span style={styles.pillButtonIcon}>{icon}</span> : null}
           <span style={styles.pillButtonLabel}>
             {label ? `${label} ${displayValue || t('请选择')}` : displayValue || t('请选择')}
           </span>
@@ -5221,13 +5260,22 @@ const ImageGeneration = () => {
                   );
                 }}
               >
-                <div style={styles.modelMenuItem}>
-                  <span style={styles.modelMenuTitle}>
-                    {getModelDisplayName(model)}
+                <div style={styles.modelMenuOption}>
+                  <span style={styles.modelMenuIcon}>
+                    {isVideoMode ? (
+                      <IconVideo size='small' />
+                    ) : (
+                      <IconImage size='small' />
+                    )}
                   </span>
-                  <span style={styles.modelMenuMeta}>
-                    {model.request_model}
-                  </span>
+                  <div style={styles.modelMenuItem}>
+                    <span style={styles.modelMenuTitle}>
+                      {getModelDisplayName(model)}
+                    </span>
+                    <span style={styles.modelMenuMeta}>
+                      {model.request_model}
+                    </span>
+                  </div>
                 </div>
               </Dropdown.Item>
             );
@@ -5264,7 +5312,7 @@ const ImageGeneration = () => {
         >
           {isVideoMode ? <IconVideo size='small' /> : <IconImage size='small' />}
           <span style={{ ...styles.pillButtonLabel, maxWidth: isMobile ? 140 : 260 }}>
-            {activeModelLabel}
+            {`${t('模型')} ${activeModelLabel}`}
           </span>
           <IconChevronDown size='small' />
         </button>
@@ -5958,17 +6006,17 @@ const ImageGeneration = () => {
     const options = [
       {
         value: CANVAS_MODE_CHAT,
-        label: t('对话'),
+        label: t('文本对话'),
         icon: <IconCommentStroked size='small' />,
       },
       {
         value: CANVAS_MODE_IMAGE,
-        label: t('图片'),
+        label: t('图片生成'),
         icon: <IconImage size='small' />,
       },
       {
         value: CANVAS_MODE_VIDEO,
-        label: t('视频'),
+        label: t('视频生成'),
         icon: <IconVideo size='small' />,
       },
     ];
@@ -5978,6 +6026,7 @@ const ImageGeneration = () => {
       renderPillDropdown({
         key: 'composer-mode',
         label: '',
+        icon: activeOption.icon,
         value: generationMode,
         displayValue: activeOption.label,
         onChange: handleModeChange,
@@ -6064,6 +6113,7 @@ const ImageGeneration = () => {
       renderPillDropdown({
         key: 'chat-model',
         label: t('模型'),
+        icon: <IconLayers size='small' />,
         value: chatModel,
         displayValue: chatModel,
         onChange: (value) => {
@@ -6076,6 +6126,7 @@ const ImageGeneration = () => {
       renderPillDropdown({
         key: 'chat-temperature',
         label: t('温度'),
+        icon: <IconSetting size='small' />,
         value: chatTemperature,
         displayValue: chatTemperature,
         onChange: setChatTemperature,
@@ -6087,6 +6138,7 @@ const ImageGeneration = () => {
       renderPillDropdown({
         key: 'chat-context',
         label: t('上下文'),
+        icon: <IconText size='small' />,
         value: chatContext,
         displayValue: chatContext,
         onChange: setChatContext,
@@ -6114,6 +6166,7 @@ const ImageGeneration = () => {
       renderPillDropdown({
         key: 'image-group',
         label: t('分组'),
+        icon: <IconArchive size='small' />,
         value: selectedGroup,
         displayValue: selectedGroup,
         onChange: setSelectedGroup,
@@ -6130,6 +6183,7 @@ const ImageGeneration = () => {
         renderPillDropdown({
           key: 'image-aspect-ratio',
           label: t('比例'),
+          icon: <IconRealSizeStroked size='small' />,
           value: aspectRatio,
           displayValue: aspectRatio,
           onChange: setAspectRatio,
@@ -6142,6 +6196,7 @@ const ImageGeneration = () => {
         renderPillDropdown({
           key: 'image-resolution',
           label: t('分辨率'),
+          icon: <IconGridRectangle size='small' />,
           value: resolution,
           displayValue: resolution,
           onChange: setResolution,
@@ -6153,6 +6208,7 @@ const ImageGeneration = () => {
       renderPillDropdown({
         key: 'image-quantity',
         label: t('数量'),
+        icon: <IconHash size='small' />,
         value: quantity,
         displayValue: String(quantity),
         onChange: (val) => setQuantity(normalizeTaskCount(val)),
@@ -6186,6 +6242,7 @@ const ImageGeneration = () => {
         renderPillDropdown({
           key: 'video-aspect-ratio',
           label: t('比例'),
+          icon: <IconRealSizeStroked size='small' />,
           value: videoAspectRatio,
           displayValue: videoAspectRatio,
           onChange: setVideoAspectRatio,
@@ -6198,6 +6255,7 @@ const ImageGeneration = () => {
         renderPillDropdown({
           key: 'video-resolution',
           label: t('分辨率'),
+          icon: <IconGridRectangle size='small' />,
           value: videoResolution,
           displayValue: videoResolution,
           onChange: setVideoResolution,
@@ -6209,6 +6267,7 @@ const ImageGeneration = () => {
       renderPillDropdown({
         key: 'video-duration',
         label: t('时长'),
+        icon: <IconClock size='small' />,
         value: videoDuration,
         displayValue: videoDuration ? `${videoDuration}s` : '',
         onChange: setVideoDuration,
