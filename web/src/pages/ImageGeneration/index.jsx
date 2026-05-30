@@ -4565,6 +4565,13 @@ const ImageGeneration = () => {
       fontSize: 13,
       lineHeight: 1,
     },
+    pillButtonIconOnly: {
+      width: 32,
+      minWidth: 32,
+      padding: 0,
+      justifyContent: 'center',
+      gap: 0,
+    },
     pillButtonActive: {
       borderColor: 'var(--semi-color-primary-light-active)',
       background: 'var(--semi-color-primary-light-default)',
@@ -5389,6 +5396,10 @@ const ImageGeneration = () => {
     extraContent = null,
   }) => {
     const dropdownKey = key;
+    const iconOnly = isMobile && !!icon;
+    const buttonText = label
+      ? `${label} ${displayValue || t('请选择')}`
+      : displayValue || t('请选择');
     const closeDropdown = () => {
       setActiveDropdownKey((current) =>
         current === dropdownKey ? '' : current,
@@ -5453,8 +5464,11 @@ const ImageGeneration = () => {
       >
         <button
           type='button'
+          aria-label={buttonText}
+          title={buttonText}
           style={{
             ...styles.pillButton,
+            ...(iconOnly ? styles.pillButtonIconOnly : null),
             ...(value !== '' && value !== null && value !== undefined
               ? styles.pillButtonActive
               : styles.pillButtonMuted),
@@ -5464,10 +5478,10 @@ const ImageGeneration = () => {
           disabled={disabled}
         >
           {icon ? <span style={styles.pillButtonIcon}>{icon}</span> : null}
-          <span style={styles.pillButtonLabel}>
-            {label ? `${label} ${displayValue || t('请选择')}` : displayValue || t('请选择')}
-          </span>
-          <IconChevronDown size='small' />
+          {!iconOnly ? (
+            <span style={styles.pillButtonLabel}>{buttonText}</span>
+          ) : null}
+          {!iconOnly ? <IconChevronDown size='small' /> : null}
         </button>
       </Dropdown>
     );
@@ -5529,6 +5543,7 @@ const ImageGeneration = () => {
   }) => {
     const hasAspectRatios = showAspectRatioSelector && aspectRatios.length > 0;
     const hasResolutions = showResolutionSelector && resolutions.length > 0;
+    const iconOnly = isMobile;
     const hasQuantitySelector =
       Array.isArray(quantityOptions) &&
       quantityOptions.length > 0 &&
@@ -5553,6 +5568,10 @@ const ImageGeneration = () => {
       displayParts.push(`${t('数量')} ${quantityValue}`);
     }
     const displayValue = displayParts.length > 0 ? displayParts.join(' | ') : t('请选择');
+    const buttonLabel =
+      displayValue && displayValue !== t('请选择')
+        ? `${ariaLabel} ${displayValue}`
+        : ariaLabel;
     const panel = (
       <div
         style={styles.imageParamPanel}
@@ -5641,16 +5660,20 @@ const ImageGeneration = () => {
       >
         <button
           type='button'
-          aria-label={ariaLabel}
+          aria-label={buttonLabel}
+          title={buttonLabel}
           style={{
             ...styles.pillButton,
+            ...(iconOnly ? styles.pillButtonIconOnly : null),
             ...styles.pillButtonActive,
             maxWidth: isMobile ? '100%' : 260,
           }}
         >
           <IconRealSizeStroked size='small' />
-          <span style={styles.pillButtonLabel}>{displayValue}</span>
-          <IconChevronDown size='small' />
+          {!iconOnly ? (
+            <span style={styles.pillButtonLabel}>{displayValue}</span>
+          ) : null}
+          {!iconOnly ? <IconChevronDown size='small' /> : null}
         </button>
       </Dropdown>
     );
@@ -5694,6 +5717,10 @@ const ImageGeneration = () => {
     const dropdownKey = isVideoMode ? 'video-model' : 'image-model';
     const modelOptions = isVideoMode ? enabledVideoModels : enabledImageModels;
     const selectedValue = isVideoMode ? videoSelectedModel : selectedModel;
+    const iconOnly = isMobile;
+    const buttonLabel = isVideoMode
+      ? `${t('选择视频模型')} ${activeModelLabel}`
+      : `${t('选择图片模型')} ${activeModelLabel}`;
     const handleSelect = (requestModel) => {
       const model = modelOptions.find((item) => item.request_model === requestModel);
       if (!model) {
@@ -5769,16 +5796,22 @@ const ImageGeneration = () => {
       >
         <button
           type='button'
-          aria-label={isVideoMode ? t('选择视频模型') : t('选择图片模型')}
+          aria-label={buttonLabel}
+          title={buttonLabel}
           data-canvas-model-selector={isVideoMode ? CANVAS_MODE_VIDEO : CANVAS_MODE_IMAGE}
-          style={styles.pillButton}
+          style={{
+            ...styles.pillButton,
+            ...(iconOnly ? styles.pillButtonIconOnly : null),
+          }}
           disabled={modelOptions.length === 0}
         >
           {isVideoMode ? <IconVideo size='small' /> : <IconImage size='small' />}
-          <span style={{ ...styles.pillButtonLabel, maxWidth: isMobile ? 140 : 260 }}>
-            {`${t('模型')} ${activeModelLabel}`}
-          </span>
-          <IconChevronDown size='small' />
+          {!iconOnly ? (
+            <span style={{ ...styles.pillButtonLabel, maxWidth: isMobile ? 140 : 260 }}>
+              {`${t('模型')} ${activeModelLabel}`}
+            </span>
+          ) : null}
+          {!iconOnly ? <IconChevronDown size='small' /> : null}
         </button>
       </Dropdown>
     );
@@ -6652,20 +6685,39 @@ const ImageGeneration = () => {
           label: item,
         })),
       }),
-      <label
-        key='chat-tools'
-        style={{
-          ...styles.pillButton,
-          ...(chatToolsEnabled ? styles.pillButtonActive : styles.pillButtonMuted),
-          cursor: 'pointer',
-        }}
-      >
-        <Checkbox
-          checked={chatToolsEnabled}
-          onChange={(event) => setChatToolsEnabled(event.target.checked)}
-        />
-        <span>{t('工具')}</span>
-      </label>,
+      isMobile ? (
+        <button
+          key='chat-tools'
+          type='button'
+          aria-label={t('工具')}
+          title={t('工具')}
+          aria-pressed={chatToolsEnabled}
+          style={{
+            ...styles.pillButton,
+            ...styles.pillButtonIconOnly,
+            ...(chatToolsEnabled ? styles.pillButtonActive : styles.pillButtonMuted),
+            cursor: 'pointer',
+          }}
+          onClick={() => setChatToolsEnabled((current) => !current)}
+        >
+          <IconSetting size='small' />
+        </button>
+      ) : (
+        <label
+          key='chat-tools'
+          style={{
+            ...styles.pillButton,
+            ...(chatToolsEnabled ? styles.pillButtonActive : styles.pillButtonMuted),
+            cursor: 'pointer',
+          }}
+        >
+          <Checkbox
+            checked={chatToolsEnabled}
+            onChange={(event) => setChatToolsEnabled(event.target.checked)}
+          />
+          <span>{t('工具')}</span>
+        </label>
+      ),
     ];
     const imageComposerParameters = [
       renderModelDropdown(false, activeModelLabel),
@@ -6675,8 +6727,11 @@ const ImageGeneration = () => {
           <button
             key='image-advanced'
             type='button'
+            aria-label={t('高级')}
+            title={t('高级')}
             style={{
               ...styles.pillButton,
+              ...(isMobile ? styles.pillButtonIconOnly : null),
               ...(composerAdvancedVisible
                 ? styles.pillButtonActive
                 : styles.pillButtonMuted),
@@ -6685,7 +6740,7 @@ const ImageGeneration = () => {
             onClick={() => setComposerAdvancedVisible((current) => !current)}
           >
             <IconSetting size='small' />
-            <span>{t('高级')}</span>
+            {!isMobile ? <span>{t('高级')}</span> : null}
           </button>
         ),
     ].filter(Boolean);
