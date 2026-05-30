@@ -2212,7 +2212,15 @@ const ImageGeneration = () => {
     return normalizeAspectRatioText(fallback) || '1 / 1';
   };
 
-  const getCanvasMediaCardSize = (aspectRatio) => {
+  const getCanvasMediaCardSize = (aspectRatio, { batchLayout = false } = {}) => {
+    if (batchLayout) {
+      return {
+        width: '100%',
+        maxWidth: '100%',
+        maxHeight: 'none',
+        aspectRatio,
+      };
+    }
     const match = String(aspectRatio || '').match(
       /^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/,
     );
@@ -5094,7 +5102,7 @@ const ImageGeneration = () => {
       width: '100%',
       display: 'flex',
       flexDirection: 'column',
-      gap: 10,
+      gap: 8,
       alignItems: 'stretch',
     },
     canvasGenerationBatchGrid: {
@@ -5104,8 +5112,8 @@ const ImageGeneration = () => {
       gridTemplateColumns:
         isMobile
           ? 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))'
-          : 'repeat(3, minmax(0, 1fr))',
-      gap: isMobile ? 10 : 8,
+          : 'repeat(auto-fit, minmax(220px, 1fr))',
+      gap: isMobile ? 8 : 6,
       alignItems: 'start',
       alignSelf: 'flex-start',
     },
@@ -6092,7 +6100,7 @@ const ImageGeneration = () => {
     setSelectedCanvasImagePreview({ src: detailSrc });
   };
 
-  const renderCanvasMediaCard = (message) => {
+  const renderCanvasMediaCard = (message, { batchLayout = false } = {}) => {
     const media = getCanvasMessageMedia(message);
     const taskType = getCanvasMessageTaskType(message);
     const isVideo = taskType === 'video_generation';
@@ -6150,7 +6158,7 @@ const ImageGeneration = () => {
         style={{
           ...styles.canvasMediaCard,
           ...(canPreviewImage ? styles.canvasMediaCardClickable : null),
-          ...getCanvasMediaCardSize(aspectRatio),
+          ...getCanvasMediaCardSize(aspectRatio, { batchLayout }),
         }}
         onClick={
           canPreviewImage
@@ -6166,8 +6174,8 @@ const ImageGeneration = () => {
     );
   };
 
-  const renderCanvasGenerationCard = (message) => {
-    return renderCanvasMediaCard(message);
+  const renderCanvasGenerationCard = (message, { batchLayout = false } = {}) => {
+    return renderCanvasMediaCard(message, { batchLayout });
   };
 
   const renderCanvasGenerationBatch = (batch) => {
@@ -6229,7 +6237,7 @@ const ImageGeneration = () => {
                 );
               }}
             >
-              {renderCanvasGenerationCard(message)}
+              {renderCanvasGenerationCard(message, { batchLayout: true })}
             </div>
           ))}
         </div>
