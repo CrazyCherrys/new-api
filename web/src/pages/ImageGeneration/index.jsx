@@ -50,7 +50,6 @@ import {
   IconRefresh,
   IconDownload,
   IconClock,
-  IconHash,
   IconLayers,
   IconPlayCircle,
   IconRealSizeStroked,
@@ -5524,10 +5523,17 @@ const ImageGeneration = () => {
     onResolutionChange,
     showAspectRatioSelector,
     showResolutionSelector,
+    quantityValue = 0,
+    quantityOptions = [],
+    onQuantityChange = null,
   }) => {
     const hasAspectRatios = showAspectRatioSelector && aspectRatios.length > 0;
     const hasResolutions = showResolutionSelector && resolutions.length > 0;
-    if (!hasAspectRatios && !hasResolutions) {
+    const hasQuantitySelector =
+      Array.isArray(quantityOptions) &&
+      quantityOptions.length > 0 &&
+      typeof onQuantityChange === 'function';
+    if (!hasAspectRatios && !hasResolutions && !hasQuantitySelector) {
       return null;
     }
 
@@ -5542,6 +5548,9 @@ const ImageGeneration = () => {
     }
     if (hasResolutions && resolutionValue) {
       displayParts.push(getResolutionDisplay(resolutionValue));
+    }
+    if (hasQuantitySelector && quantityValue > 0) {
+      displayParts.push(`${t('数量')} ${quantityValue}`);
     }
     const displayValue = displayParts.length > 0 ? displayParts.join(' | ') : t('请选择');
     const panel = (
@@ -5577,6 +5586,24 @@ const ImageGeneration = () => {
                   label: getResolutionDisplay(item),
                   selected: item === resolutionValue,
                   onClick: onResolutionChange,
+                }),
+              )}
+            </div>
+          </div>
+        ) : null}
+        {(hasAspectRatios || hasResolutions) && hasQuantitySelector ? (
+          <div style={styles.imageParamDivider} />
+        ) : null}
+        {hasQuantitySelector ? (
+          <div style={styles.imageParamSection}>
+            <div style={styles.imageParamSectionTitle}>{t('生成数量')}</div>
+            <div style={styles.imageParamOptionRow}>
+              {quantityOptions.map((item) =>
+                renderImageParamOption({
+                  value: item,
+                  label: String(item),
+                  selected: item === quantityValue,
+                  onClick: onQuantityChange,
                 }),
               )}
             </div>
@@ -5641,6 +5668,12 @@ const ImageGeneration = () => {
       onResolutionChange: setResolution,
       showAspectRatioSelector: showImageAspectRatioSelector,
       showResolutionSelector: showImageResolutionSelector,
+      quantityValue: quantity,
+      quantityOptions: Array.from(
+        { length: DEFAULT_MAX_BATCH_TASKS },
+        (_, index) => index + 1,
+      ),
+      onQuantityChange: (value) => setQuantity(normalizeTaskCount(value)),
     });
 
   const renderVideoParametersDropdown = () =>
@@ -6635,35 +6668,8 @@ const ImageGeneration = () => {
       </label>,
     ];
     const imageComposerParameters = [
-      renderPillDropdown({
-        key: 'image-group',
-        label: t('分组'),
-        icon: <IconArchive size='small' />,
-        value: selectedGroup,
-        displayValue: selectedGroup,
-        onChange: setSelectedGroup,
-        options: groupOptions
-          .filter((group) => group.has_available_token !== false)
-          .map((group) => ({
-            value: group.group,
-            label: group.group,
-          })),
-        disabled: groupLoading || groupOptions.length === 0,
-      }),
       renderModelDropdown(false, activeModelLabel),
       renderImageParametersDropdown(),
-      renderPillDropdown({
-        key: 'image-quantity',
-        label: t('数量'),
-        icon: <IconHash size='small' />,
-        value: quantity,
-        displayValue: String(quantity),
-        onChange: (val) => setQuantity(normalizeTaskCount(val)),
-        options: Array.from({ length: DEFAULT_MAX_BATCH_TASKS }, (_, index) => {
-          const value = index + 1;
-          return { value, label: String(value) };
-        }),
-      }),
       selectedModelSupportsMaskEditing &&
         referenceImages.length > 0 && (
           <button
