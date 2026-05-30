@@ -3490,6 +3490,7 @@ const ImageGeneration = () => {
           { canvasAspectRatio: aspectRatio || '' },
         );
         loadCanvasSessions(CANVAS_MODE_IMAGE, { silent: true });
+        setInspiration('');
         showSuccess(
           createdTasks.length === 1
             ? t('任务已创建，正在生成中...')
@@ -6237,6 +6238,7 @@ const ImageGeneration = () => {
   const renderCanvasGenerationBatch = (batch) => {
     const userMessage = batch.userMessage || {};
     const batchAspectRatio = getCanvasBatchAspectRatio(batch);
+    const showMessageReferences = generationMode !== CANVAS_MODE_IMAGE;
     const referenceMap = new Map();
     [userMessage, ...(batch.assistantMessages || [])].forEach((message) => {
       getCanvasMessageReferenceFiles(message).forEach((file) => {
@@ -6264,7 +6266,7 @@ const ImageGeneration = () => {
             <div style={styles.canvasMessagePrompt}>
               {userMessage.prompt || t('已添加素材引用')}
             </div>
-            {references.length > 0 ? (
+            {showMessageReferences && references.length > 0 ? (
               <div style={styles.canvasMessageRefs}>
                 {references.map((file) =>
                   renderCanvasReferenceThumb(file, t('参考图')),
@@ -6377,6 +6379,7 @@ const ImageGeneration = () => {
 
     const isUser = message.role === 'user';
     const references = getCanvasMessageReferenceFiles(message);
+    const showMessageReferences = generationMode !== CANVAS_MODE_IMAGE;
     const media = getCanvasMessageMedia(message);
     const isSelected = selectedCanvasMessageId === message.id;
     const isChatMode = generationMode === CANVAS_MODE_CHAT;
@@ -6421,7 +6424,7 @@ const ImageGeneration = () => {
                 {message.prompt || t('已添加素材引用')}
               </div>
             ) : null}
-            {references.length > 0 ? (
+            {showMessageReferences && references.length > 0 ? (
               <div style={styles.canvasMessageRefs}>
                 {references.map((file) =>
                   renderCanvasReferenceThumb(file, t('参考图')),
@@ -6458,7 +6461,7 @@ const ImageGeneration = () => {
             <div style={styles.canvasMessagePrompt}>
               {message.prompt || t('已添加素材引用')}
             </div>
-            {references.length > 0 ? (
+            {showMessageReferences && references.length > 0 ? (
               <div style={styles.canvasMessageRefs}>
                 {references.map((file) =>
                   renderCanvasReferenceThumb(file, t('参考图')),
@@ -6482,7 +6485,7 @@ const ImageGeneration = () => {
       >
         <div style={styles.canvasGenerationCardWrap}>
           {renderCanvasGenerationCard(message)}
-          {references.length > 0 ? (
+          {showMessageReferences && references.length > 0 ? (
             <div style={styles.canvasMessageRefs}>
               {references.map((file) =>
                 renderCanvasReferenceThumb(file, t('参考图')),
