@@ -2176,14 +2176,26 @@ const ImageGeneration = () => {
 
   const getCanvasMediaCardSize = (
     aspectRatio,
-    { batchLayout = false, batchAspectRatio = '' } = {},
+    { batchLayout = false, batchAspectRatio = '', mediaKind = '' } = {},
   ) => {
+    const isImageCard = mediaKind === 'image';
     if (batchLayout) {
       return {
         width: '100%',
         maxWidth: '100%',
         maxHeight: 'none',
-        aspectRatio: batchAspectRatio || aspectRatio || '1 / 1',
+        aspectRatio: isImageCard
+          ? '1 / 1'
+          : batchAspectRatio || aspectRatio || '1 / 1',
+      };
+    }
+    if (isImageCard) {
+      const fixedCardSize = isMobile ? 280 : 360;
+      return {
+        width: '100%',
+        maxWidth: `${fixedCardSize}px`,
+        maxHeight: `${fixedCardSize}px`,
+        aspectRatio: '1 / 1',
       };
     }
     const match = String(aspectRatio || '').match(
@@ -5123,6 +5135,14 @@ const ImageGeneration = () => {
     canvasMediaContent: {
       width: '100%',
       height: '100%',
+      objectFit: 'cover',
+      objectPosition: 'center',
+      display: 'block',
+      background: 'var(--semi-color-fill-0)',
+    },
+    canvasMediaVideoContent: {
+      width: '100%',
+      height: '100%',
       objectFit: 'contain',
       display: 'block',
       background: 'var(--semi-color-fill-0)',
@@ -5178,12 +5198,10 @@ const ImageGeneration = () => {
     messageResultImage: {
       display: 'block',
       width: '100%',
-      maxWidth: isMobile ? '100%' : 520,
-      maxHeight: isMobile ? 420 : 620,
-      objectFit: 'contain',
-      borderRadius: 8,
+      height: '100%',
+      objectFit: 'cover',
+      objectPosition: 'center',
       background: 'var(--semi-color-fill-0)',
-      cursor: 'pointer',
     },
     messageResultVideo: {
       display: 'block',
@@ -6198,7 +6216,7 @@ const ImageGeneration = () => {
           src={media.videoUrl}
           poster={media.src}
           controls
-          style={styles.canvasMediaContent}
+          style={styles.canvasMediaVideoContent}
           onClick={() => setVideoSelectedTask(message.video_task || null)}
         />
       );
@@ -6212,6 +6230,7 @@ const ImageGeneration = () => {
           ...getCanvasMediaCardSize(aspectRatio, {
             batchLayout,
             batchAspectRatio,
+            mediaKind: media?.kind || '',
           }),
         }}
         onClick={
@@ -6314,15 +6333,31 @@ const ImageGeneration = () => {
     }
     if (media.kind === 'image') {
       if (media.status === 'success' && media.src) {
+        const aspectRatio = getCanvasMessageAspectRatio(message);
         return (
           <div style={styles.canvasMessageResultFrame}>
-            <img
-              data-canvas-message-result='image'
-              src={media.src}
-              alt=''
-              style={styles.messageResultImage}
-              onClick={() => setSelectedTask(message.image_task || null)}
-            />
+            <div
+              style={{
+                ...styles.canvasMediaCard,
+                ...styles.canvasMediaCardClickable,
+                ...getCanvasMediaCardSize(aspectRatio, {
+                  mediaKind: 'image',
+                }),
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                openCanvasImagePreview(message, media);
+              }}
+            >
+              <div style={styles.canvasMediaFrame}>
+                <img
+                  data-canvas-message-result='image'
+                  src={media.src}
+                  alt=''
+                  style={styles.messageResultImage}
+                />
+              </div>
+            </div>
           </div>
         );
       }
