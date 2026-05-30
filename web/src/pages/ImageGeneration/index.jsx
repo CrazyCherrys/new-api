@@ -73,6 +73,10 @@ import {
   modelSupportsImageEditing,
   modelSupportsMaskEditing,
 } from './canvasRules';
+import {
+  CANVAS_RENDERABLE_IMAGE_BATCH,
+  getRenderableCanvasMessages,
+} from './canvasMessageBatches';
 
 const { Text } = Typography;
 
@@ -241,8 +245,6 @@ const getCanvasMessageTaskType = (message) =>
       ? 'image_generation'
       : '');
 
-const CANVAS_RENDERABLE_IMAGE_BATCH = 'image_generation_batch';
-
 const getCanvasMessagePromptText = (message) =>
   String(
     message?.prompt ||
@@ -250,107 +252,6 @@ const getCanvasMessagePromptText = (message) =>
       message?.video_task?.prompt ||
       '',
   ).trim();
-
-const isImageGenerationAssistantMessage = (message) =>
-  !!message &&
-  message.role !== 'user' &&
-  getCanvasMessageTaskType(message) === 'image_generation';
-
-const canvasMessageMatchesImageBatch = (message, prompt, requestId) => {
-  if (!isImageGenerationAssistantMessage(message)) {
-    return false;
-  }
-  const messagePrompt = getCanvasMessagePromptText(message);
-  if (prompt && messagePrompt && messagePrompt !== prompt) {
-    return false;
-  }
-  if (
-    requestId &&
-    String(message.client_request_id || '') !== String(requestId)
-  ) {
-    return false;
-  }
-  return true;
-};
-
-const canvasUserMessageMatchesImageBatch = (message, prompt, requestId) => {
-  if (!message || message.role !== 'user') {
-    return false;
-  }
-  const messagePrompt = getCanvasMessagePromptText(message);
-  if (prompt && messagePrompt !== prompt) {
-    return false;
-  }
-  if (
-    requestId &&
-    String(message.client_request_id || '') !== String(requestId)
-  ) {
-    return false;
-  }
-  return true;
-};
-
-const getRenderableCanvasMessages = (messages) => {
-  const renderableMessages = [];
-  const sourceMessages = Array.isArray(messages) ? messages : [];
-  let index = 0;
-
-  while (index < sourceMessages.length) {
-    const userMessage = sourceMessages[index];
-    if (userMessage?.role !== 'user') {
-      renderableMessages.push(userMessage);
-      index += 1;
-      continue;
-    }
-
-    const prompt = getCanvasMessagePromptText(userMessage);
-    const requestId = userMessage.client_request_id || '';
-    const assistantMessages = [];
-    let cursor = index + 1;
-
-    while (cursor < sourceMessages.length) {
-      const currentMessage = sourceMessages[cursor];
-      if (canvasMessageMatchesImageBatch(currentMessage, prompt, requestId)) {
-        assistantMessages.push(currentMessage);
-        cursor += 1;
-        continue;
-      }
-
-      const nextMessage = sourceMessages[cursor + 1];
-      const nextRequestId = currentMessage?.client_request_id || requestId || '';
-      if (
-        canvasUserMessageMatchesImageBatch(
-          currentMessage,
-          prompt,
-          nextRequestId,
-        ) &&
-        canvasMessageMatchesImageBatch(nextMessage, prompt, nextRequestId)
-      ) {
-        assistantMessages.push(nextMessage);
-        cursor += 2;
-        continue;
-      }
-
-      break;
-    }
-
-    if (assistantMessages.length > 1) {
-      renderableMessages.push({
-        render_type: CANVAS_RENDERABLE_IMAGE_BATCH,
-        id: `image-batch-${requestId || userMessage.id || index}`,
-        userMessage,
-        assistantMessages,
-      });
-      index = cursor;
-      continue;
-    }
-
-    renderableMessages.push(userMessage);
-    index += 1;
-  }
-
-  return renderableMessages;
-};
 
 const normalizeAspectRatioText = (value) => {
   const text = String(value || '').trim();
@@ -3497,6 +3398,8 @@ const ImageGeneration = () => {
         });
       }
 
+      const canvasSession = await ensureCanvasSession(CANVAS_MODE_IMAGE);
+      const clientRequestId = generateCanvasClientRequestId();
       // UI uses inspiration wording; backend task DTO still expects prompt.
       const taskPayload = {
         model_id: selectedModel,
@@ -3504,10 +3407,8 @@ const ImageGeneration = () => {
         prompt: inspiration.trim(),
         request_endpoint: selectedModelData.request_endpoint,
         params: JSON.stringify(params),
+        client_request_id: clientRequestId,
       };
-
-      const canvasSession = await ensureCanvasSession(CANVAS_MODE_IMAGE);
-      const clientRequestId = generateCanvasClientRequestId();
       const submittedAt = Math.floor(Date.now() / 1000);
       replaceCanvasMessagesForSession(canvasSession.id, clientRequestId, [
         {
@@ -3734,14 +3635,15 @@ const ImageGeneration = () => {
       if (base64Image) {
         params.reference_images = [base64Image];
       }
+      canvasSession = await ensureCanvasSession(CANVAS_MODE_VIDEO);
+      clientRequestId = generateCanvasClientRequestId();
       const taskPayload = {
         model_id: videoSelectedModel,
         prompt: videoPrompt.trim(),
         request_endpoint: videoSelectedModelData.request_endpoint,
         params: JSON.stringify(params),
+        client_request_id: clientRequestId,
       };
-      canvasSession = await ensureCanvasSession(CANVAS_MODE_VIDEO);
-      clientRequestId = generateCanvasClientRequestId();
       replaceCanvasMessagesForSession(
         canvasSession.id,
         clientRequestId,

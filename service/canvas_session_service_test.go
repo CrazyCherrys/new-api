@@ -270,6 +270,187 @@ func TestCreateCanvasVideoMessagePersistsTaskMessage(t *testing.T) {
 	}
 }
 
+func TestCreateCanvasImageMessagesPersistClientRequestID(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	createImageGenerationTaskForCanvas = func(userId int, modelId string, selectedGroup string, prompt string, requestEndpoint string, params string) (*model.ImageGenerationTask, error) {
+		task := &model.ImageGenerationTask{
+			UserId:          userId,
+			ModelId:         modelId,
+			SelectedGroup:   selectedGroup,
+			Prompt:          prompt,
+			RequestEndpoint: requestEndpoint,
+			Status:          model.ImageTaskStatusPending,
+			Params:          params,
+			CreatedTime:     common.GetTimestamp(),
+		}
+		if err := task.Insert(); err != nil {
+			return nil, err
+		}
+		return task, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage})
+	if err != nil {
+		t.Fatalf("failed to create image session: %v", err)
+	}
+	created, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:          "client request image",
+		ModelId:         "gpt-image-test",
+		Group:           "default",
+		RequestEndpoint: "openai",
+		Params:          `{"size":"1024x1024"}`,
+		ClientRequestId: "image-request-1",
+	})
+	if err != nil {
+		t.Fatalf("failed to create image message: %v", err)
+	}
+	if len(created) != 2 {
+		t.Fatalf("expected 2 created messages, got %d", len(created))
+	}
+	for _, message := range created {
+		if message.ClientRequestId != "image-request-1" {
+			t.Fatalf("expected created message client_request_id to persist, got %#v", message)
+		}
+	}
+
+	reloaded, err := ListCanvasMessages(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload image messages: %v", err)
+	}
+	if len(reloaded) != 2 {
+		t.Fatalf("expected 2 reloaded messages, got %d", len(reloaded))
+	}
+	for _, message := range reloaded {
+		if message.ClientRequestId != "image-request-1" {
+			t.Fatalf("expected reloaded client_request_id, got %#v", message)
+		}
+	}
+}
+
+func TestCreateCanvasVideoMessagesPersistClientRequestID(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	createVideoGenerationTaskForCanvas = func(userId int, modelId string, prompt string, requestEndpoint string, rawParams string) (*dto.VideoGenerationTaskSummary, error) {
+		task := &model.Task{
+			UserId:     userId,
+			TaskID:     "task_video_reqid",
+			Action:     constant.TaskActionTextGenerate,
+			Status:     model.TaskStatusQueued,
+			Progress:   "10%",
+			SubmitTime: common.GetTimestamp(),
+			Properties: model.Properties{
+				Input:             prompt,
+				OriginModelName:   modelId,
+				UpstreamModelName: modelId,
+				RequestParams:     rawParams,
+			},
+		}
+		if err := model.DB.Create(task).Error; err != nil {
+			return nil, err
+		}
+		return &dto.VideoGenerationTaskSummary{
+			ID:              task.ID,
+			TaskID:          task.TaskID,
+			Status:          task.Status.ToVideoStatus(),
+			Prompt:          prompt,
+			ModelID:         modelId,
+			RequestEndpoint: requestEndpoint,
+			CreatedTime:     task.SubmitTime,
+		}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeVideo})
+	if err != nil {
+		t.Fatalf("failed to create video session: %v", err)
+	}
+	created, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:          "video with request id",
+		ModelId:         "sora-test",
+		RequestEndpoint: "openai-video",
+		Params:          `{"duration":5}`,
+		ClientRequestId: "video-request-1",
+	})
+	if err != nil {
+		t.Fatalf("failed to create video message: %v", err)
+	}
+	if len(created) != 2 {
+		t.Fatalf("expected 2 created video messages, got %d", len(created))
+	}
+	for _, message := range created {
+		if message.ClientRequestId != "video-request-1" {
+			t.Fatalf("expected created video message client_request_id, got %#v", message)
+		}
+	}
+
+	reloaded, err := ListCanvasMessages(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload video messages: %v", err)
+	}
+	if len(reloaded) != 2 {
+		t.Fatalf("expected 2 reloaded video messages, got %d", len(reloaded))
+	}
+	for _, message := range reloaded {
+		if message.ClientRequestId != "video-request-1" {
+			t.Fatalf("expected reloaded video client_request_id, got %#v", message)
+		}
+	}
+}
+
+func TestCreateCanvasMessagesAllowEmptyClientRequestID(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	createImageGenerationTaskForCanvas = func(userId int, modelId string, selectedGroup string, prompt string, requestEndpoint string, params string) (*model.ImageGenerationTask, error) {
+		task := &model.ImageGenerationTask{
+			UserId:          userId,
+			ModelId:         modelId,
+			SelectedGroup:   selectedGroup,
+			Prompt:          prompt,
+			RequestEndpoint: requestEndpoint,
+			Status:          model.ImageTaskStatusPending,
+			Params:          params,
+			CreatedTime:     common.GetTimestamp(),
+		}
+		if err := task.Insert(); err != nil {
+			return nil, err
+		}
+		return task, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage})
+	if err != nil {
+		t.Fatalf("failed to create image session: %v", err)
+	}
+	created, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:          "legacy image",
+		ModelId:         "gpt-image-test",
+		Group:           "default",
+		RequestEndpoint: "openai",
+		Params:          `{}`,
+	})
+	if err != nil {
+		t.Fatalf("failed to create legacy image message: %v", err)
+	}
+	if len(created) != 2 {
+		t.Fatalf("expected 2 created legacy messages, got %d", len(created))
+	}
+	for _, message := range created {
+		if message.ClientRequestId != "" {
+			t.Fatalf("expected empty client_request_id for legacy create, got %#v", message)
+		}
+	}
+
+	reloaded, err := ListCanvasMessages(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload legacy image messages: %v", err)
+	}
+	for _, message := range reloaded {
+		if message.ClientRequestId != "" {
+			t.Fatalf("expected empty reloaded client_request_id for legacy flow, got %#v", message)
+		}
+	}
+}
+
 func TestCanvasMessagesAreUserIsolated(t *testing.T) {
 	setupCanvasSessionServiceTestDB(t)
 

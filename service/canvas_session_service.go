@@ -35,6 +35,7 @@ type CreateCanvasMessageInput struct {
 	Group           string
 	RequestEndpoint string
 	Params          string
+	ClientRequestId string
 }
 
 var (
@@ -129,6 +130,7 @@ func CreateCanvasMessage(userId int, sessionId int, input CreateCanvasMessageInp
 	if prompt == "" {
 		return nil, fmt.Errorf("prompt is required")
 	}
+	clientRequestId := strings.TrimSpace(input.ClientRequestId)
 
 	var taskMessage *model.CanvasMessage
 	var cleanupCreatedTask func()
@@ -139,14 +141,15 @@ func CreateCanvasMessage(userId int, sessionId int, input CreateCanvasMessageInp
 			return nil, err
 		}
 		taskMessage = &model.CanvasMessage{
-			SessionId: sessionId,
-			UserId:    userId,
-			Mode:      session.Mode,
-			Role:      model.CanvasMessageRoleAssistant,
-			Prompt:    prompt,
-			Status:    task.Status,
-			TaskId:    strconv.Itoa(task.Id),
-			TaskType:  model.CanvasTaskTypeImage,
+			SessionId:       sessionId,
+			UserId:          userId,
+			Mode:            session.Mode,
+			Role:            model.CanvasMessageRoleAssistant,
+			Prompt:          prompt,
+			ClientRequestId: clientRequestId,
+			Status:          task.Status,
+			TaskId:          strconv.Itoa(task.Id),
+			TaskType:        model.CanvasTaskTypeImage,
 		}
 		cleanupCreatedTask = func() {
 			if err := DeleteImageGenerationTask(task); err != nil {
@@ -159,14 +162,15 @@ func CreateCanvasMessage(userId int, sessionId int, input CreateCanvasMessageInp
 			return nil, err
 		}
 		taskMessage = &model.CanvasMessage{
-			SessionId: sessionId,
-			UserId:    userId,
-			Mode:      session.Mode,
-			Role:      model.CanvasMessageRoleAssistant,
-			Prompt:    prompt,
-			Status:    task.Status,
-			TaskId:    strconv.FormatInt(task.ID, 10),
-			TaskType:  model.CanvasTaskTypeVideo,
+			SessionId:       sessionId,
+			UserId:          userId,
+			Mode:            session.Mode,
+			Role:            model.CanvasMessageRoleAssistant,
+			Prompt:          prompt,
+			ClientRequestId: clientRequestId,
+			Status:          task.Status,
+			TaskId:          strconv.FormatInt(task.ID, 10),
+			TaskType:        model.CanvasTaskTypeVideo,
 		}
 		cleanupCreatedTask = func() {
 			if err := deleteVideoGenerationTaskForCanvas(userId, task.ID); err != nil {
@@ -175,13 +179,14 @@ func CreateCanvasMessage(userId int, sessionId int, input CreateCanvasMessageInp
 		}
 	case model.CanvasModeChat:
 		taskMessage = &model.CanvasMessage{
-			SessionId:    sessionId,
-			UserId:       userId,
-			Mode:         session.Mode,
-			Role:         model.CanvasMessageRoleAssistant,
-			Prompt:       "暂未接入聊天模型",
-			Status:       "placeholder",
-			ErrorMessage: "chat mode is not connected yet",
+			SessionId:       sessionId,
+			UserId:          userId,
+			Mode:            session.Mode,
+			Role:            model.CanvasMessageRoleAssistant,
+			Prompt:          "暂未接入聊天模型",
+			ClientRequestId: clientRequestId,
+			Status:          "placeholder",
+			ErrorMessage:    "chat mode is not connected yet",
 		}
 	default:
 		return nil, fmt.Errorf("invalid canvas mode")
@@ -210,14 +215,15 @@ func CreateCanvasMessage(userId int, sessionId int, input CreateCanvasMessageInp
 		}
 
 		userMessage := &model.CanvasMessage{
-			SessionId:   sessionId,
-			UserId:      userId,
-			Mode:        session.Mode,
-			Role:        model.CanvasMessageRoleUser,
-			Prompt:      prompt,
-			Status:      "success",
-			CreatedTime: now,
-			UpdatedTime: now,
+			SessionId:       sessionId,
+			UserId:          userId,
+			Mode:            session.Mode,
+			Role:            model.CanvasMessageRoleUser,
+			Prompt:          prompt,
+			ClientRequestId: clientRequestId,
+			Status:          "success",
+			CreatedTime:     now,
+			UpdatedTime:     now,
 		}
 		if err := tx.Create(userMessage).Error; err != nil {
 			return err

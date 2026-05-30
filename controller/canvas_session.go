@@ -27,6 +27,7 @@ type createCanvasMessageRequest struct {
 	Group           string `json:"group"`
 	RequestEndpoint string `json:"request_endpoint"`
 	Params          string `json:"params"`
+	ClientRequestId string `json:"client_request_id"`
 }
 
 func ListCanvasSessions(c *gin.Context) {
@@ -162,6 +163,7 @@ func CreateCanvasMessage(c *gin.Context) {
 		Group:           req.Group,
 		RequestEndpoint: req.RequestEndpoint,
 		Params:          req.Params,
+		ClientRequestId: req.ClientRequestId,
 	})
 	if err != nil {
 		common.ApiError(c, err)

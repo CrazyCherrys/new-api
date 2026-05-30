@@ -33,19 +33,20 @@ type CanvasSession struct {
 }
 
 type CanvasMessage struct {
-	Id           int    `json:"id" gorm:"primaryKey"`
-	SessionId    int    `json:"session_id" gorm:"index:idx_canvas_messages_session_deleted_created,priority:1;not null"`
-	UserId       int    `json:"user_id" gorm:"index;not null"`
-	Mode         string `json:"mode" gorm:"size:16;index;not null"`
-	Role         string `json:"role" gorm:"size:16;not null"`
-	Prompt       string `json:"prompt" gorm:"type:text"`
-	Status       string `json:"status" gorm:"size:32;index;default:''"`
-	TaskId       string `json:"task_id" gorm:"size:64;index;default:''"`
-	TaskType     string `json:"task_type" gorm:"size:32;index;default:''"`
-	ErrorMessage string `json:"error_message" gorm:"type:text"`
-	CreatedTime  int64  `json:"created_time" gorm:"bigint;index:idx_canvas_messages_session_deleted_created,priority:3"`
-	UpdatedTime  int64  `json:"updated_time" gorm:"bigint"`
-	DeletedTime  int64  `json:"deleted_time" gorm:"bigint;index:idx_canvas_messages_session_deleted_created,priority:2;default:0"`
+	Id              int    `json:"id" gorm:"primaryKey"`
+	SessionId       int    `json:"session_id" gorm:"index:idx_canvas_messages_session_deleted_created,priority:1;not null"`
+	UserId          int    `json:"user_id" gorm:"index;not null"`
+	Mode            string `json:"mode" gorm:"size:16;index;not null"`
+	Role            string `json:"role" gorm:"size:16;not null"`
+	Prompt          string `json:"prompt" gorm:"type:text"`
+	ClientRequestId string `json:"client_request_id" gorm:"size:64;default:''"`
+	Status          string `json:"status" gorm:"size:32;index;default:''"`
+	TaskId          string `json:"task_id" gorm:"size:64;index;default:''"`
+	TaskType        string `json:"task_type" gorm:"size:32;index;default:''"`
+	ErrorMessage    string `json:"error_message" gorm:"type:text"`
+	CreatedTime     int64  `json:"created_time" gorm:"bigint;index:idx_canvas_messages_session_deleted_created,priority:3"`
+	UpdatedTime     int64  `json:"updated_time" gorm:"bigint"`
+	DeletedTime     int64  `json:"deleted_time" gorm:"bigint;index:idx_canvas_messages_session_deleted_created,priority:2;default:0"`
 }
 
 func NormalizeCanvasMode(mode string) string {
