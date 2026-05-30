@@ -33,10 +33,12 @@ import {
   Checkbox,
   Tag,
   Popconfirm,
+  Tooltip,
 } from '@douyinfe/semi-ui';
 import {
   IconDelete,
   IconImage,
+  IconChevronLeft,
   IconChevronDown,
   IconSend,
   IconMenu,
@@ -55,6 +57,7 @@ import {
   IconText,
   IconExternalOpen,
   IconMore,
+  IconSidebar,
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
@@ -614,6 +617,7 @@ const ImageGeneration = () => {
   const [videoModels, setVideoModels] = useState([]);
   const [videoFilteredModels, setVideoFilteredModels] = useState([]);
   const [mobileTaskbarVisible, setMobileTaskbarVisible] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const [composerAdvancedVisible, setComposerAdvancedVisible] = useState(false);
   const [activeDropdownKey, setActiveDropdownKey] = useState('');
   const [assetLibraryVisible, setAssetLibraryVisible] = useState(false);
@@ -4292,11 +4296,25 @@ const ImageGeneration = () => {
       background: 'var(--semi-color-bg-0)',
       overflow: 'hidden',
     },
+    sidebarHeader: {
+      height: 40,
+      flexShrink: 0,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      padding: '8px 10px 0',
+    },
+    sidebarIconButton: {
+      width: 30,
+      height: 30,
+      minWidth: 30,
+      borderRadius: 8,
+    },
     sidebarNav: {
       display: 'flex',
       flexDirection: 'column',
       gap: 6,
-      padding: 10,
+      padding: isMobile ? 10 : '6px 10px 10px',
     },
     sidebarNavItem: {
       width: '100%',
@@ -4411,6 +4429,13 @@ const ImageGeneration = () => {
       flexDirection: 'column',
       background: 'var(--semi-color-bg-0)',
       overflow: 'hidden',
+      position: 'relative',
+    },
+    sidebarRevealButtonWrap: {
+      position: 'absolute',
+      top: 10,
+      left: 10,
+      zIndex: 5,
     },
     rightContent: {
       flex: 1,
@@ -5074,13 +5099,15 @@ const ImageGeneration = () => {
     },
     canvasGenerationBatchGrid: {
       width: '100%',
+      maxWidth: isMobile ? '100%' : 980,
       display: 'grid',
       gridTemplateColumns:
         isMobile
           ? 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))'
           : 'repeat(3, minmax(0, 1fr))',
-      gap: isMobile ? 10 : 12,
+      gap: isMobile ? 10 : 8,
       alignItems: 'start',
+      alignSelf: 'flex-start',
     },
     canvasGenerationBatchCard: {
       minWidth: 0,
@@ -5906,6 +5933,20 @@ const ImageGeneration = () => {
 
   const renderTaskSidebar = () => (
     <div style={styles.leftPanel} data-canvas-task-sidebar={generationMode}>
+      {!isMobile ? (
+        <div style={styles.sidebarHeader}>
+          <Tooltip content={t('隐藏侧边栏')} position='bottom'>
+            <Button
+              type='tertiary'
+              aria-label={t('隐藏侧边栏')}
+              data-canvas-sidebar-collapse='true'
+              icon={<IconChevronLeft />}
+              style={styles.sidebarIconButton}
+              onClick={() => setDesktopSidebarCollapsed(true)}
+            />
+          </Tooltip>
+        </div>
+      ) : null}
       <div style={styles.sidebarNav}>
         {renderSidebarNavItem({
           key: 'asset-library',
@@ -7155,6 +7196,20 @@ const ImageGeneration = () => {
 
   const renderWorkspace = () => (
     <div style={styles.rightPanel}>
+      {!isMobile && desktopSidebarCollapsed ? (
+        <div style={styles.sidebarRevealButtonWrap}>
+          <Tooltip content={t('显示侧边栏')} position='right'>
+            <Button
+              type='tertiary'
+              aria-label={t('显示侧边栏')}
+              data-canvas-sidebar-reveal='true'
+              icon={<IconSidebar />}
+              style={styles.sidebarIconButton}
+              onClick={() => setDesktopSidebarCollapsed(false)}
+            />
+          </Tooltip>
+        </div>
+      ) : null}
       {isMobile ? (
         <div style={styles.workspaceTopbar}>
           <div style={styles.workspaceTopbarLeft}>
@@ -7181,7 +7236,7 @@ const ImageGeneration = () => {
 
   return (
     <div style={styles.container}>
-      {!isMobile ? renderTaskSidebar() : null}
+      {!isMobile && !desktopSidebarCollapsed ? renderTaskSidebar() : null}
       {renderWorkspace()}
       {isMobile ? (
         <SideSheet
