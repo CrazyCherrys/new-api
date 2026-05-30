@@ -48,7 +48,6 @@ import {
   IconRefresh,
   IconDownload,
   IconClock,
-  IconGridRectangle,
   IconHash,
   IconLayers,
   IconPlayCircle,
@@ -5512,24 +5511,35 @@ const ImageGeneration = () => {
     </button>
   );
 
-  const renderImageParametersDropdown = () => {
-    const hasAspectRatios = showImageAspectRatioSelector && availableAspectRatios.length > 0;
-    const hasResolutions = showImageResolutionSelector && availableResolutions.length > 0;
+  const renderGenerationParametersDropdown = ({
+    key,
+    ariaLabel,
+    aspectRatios,
+    resolutions,
+    aspectRatioValue,
+    resolutionValue,
+    onAspectRatioChange,
+    onResolutionChange,
+    showAspectRatioSelector,
+    showResolutionSelector,
+  }) => {
+    const hasAspectRatios = showAspectRatioSelector && aspectRatios.length > 0;
+    const hasResolutions = showResolutionSelector && resolutions.length > 0;
     if (!hasAspectRatios && !hasResolutions) {
       return null;
     }
 
-    const dropdownKey = 'image-parameters';
+    const dropdownKey = key;
     const dimensionPreview = getImageDimensionPreview(
-      hasResolutions ? resolution : '',
-      hasAspectRatios ? aspectRatio : '',
+      hasResolutions ? resolutionValue : '',
+      hasAspectRatios ? aspectRatioValue : '',
     );
     const displayParts = [];
-    if (hasAspectRatios && aspectRatio) {
-      displayParts.push(getAspectRatioSummaryDisplay(aspectRatio));
+    if (hasAspectRatios && aspectRatioValue) {
+      displayParts.push(getAspectRatioSummaryDisplay(aspectRatioValue));
     }
-    if (hasResolutions && resolution) {
-      displayParts.push(getResolutionDisplay(resolution));
+    if (hasResolutions && resolutionValue) {
+      displayParts.push(getResolutionDisplay(resolutionValue));
     }
     const displayValue = displayParts.length > 0 ? displayParts.join(' | ') : t('请选择');
     const panel = (
@@ -5541,12 +5551,12 @@ const ImageGeneration = () => {
           <div style={styles.imageParamSection}>
             <div style={styles.imageParamSectionTitle}>{t('选择比例')}</div>
             <div style={styles.imageParamOptionRow}>
-              {availableAspectRatios.map((ratio) =>
+              {aspectRatios.map((ratio) =>
                 renderImageParamOption({
                   value: ratio,
                   label: getAspectRatioDisplay(ratio),
-                  selected: ratio === aspectRatio,
-                  onClick: setAspectRatio,
+                  selected: ratio === aspectRatioValue,
+                  onClick: onAspectRatioChange,
                 }),
               )}
             </div>
@@ -5559,12 +5569,12 @@ const ImageGeneration = () => {
           <div style={styles.imageParamSection}>
             <div style={styles.imageParamSectionTitle}>{t('选择分辨率')}</div>
             <div style={styles.imageParamOptionRow}>
-              {availableResolutions.map((item) =>
+              {resolutions.map((item) =>
                 renderImageParamOption({
                   value: item,
                   label: getResolutionDisplay(item),
-                  selected: item === resolution,
-                  onClick: setResolution,
+                  selected: item === resolutionValue,
+                  onClick: onResolutionChange,
                 }),
               )}
             </div>
@@ -5602,7 +5612,7 @@ const ImageGeneration = () => {
       >
         <button
           type='button'
-          aria-label={t('图片参数')}
+          aria-label={ariaLabel}
           style={{
             ...styles.pillButton,
             ...styles.pillButtonActive,
@@ -5616,6 +5626,34 @@ const ImageGeneration = () => {
       </Dropdown>
     );
   };
+
+  const renderImageParametersDropdown = () =>
+    renderGenerationParametersDropdown({
+      key: 'image-parameters',
+      ariaLabel: t('图片参数'),
+      aspectRatios: availableAspectRatios,
+      resolutions: availableResolutions,
+      aspectRatioValue: aspectRatio,
+      resolutionValue: resolution,
+      onAspectRatioChange: setAspectRatio,
+      onResolutionChange: setResolution,
+      showAspectRatioSelector: showImageAspectRatioSelector,
+      showResolutionSelector: showImageResolutionSelector,
+    });
+
+  const renderVideoParametersDropdown = () =>
+    renderGenerationParametersDropdown({
+      key: 'video-parameters',
+      ariaLabel: t('视频参数'),
+      aspectRatios: videoAvailableAspectRatios,
+      resolutions: videoAvailableResolutions,
+      aspectRatioValue: videoAspectRatio,
+      resolutionValue: videoResolution,
+      onAspectRatioChange: setVideoAspectRatio,
+      onResolutionChange: setVideoResolution,
+      showAspectRatioSelector: showVideoAspectRatioSelector,
+      showResolutionSelector: showVideoResolutionSelector,
+    });
 
   const renderModelDropdown = (isVideoMode, activeModelLabel) => {
     const dropdownKey = isVideoMode ? 'video-model' : 'image-model';
@@ -6604,32 +6642,7 @@ const ImageGeneration = () => {
     ].filter(Boolean);
     const videoComposerParameters = [
       renderModelDropdown(true, activeModelLabel),
-      showVideoAspectRatioSelector &&
-        renderPillDropdown({
-          key: 'video-aspect-ratio',
-          label: t('比例'),
-          icon: <IconRealSizeStroked size='small' />,
-          value: videoAspectRatio,
-          displayValue: videoAspectRatio,
-          onChange: setVideoAspectRatio,
-          options: videoAvailableAspectRatios.map((ratio) => ({
-            value: ratio,
-            label: ratio,
-          })),
-        }),
-      showVideoResolutionSelector &&
-        renderPillDropdown({
-          key: 'video-resolution',
-          label: t('分辨率'),
-          icon: <IconGridRectangle size='small' />,
-          value: videoResolution,
-          displayValue: videoResolution,
-          onChange: setVideoResolution,
-          options: videoAvailableResolutions.map((res) => ({
-            value: res,
-            label: res,
-          })),
-        }),
+      renderVideoParametersDropdown(),
       renderPillDropdown({
         key: 'video-duration',
         label: t('时长'),
