@@ -364,6 +364,169 @@ const normalizeAspectRatioText = (value) => {
   return `${match[1]} / ${match[2]}`;
 };
 
+const normalizeImageResolutionTier = (value) => {
+  const text = String(value || '').trim().toUpperCase();
+  return ['1K', '2K', '4K'].includes(text) ? text : '';
+};
+
+const normalizeImageAspectRatioValue = (value) => {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+  if (text.toLowerCase() === 'auto') {
+    return 'auto';
+  }
+  return text
+    .toLowerCase()
+    .replace(/×/g, 'x')
+    .replace(/\s+/g, '')
+    .replace(/x/g, ':');
+};
+
+const roundImageSizeToMultiple = (value, multiple = 16) =>
+  Math.max(multiple, Math.round(value / multiple) * multiple);
+
+const floorImageSizeToMultiple = (value, multiple = 16) =>
+  Math.max(multiple, Math.floor(value / multiple) * multiple);
+
+const ceilImageSizeToMultiple = (value, multiple = 16) =>
+  Math.max(multiple, Math.ceil(value / multiple) * multiple);
+
+const normalizeImagePreviewDimensions = (rawWidth, rawHeight) => {
+  const multiple = 16;
+  const maxEdge = 3840;
+  const maxAspect = 3;
+  const minPixels = 655360;
+  const maxPixels = 8294400;
+  let width = roundImageSizeToMultiple(rawWidth, multiple);
+  let height = roundImageSizeToMultiple(rawHeight, multiple);
+
+  const scaleToFit = (scale) => {
+    width = floorImageSizeToMultiple(width * scale, multiple);
+    height = floorImageSizeToMultiple(height * scale, multiple);
+  };
+  const scaleToFill = (scale) => {
+    width = ceilImageSizeToMultiple(width * scale, multiple);
+    height = ceilImageSizeToMultiple(height * scale, multiple);
+  };
+
+  for (let index = 0; index < 4; index += 1) {
+    const edge = Math.max(width, height);
+    if (edge > maxEdge) {
+      scaleToFit(maxEdge / edge);
+    }
+
+    if (width / height > maxAspect) {
+      width = floorImageSizeToMultiple(height * maxAspect, multiple);
+    } else if (height / width > maxAspect) {
+      height = floorImageSizeToMultiple(width * maxAspect, multiple);
+    }
+
+    const pixels = width * height;
+    if (pixels > maxPixels) {
+      scaleToFit(Math.sqrt(maxPixels / pixels));
+    } else if (pixels < minPixels) {
+      scaleToFill(Math.sqrt(minPixels / pixels));
+    }
+  }
+
+  return { width, height };
+};
+
+const parseImageAspectRatioPair = (ratio) => {
+  const match = String(ratio || '')
+    .trim()
+    .match(/^(\d+(?:\.\d+)?)\s*[:xX×]\s*(\d+(?:\.\d+)?)$/);
+  if (!match) {
+    return null;
+  }
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return { width, height };
+};
+
+const parseImageSizePair = (size) => {
+  const match = String(size || '')
+    .trim()
+    .match(/^(\d+)\s*[xX×]\s*(\d+)$/);
+  if (!match) {
+    return null;
+  }
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return { width, height };
+};
+
+const getImageDimensionPreview = (resolutionValue, aspectRatioValue) => {
+  const explicitSize = parseImageSizePair(resolutionValue);
+  if (explicitSize) {
+    return {
+      width: String(explicitSize.width),
+      height: String(explicitSize.height),
+    };
+  }
+
+  const normalizedRatio = normalizeImageAspectRatioValue(aspectRatioValue);
+  if (normalizedRatio === 'auto') {
+    return { width: 'auto', height: 'auto' };
+  }
+
+  const tier = normalizeImageResolutionTier(resolutionValue);
+  if (!tier) {
+    return { width: 'auto', height: 'auto' };
+  }
+
+  const ratio = parseImageAspectRatioPair(normalizedRatio || '1:1');
+  if (!ratio) {
+    return { width: 'auto', height: 'auto' };
+  }
+
+  const isSquare = ratio.width === ratio.height;
+  if (isSquare) {
+    const side = tier === '4K' ? 3840 : tier === '2K' ? 2048 : 1024;
+    const normalized = normalizeImagePreviewDimensions(side, side);
+    return {
+      width: String(normalized.width),
+      height: String(normalized.height),
+    };
+  }
+
+  if (tier === '1K') {
+    const shortSide = 1024;
+    if (ratio.width > ratio.height) {
+      return {
+        width: String(roundImageSizeToMultiple((shortSide * ratio.width) / ratio.height)),
+        height: String(shortSide),
+      };
+    }
+    return {
+      width: String(shortSide),
+      height: String(roundImageSizeToMultiple((shortSide * ratio.height) / ratio.width)),
+    };
+  }
+
+  const longSide = tier === '4K' ? 3840 : 2048;
+  let rawWidth = longSide;
+  let rawHeight = longSide;
+  if (ratio.width > ratio.height) {
+    rawHeight = roundImageSizeToMultiple((longSide * ratio.height) / ratio.width);
+  } else {
+    rawWidth = roundImageSizeToMultiple((longSide * ratio.width) / ratio.height);
+  }
+  const normalized = normalizeImagePreviewDimensions(rawWidth, rawHeight);
+  return {
+    width: String(normalized.width),
+    height: String(normalized.height),
+  };
+};
+
 const collectTaskReferenceValues = (raw) => {
   const values = [];
   const append = (item) => {
@@ -4451,6 +4614,90 @@ const ImageGeneration = () => {
       background: 'var(--semi-color-primary-light-default)',
       color: 'var(--semi-color-primary)',
     },
+    imageParamPanel: {
+      width: isMobile ? 'calc(100vw - 32px)' : 380,
+      maxWidth: 'calc(100vw - 32px)',
+      border: '1px solid var(--semi-color-border)',
+      borderRadius: 10,
+      background: 'var(--semi-color-bg-0)',
+      boxShadow: '0 18px 48px rgba(15, 23, 42, 0.18)',
+      padding: isMobile ? 12 : 14,
+    },
+    imageParamSection: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+    },
+    imageParamSectionTitle: {
+      fontSize: 13,
+      fontWeight: 650,
+      color: 'var(--semi-color-text-0)',
+      lineHeight: 1.3,
+    },
+    imageParamOptionRow: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap',
+      minWidth: 0,
+    },
+    imageParamOption: {
+      minHeight: 32,
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
+      color: 'var(--semi-color-text-1)',
+      padding: '0 11px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: 13,
+      lineHeight: 1.2,
+      cursor: 'pointer',
+      maxWidth: '100%',
+      whiteSpace: 'nowrap',
+    },
+    imageParamOptionActive: {
+      borderColor: 'var(--semi-color-primary-light-active)',
+      background: 'var(--semi-color-primary-light-default)',
+      color: 'var(--semi-color-primary)',
+      fontWeight: 650,
+    },
+    imageParamDivider: {
+      height: 1,
+      background: 'var(--semi-color-border)',
+      margin: '12px 0',
+    },
+    imageParamSizeRow: {
+      display: 'grid',
+      gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+      gap: 8,
+    },
+    imageParamSizeField: {
+      minHeight: 34,
+      borderRadius: 8,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
+      color: 'var(--semi-color-text-0)',
+      padding: '0 10px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      minWidth: 0,
+    },
+    imageParamSizeLabel: {
+      flex: '0 0 auto',
+      color: 'var(--semi-color-text-2)',
+      fontSize: 12,
+    },
+    imageParamSizeValue: {
+      minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      fontSize: 13,
+      fontWeight: 650,
+    },
     modelMenuOption: {
       display: 'flex',
       alignItems: 'flex-start',
@@ -5220,6 +5467,150 @@ const ImageGeneration = () => {
           <span style={styles.pillButtonLabel}>
             {label ? `${label} ${displayValue || t('请选择')}` : displayValue || t('请选择')}
           </span>
+          <IconChevronDown size='small' />
+        </button>
+      </Dropdown>
+    );
+  };
+
+  const getAspectRatioDisplay = (value) =>
+    String(value || '').trim().toLowerCase() === 'auto'
+      ? t('智能')
+      : String(value || '');
+
+  const getAspectRatioSummaryDisplay = (value) =>
+    String(value || '').trim().toLowerCase() === 'auto'
+      ? t('智能比例')
+      : String(value || '');
+
+  const getResolutionDisplay = (value) => {
+    const text = String(value || '').trim();
+    const normalized = text.toUpperCase();
+    if (normalized === '2K') {
+      return t('高清 2K');
+    }
+    if (normalized === '4K') {
+      return t('超清 4K');
+    }
+    return text;
+  };
+
+  const renderImageParamOption = ({ value, label, selected, onClick }) => (
+    <button
+      key={value}
+      type='button'
+      style={{
+        ...styles.imageParamOption,
+        ...(selected ? styles.imageParamOptionActive : null),
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick(value);
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  const renderImageParametersDropdown = () => {
+    const hasAspectRatios = showImageAspectRatioSelector && availableAspectRatios.length > 0;
+    const hasResolutions = showImageResolutionSelector && availableResolutions.length > 0;
+    if (!hasAspectRatios && !hasResolutions) {
+      return null;
+    }
+
+    const dropdownKey = 'image-parameters';
+    const dimensionPreview = getImageDimensionPreview(
+      hasResolutions ? resolution : '',
+      hasAspectRatios ? aspectRatio : '',
+    );
+    const displayParts = [];
+    if (hasAspectRatios && aspectRatio) {
+      displayParts.push(getAspectRatioSummaryDisplay(aspectRatio));
+    }
+    if (hasResolutions && resolution) {
+      displayParts.push(getResolutionDisplay(resolution));
+    }
+    const displayValue = displayParts.length > 0 ? displayParts.join(' | ') : t('请选择');
+    const panel = (
+      <div
+        style={styles.imageParamPanel}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {hasAspectRatios ? (
+          <div style={styles.imageParamSection}>
+            <div style={styles.imageParamSectionTitle}>{t('选择比例')}</div>
+            <div style={styles.imageParamOptionRow}>
+              {availableAspectRatios.map((ratio) =>
+                renderImageParamOption({
+                  value: ratio,
+                  label: getAspectRatioDisplay(ratio),
+                  selected: ratio === aspectRatio,
+                  onClick: setAspectRatio,
+                }),
+              )}
+            </div>
+          </div>
+        ) : null}
+        {hasAspectRatios && hasResolutions ? (
+          <div style={styles.imageParamDivider} />
+        ) : null}
+        {hasResolutions ? (
+          <div style={styles.imageParamSection}>
+            <div style={styles.imageParamSectionTitle}>{t('选择分辨率')}</div>
+            <div style={styles.imageParamOptionRow}>
+              {availableResolutions.map((item) =>
+                renderImageParamOption({
+                  value: item,
+                  label: getResolutionDisplay(item),
+                  selected: item === resolution,
+                  onClick: setResolution,
+                }),
+              )}
+            </div>
+          </div>
+        ) : null}
+        <div style={styles.imageParamDivider} />
+        <div style={styles.imageParamSection}>
+          <div style={styles.imageParamSectionTitle}>{t('尺寸')}</div>
+          <div style={styles.imageParamSizeRow}>
+            <div style={styles.imageParamSizeField}>
+              <span style={styles.imageParamSizeLabel}>W</span>
+              <span style={styles.imageParamSizeValue}>{dimensionPreview.width}</span>
+            </div>
+            <div style={styles.imageParamSizeField}>
+              <span style={styles.imageParamSizeLabel}>H</span>
+              <span style={styles.imageParamSizeValue}>{dimensionPreview.height}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+
+    return (
+      <Dropdown
+        key={dropdownKey}
+        trigger='click'
+        position='bottomLeft'
+        render={panel}
+        visible={activeDropdownKey === dropdownKey}
+        onVisibleChange={(visible) => {
+          setActiveDropdownKey((current) =>
+            visible ? dropdownKey : current === dropdownKey ? '' : current,
+          );
+        }}
+      >
+        <button
+          type='button'
+          aria-label={t('图片参数')}
+          style={{
+            ...styles.pillButton,
+            ...styles.pillButtonActive,
+            maxWidth: isMobile ? '100%' : 260,
+          }}
+        >
+          <IconRealSizeStroked size='small' />
+          <span style={styles.pillButtonLabel}>{displayValue}</span>
           <IconChevronDown size='small' />
         </button>
       </Dropdown>
@@ -6179,32 +6570,7 @@ const ImageGeneration = () => {
         disabled: groupLoading || groupOptions.length === 0,
       }),
       renderModelDropdown(false, activeModelLabel),
-      showImageAspectRatioSelector &&
-        renderPillDropdown({
-          key: 'image-aspect-ratio',
-          label: t('比例'),
-          icon: <IconRealSizeStroked size='small' />,
-          value: aspectRatio,
-          displayValue: aspectRatio,
-          onChange: setAspectRatio,
-          options: availableAspectRatios.map((ratio) => ({
-            value: ratio,
-            label: ratio,
-          })),
-        }),
-      showImageResolutionSelector &&
-        renderPillDropdown({
-          key: 'image-resolution',
-          label: t('分辨率'),
-          icon: <IconGridRectangle size='small' />,
-          value: resolution,
-          displayValue: resolution,
-          onChange: setResolution,
-          options: availableResolutions.map((res) => ({
-            value: res,
-            label: res,
-          })),
-        }),
+      renderImageParametersDropdown(),
       renderPillDropdown({
         key: 'image-quantity',
         label: t('数量'),
