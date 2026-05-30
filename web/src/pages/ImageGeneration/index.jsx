@@ -366,6 +366,20 @@ const normalizeAspectRatioText = (value) => {
   return `${match[1]} / ${match[2]}`;
 };
 
+const buildAspectRatioTextFromDimensions = (width, height) => {
+  const normalizedWidth = Number(width);
+  const normalizedHeight = Number(height);
+  if (
+    !Number.isFinite(normalizedWidth) ||
+    !Number.isFinite(normalizedHeight) ||
+    normalizedWidth <= 0 ||
+    normalizedHeight <= 0
+  ) {
+    return '';
+  }
+  return `${Math.round(normalizedWidth)} / ${Math.round(normalizedHeight)}`;
+};
+
 const normalizeImageResolutionTier = (value) => {
   const text = String(value || '').trim().toUpperCase();
   return ['1K', '2K', '4K'].includes(text) ? text : '';
@@ -2185,10 +2199,11 @@ const ImageGeneration = () => {
     return null;
   };
 
-  const getCanvasMessageAspectRatio = (message) => {
-    const taskType = getCanvasMessageTaskType(message);
+  const getCanvasMessageExplicitAspectRatio = (message) => {
     const task = message?.image_task || message?.video_task || {};
     const params = parseCanvasTaskParams(task?.params || task?.request_params);
+    const metadata = parseCanvasTaskParams(task?.image_metadata);
+    const metadataDetails = parseCanvasTaskParams(metadata?.metadata);
     const candidates = [
       message?.canvas_aspect_ratio,
       params.aspect_ratio,
@@ -2208,16 +2223,67 @@ const ImageGeneration = () => {
         return normalized;
       }
     }
-    const fallback = message?.canvas_aspect_ratio || task?.aspect_ratio || '';
-    return normalizeAspectRatioText(fallback) || '1 / 1';
+    const dimensionSources = [task, params, metadata, metadataDetails];
+    let outputWidth = 0;
+    let outputHeight = 0;
+    for (const source of dimensionSources) {
+      if (!source || typeof source !== 'object') {
+        continue;
+      }
+      outputWidth =
+        outputWidth ||
+        Number(
+          source.output_width ||
+            source.outputWidth ||
+            source.image_width ||
+            source.imageWidth ||
+            source.width ||
+            0,
+        );
+      outputHeight =
+        outputHeight ||
+        Number(
+          source.output_height ||
+            source.outputHeight ||
+            source.image_height ||
+            source.imageHeight ||
+            source.height ||
+            0,
+        );
+      if (outputWidth > 0 && outputHeight > 0) {
+        return buildAspectRatioTextFromDimensions(outputWidth, outputHeight);
+      }
+      const normalizedSize = normalizeAspectRatioText(
+        source.output_size_text ||
+          source.outputSizeText ||
+          source.size_text ||
+          source.sizeText ||
+          source.output_size ||
+          source.outputSize ||
+          source.size ||
+          source.dimensions,
+      );
+      if (normalizedSize) {
+        return normalizedSize;
+      }
+    }
+    return '';
   };
 
-  const getCanvasMediaCardSize = (aspectRatio, { batchLayout = false } = {}) => {
+  const getCanvasMessageAspectRatio = (message) => {
+    return getCanvasMessageExplicitAspectRatio(message) || '1 / 1';
+  };
+
+  const getCanvasMediaCardSize = (
+    aspectRatio,
+    { batchLayout = false, batchAspectRatio = '' } = {},
+  ) => {
     if (batchLayout) {
       return {
         width: '100%',
         maxWidth: '100%',
         maxHeight: 'none',
+        aspectRatio: batchAspectRatio || aspectRatio || '1 / 1',
       };
     }
     const match = String(aspectRatio || '').match(
@@ -5122,9 +5188,6 @@ const ImageGeneration = () => {
       flexDirection: 'column',
       alignItems: 'stretch',
     },
-    canvasGenerationBatchMediaCard: {
-      height: isMobile ? 212 : 228,
-    },
     canvasMediaCard: {
       width: '100%',
       minWidth: 0,
@@ -6102,7 +6165,24 @@ const ImageGeneration = () => {
     setSelectedCanvasImagePreview({ src: detailSrc });
   };
 
-  const renderCanvasMediaCard = (message, { batchLayout = false } = {}) => {
+  const getCanvasBatchAspectRatio = (batch) => {
+    const userRatio = getCanvasMessageExplicitAspectRatio(batch?.userMessage);
+    if (userRatio) {
+      return userRatio;
+    }
+    for (const message of batch?.assistantMessages || []) {
+      const ratio = getCanvasMessageExplicitAspectRatio(message);
+      if (ratio) {
+        return ratio;
+      }
+    }
+    return '1 / 1';
+  };
+
+  const renderCanvasMediaCard = (
+    message,
+    { batchLayout = false, batchAspectRatio = '' } = {},
+  ) => {
     const media = getCanvasMessageMedia(message);
     const taskType = getCanvasMessageTaskType(message);
     const isVideo = taskType === 'video_generation';
@@ -6159,9 +6239,11 @@ const ImageGeneration = () => {
       <div
         style={{
           ...styles.canvasMediaCard,
-          ...(batchLayout ? styles.canvasGenerationBatchMediaCard : null),
           ...(canPreviewImage ? styles.canvasMediaCardClickable : null),
-          ...getCanvasMediaCardSize(aspectRatio, { batchLayout }),
+          ...getCanvasMediaCardSize(aspectRatio, {
+            batchLayout,
+            batchAspectRatio,
+          }),
         }}
         onClick={
           canPreviewImage
@@ -6177,12 +6259,16 @@ const ImageGeneration = () => {
     );
   };
 
-  const renderCanvasGenerationCard = (message, { batchLayout = false } = {}) => {
-    return renderCanvasMediaCard(message, { batchLayout });
+  const renderCanvasGenerationCard = (
+    message,
+    { batchLayout = false, batchAspectRatio = '' } = {},
+  ) => {
+    return renderCanvasMediaCard(message, { batchLayout, batchAspectRatio });
   };
 
   const renderCanvasGenerationBatch = (batch) => {
     const userMessage = batch.userMessage || {};
+    const batchAspectRatio = getCanvasBatchAspectRatio(batch);
     const referenceMap = new Map();
     [userMessage, ...(batch.assistantMessages || [])].forEach((message) => {
       getCanvasMessageReferenceFiles(message).forEach((file) => {
@@ -6240,7 +6326,10 @@ const ImageGeneration = () => {
                 );
               }}
             >
-              {renderCanvasGenerationCard(message, { batchLayout: true })}
+              {renderCanvasGenerationCard(message, {
+                batchLayout: true,
+                batchAspectRatio,
+              })}
             </div>
           ))}
         </div>
