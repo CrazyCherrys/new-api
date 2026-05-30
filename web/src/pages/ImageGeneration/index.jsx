@@ -2218,7 +2218,6 @@ const ImageGeneration = () => {
         width: '100%',
         maxWidth: '100%',
         maxHeight: 'none',
-        aspectRatio,
       };
     }
     const match = String(aspectRatio || '').match(
@@ -5123,6 +5122,9 @@ const ImageGeneration = () => {
       flexDirection: 'column',
       alignItems: 'stretch',
     },
+    canvasGenerationBatchMediaCard: {
+      height: isMobile ? 212 : 228,
+    },
     canvasMediaCard: {
       width: '100%',
       minWidth: 0,
@@ -6157,6 +6159,7 @@ const ImageGeneration = () => {
       <div
         style={{
           ...styles.canvasMediaCard,
+          ...(batchLayout ? styles.canvasGenerationBatchMediaCard : null),
           ...(canPreviewImage ? styles.canvasMediaCardClickable : null),
           ...getCanvasMediaCardSize(aspectRatio, { batchLayout }),
         }}
@@ -6169,7 +6172,7 @@ const ImageGeneration = () => {
             : undefined
         }
       >
-        {content}
+        <div style={styles.canvasMediaFrame}>{content}</div>
       </div>
     );
   };
