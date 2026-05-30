@@ -234,6 +234,117 @@ const getCanvasMessageTaskType = (message) =>
       ? 'image_generation'
       : '');
 
+const CANVAS_RENDERABLE_IMAGE_BATCH = 'image_generation_batch';
+
+const getCanvasMessagePromptText = (message) =>
+  String(
+    message?.prompt ||
+      message?.image_task?.prompt ||
+      message?.video_task?.prompt ||
+      '',
+  ).trim();
+
+const isImageGenerationAssistantMessage = (message) =>
+  !!message &&
+  message.role !== 'user' &&
+  getCanvasMessageTaskType(message) === 'image_generation';
+
+const canvasMessageMatchesImageBatch = (message, prompt, requestId) => {
+  if (!isImageGenerationAssistantMessage(message)) {
+    return false;
+  }
+  const messagePrompt = getCanvasMessagePromptText(message);
+  if (prompt && messagePrompt && messagePrompt !== prompt) {
+    return false;
+  }
+  if (
+    requestId &&
+    String(message.client_request_id || '') !== String(requestId)
+  ) {
+    return false;
+  }
+  return true;
+};
+
+const canvasUserMessageMatchesImageBatch = (message, prompt, requestId) => {
+  if (!message || message.role !== 'user') {
+    return false;
+  }
+  const messagePrompt = getCanvasMessagePromptText(message);
+  if (prompt && messagePrompt !== prompt) {
+    return false;
+  }
+  if (
+    requestId &&
+    String(message.client_request_id || '') !== String(requestId)
+  ) {
+    return false;
+  }
+  return true;
+};
+
+const getRenderableCanvasMessages = (messages) => {
+  const renderableMessages = [];
+  const sourceMessages = Array.isArray(messages) ? messages : [];
+  let index = 0;
+
+  while (index < sourceMessages.length) {
+    const userMessage = sourceMessages[index];
+    if (userMessage?.role !== 'user') {
+      renderableMessages.push(userMessage);
+      index += 1;
+      continue;
+    }
+
+    const prompt = getCanvasMessagePromptText(userMessage);
+    const requestId = userMessage.client_request_id || '';
+    const assistantMessages = [];
+    let cursor = index + 1;
+
+    while (cursor < sourceMessages.length) {
+      const currentMessage = sourceMessages[cursor];
+      if (canvasMessageMatchesImageBatch(currentMessage, prompt, requestId)) {
+        assistantMessages.push(currentMessage);
+        cursor += 1;
+        continue;
+      }
+
+      const nextMessage = sourceMessages[cursor + 1];
+      const nextRequestId = currentMessage?.client_request_id || requestId || '';
+      if (
+        canvasUserMessageMatchesImageBatch(
+          currentMessage,
+          prompt,
+          nextRequestId,
+        ) &&
+        canvasMessageMatchesImageBatch(nextMessage, prompt, nextRequestId)
+      ) {
+        assistantMessages.push(nextMessage);
+        cursor += 2;
+        continue;
+      }
+
+      break;
+    }
+
+    if (assistantMessages.length > 1) {
+      renderableMessages.push({
+        render_type: CANVAS_RENDERABLE_IMAGE_BATCH,
+        id: `image-batch-${requestId || userMessage.id || index}`,
+        userMessage,
+        assistantMessages,
+      });
+      index = cursor;
+      continue;
+    }
+
+    renderableMessages.push(userMessage);
+    index += 1;
+  }
+
+  return renderableMessages;
+};
+
 const normalizeAspectRatioText = (value) => {
   const text = String(value || '').trim();
   if (!text) {
@@ -340,6 +451,7 @@ const ImageGeneration = () => {
   const [videoFilteredModels, setVideoFilteredModels] = useState([]);
   const [mobileTaskbarVisible, setMobileTaskbarVisible] = useState(false);
   const [composerAdvancedVisible, setComposerAdvancedVisible] = useState(false);
+  const [activeDropdownKey, setActiveDropdownKey] = useState('');
   const [assetLibraryVisible, setAssetLibraryVisible] = useState(false);
   const [canvasAssets, setCanvasAssets] = useState([]);
   const [canvasAssetsLoading, setCanvasAssetsLoading] = useState(false);
@@ -3123,26 +3235,33 @@ const ImageGeneration = () => {
 
       const canvasSession = await ensureCanvasSession(CANVAS_MODE_IMAGE);
       const clientRequestId = generateCanvasClientRequestId();
+      const submittedAt = Math.floor(Date.now() / 1000);
       replaceCanvasMessagesForSession(canvasSession.id, clientRequestId, [
         {
           id: `${clientRequestId}-user`,
           role: 'user',
           prompt: inspiration.trim(),
-          created_time: Math.floor(Date.now() / 1000),
+          created_time: submittedAt,
           client_request_id: clientRequestId,
           canvas_aspect_ratio: aspectRatio || '',
         },
-        {
-          id: `${clientRequestId}-assistant`,
+        ...Array.from({ length: taskCount }, (_, index) => ({
+          id:
+            index === 0
+              ? `${clientRequestId}-assistant`
+              : `${clientRequestId}-assistant-${index + 1}`,
           role: 'assistant',
           prompt: inspiration.trim(),
           status: 'generating',
           task_type: 'image_generation',
-          created_time: Math.floor(Date.now() / 1000),
+          created_time: submittedAt,
           client_request_id: clientRequestId,
           canvas_aspect_ratio: aspectRatio || '',
           image_task: {
-            id: `pending-${clientRequestId}`,
+            id:
+              index === 0
+                ? `pending-${clientRequestId}`
+                : `pending-${clientRequestId}-${index + 1}`,
             status: 'generating',
             prompt: inspiration.trim(),
             model_id: selectedModel,
@@ -3152,7 +3271,7 @@ const ImageGeneration = () => {
             image_url: '',
             error_message: '',
           },
-        },
+        })),
       ], {
         canvasAspectRatio: aspectRatio || '',
       });
@@ -4017,7 +4136,7 @@ const ImageGeneration = () => {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--semi-color-bg-0)',
       overflow: 'hidden',
     },
     rightContent: {
@@ -4089,7 +4208,25 @@ const ImageGeneration = () => {
       background: 'var(--semi-color-bg-0)',
       padding: isMobile ? '10px' : '12px',
     },
+    promptInputRow: {
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: 8,
+      flexWrap: isMobile ? 'wrap' : 'nowrap',
+      minWidth: 0,
+    },
+    promptInlineAssets: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: 'wrap',
+      flex: '0 0 auto',
+      maxWidth: isMobile ? '100%' : '48%',
+      minHeight: 36,
+    },
     promptInput: {
+      flex: '1 1 220px',
+      minWidth: isMobile ? 'min(220px, 100%)' : 0,
       border: 'none',
       background: 'transparent',
       resize: 'none',
@@ -4128,7 +4265,6 @@ const ImageGeneration = () => {
       gap: 8,
       flexWrap: 'wrap',
       minHeight: 36,
-      marginBottom: 6,
     },
     uploadIconBtn: {
       width: 32,
@@ -4400,7 +4536,7 @@ const ImageGeneration = () => {
       height: isMobile ? 44 : 0,
       flexShrink: 0,
       borderBottom: 'none',
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--semi-color-bg-0)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -4446,17 +4582,19 @@ const ImageGeneration = () => {
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
+      background: 'var(--semi-color-bg-0)',
     },
     mainViewport: {
       flex: 1,
       minHeight: 0,
       overflowY: 'auto',
       padding: isMobile ? '10px 10px 6px' : '16px 18px 8px',
+      background: 'var(--semi-color-bg-0)',
     },
     composerDock: {
       flexShrink: 0,
       borderTop: 'none',
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--semi-color-bg-0)',
       padding: isMobile ? '6px 10px 10px' : '8px 18px 14px',
     },
     composerShell: {
@@ -4570,6 +4708,29 @@ const ImageGeneration = () => {
       alignItems: 'flex-start',
       width: '100%',
     },
+    canvasGenerationBatchRow: {
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      alignItems: 'stretch',
+    },
+    canvasGenerationBatchGrid: {
+      width: '100%',
+      display: 'grid',
+      gridTemplateColumns:
+        isMobile
+          ? 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))'
+          : 'repeat(3, minmax(0, 1fr))',
+      gap: isMobile ? 10 : 12,
+      alignItems: 'start',
+    },
+    canvasGenerationBatchCard: {
+      minWidth: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'stretch',
+    },
     canvasMediaCard: {
       width: '100%',
       minWidth: 0,
@@ -4630,6 +4791,14 @@ const ImageGeneration = () => {
       gap: 8,
       color: 'var(--semi-color-text-2)',
       padding: 16,
+    },
+    canvasErrorText: {
+      maxWidth: '100%',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      overflowWrap: 'anywhere',
+      textAlign: 'center',
+      lineHeight: 1.5,
     },
     canvasMessageResult: {
       display: 'flex',
@@ -4860,6 +5029,12 @@ const ImageGeneration = () => {
     emptyText = t('暂无可用选项'),
     extraContent = null,
   }) => {
+    const dropdownKey = key;
+    const closeDropdown = () => {
+      setActiveDropdownKey((current) =>
+        current === dropdownKey ? '' : current,
+      );
+    };
     const menu = (
       <Dropdown.Menu style={styles.darkMenu}>
         {options.length > 0 ? (
@@ -4872,7 +5047,10 @@ const ImageGeneration = () => {
                   ...styles.darkMenuItem,
                   ...(selected ? styles.darkMenuItemActive : null),
                 }}
-                onClick={() => onChange(option.value)}
+                onClick={() => {
+                  onChange(option.value);
+                  closeDropdown();
+                }}
               >
                 {option.label}
               </Dropdown.Item>
@@ -4897,7 +5075,18 @@ const ImageGeneration = () => {
     );
 
     return (
-      <Dropdown key={key} trigger='click' position='bottomLeft' render={menu}>
+      <Dropdown
+        key={dropdownKey}
+        trigger='click'
+        position='bottomLeft'
+        render={menu}
+        visible={!disabled && activeDropdownKey === dropdownKey}
+        onVisibleChange={(visible) => {
+          setActiveDropdownKey((current) =>
+            visible ? dropdownKey : current === dropdownKey ? '' : current,
+          );
+        }}
+      >
         <button
           type='button'
           style={{
@@ -4920,6 +5109,7 @@ const ImageGeneration = () => {
   };
 
   const renderModelDropdown = (isVideoMode, activeModelLabel) => {
+    const dropdownKey = isVideoMode ? 'video-model' : 'image-model';
     const modelOptions = isVideoMode ? enabledVideoModels : enabledImageModels;
     const selectedValue = isVideoMode ? videoSelectedModel : selectedModel;
     const handleSelect = (requestModel) => {
@@ -4945,7 +5135,12 @@ const ImageGeneration = () => {
                   ...styles.darkMenuItem,
                   ...(selected ? styles.darkMenuItemActive : null),
                 }}
-                onClick={() => handleSelect(model.request_model)}
+                onClick={() => {
+                  handleSelect(model.request_model);
+                  setActiveDropdownKey((current) =>
+                    current === dropdownKey ? '' : current,
+                  );
+                }}
               >
                 <div style={styles.modelMenuItem}>
                   <span style={styles.modelMenuTitle}>
@@ -4968,10 +5163,18 @@ const ImageGeneration = () => {
 
     return (
       <Dropdown
-        key={isVideoMode ? 'video-model' : 'image-model'}
+        key={dropdownKey}
         trigger='click'
         position='bottomLeft'
         render={menu}
+        visible={
+          modelOptions.length > 0 && activeDropdownKey === dropdownKey
+        }
+        onVisibleChange={(visible) => {
+          setActiveDropdownKey((current) =>
+            visible ? dropdownKey : current === dropdownKey ? '' : current,
+          );
+        }}
       >
         <button
           type='button'
@@ -5321,7 +5524,7 @@ const ImageGeneration = () => {
       content = (
         <div style={styles.canvasMediaStatusBody}>
           <IconClock size='small' />
-          <Text type='danger' size='small'>
+          <Text type='danger' size='small' style={styles.canvasErrorText}>
             {media?.error || message.error_message || t('生成失败')}
           </Text>
         </div>
@@ -5373,6 +5576,73 @@ const ImageGeneration = () => {
     return renderCanvasMediaCard(message);
   };
 
+  const renderCanvasGenerationBatch = (batch) => {
+    const userMessage = batch.userMessage || {};
+    const referenceMap = new Map();
+    [userMessage, ...(batch.assistantMessages || [])].forEach((message) => {
+      getCanvasMessageReferenceFiles(message).forEach((file) => {
+        const key = file.url || file.uid || file.name;
+        if (key && !referenceMap.has(key)) {
+          referenceMap.set(key, file);
+        }
+      });
+    });
+    const references = Array.from(referenceMap.values());
+    return (
+      <div
+        key={batch.id}
+        data-canvas-message-batch='image_generation'
+        style={styles.canvasGenerationBatchRow}
+      >
+        <div
+          data-canvas-message-row='true'
+          style={{
+            ...styles.canvasMessageRow,
+            ...styles.canvasMessageRowUser,
+          }}
+        >
+          <div style={styles.canvasMessageBody}>
+            <div style={styles.canvasMessagePrompt}>
+              {userMessage.prompt || t('已添加素材引用')}
+            </div>
+            {references.length > 0 ? (
+              <div style={styles.canvasMessageRefs}>
+                {references.map((file) =>
+                  renderCanvasReferenceThumb(file, t('参考图')),
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div style={styles.canvasGenerationBatchGrid}>
+          {(batch.assistantMessages || []).map((message) => (
+            <div
+              key={message.id || message.task_id || message.image_task?.id}
+              data-canvas-generation-batch-card='true'
+              style={styles.canvasGenerationBatchCard}
+              onClick={async () => {
+                setSelectedCanvasMessageId(message.id);
+                const detail = await loadCanvasMessageTaskDetail(message);
+                if (!detail) {
+                  return;
+                }
+                setCanvasMessages((prev) =>
+                  prev.map((item) =>
+                    item.id === message.id
+                      ? mergeCanvasMessageTaskDetail(item, detail)
+                      : item,
+                  ),
+                );
+              }}
+            >
+              {renderCanvasGenerationCard(message)}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const renderCanvasMessageResult = (message) => {
     const media = getCanvasMessageMedia(message);
     if (!media) {
@@ -5393,7 +5663,11 @@ const ImageGeneration = () => {
         );
       }
       if (media.status === 'failed') {
-        return <Text type='danger'>{media.error || t('生成失败')}</Text>;
+        return (
+          <Text type='danger' style={styles.canvasErrorText}>
+            {media.error || t('生成失败')}
+          </Text>
+        );
       }
       return (
         <div style={styles.messagePending}>
@@ -5418,7 +5692,11 @@ const ImageGeneration = () => {
         );
       }
       if (media.status === 'failed') {
-        return <Text type='danger'>{media.error || t('生成失败')}</Text>;
+        return (
+          <Text type='danger' style={styles.canvasErrorText}>
+            {media.error || t('生成失败')}
+          </Text>
+        );
       }
       return (
         <div style={styles.messagePending}>
@@ -5431,6 +5709,10 @@ const ImageGeneration = () => {
   };
 
   const renderCanvasMessage = (message) => {
+    if (message?.render_type === CANVAS_RENDERABLE_IMAGE_BATCH) {
+      return renderCanvasGenerationBatch(message);
+    }
+
     const isUser = message.role === 'user';
     const references = getCanvasMessageReferenceFiles(message);
     const media = getCanvasMessageMedia(message);
@@ -5490,7 +5772,7 @@ const ImageGeneration = () => {
               </div>
             ) : null}
             {media?.status === 'failed' && message.error_message ? (
-              <Text type='danger' size='small'>
+              <Text type='danger' size='small' style={styles.canvasErrorText}>
                 {message.error_message}
               </Text>
             ) : null}
@@ -5589,7 +5871,9 @@ const ImageGeneration = () => {
     }
     return (
       <div style={styles.canvasMessageList}>
-        {displayedCanvasMessages.map(renderCanvasMessage)}
+        {getRenderableCanvasMessages(displayedCanvasMessages).map(
+          renderCanvasMessage,
+        )}
       </div>
     );
   };
@@ -5882,82 +6166,89 @@ const ImageGeneration = () => {
       <div style={styles.composerDock}>
         <div style={styles.composerShell} data-canvas-composer={generationMode}>
           <div style={styles.promptArea}>
-            {showPromptAssetBar ? (
-              <div style={styles.promptAssetBar}>
-                {isChatMode
-                  ? chatAttachments.map((file) =>
-                      renderReferenceThumb(file, () =>
-                        setChatAttachments((prev) =>
-                          prev.filter((item) => item.uid !== file.uid),
+            <div style={styles.promptInputRow}>
+              {showPromptAssetBar ? (
+                <div style={styles.promptInlineAssets}>
+                  {isChatMode
+                    ? chatAttachments.map((file) =>
+                        renderReferenceThumb(file, () =>
+                          setChatAttachments((prev) =>
+                            prev.filter((item) => item.uid !== file.uid),
+                          ),
                         ),
-                      ),
-                    )
-                  : null}
-                {isImageMode && selectedModelSupportsEditing ? (
-                  <Upload
-                    action=''
-                    accept='image/*'
-                    multiple
-                    fileList={referenceImages}
-                    onChange={handleImageUpload}
-                    showUploadList={false}
-                    beforeUpload={validateImageSize}
-                    disabled={referenceImageLimitReached}
-                  >
-                    {renderUploadIconButton({
-                      disabled: referenceImageLimitReached,
-                      title: referenceImageLimitReached
-                        ? t('已达到当前模型参考图上限')
-                        : t('上传图片'),
-                    })}
-                  </Upload>
-                ) : null}
-                {isImageMode && selectedModelSupportsEditing
-                  ? referenceImages.map((file) =>
-                      renderReferenceThumb(file, () => handleImageRemove(file)),
-                    )
-                  : null}
-                {isVideoMode && videoSelectedModelSupportsImageToVideo ? (
-                  <Upload
-                    action=''
-                    accept='image/*'
-                    multiple={false}
-                    fileList={videoReferenceImage ? [videoReferenceImage] : []}
-                    onChange={handleVideoReferenceUpload}
-                    showUploadList={false}
-                    beforeUpload={validateImageSize}
-                  >
-                    {renderUploadIconButton({ title: t('上传图片') })}
-                  </Upload>
-                ) : null}
-                {isVideoMode &&
-                videoSelectedModelSupportsImageToVideo &&
-                videoReferenceImage
-                  ? renderReferenceThumb(videoReferenceImage, handleVideoReferenceRemove)
-                  : null}
-              </div>
-            ) : null}
-            <TextArea
-              aria-label={placeholder}
-              data-canvas-prompt-input={generationMode}
-              placeholder={placeholder}
-              value={activePrompt}
-              onChange={
-                isChatMode ? setChatPrompt : isVideoMode ? setVideoPrompt : setInspiration
-              }
-              onKeyDown={handleComposerKeyDown}
-              onCompositionStart={() => {
-                composerComposingRef.current = true;
-              }}
-              onCompositionEnd={() => {
-                composerComposingRef.current = false;
-              }}
-              maxLength={5000}
-              showClear
-              borderless
-              autosize={{ minRows: isMobile ? 2 : 3, maxRows: 8 }}
-              style={styles.promptInput}
-            />
+                      )
+                    : null}
+                  {isImageMode && selectedModelSupportsEditing ? (
+                    <Upload
+                      action=''
+                      accept='image/*'
+                      multiple
+                      fileList={referenceImages}
+                      onChange={handleImageUpload}
+                      showUploadList={false}
+                      beforeUpload={validateImageSize}
+                      disabled={referenceImageLimitReached}
+                    >
+                      {renderUploadIconButton({
+                        disabled: referenceImageLimitReached,
+                        title: referenceImageLimitReached
+                          ? t('已达到当前模型参考图上限')
+                          : t('上传图片'),
+                      })}
+                    </Upload>
+                  ) : null}
+                  {isImageMode && selectedModelSupportsEditing
+                    ? referenceImages.map((file) =>
+                        renderReferenceThumb(file, () =>
+                          handleImageRemove(file),
+                        ),
+                      )
+                    : null}
+                  {isVideoMode && videoSelectedModelSupportsImageToVideo ? (
+                    <Upload
+                      action=''
+                      accept='image/*'
+                      multiple={false}
+                      fileList={videoReferenceImage ? [videoReferenceImage] : []}
+                      onChange={handleVideoReferenceUpload}
+                      showUploadList={false}
+                      beforeUpload={validateImageSize}
+                    >
+                      {renderUploadIconButton({ title: t('上传图片') })}
+                    </Upload>
+                  ) : null}
+                  {isVideoMode &&
+                  videoSelectedModelSupportsImageToVideo &&
+                  videoReferenceImage
+                    ? renderReferenceThumb(
+                        videoReferenceImage,
+                        handleVideoReferenceRemove,
+                      )
+                    : null}
+                </div>
+              ) : null}
+              <TextArea
+                aria-label={placeholder}
+                data-canvas-prompt-input={generationMode}
+                placeholder={placeholder}
+                value={activePrompt}
+                onChange={
+                  isChatMode ? setChatPrompt : isVideoMode ? setVideoPrompt : setInspiration
+                }
+                onKeyDown={handleComposerKeyDown}
+                onCompositionStart={() => {
+                  composerComposingRef.current = true;
+                }}
+                onCompositionEnd={() => {
+                  composerComposingRef.current = false;
+                }}
+                maxLength={5000}
+                showClear
+                borderless
+                autosize={{ minRows: isMobile ? 2 : 3, maxRows: 8 }}
+                style={styles.promptInput}
+              />
+            </div>
             <div style={styles.promptControls}>
               <div style={styles.promptControlsLeft}>
                 {renderComposerModeSwitch()}

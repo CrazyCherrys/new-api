@@ -148,6 +148,28 @@ const VideoGenerationTaskCard = ({
       zIndex: 2,
       color: '#fff',
     },
+    errorWrap: {
+      width: '86%',
+      minWidth: 148,
+      padding: '12px 14px',
+      borderRadius: 10,
+      background: 'rgba(255,255,255,0.88)',
+      border: '1px solid rgba(255,255,255,0.72)',
+      boxShadow: '0 8px 24px rgba(15, 23, 42, 0.10)',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 8,
+    },
+    errorText: {
+      maxWidth: '100%',
+      color: 'var(--semi-color-text-2)',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      overflowWrap: 'anywhere',
+      textAlign: 'center',
+      lineHeight: 1.45,
+    },
     footer: {
       position: 'absolute',
       left: 0,
@@ -233,7 +255,12 @@ const VideoGenerationTaskCard = ({
         {isSuccess ? (
           <IconPlayCircle size='extra-large' />
         ) : isFailed ? (
-          <IconAlertTriangle size='extra-large' style={{ color: statusMeta.color }} />
+          <div style={styles.errorWrap}>
+            <IconAlertTriangle size='large' style={{ color: statusMeta.color }} />
+            <Text type='tertiary' size='small' style={styles.errorText}>
+              {task.error_message || task.fail_reason || t('生成失败')}
+            </Text>
+          </div>
         ) : (
           <div style={{ ...styles.progressWrap, textAlign: 'center' }}>
             <IconClock size='large' style={{ marginBottom: 10, color: statusMeta.color }} />
@@ -272,6 +299,8 @@ VideoGenerationTaskCard.propTypes = {
     thumbnail_url: PropTypes.string,
     prompt: PropTypes.string,
     progress: PropTypes.string,
+    error_message: PropTypes.string,
+    fail_reason: PropTypes.string,
     created_time: PropTypes.number.isRequired,
     started_time: PropTypes.number,
     display_name: PropTypes.string,
@@ -296,6 +325,7 @@ export default memo(VideoGenerationTaskCard, (prev, next) => {
     prev.task.status === next.task.status &&
     prev.task.thumbnail_url === next.task.thumbnail_url &&
     prev.task.progress === next.task.progress &&
+    prev.task.error_message === next.task.error_message &&
     prev.task.fail_reason === next.task.fail_reason
   );
 });

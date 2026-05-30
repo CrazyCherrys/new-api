@@ -177,7 +177,7 @@ const ImageGenerationTaskCard = ({
     },
     centerState: {
       minWidth: 148,
-      maxWidth: '72%',
+      maxWidth: '86%',
       padding: '12px 14px',
       borderRadius: 10,
       background: 'rgba(255,255,255,0.88)',
@@ -188,6 +188,14 @@ const ImageGenerationTaskCard = ({
       alignItems: 'center',
       gap: 8,
       color: 'var(--semi-color-text-1)',
+    },
+    errorText: {
+      maxWidth: '100%',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      overflowWrap: 'anywhere',
+      textAlign: 'center',
+      lineHeight: 1.45,
     },
     footer: {
       position: 'absolute',
@@ -277,7 +285,7 @@ const ImageGenerationTaskCard = ({
         <div style={styles.center}>
           <div style={styles.centerState}>
             <IconAlertTriangle size='large' style={{ color: statusMeta.color }} />
-            <Text type='tertiary' size='small' ellipsis={{ rows: 1 }}>
+            <Text type='tertiary' size='small' style={styles.errorText}>
               {task.error_message || t('生成失败')}
             </Text>
           </div>
