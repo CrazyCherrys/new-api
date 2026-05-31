@@ -29,11 +29,11 @@ type VideoGenerationTaskSummary struct {
 	CompletedTime   int64  `json:"completed_time"`
 	ThumbnailURL    string `json:"thumbnail_url"`
 	VideoURL        string `json:"video_url"`
+	ResultURL       string `json:"result_url"`
 	FailReason      string `json:"fail_reason,omitempty"`
 }
 
 type VideoGenerationTaskDetail struct {
 	VideoGenerationTaskSummary
-	Quota     int    `json:"quota"`
-	ResultURL string `json:"result_url"`
+	Quota int `json:"quota"`
 }

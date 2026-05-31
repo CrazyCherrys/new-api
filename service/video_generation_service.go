@@ -442,6 +442,7 @@ func buildVideoTaskSummary(task *model.Task) *dto.VideoGenerationTaskSummary {
 		CompletedTime:   task.FinishTime,
 		ThumbnailURL:    model.ExtractTaskThumbnailURL(task),
 		VideoURL:        model.BuildVideoProxyURL(task),
+		ResultURL:       model.EffectiveVideoResultURL(task),
 		FailReason:      task.FailReason,
 	}
 }
@@ -454,7 +455,6 @@ func buildVideoTaskDetail(task *model.Task) *dto.VideoGenerationTaskDetail {
 	return &dto.VideoGenerationTaskDetail{
 		VideoGenerationTaskSummary: *summary,
 		Quota:                      task.Quota,
-		ResultURL:                  task.GetResultURL(),
 	}
 }
 

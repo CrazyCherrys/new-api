@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -173,6 +174,70 @@ func ExtractTaskAspectRatio(task *Task) string {
 	return ""
 }
 
+func ExtractVideoResultURLFromPayload(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+
+	var payload map[string]any
+	if err := common.Unmarshal(data, &payload); err != nil {
+		return ""
+	}
+
+	for _, path := range [][]string{
+		{"content", "video_url"},
+		{"data", "content", "video_url"},
+		{"video_url"},
+		{"data", "video_url"},
+	} {
+		if value := extractNestedVideoString(payload, path); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func IsTaskVideoProxyURL(task *Task, value string) bool {
+	if task == nil {
+		return false
+	}
+
+	proxyPath := BuildVideoProxyURL(task)
+	value = strings.TrimSpace(value)
+	if proxyPath == "" || value == "" {
+		return false
+	}
+	if value == proxyPath {
+		return true
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	return parsed.Path == proxyPath
+}
+
+// EffectiveVideoResultURL prefers a stored direct URL, then recovers one from task.Data,
+// and only falls back to the proxy URL when no direct result is available.
+func EffectiveVideoResultURL(task *Task) string {
+	if task == nil {
+		return ""
+	}
+
+	storedResultURL := strings.TrimSpace(task.PrivateData.ResultURL)
+	if storedResultURL != "" && !IsTaskVideoProxyURL(task, storedResultURL) {
+		return storedResultURL
+	}
+	if directResultURL := ExtractVideoResultURLFromPayload(task.Data); directResultURL != "" {
+		return directResultURL
+	}
+	if storedResultURL != "" {
+		return storedResultURL
+	}
+	return BuildVideoProxyURL(task)
+}
+
 func BuildVideoProxyURL(task *Task) string {
 	if task == nil || strings.TrimSpace(task.TaskID) == "" {
 		return ""
@@ -219,4 +284,21 @@ func DecodeBase64DataURL(dataURL string) ([]byte, error) {
 		return decoded, nil
 	}
 	return base64.RawStdEncoding.DecodeString(parts[1])
+}
+
+func extractNestedVideoString(value any, path []string) string {
+	if len(path) == 0 {
+		text, _ := value.(string)
+		return strings.TrimSpace(text)
+	}
+
+	obj, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	next, ok := obj[path[0]]
+	if !ok {
+		return ""
+	}
+	return extractNestedVideoString(next, path[1:])
 }

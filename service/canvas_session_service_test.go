@@ -397,6 +397,75 @@ func TestCreateCanvasVideoMessagesPersistClientRequestID(t *testing.T) {
 	}
 }
 
+func TestListCanvasMessagesIncludesEffectiveVideoResultURL(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeVideo})
+	if err != nil {
+		t.Fatalf("failed to create video session: %v", err)
+	}
+
+	payload, err := common.Marshal(map[string]any{
+		"content": map[string]any{
+			"video_url": "https://cdn.example.com/canvas.mp4",
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal task payload: %v", err)
+	}
+
+	task := &model.Task{
+		UserId:     1,
+		TaskID:     "task_canvas_direct",
+		Action:     constant.TaskActionTextGenerate,
+		Status:     model.TaskStatusSuccess,
+		Progress:   "100%",
+		SubmitTime: common.GetTimestamp(),
+		Properties: model.Properties{
+			Input:             "canvas video prompt",
+			OriginModelName:   "sora-compatible",
+			UpstreamModelName: "sora-compatible",
+		},
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "https://gateway.example.com/v1/videos/task_canvas_direct/content",
+		},
+		Data: payload,
+	}
+	if err := model.DB.Create(task).Error; err != nil {
+		t.Fatalf("failed to create video task: %v", err)
+	}
+
+	message := &model.CanvasMessage{
+		SessionId:   session.Id,
+		UserId:      1,
+		Mode:        model.CanvasModeVideo,
+		Role:        model.CanvasMessageRoleAssistant,
+		Prompt:      "canvas video prompt",
+		Status:      dto.VideoStatusCompleted,
+		TaskId:      strconv.FormatInt(task.ID, 10),
+		TaskType:    model.CanvasTaskTypeVideo,
+		CreatedTime: common.GetTimestamp(),
+		UpdatedTime: common.GetTimestamp(),
+	}
+	if err := model.DB.Create(message).Error; err != nil {
+		t.Fatalf("failed to create canvas message: %v", err)
+	}
+
+	messages, err := ListCanvasMessages(1, session.Id)
+	if err != nil {
+		t.Fatalf("ListCanvasMessages returned error: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 canvas message, got %d", len(messages))
+	}
+	if messages[0].VideoTask == nil {
+		t.Fatal("expected attached video task")
+	}
+	if messages[0].VideoTask.ResultURL != "https://cdn.example.com/canvas.mp4" {
+		t.Fatalf("expected direct canvas result url, got %q", messages[0].VideoTask.ResultURL)
+	}
+}
+
 func TestCreateCanvasMessagesAllowEmptyClientRequestID(t *testing.T) {
 	setupCanvasSessionServiceTestDB(t)
 

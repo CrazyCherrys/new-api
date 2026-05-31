@@ -393,6 +393,11 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 
 	task.Data = redactVideoResponseBody(responseBody)
+	if taskResult.Status == string(model.TaskStatusSuccess) && (taskResult.Url == "" || model.IsTaskVideoProxyURL(task, taskResult.Url)) {
+		if directResultURL := model.ExtractVideoResultURLFromPayload(task.Data); directResultURL != "" {
+			taskResult.Url = directResultURL
+		}
+	}
 
 	logger.LogDebug(ctx, fmt.Sprintf("updateVideoSingleTask taskResult: %+v", taskResult))
 
