@@ -3,10 +3,14 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -309,6 +313,41 @@ func callUpstreamVideoAPIViaRelay(ctx context.Context, userId int, modelId strin
 		}
 	}
 
+	requestBody, contentType, err := buildVideoRelaySubmitBody(modelId, prompt, requestEndpoint, params, imageInput)
+	if err != nil {
+		return nil, "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, requestBody)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create video request: %w", err)
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Authorization", "Bearer "+userToken)
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to send video request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read video response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("video relay error: status=%d, body=%s", resp.StatusCode, string(body))
+	}
+
+	publicTaskID, _ := extractPublicTaskID(body)
+	if publicTaskID == "" {
+		return nil, "", fmt.Errorf("video relay did not return task id")
+	}
+	return body, publicTaskID, nil
+}
+
+func buildVideoRelaySubmitBody(modelId string, prompt string, requestEndpoint string, params VideoGenerationParams, imageInput string) (io.Reader, string, error) {
 	videoReq := relaycommon.TaskSubmitReq{
 		Prompt:   prompt,
 		Model:    modelId,
@@ -318,7 +357,11 @@ func callUpstreamVideoAPIViaRelay(ctx context.Context, userId int, modelId strin
 	}
 	if normalizeVideoEndpoint(requestEndpoint) == "openai-video" {
 		if imageInput != "" {
-			videoReq.InputReference = imageInput
+			body, contentType, err := buildOpenAIVideoMultipartSubmitBody(modelId, prompt, params, imageInput)
+			if err != nil {
+				return nil, "", err
+			}
+			return body, contentType, nil
 		}
 	} else {
 		if imageInput != "" {
@@ -342,34 +385,66 @@ func callUpstreamVideoAPIViaRelay(ctx context.Context, userId int, modelId strin
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to marshal video request: %w", err)
 	}
+	return bytes.NewBuffer(jsonData), "application/json", nil
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewBuffer(jsonData))
+func buildOpenAIVideoMultipartSubmitBody(modelId string, prompt string, params VideoGenerationParams, imageInput string) (*bytes.Buffer, string, error) {
+	mimeType, base64Data, err := DecodeBase64FileData(imageInput)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to create video request: %w", err)
+		return nil, "", fmt.Errorf("failed to decode reference image data: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+userToken)
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
+	imageBytes, err := base64.StdEncoding.DecodeString(base64Data)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to send video request: %w", err)
+		return nil, "", fmt.Errorf("failed to decode reference image bytes: %w", err)
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("model", modelId); err != nil {
+		return nil, "", fmt.Errorf("failed to write model field: %w", err)
+	}
+	if err := writer.WriteField("prompt", prompt); err != nil {
+		return nil, "", fmt.Errorf("failed to write prompt field: %w", err)
+	}
+	if params.Duration > 0 {
+		if err := writer.WriteField("seconds", strconv.Itoa(params.Duration)); err != nil {
+			return nil, "", fmt.Errorf("failed to write seconds field: %w", err)
+		}
+	}
+	if strings.TrimSpace(params.Resolution) != "" {
+		if err := writer.WriteField("size", strings.TrimSpace(params.Resolution)); err != nil {
+			return nil, "", fmt.Errorf("failed to write size field: %w", err)
+		}
+	}
+
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="input_reference"; filename="%s"`, videoReferenceImageFilename(mimeType)))
+	header.Set("Content-Type", mimeType)
+	part, err := writer.CreatePart(header)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to read video response: %w", err)
+		return nil, "", fmt.Errorf("failed to create input_reference part: %w", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("video relay error: status=%d, body=%s", resp.StatusCode, string(body))
+	if _, err := part.Write(imageBytes); err != nil {
+		return nil, "", fmt.Errorf("failed to write input_reference part: %w", err)
 	}
+	contentType := writer.FormDataContentType()
+	if err := writer.Close(); err != nil {
+		return nil, "", fmt.Errorf("failed to finalize multipart body: %w", err)
+	}
+	return &body, contentType, nil
+}
 
-	publicTaskID, _ := extractPublicTaskID(body)
-	if publicTaskID == "" {
-		return nil, "", fmt.Errorf("video relay did not return task id")
+func videoReferenceImageFilename(mimeType string) string {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "image/jpeg":
+		return "reference.jpg"
+	case "image/webp":
+		return "reference.webp"
+	case "image/gif":
+		return "reference.gif"
+	default:
+		return "reference.png"
 	}
-	return body, publicTaskID, nil
 }
 
 func extractPublicTaskID(data []byte) (string, bool) {

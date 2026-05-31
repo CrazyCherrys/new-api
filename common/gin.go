@@ -333,6 +333,27 @@ func parseMultipartFormData(c *gin.Context, data []byte, v any) error {
 			formMap[key] = vals
 		}
 	}
+	for key, fileHeaders := range form.File {
+		if _, exists := formMap[key]; exists || len(fileHeaders) == 0 {
+			continue
+		}
+		fileNames := make([]string, 0, len(fileHeaders))
+		for _, fh := range fileHeaders {
+			if fh == nil {
+				continue
+			}
+			fileName := strings.TrimSpace(fh.Filename)
+			if fileName == "" {
+				fileName = "__multipart_file__"
+			}
+			fileNames = append(fileNames, fileName)
+		}
+		if len(fileNames) == 1 {
+			formMap[key] = fileNames[0]
+		} else if len(fileNames) > 1 {
+			formMap[key] = fileNames
+		}
+	}
 
 	return processFormMap(formMap, v)
 }

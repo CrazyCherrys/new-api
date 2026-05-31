@@ -1,7 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -59,5 +64,85 @@ func TestBuildVideoTaskSummaryAndDetailUseEffectiveResultURL(t *testing.T) {
 	}
 	if detail.ResultURL != "https://cdn.example.com/detail.mp4" {
 		t.Fatalf("expected direct detail result url, got %q", detail.ResultURL)
+	}
+}
+
+func TestBuildVideoRelaySubmitBodyUsesMultipartForOpenAIVideoReferenceImage(t *testing.T) {
+	body, contentType, err := buildVideoRelaySubmitBody(
+		"sora-2",
+		"cat video",
+		"openai-video",
+		VideoGenerationParams{
+			Duration:   8,
+			Resolution: "720x1280",
+		},
+		"data:image/png;base64,YWJj",
+	)
+	if err != nil {
+		t.Fatalf("buildVideoRelaySubmitBody returned error: %v", err)
+	}
+	if !strings.HasPrefix(contentType, "multipart/form-data;") {
+		t.Fatalf("expected multipart content type, got %q", contentType)
+	}
+
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		t.Fatalf("failed to parse multipart content type: %v", err)
+	}
+	payload, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read multipart body: %v", err)
+	}
+	form, err := multipart.NewReader(bytes.NewReader(payload), params["boundary"]).ReadForm(1024 * 1024)
+	if err != nil {
+		t.Fatalf("failed to read multipart form: %v", err)
+	}
+	defer form.RemoveAll()
+
+	if got := form.Value["model"]; len(got) != 1 || got[0] != "sora-2" {
+		t.Fatalf("expected model field sora-2, got %#v", got)
+	}
+	if got := form.Value["prompt"]; len(got) != 1 || got[0] != "cat video" {
+		t.Fatalf("expected prompt field cat video, got %#v", got)
+	}
+	if got := form.Value["seconds"]; len(got) != 1 || got[0] != "8" {
+		t.Fatalf("expected seconds field 8, got %#v", got)
+	}
+	files := form.File["input_reference"]
+	if len(files) != 1 || files[0].Filename != "reference.png" {
+		t.Fatalf("expected one input_reference file, got %#v", files)
+	}
+}
+
+func TestBuildVideoRelaySubmitBodyKeepsJSONForOpenAIVideoTextOnly(t *testing.T) {
+	body, contentType, err := buildVideoRelaySubmitBody(
+		"sora-2",
+		"text only video",
+		"openai-video",
+		VideoGenerationParams{
+			Duration:   4,
+			Resolution: "1280x720",
+		},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("buildVideoRelaySubmitBody returned error: %v", err)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("expected json content type, got %q", contentType)
+	}
+	payload, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read json body: %v", err)
+	}
+	var req map[string]any
+	if err := common.Unmarshal(payload, &req); err != nil {
+		t.Fatalf("failed to unmarshal json body: %v", err)
+	}
+	if req["prompt"] != "text only video" {
+		t.Fatalf("expected prompt to be preserved, got %#v", req["prompt"])
+	}
+	if _, exists := req["input_reference"]; exists {
+		t.Fatalf("did not expect input_reference in text-only json body: %#v", req)
 	}
 }
