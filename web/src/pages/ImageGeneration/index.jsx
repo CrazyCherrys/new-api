@@ -62,6 +62,7 @@ import { API, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
 import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
+import PlayableVideo from '../../components/PlayableVideo';
 import VideoGenerationTaskCard from '../../components/VideoGenerationTaskCard';
 import VideoGenerationTaskModal from '../../components/VideoGenerationTaskModal';
 import {
@@ -1035,7 +1036,7 @@ const ImageGeneration = () => {
           if (res.data.success) {
             setVideoSelectedTask(res.data.data);
             setGenerationMode(CANVAS_MODE_VIDEO);
-            setVideoTaskModalVisible(false);
+            setVideoTaskModalVisible(true);
           } else {
             showError(res.data.message || t('加载任务详情失败'));
           }
@@ -2087,8 +2088,7 @@ const ImageGeneration = () => {
       return {
         kind: 'video',
         status: task.status || message.status,
-        src: task.thumbnail_url || task.video_url || task.result_url || '',
-        videoUrl: task.video_url || task.result_url || '',
+        src: task.thumbnail_url || task.result_url || task.video_url || '',
         error:
           task.error_message ||
           task.fail_reason ||
@@ -2457,7 +2457,7 @@ const ImageGeneration = () => {
   const handleVideoTaskCardClick = async (task) => {
     if (!task?.id) return;
     setVideoSelectedTask(task);
-    setVideoTaskModalVisible(false);
+    setVideoTaskModalVisible(true);
     try {
       const res = await API.get(`/api/video-generation/tasks/${task.id}`);
       if (res.data.success) {
@@ -4960,14 +4960,23 @@ const ImageGeneration = () => {
       overflow: 'hidden',
       background: 'var(--semi-color-bg-0)',
     },
-    mainViewport: {
+    workspaceScrollPanel: {
       flex: 1,
       minHeight: 0,
       overflowY: 'auto',
-      padding: isMobile ? '10px 10px 6px' : '16px 18px 8px',
+      display: 'flex',
+      flexDirection: 'column',
       background: 'var(--semi-color-bg-0)',
     },
+    mainViewport: {
+      width: '100%',
+      padding: isMobile ? '10px 10px 6px' : '16px 18px 8px',
+    },
     composerDock: {
+      marginTop: 'auto',
+      position: 'sticky',
+      bottom: 0,
+      zIndex: 2,
       flexShrink: 0,
       borderTop: 'none',
       background: 'var(--semi-color-bg-0)',
@@ -6209,15 +6218,16 @@ const ImageGeneration = () => {
           style={styles.canvasMediaContent}
         />
       );
-    } else if (isDone && media?.kind === 'video' && media.videoUrl) {
+    } else if (isDone && media?.kind === 'video') {
       content = (
-        <video
-          data-canvas-message-result='video'
-          src={media.videoUrl}
+        <PlayableVideo
+          task={message.video_task || null}
           poster={media.src}
-          controls
           style={styles.canvasMediaVideoContent}
+          statusStyle={styles.canvasMediaStatusBody}
+          statusTextStyle={styles.canvasErrorText}
           onClick={() => setVideoSelectedTask(message.video_task || null)}
+          videoProps={{ 'data-canvas-message-result': 'video' }}
         />
       );
     }
@@ -6376,16 +6386,16 @@ const ImageGeneration = () => {
       );
     }
     if (media.kind === 'video') {
-      if (media.status === 'completed' && media.videoUrl) {
+      if (media.status === 'completed') {
         return (
           <div style={styles.canvasMessageResultFrame}>
-            <video
-              data-canvas-message-result='video'
-              src={media.videoUrl}
+            <PlayableVideo
+              task={message.video_task || null}
               poster={media.src}
-              controls
               style={styles.messageResultVideo}
+              statusTextStyle={styles.canvasErrorText}
               onClick={() => setVideoSelectedTask(message.video_task || null)}
+              videoProps={{ 'data-canvas-message-result': 'video' }}
             />
           </div>
         );
@@ -7325,12 +7335,14 @@ const ImageGeneration = () => {
         </div>
       ) : null}
       <div style={styles.workspaceBody}>
-        <div ref={canvasMessageViewportRef} style={styles.mainViewport}>
-          {generationMode === CANVAS_MODE_CHAT
-            ? renderChatWorkspace()
-            : renderCanvasMessageStream()}
+        <div ref={canvasMessageViewportRef} style={styles.workspaceScrollPanel}>
+          <div style={styles.mainViewport}>
+            {generationMode === CANVAS_MODE_CHAT
+              ? renderChatWorkspace()
+              : renderCanvasMessageStream()}
+          </div>
+          {renderComposer()}
         </div>
-        {renderComposer()}
       </div>
     </div>
   );

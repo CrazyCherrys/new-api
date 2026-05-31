@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Button, Modal, Popconfirm, Typography } from '@douyinfe/semi-ui';
+import { Button, Modal, Popconfirm, Spin, Typography } from '@douyinfe/semi-ui';
 import {
   IconCopy,
   IconDelete,
@@ -9,6 +9,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import { API, copy, showError, showSuccess } from '../helpers';
+import { usePlayableVideo } from '../helpers/videoPlayback';
 import { useIsMobile } from '../hooks/common/useIsMobile';
 
 const { Text } = Typography;
@@ -25,6 +26,14 @@ const VideoGenerationTaskModal = ({
   const isMobile = useIsMobile();
   const [retrying, setRetrying] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const {
+    src: playableVideoSrc,
+    loading: playableVideoLoading,
+    error: playableVideoError,
+    hasSource: hasPlayableVideoSource,
+    onPlaybackError,
+    openInNewTab,
+  } = usePlayableVideo(visible ? task : null);
 
   const canDelete = task?.status === 'completed' || task?.status === 'failed';
 
@@ -51,6 +60,50 @@ const VideoGenerationTaskModal = ({
     return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(
       date.getHours(),
     )}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  };
+
+  const previewStatusText = useMemo(() => {
+    if (playableVideoLoading) {
+      return t('正在加载视频...');
+    }
+    if (playableVideoError?.kind === 'auth') {
+      return t('当前登录态无法直接加载该受保护视频');
+    }
+    if (playableVideoError?.kind === 'not_found') {
+      return t('视频内容不存在、已过期，或代理地址不可用');
+    }
+    if (playableVideoError) {
+      return t('视频加载失败，请稍后重试');
+    }
+    if (task?.status === 'failed') {
+      return task?.fail_reason || t('生成失败');
+    }
+    if (task?.status === 'completed') {
+      return hasPlayableVideoSource
+        ? t('视频加载失败，请稍后重试')
+        : t('视频已生成，但暂无可播放地址');
+    }
+    if (task?.status === 'in_progress') {
+      return t('视频生成中');
+    }
+    if (task?.status === 'queued') {
+      return t('视频排队中');
+    }
+    return t('暂无视频预览');
+  }, [
+    hasPlayableVideoSource,
+    playableVideoError,
+    playableVideoLoading,
+    t,
+    task?.fail_reason,
+    task?.status,
+  ]);
+
+  const handleOpenVideo = () => {
+    if (openInNewTab()) {
+      return;
+    }
+    showError(previewStatusText || t('暂无可打开视频'));
   };
 
   const handleRetry = async () => {
@@ -171,6 +224,17 @@ const VideoGenerationTaskModal = ({
       gap: 8,
       flexWrap: 'wrap',
     },
+    previewStatus: {
+      width: '100%',
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+      padding: 20,
+      textAlign: 'center',
+    },
   };
 
   return (
@@ -184,15 +248,36 @@ const VideoGenerationTaskModal = ({
     >
       <div style={styles.body}>
         <div style={styles.previewPanel}>
-          {task.video_url || task.result_url ? (
+          {playableVideoSrc ? (
             <video
-              src={task.video_url || task.result_url}
+              src={playableVideoSrc}
+              poster={task.thumbnail_url || ''}
               controls
               playsInline
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              onError={onPlaybackError}
             />
           ) : (
-            <IconVideo size='extra-large' style={{ color: 'rgba(255,255,255,0.55)' }} />
+            <div style={styles.previewStatus}>
+              {playableVideoLoading ? (
+                <Spin size='small' />
+              ) : (
+                <IconVideo
+                  size='extra-large'
+                  style={{ color: 'rgba(255,255,255,0.55)' }}
+                />
+              )}
+              <Text
+                type={playableVideoError ? 'danger' : 'tertiary'}
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  overflowWrap: 'anywhere',
+                }}
+              >
+                {previewStatusText}
+              </Text>
+            </div>
           )}
         </div>
 
@@ -276,10 +361,12 @@ const VideoGenerationTaskModal = ({
           <Button icon={<IconExternalOpen />} onClick={() => onOpenTaskLogs?.(task)}>
             {t('查看任务日志')}
           </Button>
-          {(task.video_url || task.result_url) && (
+          {hasPlayableVideoSource && (
             <Button
               icon={<IconExternalOpen />}
-              onClick={() => window.open(task.video_url || task.result_url, '_blank')}
+              loading={playableVideoLoading}
+              disabled={!playableVideoSrc}
+              onClick={handleOpenVideo}
             >
               {t('打开视频')}
             </Button>
