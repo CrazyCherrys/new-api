@@ -516,6 +516,19 @@ func GetUserModels(c *gin.Context) {
 	if err != nil {
 		id = c.GetInt("id")
 	}
+	if strings.EqualFold(strings.TrimSpace(c.Query("mode")), "chat") {
+		models, listErr := service.ListUserCanvasChatModels(id)
+		if listErr != nil {
+			common.ApiError(c, listErr)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    models,
+		})
+		return
+	}
 	user, err := model.GetUserCache(id)
 	if err != nil {
 		common.ApiError(c, err)

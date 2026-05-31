@@ -1338,7 +1338,9 @@ const ImageGeneration = () => {
 
   const loadChatModels = async () => {
     try {
-      const res = await API.get('/api/user/models');
+      const res = await API.get('/api/user/models', {
+        params: { mode: 'chat' },
+      });
       if (!res.data.success) {
         showError(res.data.message || t('加载聊天模型失败'));
         return;

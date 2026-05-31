@@ -429,7 +429,7 @@ func resolveCanvasChatModel(userId int, session *model.CanvasSession, inputModel
 			return candidate, nil
 		}
 	}
-	models, err := listUserCanvasChatModels(userId)
+	models, err := ListUserCanvasChatModels(userId)
 	if err != nil {
 		return "", err
 	}
@@ -482,6 +482,10 @@ func resolveCanvasChatGroup(userId int, userGroup string, session *model.CanvasS
 	return "", fmt.Errorf("no available group for chat model %s", modelId)
 }
 
+func ListUserCanvasChatModels(userId int) ([]string, error) {
+	return listUserCanvasChatModels(userId)
+}
+
 func listUserCanvasChatModels(userId int) ([]string, error) {
 	user, err := model.GetUserCache(userId)
 	if err != nil {
@@ -497,6 +501,13 @@ func listUserCanvasChatModels(userId int) ([]string, error) {
 			if trimmed == "" {
 				continue
 			}
+			chatModel, filterErr := isCanvasChatModelName(trimmed)
+			if filterErr != nil {
+				return nil, filterErr
+			}
+			if !chatModel {
+				continue
+			}
 			modelSet[trimmed] = struct{}{}
 		}
 	}
@@ -506,6 +517,21 @@ func listUserCanvasChatModels(userId int) ([]string, error) {
 	}
 	sort.Strings(result)
 	return result, nil
+}
+
+func isCanvasChatModelName(modelName string) (bool, error) {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return false, nil
+	}
+	mapping, err := model.GetActiveModelMappingByRequestModel(modelName)
+	if err != nil {
+		return false, err
+	}
+	if mapping == nil {
+		return true, nil
+	}
+	return mapping.ModelType == 1, nil
 }
 
 func listCanvasChatCandidateGroups(userId int, userGroup string) ([]string, error) {
