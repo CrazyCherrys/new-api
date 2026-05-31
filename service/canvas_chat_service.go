@@ -85,22 +85,29 @@ type canvasChatRelayRequest struct {
 	Messages    []dto.Message
 }
 
+type canvasChatRelayDelta struct {
+	Content          string
+	ReasoningContent string
+}
+
 type canvasChatRelayResult struct {
-	Text string
+	Text             string
+	ReasoningContent string
 }
 
 type canvasChatStreamCallbacks struct {
-	OnDelta     func(prepared *canvasChatPreparedRequest, delta string)
+	OnDelta     func(prepared *canvasChatPreparedRequest, delta canvasChatRelayDelta)
 	OnCompleted func(prepared *canvasChatPreparedRequest)
 	OnError     func(prepared *canvasChatPreparedRequest)
 }
 
 type canvasChatSSEEvent struct {
-	Session  *model.CanvasSession     `json:"session,omitempty"`
-	Message  *CanvasMessageWithTask   `json:"message,omitempty"`
-	Messages []*CanvasMessageWithTask `json:"messages,omitempty"`
-	Delta    string                   `json:"delta,omitempty"`
-	Error    string                   `json:"error,omitempty"`
+	Session        *model.CanvasSession     `json:"session,omitempty"`
+	Message        *CanvasMessageWithTask   `json:"message,omitempty"`
+	Messages       []*CanvasMessageWithTask `json:"messages,omitempty"`
+	Delta          string                   `json:"delta,omitempty"`
+	ReasoningDelta string                   `json:"reasoning_delta,omitempty"`
+	Error          string                   `json:"error,omitempty"`
 }
 
 type CanvasChatModelOption struct {
@@ -187,10 +194,11 @@ func StreamCanvasChatMessage(c *gin.Context, userId int, sessionId int, input Cr
 	}
 
 	callbacks := &canvasChatStreamCallbacks{
-		OnDelta: func(prepared *canvasChatPreparedRequest, delta string) {
+		OnDelta: func(prepared *canvasChatPreparedRequest, delta canvasChatRelayDelta) {
 			_ = emitCanvasChatEvent(c, "canvas.message.delta", canvasChatSSEEvent{
-				Message: &CanvasMessageWithTask{CanvasMessage: prepared.AssistantMessage},
-				Delta:   delta,
+				Message:        &CanvasMessageWithTask{CanvasMessage: prepared.AssistantMessage},
+				Delta:          delta.Content,
+				ReasoningDelta: delta.ReasoningContent,
 			})
 		},
 		OnCompleted: func(prepared *canvasChatPreparedRequest) {
@@ -353,33 +361,45 @@ func executeCanvasChatRun(ctx context.Context, prepared *canvasChatPreparedReque
 	}
 
 	var fullTextBuilder strings.Builder
-	var pendingDelta strings.Builder
+	var fullReasoningBuilder strings.Builder
+	var pendingTextDelta strings.Builder
+	var pendingReasoningDelta strings.Builder
 	lastPersistedPrompt := ""
+	lastPersistedReasoningContent := ""
 	lastFlushTime := time.Now()
 
 	flushAssistantDelta := func(force bool) error {
 		currentPrompt := fullTextBuilder.String()
-		shouldPersist := currentPrompt != lastPersistedPrompt
-		if !force && pendingDelta.Len() == 0 && !shouldPersist {
+		currentReasoningContent := fullReasoningBuilder.String()
+		shouldPersist := currentPrompt != lastPersistedPrompt || currentReasoningContent != lastPersistedReasoningContent
+		if !force && pendingTextDelta.Len() == 0 && pendingReasoningDelta.Len() == 0 && !shouldPersist {
 			return nil
 		}
 		if shouldPersist {
 			if err := model.UpdateCanvasMessageFields(prepared.UserId, prepared.AssistantMessage.Id, map[string]interface{}{
-				"prompt":        currentPrompt,
-				"status":        model.CanvasMessageStatusGenerating,
-				"error_message": "",
+				"prompt":            currentPrompt,
+				"reasoning_content": currentReasoningContent,
+				"status":            model.CanvasMessageStatusGenerating,
+				"error_message":     "",
 			}); err != nil {
 				return err
 			}
 			prepared.AssistantMessage.Prompt = currentPrompt
+			prepared.AssistantMessage.ReasoningContent = currentReasoningContent
 			prepared.AssistantMessage.Status = model.CanvasMessageStatusGenerating
 			prepared.AssistantMessage.ErrorMessage = ""
 			lastPersistedPrompt = currentPrompt
+			lastPersistedReasoningContent = currentReasoningContent
 		}
-		if callbacks != nil && pendingDelta.Len() > 0 && callbacks.OnDelta != nil {
-			callbacks.OnDelta(prepared, pendingDelta.String())
+		if callbacks != nil && callbacks.OnDelta != nil &&
+			(pendingTextDelta.Len() > 0 || pendingReasoningDelta.Len() > 0) {
+			callbacks.OnDelta(prepared, canvasChatRelayDelta{
+				Content:          pendingTextDelta.String(),
+				ReasoningContent: pendingReasoningDelta.String(),
+			})
 		}
-		pendingDelta.Reset()
+		pendingTextDelta.Reset()
+		pendingReasoningDelta.Reset()
 		lastFlushTime = time.Now()
 		return nil
 	}
@@ -391,13 +411,16 @@ func executeCanvasChatRun(ctx context.Context, prepared *canvasChatPreparedReque
 		Group:       prepared.FinalGroup,
 		Temperature: prepared.Temperature,
 		Messages:    relayMessages,
-	}, func(delta string) error {
-		if delta == "" {
+	}, func(delta canvasChatRelayDelta) error {
+		if delta.Content == "" && delta.ReasoningContent == "" {
 			return nil
 		}
-		fullTextBuilder.WriteString(delta)
-		pendingDelta.WriteString(delta)
-		if pendingDelta.Len() >= canvasChatDeltaFlushMinChars || time.Since(lastFlushTime) >= canvasChatDeltaFlushInterval {
+		fullTextBuilder.WriteString(delta.Content)
+		fullReasoningBuilder.WriteString(delta.ReasoningContent)
+		pendingTextDelta.WriteString(delta.Content)
+		pendingReasoningDelta.WriteString(delta.ReasoningContent)
+		if pendingTextDelta.Len()+pendingReasoningDelta.Len() >= canvasChatDeltaFlushMinChars ||
+			time.Since(lastFlushTime) >= canvasChatDeltaFlushInterval {
 			return flushAssistantDelta(false)
 		}
 		return nil
@@ -411,14 +434,16 @@ func executeCanvasChatRun(ctx context.Context, prepared *canvasChatPreparedReque
 		return finalizeCanvasChatRunError(prepared, callbacks, err)
 	}
 	if err := model.UpdateCanvasMessageFields(prepared.UserId, prepared.AssistantMessage.Id, map[string]interface{}{
-		"prompt":        fullTextBuilder.String(),
-		"status":        model.CanvasMessageStatusSuccess,
-		"error_message": "",
+		"prompt":            fullTextBuilder.String(),
+		"reasoning_content": fullReasoningBuilder.String(),
+		"status":            model.CanvasMessageStatusSuccess,
+		"error_message":     "",
 	}); err != nil {
 		return nil, err
 	}
 
 	prepared.AssistantMessage.Prompt = fullTextBuilder.String()
+	prepared.AssistantMessage.ReasoningContent = fullReasoningBuilder.String()
 	prepared.AssistantMessage.Status = model.CanvasMessageStatusSuccess
 	prepared.AssistantMessage.ErrorMessage = ""
 
@@ -443,9 +468,10 @@ func finalizeCanvasChatRunError(prepared *canvasChatPreparedRequest, callbacks *
 		errorMessage = "聊天已停止"
 	}
 	if err := model.UpdateCanvasMessageFields(prepared.UserId, prepared.AssistantMessage.Id, map[string]interface{}{
-		"prompt":        prepared.AssistantMessage.Prompt,
-		"status":        status,
-		"error_message": errorMessage,
+		"prompt":            prepared.AssistantMessage.Prompt,
+		"reasoning_content": prepared.AssistantMessage.ReasoningContent,
+		"status":            status,
+		"error_message":     errorMessage,
 	}); err != nil {
 		return nil, err
 	}
@@ -1100,7 +1126,7 @@ func listCanvasSuccessfulChatMessages(userId int, sessionId int, beforeMessageId
 	return messages, err
 }
 
-func defaultCallCanvasChatRelay(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+func defaultCallCanvasChatRelay(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
 	relayRequest := dto.GeneralOpenAIRequest{
 		Model:       request.ModelId,
 		Messages:    request.Messages,
@@ -1150,22 +1176,26 @@ func defaultCallCanvasChatRelay(ctx context.Context, request canvasChatRelayRequ
 		if err != nil {
 			return nil, fmt.Errorf("failed to read chat relay response: %w", err)
 		}
-		text, parseErr := parseCanvasChatResponseBody(body)
+		result, parseErr := parseCanvasChatResponseBody(body)
 		if parseErr != nil {
 			return nil, parseErr
 		}
-		if onDelta != nil && text != "" {
-			if err := onDelta(text); err != nil {
+		if onDelta != nil && (result.Text != "" || result.ReasoningContent != "") {
+			if err := onDelta(canvasChatRelayDelta{
+				Content:          result.Text,
+				ReasoningContent: result.ReasoningContent,
+			}); err != nil {
 				return nil, err
 			}
 		}
-		return &canvasChatRelayResult{Text: text}, nil
+		return result, nil
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, canvasChatRelayScannerInitialBufferSize), canvasChatRelayScannerMaxBufferSize)
 
 	var fullText strings.Builder
+	var fullReasoning strings.Builder
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") || strings.HasPrefix(line, "event:") {
@@ -1186,44 +1216,60 @@ func defaultCallCanvasChatRelay(ctx context.Context, request canvasChatRelayRequ
 		if err := common.Unmarshal(common.StringToByteSlice(payload), &chunk); err != nil {
 			return nil, fmt.Errorf("failed to decode chat relay chunk: %w", err)
 		}
-		deltaText := extractCanvasChatDeltaText(&chunk)
-		if deltaText == "" {
+		delta := extractCanvasChatDelta(&chunk)
+		if delta.Content == "" && delta.ReasoningContent == "" {
 			continue
 		}
-		fullText.WriteString(deltaText)
+		fullText.WriteString(delta.Content)
+		fullReasoning.WriteString(delta.ReasoningContent)
 		if onDelta != nil {
-			if err := onDelta(deltaText); err != nil {
+			if err := onDelta(delta); err != nil {
 				return nil, err
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return &canvasChatRelayResult{Text: fullText.String()}, err
+		return &canvasChatRelayResult{
+			Text:             fullText.String(),
+			ReasoningContent: fullReasoning.String(),
+		}, err
 	}
 
-	return &canvasChatRelayResult{Text: fullText.String()}, nil
+	return &canvasChatRelayResult{
+		Text:             fullText.String(),
+		ReasoningContent: fullReasoning.String(),
+	}, nil
 }
 
-func extractCanvasChatDeltaText(chunk *dto.ChatCompletionsStreamResponse) string {
+func extractCanvasChatDelta(chunk *dto.ChatCompletionsStreamResponse) canvasChatRelayDelta {
+	delta := canvasChatRelayDelta{}
 	if chunk == nil {
-		return ""
+		return delta
 	}
-	var builder strings.Builder
 	for _, choice := range chunk.Choices {
-		builder.WriteString(choice.Delta.GetContentString())
+		delta.Content += choice.Delta.GetContentString()
+		delta.ReasoningContent += choice.Delta.GetReasoningContent()
 	}
-	return builder.String()
+	return delta
 }
 
-func parseCanvasChatResponseBody(body []byte) (string, error) {
+func parseCanvasChatResponseBody(body []byte) (*canvasChatRelayResult, error) {
 	var response dto.OpenAITextResponse
 	if err := common.Unmarshal(body, &response); err != nil {
-		return "", fmt.Errorf("failed to decode chat relay response: %w", err)
+		return nil, fmt.Errorf("failed to decode chat relay response: %w", err)
 	}
 	if len(response.Choices) == 0 {
-		return "", nil
+		return &canvasChatRelayResult{}, nil
 	}
-	return response.Choices[0].Message.StringContent(), nil
+	message := response.Choices[0].Message
+	reasoningContent := strings.TrimSpace(message.ReasoningContent)
+	if reasoningContent == "" {
+		reasoningContent = message.Reasoning
+	}
+	return &canvasChatRelayResult{
+		Text:             message.StringContent(),
+		ReasoningContent: reasoningContent,
+	}, nil
 }
 
 func parseCanvasChatRelayError(body []byte, statusCode int) string {

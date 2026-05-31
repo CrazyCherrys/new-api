@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http/httptest"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -136,6 +138,65 @@ func seedCanvasChatCapability(t *testing.T, db *gorm.DB, userId int, userGroup s
 	if err := db.Create(ability).Error; err != nil {
 		t.Fatalf("failed to create ability: %v", err)
 	}
+
+	if err := db.Create(&model.ModelMapping{
+		RequestModel:    modelId,
+		ActualModel:     modelId,
+		DisplayName:     modelId,
+		ModelSeries:     "openai",
+		ModelType:       1,
+		Status:          1,
+		RequestEndpoint: "openai",
+	}).Error; err != nil {
+		t.Fatalf("failed to create model mapping: %v", err)
+	}
+}
+
+type canvasChatStreamTestEvent struct {
+	Event   string
+	RawData string
+	Payload canvasChatSSEEvent
+}
+
+func parseCanvasChatStreamTestEvents(t *testing.T, raw string) []canvasChatStreamTestEvent {
+	t.Helper()
+
+	blocks := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n\n")
+	events := make([]canvasChatStreamTestEvent, 0, len(blocks))
+	for _, block := range blocks {
+		block = strings.TrimSpace(block)
+		if block == "" {
+			continue
+		}
+		lines := strings.Split(block, "\n")
+		item := canvasChatStreamTestEvent{}
+		for _, line := range lines {
+			if strings.HasPrefix(line, "event:") {
+				item.Event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+				continue
+			}
+			if strings.HasPrefix(line, "data:") {
+				item.RawData = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			}
+		}
+		if item.RawData == "" {
+			continue
+		}
+		if err := common.Unmarshal(common.StringToByteSlice(item.RawData), &item.Payload); err != nil {
+			t.Fatalf("failed to decode stream payload %q: %v", item.RawData, err)
+		}
+		events = append(events, item)
+	}
+	return events
+}
+
+func findCanvasChatStreamTestEvent(events []canvasChatStreamTestEvent, eventType string) *canvasChatStreamTestEvent {
+	for i := range events {
+		if events[i].Event == eventType {
+			return &events[i]
+		}
+	}
+	return nil
 }
 
 func TestCanvasSessionCreateRenamePinSortAndModeFilter(t *testing.T) {
@@ -582,7 +643,7 @@ func TestCreateCanvasChatMessageAutoTitlesAndPersistsModelGroupAndMetadata(t *te
 	db := setupCanvasSessionServiceTestDB(t)
 	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
 
-	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
 		if request.ModelId != "gpt-chat-test" {
 			t.Fatalf("expected model gpt-chat-test, got %q", request.ModelId)
 		}
@@ -593,7 +654,7 @@ func TestCreateCanvasChatMessageAutoTitlesAndPersistsModelGroupAndMetadata(t *te
 			t.Fatalf("unexpected relay messages: %#v", request.Messages)
 		}
 		if onDelta != nil {
-			if err := onDelta("assistant reply"); err != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: "assistant reply"}); err != nil {
 				return nil, err
 			}
 		}
@@ -738,7 +799,7 @@ func TestCreateCanvasChatMessageUsesSessionConfigFallbacks(t *testing.T) {
 	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
 	systemPrompt := "Focus on concise answers."
 
-	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
 		if request.ModelId != "gpt-chat-test" {
 			t.Fatalf("expected session current model fallback, got %q", request.ModelId)
 		}
@@ -755,7 +816,7 @@ func TestCreateCanvasChatMessageUsesSessionConfigFallbacks(t *testing.T) {
 			t.Fatalf("unexpected relay messages: %#v", request.Messages)
 		}
 		if onDelta != nil {
-			if err := onDelta("assistant reply"); err != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: "assistant reply"}); err != nil {
 				return nil, err
 			}
 		}
@@ -797,6 +858,68 @@ func TestCreateCanvasChatMessageUsesSessionConfigFallbacks(t *testing.T) {
 	}
 }
 
+func TestCreateCanvasChatMessagePersistsReasoningContentFromMixedDeltas(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
+		deltas := []canvasChatRelayDelta{
+			{ReasoningContent: "Step 1"},
+			{ReasoningContent: "\nStep 2"},
+			{Content: "final "},
+			{Content: "answer"},
+		}
+		for _, delta := range deltas {
+			if onDelta != nil {
+				if err := onDelta(delta); err != nil {
+					return nil, err
+				}
+			}
+		}
+		return &canvasChatRelayResult{
+			Text:             "final answer",
+			ReasoningContent: "Step 1\nStep 2",
+		}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	created, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "show work",
+		ModelId: "gpt-chat-test",
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat message: %v", err)
+	}
+	if len(created) != 2 {
+		t.Fatalf("expected 2 chat messages, got %d", len(created))
+	}
+	assistant := created[1]
+	if assistant.Prompt != "final answer" {
+		t.Fatalf("expected final assistant prompt to persist, got %q", assistant.Prompt)
+	}
+	if assistant.ReasoningContent != "Step 1\nStep 2" {
+		t.Fatalf("expected reasoning content to persist, got %q", assistant.ReasoningContent)
+	}
+
+	reloaded, err := ListCanvasMessages(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload chat messages: %v", err)
+	}
+	if len(reloaded) != 2 {
+		t.Fatalf("expected 2 reloaded chat messages, got %d", len(reloaded))
+	}
+	if reloaded[1].Prompt != "final answer" {
+		t.Fatalf("expected reloaded assistant prompt, got %q", reloaded[1].Prompt)
+	}
+	if reloaded[1].ReasoningContent != "Step 1\nStep 2" {
+		t.Fatalf("expected reloaded reasoning content, got %q", reloaded[1].ReasoningContent)
+	}
+}
+
 func TestCanvasChatSummaryDisabledSkipsBackgroundSummary(t *testing.T) {
 	db := setupCanvasSessionServiceTestDB(t)
 	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
@@ -809,7 +932,7 @@ func TestCanvasChatSummaryDisabledSkipsBackgroundSummary(t *testing.T) {
 
 	replyIndex := 0
 	summaryCalls := 0
-	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
 		if len(request.Messages) > 0 && strings.Contains(request.Messages[0].StringContent(), "你负责维护长对话摘要记忆") {
 			summaryCalls++
 			return &canvasChatRelayResult{Text: "summary memory"}, nil
@@ -817,7 +940,7 @@ func TestCanvasChatSummaryDisabledSkipsBackgroundSummary(t *testing.T) {
 		replyIndex++
 		reply := fmt.Sprintf("assistant-%d", replyIndex)
 		if onDelta != nil {
-			if err := onDelta(reply); err != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: reply}); err != nil {
 				return nil, err
 			}
 		}
@@ -985,13 +1108,19 @@ func TestCreateCanvasChatMessageFailureKeepsPartialText(t *testing.T) {
 	db := setupCanvasSessionServiceTestDB(t)
 	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
 
-	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
 		if onDelta != nil {
-			if err := onDelta("partial reply"); err != nil {
+			if err := onDelta(canvasChatRelayDelta{
+				Content:          "partial reply",
+				ReasoningContent: "reasoning chunk",
+			}); err != nil {
 				return nil, err
 			}
 		}
-		return &canvasChatRelayResult{Text: "partial reply"}, fmt.Errorf("upstream exploded")
+		return &canvasChatRelayResult{
+			Text:             "partial reply",
+			ReasoningContent: "reasoning chunk",
+		}, fmt.Errorf("upstream exploded")
 	}
 
 	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
@@ -1017,11 +1146,174 @@ func TestCreateCanvasChatMessageFailureKeepsPartialText(t *testing.T) {
 	if assistant.Prompt != "partial reply" {
 		t.Fatalf("expected partial assistant text to persist, got %q", assistant.Prompt)
 	}
+	if assistant.ReasoningContent != "reasoning chunk" {
+		t.Fatalf("expected partial reasoning content to persist, got %q", assistant.ReasoningContent)
+	}
 	if assistant.Status != model.CanvasMessageStatusFailed {
 		t.Fatalf("expected failed status, got %q", assistant.Status)
 	}
 	if !strings.Contains(assistant.ErrorMessage, "upstream exploded") {
 		t.Fatalf("expected upstream error message, got %q", assistant.ErrorMessage)
+	}
+}
+
+func TestCanvasChatResponseBodyReturnsReasoningContent(t *testing.T) {
+	body, err := common.Marshal(dto.OpenAITextResponse{
+		Choices: []dto.OpenAITextResponseChoice{
+			{
+				Message: dto.Message{
+					Role:             model.CanvasMessageRoleAssistant,
+					Content:          "final answer",
+					ReasoningContent: "reasoning summary",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal response body: %v", err)
+	}
+
+	result, err := parseCanvasChatResponseBody(body)
+	if err != nil {
+		t.Fatalf("failed to parse response body: %v", err)
+	}
+	if result.Text != "final answer" {
+		t.Fatalf("expected parsed text, got %q", result.Text)
+	}
+	if result.ReasoningContent != "reasoning summary" {
+		t.Fatalf("expected parsed reasoning content, got %q", result.ReasoningContent)
+	}
+}
+
+func TestCanvasChatStreamEmitsReasoningDeltaAndSnapshots(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
+		deltas := []canvasChatRelayDelta{
+			{ReasoningContent: "Step 1"},
+			{ReasoningContent: "\nStep 2"},
+			{Content: "Answer"},
+		}
+		for _, delta := range deltas {
+			if onDelta != nil {
+				if err := onDelta(delta); err != nil {
+					return nil, err
+				}
+			}
+		}
+		return &canvasChatRelayResult{
+			Text:             "Answer",
+			ReasoningContent: "Step 1\nStep 2",
+		}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest("POST", "/api/canvas/sessions/1/messages", nil)
+
+	if err := StreamCanvasChatMessage(c, 1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "hello",
+		ModelId: "gpt-chat-test",
+	}); err != nil {
+		t.Fatalf("StreamCanvasChatMessage returned error: %v", err)
+	}
+
+	events := parseCanvasChatStreamTestEvents(t, recorder.Body.String())
+	createdEvent := findCanvasChatStreamTestEvent(events, "canvas.message.created")
+	if createdEvent == nil {
+		t.Fatalf("expected created event, got %#v", events)
+	}
+	if !strings.Contains(createdEvent.RawData, "\"reasoning_content\":\"\"") {
+		t.Fatalf("expected created snapshot to include empty reasoning_content, got %s", createdEvent.RawData)
+	}
+	if len(createdEvent.Payload.Messages) != 2 {
+		t.Fatalf("expected created event to include user and assistant messages, got %#v", createdEvent.Payload.Messages)
+	}
+
+	deltaEvent := findCanvasChatStreamTestEvent(events, "canvas.message.delta")
+	if deltaEvent == nil {
+		t.Fatalf("expected delta event, got %#v", events)
+	}
+	if deltaEvent.Payload.Delta != "Answer" {
+		t.Fatalf("expected content delta to stream, got %q", deltaEvent.Payload.Delta)
+	}
+	if deltaEvent.Payload.ReasoningDelta != "Step 1\nStep 2" {
+		t.Fatalf("expected reasoning delta to stream, got %q", deltaEvent.Payload.ReasoningDelta)
+	}
+	if deltaEvent.Payload.Message == nil || deltaEvent.Payload.Message.ReasoningContent != "Step 1\nStep 2" {
+		t.Fatalf("expected delta snapshot to carry reasoning content, got %#v", deltaEvent.Payload.Message)
+	}
+
+	completedEvent := findCanvasChatStreamTestEvent(events, "canvas.message.completed")
+	if completedEvent == nil {
+		t.Fatalf("expected completed event, got %#v", events)
+	}
+	if completedEvent.Payload.Message == nil || completedEvent.Payload.Message.Prompt != "Answer" {
+		t.Fatalf("expected completed snapshot to carry final prompt, got %#v", completedEvent.Payload.Message)
+	}
+	if completedEvent.Payload.Message.ReasoningContent != "Step 1\nStep 2" {
+		t.Fatalf("expected completed snapshot to carry reasoning content, got %#v", completedEvent.Payload.Message)
+	}
+}
+
+func TestCanvasChatStreamErrorEventIncludesReasoningSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
+		if onDelta != nil {
+			if err := onDelta(canvasChatRelayDelta{
+				Content:          "partial",
+				ReasoningContent: "thinking",
+			}); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{
+			Text:             "partial",
+			ReasoningContent: "thinking",
+		}, fmt.Errorf("upstream exploded")
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest("POST", "/api/canvas/sessions/1/messages", nil)
+
+	if err := StreamCanvasChatMessage(c, 1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "hello",
+		ModelId: "gpt-chat-test",
+	}); err != nil {
+		t.Fatalf("StreamCanvasChatMessage returned error: %v", err)
+	}
+
+	events := parseCanvasChatStreamTestEvents(t, recorder.Body.String())
+	errorEvent := findCanvasChatStreamTestEvent(events, "canvas.message.error")
+	if errorEvent == nil {
+		t.Fatalf("expected error event, got %#v", events)
+	}
+	if errorEvent.Payload.Error == "" || !strings.Contains(errorEvent.Payload.Error, "upstream exploded") {
+		t.Fatalf("expected error payload to contain upstream message, got %#v", errorEvent.Payload)
+	}
+	if errorEvent.Payload.Message == nil || errorEvent.Payload.Message.Prompt != "partial" {
+		t.Fatalf("expected error snapshot to carry partial prompt, got %#v", errorEvent.Payload.Message)
+	}
+	if errorEvent.Payload.Message.ReasoningContent != "thinking" {
+		t.Fatalf("expected error snapshot to carry reasoning content, got %#v", errorEvent.Payload.Message)
 	}
 }
 
@@ -1073,7 +1365,7 @@ func TestCanvasChatSummaryWriteBackSkipsStaleBranchChanges(t *testing.T) {
 	}
 
 	summaryRelayCalls := 0
-	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
 		if len(request.Messages) > 0 && strings.Contains(request.Messages[0].StringContent(), "你负责维护长对话摘要记忆") {
 			summaryRelayCalls++
 			if summaryRelayCalls == 1 {
@@ -1086,7 +1378,7 @@ func TestCanvasChatSummaryWriteBackSkipsStaleBranchChanges(t *testing.T) {
 			return &canvasChatRelayResult{Text: "summary memory"}, nil
 		}
 		if onDelta != nil {
-			if err := onDelta("assistant reply"); err != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: "assistant reply"}); err != nil {
 				return nil, err
 			}
 		}
@@ -1139,7 +1431,7 @@ func TestCanvasChatSummaryTriggerAdvancesCursor(t *testing.T) {
 
 	replyIndex := 0
 	summaryCalls := 0
-	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
 		if len(request.Messages) > 0 && strings.Contains(request.Messages[0].StringContent(), "你负责维护长对话摘要记忆") {
 			summaryCalls++
 			return &canvasChatRelayResult{Text: "summary memory"}, nil
@@ -1147,7 +1439,7 @@ func TestCanvasChatSummaryTriggerAdvancesCursor(t *testing.T) {
 		replyIndex++
 		reply := fmt.Sprintf("assistant-%d", replyIndex)
 		if onDelta != nil {
-			if err := onDelta(reply); err != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: reply}); err != nil {
 				return nil, err
 			}
 		}
@@ -1201,14 +1493,14 @@ func TestCanvasChatClearContextTruncatesRelayHistory(t *testing.T) {
 
 	var capturedRequests [][]dto.Message
 	replyIndex := 0
-	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
 		cloned := make([]dto.Message, len(request.Messages))
 		copy(cloned, request.Messages)
 		capturedRequests = append(capturedRequests, cloned)
 		replyIndex++
 		reply := fmt.Sprintf("assistant-%d", replyIndex)
 		if onDelta != nil {
-			if err := onDelta(reply); err != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: reply}); err != nil {
 				return nil, err
 			}
 		}

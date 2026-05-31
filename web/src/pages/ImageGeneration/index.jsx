@@ -85,6 +85,7 @@ import {
   CANVAS_RENDERABLE_IMAGE_BATCH,
   getRenderableCanvasMessages,
 } from './canvasMessageBatches';
+import { extractCanvasChatReasoning } from './canvasChatReasoning';
 
 const { Text } = Typography;
 
@@ -266,9 +267,7 @@ const buildComparableIdSet = (values) => {
   const list =
     values instanceof Set ? Array.from(values) : [].concat(values || []);
   return new Set(
-    list
-      .map(normalizeComparableId)
-      .filter((value) => value !== ''),
+    list.map(normalizeComparableId).filter((value) => value !== ''),
   );
 };
 
@@ -313,9 +312,7 @@ const normalizeAspectRatioText = (value) => {
   if (!text) {
     return '';
   }
-  const match = text.match(
-    /^(\d+(?:\.\d+)?)\s*[:/xX×]\s*(\d+(?:\.\d+)?)$/,
-  );
+  const match = text.match(/^(\d+(?:\.\d+)?)\s*[:/xX×]\s*(\d+(?:\.\d+)?)$/);
   if (!match) {
     return '';
   }
@@ -337,7 +334,9 @@ const buildAspectRatioTextFromDimensions = (width, height) => {
 };
 
 const normalizeImageResolutionTier = (value) => {
-  const text = String(value || '').trim().toUpperCase();
+  const text = String(value || '')
+    .trim()
+    .toUpperCase();
   return ['1K', '2K', '4K'].includes(text) ? text : '';
 };
 
@@ -415,7 +414,12 @@ const parseImageAspectRatioPair = (ratio) => {
   }
   const width = Number(match[1]);
   const height = Number(match[2]);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
     return null;
   }
   return { width, height };
@@ -430,7 +434,12 @@ const parseImageSizePair = (size) => {
   }
   const width = Number(match[1]);
   const height = Number(match[2]);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
     return null;
   }
   return { width, height };
@@ -474,13 +483,17 @@ const getImageDimensionPreview = (resolutionValue, aspectRatioValue) => {
     const shortSide = 1024;
     if (ratio.width > ratio.height) {
       return {
-        width: String(roundImageSizeToMultiple((shortSide * ratio.width) / ratio.height)),
+        width: String(
+          roundImageSizeToMultiple((shortSide * ratio.width) / ratio.height),
+        ),
         height: String(shortSide),
       };
     }
     return {
       width: String(shortSide),
-      height: String(roundImageSizeToMultiple((shortSide * ratio.height) / ratio.width)),
+      height: String(
+        roundImageSizeToMultiple((shortSide * ratio.height) / ratio.width),
+      ),
     };
   }
 
@@ -488,9 +501,13 @@ const getImageDimensionPreview = (resolutionValue, aspectRatioValue) => {
   let rawWidth = longSide;
   let rawHeight = longSide;
   if (ratio.width > ratio.height) {
-    rawHeight = roundImageSizeToMultiple((longSide * ratio.height) / ratio.width);
+    rawHeight = roundImageSizeToMultiple(
+      (longSide * ratio.height) / ratio.width,
+    );
   } else {
-    rawWidth = roundImageSizeToMultiple((longSide * ratio.width) / ratio.height);
+    rawWidth = roundImageSizeToMultiple(
+      (longSide * ratio.width) / ratio.height,
+    );
   }
   const normalized = normalizeImagePreviewDimensions(rawWidth, rawHeight);
   return {
@@ -597,7 +614,8 @@ const ImageGeneration = () => {
   const [canvasAssetsTotal, setCanvasAssetsTotal] = useState(0);
   const [canvasAssetPage, setCanvasAssetPage] = useState(1);
   const [selectedAssetPreview, setSelectedAssetPreview] = useState(null);
-  const [selectedCanvasImagePreview, setSelectedCanvasImagePreview] = useState(null);
+  const [selectedCanvasImagePreview, setSelectedCanvasImagePreview] =
+    useState(null);
   const [selectedCanvasAssetIds, setSelectedCanvasAssetIds] = useState(
     new Set(),
   );
@@ -614,8 +632,8 @@ const ImageGeneration = () => {
   const [chatContext, setChatContext] = useState(() =>
     getStoredValue(STORAGE_KEYS.CHAT_CONTEXT, DEFAULT_CHAT_CONTEXT_COUNT),
   );
-  const [chatToolsEnabled, setChatToolsEnabled] = useState(() =>
-    getStoredValue(STORAGE_KEYS.CHAT_TOOLS, 'false') === 'true',
+  const [chatToolsEnabled, setChatToolsEnabled] = useState(
+    () => getStoredValue(STORAGE_KEYS.CHAT_TOOLS, 'false') === 'true',
   );
   const [chatAttachments, setChatAttachments] = useState([]);
   const [chatStreaming, setChatStreaming] = useState(false);
@@ -624,7 +642,8 @@ const ImageGeneration = () => {
     useState(false);
   const [chatSessionSettingsSessionId, setChatSessionSettingsSessionId] =
     useState(null);
-  const [chatSessionSettingsDraft, setChatSessionSettingsDraft] = useState(null);
+  const [chatSessionSettingsDraft, setChatSessionSettingsDraft] =
+    useState(null);
   const [chatSessionSettingsSaving, setChatSessionSettingsSaving] =
     useState(false);
   const [canvasSessions, setCanvasSessions] = useState({
@@ -655,6 +674,10 @@ const ImageGeneration = () => {
   const [hoveredCanvasSessionId, setHoveredCanvasSessionId] = useState(null);
   const [hoveredCanvasChatMessageId, setHoveredCanvasChatMessageId] =
     useState(null);
+  const [
+    expandedCanvasReasoningMessageIds,
+    setExpandedCanvasReasoningMessageIds,
+  ] = useState({});
 
   const [selectedSeries, setSelectedSeries] = useState(() =>
     getStoredValue(STORAGE_KEYS.SERIES, ''),
@@ -706,14 +729,12 @@ const ImageGeneration = () => {
     getStoredNumber(STORAGE_KEYS.VIDEO_DURATION, 0),
   );
 
-  const {
-    showImageAspectRatioSelector,
-    showImageResolutionSelector,
-  } = getCanvasImageSelectorVisibility({
-    model: selectedModelData,
-    aspectRatios: availableAspectRatios,
-    resolutions: availableResolutions,
-  });
+  const { showImageAspectRatioSelector, showImageResolutionSelector } =
+    getCanvasImageSelectorVisibility({
+      model: selectedModelData,
+      aspectRatios: availableAspectRatios,
+      resolutions: availableResolutions,
+    });
   const showVideoAspectRatioSelector = videoAvailableAspectRatios.length > 0;
   const showVideoResolutionSelector = videoAvailableResolutions.length > 0;
 
@@ -848,7 +869,8 @@ const ImageGeneration = () => {
   const displayedCanvasMessages =
     canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [];
   const isCurrentCanvasMessageSession = (sessionId) =>
-    String(canvasMessagesSessionIdRef.current || '') === String(sessionId || '');
+    String(canvasMessagesSessionIdRef.current || '') ===
+    String(sessionId || '');
   const updateCurrentCanvasSessionModel = async (mode, modelId) => {
     const normalizedMode = CANVAS_MODES.includes(mode) ? mode : generationMode;
     const sessionId = selectedCanvasSessionIds[normalizedMode];
@@ -859,7 +881,9 @@ const ImageGeneration = () => {
     const currentModel = String(modelId || '').trim();
     setCanvasSessionsForMode(normalizedMode, (prev) =>
       prev.map((item) =>
-        item.id === session.id ? { ...item, current_model: currentModel } : item,
+        item.id === session.id
+          ? { ...item, current_model: currentModel }
+          : item,
       ),
     );
     try {
@@ -891,7 +915,10 @@ const ImageGeneration = () => {
       ),
     );
     try {
-      const res = await API.patch(`/api/canvas/sessions/${session.id}`, updates);
+      const res = await API.patch(
+        `/api/canvas/sessions/${session.id}`,
+        updates,
+      );
       if (res.data.success && res.data.data) {
         updateCanvasSessionInState(res.data.data);
       } else {
@@ -961,6 +988,7 @@ const ImageGeneration = () => {
     setSelectedCanvasMessageId(null);
     setHoveredCanvasChatMessageId(null);
     setHoveredCanvasSessionId(null);
+    setExpandedCanvasReasoningMessageIds({});
   }, [selectedCanvasSessionId, generationMode]);
 
   useEffect(() => {
@@ -1080,7 +1108,7 @@ const ImageGeneration = () => {
           model.status === undefined ||
           model.status === null ||
           model.status === 1,
-    ),
+      ),
     [models],
   );
 
@@ -1091,7 +1119,7 @@ const ImageGeneration = () => {
           model.status === undefined ||
           model.status === null ||
           model.status === 1,
-    ),
+      ),
     [videoModels],
   );
 
@@ -1183,12 +1211,7 @@ const ImageGeneration = () => {
         ? t('当前会话模型，现不可用')
         : t('当前选择的模型，现不可用'),
     );
-  }, [
-    chatModel,
-    chatModelOptionMap,
-    selectedCanvasSession?.current_model,
-    t,
-  ]);
+  }, [chatModel, chatModelOptionMap, selectedCanvasSession?.current_model, t]);
 
   const buildRemoteReferenceFile = (imageUrl) => {
     if (!imageUrl) {
@@ -1429,7 +1452,9 @@ const ImageGeneration = () => {
         setModels(drawingModels);
 
         const seriesList = Array.from(
-          new Set(drawingModels.map((model) => model.model_series).filter(Boolean)),
+          new Set(
+            drawingModels.map((model) => model.model_series).filter(Boolean),
+          ),
         );
         setSelectedSeries((prev) => {
           if (prev === 'all' || (prev && seriesList.includes(prev))) {
@@ -1659,11 +1684,14 @@ const ImageGeneration = () => {
   const loadRecentCanvasSessions = async (options = {}) => {
     const reset = !!options.reset;
     const silent = !!options.silent;
-    const nextOffset = reset ? 0 : Math.max(0, recentCanvasSessions.offset || 0);
+    const nextOffset = reset
+      ? 0
+      : Math.max(0, recentCanvasSessions.offset || 0);
     const requestedLimit = Number.parseInt(options.limit, 10);
-    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
-      ? Math.min(requestedLimit, MAX_CANVAS_SESSION_RECENT_PAGE_SIZE)
-      : DEFAULT_CANVAS_SESSION_RECENT_PAGE_SIZE;
+    const limit =
+      Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, MAX_CANVAS_SESSION_RECENT_PAGE_SIZE)
+        : DEFAULT_CANVAS_SESSION_RECENT_PAGE_SIZE;
     const requestSeq = recentCanvasSessionsRequestSeqRef.current + 1;
     recentCanvasSessionsRequestSeqRef.current = requestSeq;
     setRecentCanvasSessions((prev) => ({
@@ -1850,7 +1878,11 @@ const ImageGeneration = () => {
   };
 
   const appendCanvasMessagesForSession = (sessionId, messages) => {
-    if (!sessionId || !messages?.length || !isCurrentCanvasMessageSession(sessionId)) {
+    if (
+      !sessionId ||
+      !messages?.length ||
+      !isCurrentCanvasMessageSession(sessionId)
+    ) {
       return;
     }
     setCanvasMessages((prev) => [...prev, ...messages]);
@@ -1893,6 +1925,33 @@ const ImageGeneration = () => {
         return (Number(a?.id) || 0) - (Number(b?.id) || 0);
       });
     });
+  };
+
+  const appendCanvasChatDeltaForSession = (
+    sessionId,
+    messageId,
+    delta,
+    reasoningDelta,
+  ) => {
+    if (!sessionId || !messageId || !isCurrentCanvasMessageSession(sessionId)) {
+      return;
+    }
+    if (!delta && !reasoningDelta) {
+      return;
+    }
+    setCanvasMessages((prev) =>
+      prev.map((message) =>
+        message?.id === messageId
+          ? {
+              ...message,
+              prompt: `${String(message?.prompt || '')}${delta || ''}`,
+              reasoning_content: `${String(
+                message?.reasoning_content || '',
+              )}${reasoningDelta || ''}`,
+            }
+          : message,
+      ),
+    );
   };
 
   const replaceCanvasMessagesForSession = (
@@ -2058,9 +2117,7 @@ const ImageGeneration = () => {
       ) {
         setChatModel(String(res.data.data.current_model || ''));
         setChatTemperature(
-          String(
-            res.data.data.chat_temperature ?? DEFAULT_CHAT_TEMPERATURE,
-          ),
+          String(res.data.data.chat_temperature ?? DEFAULT_CHAT_TEMPERATURE),
         );
         setChatContext(
           String(
@@ -2091,9 +2148,12 @@ const ImageGeneration = () => {
     }
     const isRestoring = Number(session.clear_context_message_id) > 0;
     try {
-      const res = await API.patch(`/api/canvas/sessions/${session.id}`, isRestoring
-        ? { clear_context_message_id: 0 }
-        : { clear_context_to_latest: true });
+      const res = await API.patch(
+        `/api/canvas/sessions/${session.id}`,
+        isRestoring
+          ? { clear_context_message_id: 0 }
+          : { clear_context_to_latest: true },
+      );
       if (!res.data.success || !res.data.data) {
         showError(
           res.data.message ||
@@ -2107,7 +2167,8 @@ const ImageGeneration = () => {
       );
     } catch (error) {
       showError(
-        error.message || (isRestoring ? t('恢复上下文失败') : t('清空上下文失败')),
+        error.message ||
+          (isRestoring ? t('恢复上下文失败') : t('清空上下文失败')),
       );
     }
   };
@@ -2600,14 +2661,23 @@ const ImageGeneration = () => {
     }
     setCanvasMessages((prevMessages) =>
       prevMessages.map((message) => {
-        if (!message?.task_id || String(message.task_id) !== String(updatedTask.id)) {
+        if (
+          !message?.task_id ||
+          String(message.task_id) !== String(updatedTask.id)
+        ) {
           return message;
         }
         const messageTaskType = getCanvasMessageTaskType(message);
-        if (mode === CANVAS_MODE_VIDEO && messageTaskType !== 'video_generation') {
+        if (
+          mode === CANVAS_MODE_VIDEO &&
+          messageTaskType !== 'video_generation'
+        ) {
           return message;
         }
-        if (mode === CANVAS_MODE_IMAGE && messageTaskType !== 'image_generation') {
+        if (
+          mode === CANVAS_MODE_IMAGE &&
+          messageTaskType !== 'image_generation'
+        ) {
           return message;
         }
         if (mode === CANVAS_MODE_VIDEO) {
@@ -2678,8 +2748,14 @@ const ImageGeneration = () => {
       });
     };
 
-    addFiles(message.reference_images || message.reference_image, 'message-reference');
-    addFiles(params.reference_images || params.reference_image, 'task-reference');
+    addFiles(
+      message.reference_images || message.reference_image,
+      'message-reference',
+    );
+    addFiles(
+      params.reference_images || params.reference_image,
+      'task-reference',
+    );
     addFiles(
       task?.reference_images || task?.reference_image,
       taskType === 'video_generation' ? 'video-reference' : 'task-reference',
@@ -2707,10 +2783,7 @@ const ImageGeneration = () => {
         src: task.thumbnail_url || task.image_url || '',
         previewSrc: task.image_url || task.thumbnail_url || '',
         error:
-          task.error_message ||
-          task.fail_reason ||
-          message.error_message ||
-          '',
+          task.error_message || task.fail_reason || message.error_message || '',
       };
     }
     if (taskType === 'video_generation') {
@@ -2720,10 +2793,7 @@ const ImageGeneration = () => {
         status: task.status || message.status,
         src: task.thumbnail_url || task.result_url || task.video_url || '',
         error:
-          task.error_message ||
-          task.fail_reason ||
-          message.error_message ||
-          '',
+          task.error_message || task.fail_reason || message.error_message || '',
       };
     }
     return null;
@@ -3031,7 +3101,8 @@ const ImageGeneration = () => {
         ? parsedDecrementTotal
         : fallbackDecrementTotal;
     const selectedTaskRemoved =
-      videoSelectedTask && idSet.has(normalizeComparableId(videoSelectedTask.id));
+      videoSelectedTask &&
+      idSet.has(normalizeComparableId(videoSelectedTask.id));
 
     setVideoTasks((prevTasks) =>
       prevTasks.filter((task) => !idSet.has(normalizeComparableId(task.id))),
@@ -3826,10 +3897,7 @@ const ImageGeneration = () => {
   }, [videoSelectedModel, videoModels]);
 
   useEffect(() => {
-    if (
-      !selectedModelData ||
-      !modelSupportsImageEditing(selectedModelData)
-    ) {
+    if (!selectedModelData || !modelSupportsImageEditing(selectedModelData)) {
       setReferenceImages([]);
       setMaskImage(null);
     }
@@ -4030,7 +4098,10 @@ const ImageGeneration = () => {
           }))
           .filter((file) => file.url);
       }
-      if (modelSupportsMaskEditing(selectedModelData) && maskImage?.fileInstance) {
+      if (
+        modelSupportsMaskEditing(selectedModelData) &&
+        maskImage?.fileInstance
+      ) {
         params.mask = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = (e) => resolve(e.target.result);
@@ -4051,46 +4122,51 @@ const ImageGeneration = () => {
         client_request_id: clientRequestId,
       };
       const submittedAt = Math.floor(Date.now() / 1000);
-      replaceCanvasMessagesForSession(canvasSession.id, clientRequestId, [
-        {
-          id: `${clientRequestId}-user`,
-          role: 'user',
-          prompt: inspiration.trim(),
-          created_time: submittedAt,
-          client_request_id: clientRequestId,
-          canvas_aspect_ratio: aspectRatio || '',
-        },
-        ...Array.from({ length: taskCount }, (_, index) => ({
-          id:
-            index === 0
-              ? `${clientRequestId}-assistant`
-              : `${clientRequestId}-assistant-${index + 1}`,
-          role: 'assistant',
-          prompt: inspiration.trim(),
-          status: 'generating',
-          task_type: 'image_generation',
-          created_time: submittedAt,
-          client_request_id: clientRequestId,
-          canvas_aspect_ratio: aspectRatio || '',
-          reference_images: canvasReferenceFiles,
-          image_task: {
+      replaceCanvasMessagesForSession(
+        canvasSession.id,
+        clientRequestId,
+        [
+          {
+            id: `${clientRequestId}-user`,
+            role: 'user',
+            prompt: inspiration.trim(),
+            created_time: submittedAt,
+            client_request_id: clientRequestId,
+            canvas_aspect_ratio: aspectRatio || '',
+          },
+          ...Array.from({ length: taskCount }, (_, index) => ({
             id:
               index === 0
-                ? `pending-${clientRequestId}`
-                : `pending-${clientRequestId}-${index + 1}`,
-            status: 'generating',
+                ? `${clientRequestId}-assistant`
+                : `${clientRequestId}-assistant-${index + 1}`,
+            role: 'assistant',
             prompt: inspiration.trim(),
-            model_id: selectedModel,
-            selected_group: selectedGroup,
-            aspect_ratio: aspectRatio || '',
-            thumbnail_url: '',
-            image_url: '',
-            error_message: '',
-          },
-        })),
-      ], {
-        canvasAspectRatio: aspectRatio || '',
-      });
+            status: 'generating',
+            task_type: 'image_generation',
+            created_time: submittedAt,
+            client_request_id: clientRequestId,
+            canvas_aspect_ratio: aspectRatio || '',
+            reference_images: canvasReferenceFiles,
+            image_task: {
+              id:
+                index === 0
+                  ? `pending-${clientRequestId}`
+                  : `pending-${clientRequestId}-${index + 1}`,
+              status: 'generating',
+              prompt: inspiration.trim(),
+              model_id: selectedModel,
+              selected_group: selectedGroup,
+              aspect_ratio: aspectRatio || '',
+              thumbnail_url: '',
+              image_url: '',
+              error_message: '',
+            },
+          })),
+        ],
+        {
+          canvasAspectRatio: aspectRatio || '',
+        },
+      );
       const results = await Promise.allSettled(
         Array.from({ length: taskCount }, () =>
           API.post(
@@ -4129,7 +4205,10 @@ const ImageGeneration = () => {
         replaceCanvasMessagesForSession(
           canvasSession.id,
           clientRequestId,
-          attachPendingReferencesToMessages(createdMessages, canvasReferenceFiles),
+          attachPendingReferencesToMessages(
+            createdMessages,
+            canvasReferenceFiles,
+          ),
           { canvasAspectRatio: aspectRatio || '' },
         );
         refreshRecentCanvasSessions({ silent: true });
@@ -4344,7 +4423,10 @@ const ImageGeneration = () => {
       replaceCanvasMessagesForSession(
         canvasSession.id,
         clientRequestId,
-        attachPendingReferencesToMessages(createdMessages, canvasReferenceFiles),
+        attachPendingReferencesToMessages(
+          createdMessages,
+          canvasReferenceFiles,
+        ),
         { canvasAspectRatio: videoAspectRatio || '' },
       );
       refreshRecentCanvasSessions({ silent: true });
@@ -4496,7 +4578,8 @@ const ImageGeneration = () => {
   };
 
   const getAssetSizeText = (asset) => {
-    const { params, metadata, metadataDetails } = getAssetMetadataSources(asset);
+    const { params, metadata, metadataDetails } =
+      getAssetMetadataSources(asset);
     const metadataSources = [metadata, metadataDetails];
     const allSources = [params, metadata, metadataDetails];
     const width = readAssetPositiveNumber(metadataSources, [
@@ -4532,7 +4615,10 @@ const ImageGeneration = () => {
     return (
       joinAssetMetaParts([
         readAssetStringValue(allSources, ['aspect_ratio', 'aspectRatio']),
-        readAssetStringValue([params], ['resolution', 'image_size', 'imageSize']),
+        readAssetStringValue(
+          [params],
+          ['resolution', 'image_size', 'imageSize'],
+        ),
         readAssetStringValue(allSources, [
           'size',
           'output_size',
@@ -4560,7 +4646,9 @@ const ImageGeneration = () => {
   };
 
   const handleCanvasAssetSelectAll = (checked) => {
-    setSelectedCanvasAssetIds(checked ? new Set(currentCanvasAssetIds) : new Set());
+    setSelectedCanvasAssetIds(
+      checked ? new Set(currentCanvasAssetIds) : new Set(),
+    );
   };
 
   const removeDeletedCanvasAssetsFromState = (deletedAssets) => {
@@ -4843,7 +4931,9 @@ const ImageGeneration = () => {
         }
 
         if (event.event === 'canvas.message.created') {
-          const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+          const messages = Array.isArray(payload?.messages)
+            ? payload.messages
+            : [];
           const assistantMessage = messages.find(
             (message) => message?.role === 'assistant',
           );
@@ -4863,6 +4953,14 @@ const ImageGeneration = () => {
         }
 
         if (event.event === 'canvas.message.delta') {
+          if (!payload?.message?.id && chatStreamingMessageIdRef.current) {
+            appendCanvasChatDeltaForSession(
+              activeSessionId,
+              chatStreamingMessageIdRef.current,
+              payload?.delta || '',
+              payload?.reasoning_delta || '',
+            );
+          }
           bumpChatStreamRenderVersion();
           return;
         }
@@ -4875,9 +4973,7 @@ const ImageGeneration = () => {
 
         if (event.event === 'canvas.message.error') {
           streamErrorMessage =
-            payload?.error ||
-            payload?.message?.error_message ||
-            t('发送失败');
+            payload?.error || payload?.message?.error_message || t('发送失败');
           bumpChatStreamRenderVersion();
         }
       };
@@ -5686,7 +5782,8 @@ const ImageGeneration = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      transition: 'opacity 0.2s, background 0.2s, border-color 0.2s, color 0.2s',
+      transition:
+        'opacity 0.2s, background 0.2s, border-color 0.2s, color 0.2s',
     },
     generateIconBtnEmbedded: {
       width: 40,
@@ -5700,7 +5797,8 @@ const ImageGeneration = () => {
       justifyContent: 'center',
       flexShrink: 0,
       marginBottom: 4,
-      transition: 'opacity 0.2s, background 0.2s, border-color 0.2s, color 0.2s',
+      transition:
+        'opacity 0.2s, background 0.2s, border-color 0.2s, color 0.2s',
     },
     generateStopIcon: {
       width: 12,
@@ -5942,6 +6040,41 @@ const ImageGeneration = () => {
       borderRadius: 14,
       padding: isMobile ? '10px 10px 8px' : '10px 12px 8px',
     },
+    canvasChatReasoningWrap: {
+      width: '100%',
+      borderRadius: 12,
+      border: '1px solid rgba(15, 23, 42, 0.08)',
+      background: 'rgba(248, 250, 252, 0.9)',
+      overflow: 'hidden',
+    },
+    canvasChatReasoningToggle: {
+      width: '100%',
+      border: 'none',
+      background: 'transparent',
+      padding: isMobile ? '10px 12px' : '10px 14px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      cursor: 'pointer',
+      color: 'var(--semi-color-text-1)',
+    },
+    canvasChatReasoningToggleText: {
+      fontSize: 13,
+      fontWeight: 600,
+      color: 'inherit',
+    },
+    canvasChatReasoningPanel: {
+      borderTop: '1px solid rgba(15, 23, 42, 0.08)',
+      padding: isMobile ? '10px 12px 12px' : '10px 14px 14px',
+      background: 'rgba(255, 255, 255, 0.72)',
+    },
+    canvasChatReasoningMarkdown: {
+      width: '100%',
+      color: 'var(--semi-color-text-1)',
+      fontSize: 13,
+      lineHeight: 1.7,
+    },
     canvasChatMarkdown: {
       width: '100%',
       color: 'var(--semi-color-text-1)',
@@ -6084,10 +6217,9 @@ const ImageGeneration = () => {
       width: '100%',
       maxWidth: isMobile ? '100%' : 980,
       display: 'grid',
-      gridTemplateColumns:
-        isMobile
-          ? 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))'
-          : 'repeat(auto-fit, minmax(220px, 1fr))',
+      gridTemplateColumns: isMobile
+        ? 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))'
+        : 'repeat(auto-fit, minmax(220px, 1fr))',
       gap: isMobile ? 8 : 6,
       alignItems: 'start',
       alignSelf: 'flex-start',
@@ -6295,7 +6427,8 @@ const ImageGeneration = () => {
       flexDirection: 'column',
       cursor: 'pointer',
       minWidth: 0,
-      transition: 'border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease',
+      transition:
+        'border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease',
     },
     assetSelect: {
       position: 'absolute',
@@ -6342,7 +6475,9 @@ const ImageGeneration = () => {
       width: 'min(100%, 980px)',
       maxHeight: 'calc(100vh - 48px)',
       display: 'grid',
-      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.35fr) minmax(280px, 0.65fr)',
+      gridTemplateColumns: isMobile
+        ? '1fr'
+        : 'minmax(0, 1.35fr) minmax(280px, 0.65fr)',
       gap: 0,
       overflow: 'hidden',
       borderRadius: 10,
@@ -6428,9 +6563,7 @@ const ImageGeneration = () => {
       VIDEO_CAPABILITY_TEXT_TO_VIDEO,
     );
   const canGenerate =
-    !!selectedModel &&
-    !!selectedModelData &&
-    imageUiState.canGenerate;
+    !!selectedModel && !!selectedModelData && imageUiState.canGenerate;
 
   const canGenerateVideo =
     !!videoSelectedModel &&
@@ -6441,9 +6574,15 @@ const ImageGeneration = () => {
       (!videoReferenceImage && videoSelectedModelSupportsTextToVideo));
 
   const renderReferenceThumb = (file, onRemove) => (
-    <div key={file.uid || file.name || file.url} style={styles.referenceImageContainer}>
+    <div
+      key={file.uid || file.name || file.url}
+      style={styles.referenceImageContainer}
+    >
       <img
-        src={file.url || (file.fileInstance && URL.createObjectURL(file.fileInstance))}
+        src={
+          file.url ||
+          (file.fileInstance && URL.createObjectURL(file.fileInstance))
+        }
         alt=''
         style={styles.referenceImageThumb}
       />
@@ -6523,7 +6662,12 @@ const ImageGeneration = () => {
           </div>
         )}
         {extraContent ? (
-          <div style={{ marginTop: 6, borderTop: '1px solid rgba(148, 163, 184, 0.16)' }}>
+          <div
+            style={{
+              marginTop: 6,
+              borderTop: '1px solid rgba(148, 163, 184, 0.16)',
+            }}
+          >
             {extraContent}
           </div>
         ) : null}
@@ -6569,12 +6713,16 @@ const ImageGeneration = () => {
   };
 
   const getAspectRatioDisplay = (value) =>
-    String(value || '').trim().toLowerCase() === 'auto'
+    String(value || '')
+      .trim()
+      .toLowerCase() === 'auto'
       ? t('智能')
       : String(value || '');
 
   const getAspectRatioSummaryDisplay = (value) =>
-    String(value || '').trim().toLowerCase() === 'auto'
+    String(value || '')
+      .trim()
+      .toLowerCase() === 'auto'
       ? t('智能比例')
       : String(value || '');
 
@@ -6739,7 +6887,8 @@ const ImageGeneration = () => {
     if (hasQuantitySelector && quantityValue > 0) {
       displayParts.push(`${t('数量')} ${quantityValue}`);
     }
-    const displayValue = displayParts.length > 0 ? displayParts.join(' | ') : t('请选择');
+    const displayValue =
+      displayParts.length > 0 ? displayParts.join(' | ') : t('请选择');
     const buttonLabel =
       displayValue && displayValue !== t('请选择')
         ? `${ariaLabel} ${displayValue}`
@@ -6806,11 +6955,15 @@ const ImageGeneration = () => {
           <div style={styles.imageParamSizeRow}>
             <div style={styles.imageParamSizeField}>
               <span style={styles.imageParamSizeLabel}>W</span>
-              <span style={styles.imageParamSizeValue}>{dimensionPreview.width}</span>
+              <span style={styles.imageParamSizeValue}>
+                {dimensionPreview.width}
+              </span>
             </div>
             <div style={styles.imageParamSizeField}>
               <span style={styles.imageParamSizeLabel}>H</span>
-              <span style={styles.imageParamSizeValue}>{dimensionPreview.height}</span>
+              <span style={styles.imageParamSizeValue}>
+                {dimensionPreview.height}
+              </span>
             </div>
           </div>
         </div>
@@ -6894,7 +7047,9 @@ const ImageGeneration = () => {
       ? `${t('选择视频模型')} ${activeModelLabel}`
       : `${t('选择图片模型')} ${activeModelLabel}`;
     const handleSelect = (requestModel) => {
-      const model = modelOptions.find((item) => item.request_model === requestModel);
+      const model = modelOptions.find(
+        (item) => item.request_model === requestModel,
+      );
       if (!model) {
         return;
       }
@@ -6905,7 +7060,9 @@ const ImageGeneration = () => {
       selectImageModelFromCatalog(model);
     };
     const menu = (
-      <Dropdown.Menu style={{ ...styles.darkMenu, minWidth: isMobile ? 280 : 320 }}>
+      <Dropdown.Menu
+        style={{ ...styles.darkMenu, minWidth: isMobile ? 280 : 320 }}
+      >
         {modelOptions.length > 0 ? (
           modelOptions.map((model) => {
             const selected = model.request_model === selectedValue;
@@ -6944,8 +7101,15 @@ const ImageGeneration = () => {
             );
           })
         ) : (
-          <div style={{ ...styles.darkMenuItem, color: 'rgba(226, 232, 240, 0.66)' }}>
-            {isVideoMode ? t('当前没有可用视频模型') : t('当前分组下没有可用图片模型')}
+          <div
+            style={{
+              ...styles.darkMenuItem,
+              color: 'rgba(226, 232, 240, 0.66)',
+            }}
+          >
+            {isVideoMode
+              ? t('当前没有可用视频模型')
+              : t('当前分组下没有可用图片模型')}
           </div>
         )}
       </Dropdown.Menu>
@@ -6957,9 +7121,7 @@ const ImageGeneration = () => {
         trigger='click'
         position='bottomLeft'
         render={menu}
-        visible={
-          modelOptions.length > 0 && activeDropdownKey === dropdownKey
-        }
+        visible={modelOptions.length > 0 && activeDropdownKey === dropdownKey}
         onVisibleChange={(visible) => {
           setActiveDropdownKey((current) =>
             visible ? dropdownKey : current === dropdownKey ? '' : current,
@@ -6970,16 +7132,27 @@ const ImageGeneration = () => {
           type='button'
           aria-label={buttonLabel}
           title={buttonLabel}
-          data-canvas-model-selector={isVideoMode ? CANVAS_MODE_VIDEO : CANVAS_MODE_IMAGE}
+          data-canvas-model-selector={
+            isVideoMode ? CANVAS_MODE_VIDEO : CANVAS_MODE_IMAGE
+          }
           style={{
             ...styles.pillButton,
             ...(iconOnly ? styles.pillButtonIconOnly : null),
           }}
           disabled={modelOptions.length === 0}
         >
-          {isVideoMode ? <IconVideo size='small' /> : <IconImage size='small' />}
+          {isVideoMode ? (
+            <IconVideo size='small' />
+          ) : (
+            <IconImage size='small' />
+          )}
           {!iconOnly ? (
-            <span style={{ ...styles.pillButtonLabel, maxWidth: isMobile ? 140 : 260 }}>
+            <span
+              style={{
+                ...styles.pillButtonLabel,
+                maxWidth: isMobile ? 140 : 260,
+              }}
+            >
               {`${t('模型')} ${activeModelLabel}`}
             </span>
           ) : null}
@@ -6993,7 +7166,9 @@ const ImageGeneration = () => {
     <div style={{ padding: '28px 10px' }}>
       <Empty title={title} description={description} />
       {action ? (
-        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
+        <div
+          style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}
+        >
           {action}
         </div>
       ) : null}
@@ -7135,9 +7310,12 @@ const ImageGeneration = () => {
   };
 
   const renderCanvasSessionList = () => (
-    <Spin spinning={recentCanvasSessions.initialLoading || deletingCanvasSession}>
+    <Spin
+      spinning={recentCanvasSessions.initialLoading || deletingCanvasSession}
+    >
       <div style={styles.taskList} onScroll={handleRecentCanvasSessionsScroll}>
-        {recentCanvasSessions.error && recentCanvasSessions.items.length === 0 ? (
+        {recentCanvasSessions.error &&
+        recentCanvasSessions.items.length === 0 ? (
           renderSidebarEmpty(
             t('会话加载失败'),
             recentCanvasSessions.error,
@@ -7229,9 +7407,7 @@ const ImageGeneration = () => {
                   size='small'
                   type='tertiary'
                   icon={<IconRefresh />}
-                  onClick={() =>
-                    refreshRecentCanvasSessions({ silent: false })
-                  }
+                  onClick={() => refreshRecentCanvasSessions({ silent: false })}
                 >
                   {t('重试')}
                 </Button>
@@ -7357,7 +7533,13 @@ const ImageGeneration = () => {
         return null;
       }
       return (
-        <div style={{ ...styles.tasksGrid, gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', padding: 0 }}>
+        <div
+          style={{
+            ...styles.tasksGrid,
+            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+            padding: 0,
+          }}
+        >
           {videoTasks.map((task) => (
             <VideoGenerationTaskCard
               key={task.id}
@@ -7374,7 +7556,13 @@ const ImageGeneration = () => {
       return null;
     }
     return (
-      <div style={{ ...styles.tasksGrid, gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', padding: 0 }}>
+      <div
+        style={{
+          ...styles.tasksGrid,
+          gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+          padding: 0,
+        }}
+      >
         {tasks.map((task) => (
           <ImageGenerationTaskCard
             key={task.id}
@@ -7389,7 +7577,8 @@ const ImageGeneration = () => {
   };
 
   const renderChatWorkspace = () => {
-    const contextCleared = Number(selectedCanvasSession?.clear_context_message_id) > 0;
+    const contextCleared =
+      Number(selectedCanvasSession?.clear_context_message_id) > 0;
     return (
       <div style={styles.chatStream}>
         {contextCleared ? (
@@ -7420,7 +7609,11 @@ const ImageGeneration = () => {
       style={styles.canvasReferenceThumbWrap}
     >
       <img src={file.url} alt='' style={styles.canvasReferenceThumb} />
-      <Text type='tertiary' size='small' style={{ display: 'block', marginTop: 4 }}>
+      <Text
+        type='tertiary'
+        size='small'
+        style={{ display: 'block', marginTop: 4 }}
+      >
         {fallbackLabel}
       </Text>
     </div>
@@ -7445,7 +7638,9 @@ const ImageGeneration = () => {
 
     setCanvasMessages((prev) =>
       prev.map((item) =>
-        item.id === message.id ? mergeCanvasMessageTaskDetail(item, detail) : item,
+        item.id === message.id
+          ? mergeCanvasMessageTaskDetail(item, detail)
+          : item,
       ),
     );
     setSelectedCanvasImagePreview({ src: detailSrc });
@@ -7465,8 +7660,21 @@ const ImageGeneration = () => {
     return '1 / 1';
   };
 
+  const getCanvasChatMessageDisplay = (message) =>
+    extractCanvasChatReasoning(message);
+
   const getCanvasChatMessageText = (message) =>
-    String(message?.prompt || '').trim();
+    getCanvasChatMessageDisplay(message).content;
+
+  const toggleCanvasReasoningExpansion = (messageId) => {
+    if (!messageId) {
+      return;
+    }
+    setExpandedCanvasReasoningMessageIds((prev) => ({
+      ...prev,
+      [messageId]: !prev[messageId],
+    }));
+  };
 
   const getCanvasChatRetryPrompt = (message) => {
     const requestId = String(message?.client_request_id || '').trim();
@@ -7492,7 +7700,9 @@ const ImageGeneration = () => {
       if (displayedCanvasMessages[index]?.role !== 'user') {
         continue;
       }
-      const prompt = String(displayedCanvasMessages[index]?.prompt || '').trim();
+      const prompt = String(
+        displayedCanvasMessages[index]?.prompt || '',
+      ).trim();
       if (prompt) {
         return prompt;
       }
@@ -7551,7 +7761,11 @@ const ImageGeneration = () => {
         <Text
           type={overlay ? undefined : 'danger'}
           size={size}
-          style={overlay ? styles.canvasMediaStatusOverlayText : styles.canvasErrorText}
+          style={
+            overlay
+              ? styles.canvasMediaStatusOverlayText
+              : styles.canvasErrorText
+          }
         >
           {text}
         </Text>
@@ -7623,14 +7837,16 @@ const ImageGeneration = () => {
           <div
             style={{
               ...styles.canvasMediaStatusOverlay,
-              ...(isFailed
-                ? styles.canvasMediaStatusOverlayInteractive
-                : null),
+              ...(isFailed ? styles.canvasMediaStatusOverlayInteractive : null),
               ...(isFailed ? styles.canvasMediaStatusOverlayError : null),
             }}
           >
             <div style={styles.canvasMediaStatusBodyOverlay}>
-              {isQueued || isFailed ? <IconClock size='small' /> : <Spin size='small' />}
+              {isQueued || isFailed ? (
+                <IconClock size='small' />
+              ) : (
+                <Spin size='small' />
+              )}
               {isFailed ? (
                 renderCanvasErrorBlock(errorText, {
                   overlay: true,
@@ -7823,8 +8039,14 @@ const ImageGeneration = () => {
       }
       return (
         <div style={styles.messagePending}>
-          {media.status === 'generating' ? <Spin size='small' /> : <IconClock />}
-          <span>{media.status === 'generating' ? t('生成中') : t('排队中')}</span>
+          {media.status === 'generating' ? (
+            <Spin size='small' />
+          ) : (
+            <IconClock />
+          )}
+          <span>
+            {media.status === 'generating' ? t('生成中') : t('排队中')}
+          </span>
         </div>
       );
     }
@@ -7852,8 +8074,14 @@ const ImageGeneration = () => {
       }
       return (
         <div style={styles.messagePending}>
-          {media.status === 'in_progress' ? <Spin size='small' /> : <IconPlayCircle />}
-          <span>{media.status === 'in_progress' ? t('生成中') : t('排队中')}</span>
+          {media.status === 'in_progress' ? (
+            <Spin size='small' />
+          ) : (
+            <IconPlayCircle />
+          )}
+          <span>
+            {media.status === 'in_progress' ? t('生成中') : t('排队中')}
+          </span>
         </div>
       );
     }
@@ -7881,20 +8109,24 @@ const ImageGeneration = () => {
       }
       setCanvasMessages((prev) =>
         prev.map((item) =>
-          item.id === message.id ? mergeCanvasMessageTaskDetail(item, detail) : item,
+          item.id === message.id
+            ? mergeCanvasMessageTaskDetail(item, detail)
+            : item,
         ),
       );
     };
 
     if (isChatMode) {
       const chatStatus = String(message?.status || '');
-      const assistantText = getCanvasChatMessageText(message);
+      const assistantDisplay = getCanvasChatMessageDisplay(message);
+      const assistantText = assistantDisplay.content;
+      const assistantReasoning = assistantDisplay.reasoningContent;
+      const hasAssistantReasoning = assistantDisplay.hasReasoning;
+      const reasoningExpanded = !!expandedCanvasReasoningMessageIds[message.id];
       const retryPrompt = isUser ? '' : getCanvasChatRetryPrompt(message);
       const actionVisible =
         !isUser &&
-        (isMobile ||
-          hoveredCanvasChatMessageId === message.id ||
-          isSelected);
+        (isMobile || hoveredCanvasChatMessageId === message.id || isSelected);
       return (
         <div
           key={message.id}
@@ -7941,9 +8173,49 @@ const ImageGeneration = () => {
             <div
               style={{
                 ...styles.canvasChatAssistantContent,
-                ...(isSelected ? styles.canvasChatAssistantContentSelected : null),
+                ...(isSelected
+                  ? styles.canvasChatAssistantContentSelected
+                  : null),
               }}
             >
+              {hasAssistantReasoning ? (
+                <div style={styles.canvasChatReasoningWrap}>
+                  <button
+                    type='button'
+                    aria-label={
+                      reasoningExpanded ? t('收起思考过程') : t('展开思考过程')
+                    }
+                    style={styles.canvasChatReasoningToggle}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleCanvasReasoningExpansion(message.id);
+                    }}
+                  >
+                    <span style={styles.canvasChatReasoningToggleText}>
+                      {chatStatus === 'generating'
+                        ? t('思考中...')
+                        : t('思考过程')}
+                    </span>
+                    <IconChevronDown
+                      style={{
+                        transform: reasoningExpanded
+                          ? 'rotate(0deg)'
+                          : 'rotate(-90deg)',
+                        transition: 'transform 0.16s ease',
+                      }}
+                    />
+                  </button>
+                  {reasoningExpanded ? (
+                    <div style={styles.canvasChatReasoningPanel}>
+                      <MarkdownRenderer
+                        content={assistantReasoning}
+                        className='canvas-chat-markdown'
+                        style={styles.canvasChatReasoningMarkdown}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {assistantText ? (
                 <MarkdownRenderer
                   content={assistantText}
@@ -7960,7 +8232,11 @@ const ImageGeneration = () => {
                   {t('已停止')}
                 </Text>
               ) : chatStatus === 'failed' ? (
-                <Text type='danger' size='small' style={styles.canvasChatErrorText}>
+                <Text
+                  type='danger'
+                  size='small'
+                  style={styles.canvasChatErrorText}
+                >
                   {message.error_message || t('发送失败')}
                 </Text>
               ) : null}
@@ -7983,7 +8259,11 @@ const ImageGeneration = () => {
                 </Text>
               ) : null}
               {assistantText && chatStatus === 'failed' ? (
-                <Text type='danger' size='small' style={styles.canvasChatErrorText}>
+                <Text
+                  type='danger'
+                  size='small'
+                  style={styles.canvasChatErrorText}
+                >
                   {message.error_message}
                 </Text>
               ) : null}
@@ -8094,7 +8374,9 @@ const ImageGeneration = () => {
     if (canvasMessagesLoading) {
       return (
         <div style={styles.canvasStreamEmpty}>
-          <div style={{ padding: 24, display: 'flex', justifyContent: 'center' }}>
+          <div
+            style={{ padding: 24, display: 'flex', justifyContent: 'center' }}
+          >
             <Spin />
           </div>
         </div>
@@ -8106,7 +8388,10 @@ const ImageGeneration = () => {
           {renderSidebarEmpty(
             t('消息加载失败'),
             canvasMessagesError,
-            <Button size='small' onClick={() => loadCanvasMessages(selectedCanvasSession.id)}>
+            <Button
+              size='small'
+              onClick={() => loadCanvasMessages(selectedCanvasSession.id)}
+            >
               {t('重试')}
             </Button>,
           )}
@@ -8149,24 +8434,24 @@ const ImageGeneration = () => {
     ];
     const activeOption =
       options.find((option) => option.value === generationMode) || options[0];
-    return (
-      renderPillDropdown({
-        key: 'composer-mode',
-        label: '',
-        icon: activeOption.icon,
-        value: generationMode,
-        displayValue: activeOption.label,
-        onChange: handleModeChange,
-        options,
-      })
-    );
+    return renderPillDropdown({
+      key: 'composer-mode',
+      label: '',
+      icon: activeOption.icon,
+      value: generationMode,
+      displayValue: activeOption.label,
+      onChange: handleModeChange,
+      options,
+    });
   };
 
   const renderComposer = () => {
     const isChatMode = generationMode === CANVAS_MODE_CHAT;
     const isVideoMode = generationMode === CANVAS_MODE_VIDEO;
     const isImageMode = generationMode === CANVAS_MODE_IMAGE;
-    const activeModel = isVideoMode ? videoSelectedModelData : selectedModelData;
+    const activeModel = isVideoMode
+      ? videoSelectedModelData
+      : selectedModelData;
     const activeChatModelLabel = activeChatModelOption
       ? getChatModelDisplayText(activeChatModelOption)
       : chatModel || t('请选择模型');
@@ -8275,27 +8560,26 @@ const ImageGeneration = () => {
     const imageComposerParameters = [
       renderModelDropdown(false, activeModelLabel),
       renderImageParametersDropdown(),
-      selectedModelSupportsMaskEditing &&
-        referenceImages.length > 0 && (
-          <button
-            key='image-advanced'
-            type='button'
-            aria-label={t('高级')}
-            title={t('高级')}
-            style={{
-              ...styles.pillButton,
-              ...(isMobile ? styles.pillButtonIconOnly : null),
-              ...(composerAdvancedVisible
-                ? styles.pillButtonActive
-                : styles.pillButtonMuted),
-              cursor: 'pointer',
-            }}
-            onClick={() => setComposerAdvancedVisible((current) => !current)}
-          >
-            <IconSetting size='small' />
-            {!isMobile ? <span>{t('高级')}</span> : null}
-          </button>
-        ),
+      selectedModelSupportsMaskEditing && referenceImages.length > 0 && (
+        <button
+          key='image-advanced'
+          type='button'
+          aria-label={t('高级')}
+          title={t('高级')}
+          style={{
+            ...styles.pillButton,
+            ...(isMobile ? styles.pillButtonIconOnly : null),
+            ...(composerAdvancedVisible
+              ? styles.pillButtonActive
+              : styles.pillButtonMuted),
+            cursor: 'pointer',
+          }}
+          onClick={() => setComposerAdvancedVisible((current) => !current)}
+        >
+          <IconSetting size='small' />
+          {!isMobile ? <span>{t('高级')}</span> : null}
+        </button>
+      ),
     ].filter(Boolean);
     const videoComposerParameters = [
       renderModelDropdown(true, activeModelLabel),
@@ -8307,10 +8591,12 @@ const ImageGeneration = () => {
         value: videoDuration,
         displayValue: videoDuration ? `${videoDuration}s` : '',
         onChange: setVideoDuration,
-        options: (videoSelectedModelData?.duration_options || []).map((item) => ({
-          value: item,
-          label: `${item}s`,
-        })),
+        options: (videoSelectedModelData?.duration_options || []).map(
+          (item) => ({
+            value: item,
+            label: `${item}s`,
+          }),
+        ),
         disabled: !videoSelectedModelData?.duration_options?.length,
       }),
     ].filter(Boolean);
@@ -8392,7 +8678,11 @@ const ImageGeneration = () => {
                 placeholder={placeholder}
                 value={activePrompt}
                 onChange={
-                  isChatMode ? setChatPrompt : isVideoMode ? setVideoPrompt : setInspiration
+                  isChatMode
+                    ? setChatPrompt
+                    : isVideoMode
+                      ? setVideoPrompt
+                      : setInspiration
                 }
                 onKeyDown={handleComposerKeyDown}
                 onCompositionStart={() => {
@@ -8421,12 +8711,14 @@ const ImageGeneration = () => {
                   ...styles.generateIconBtnEmbedded,
                   opacity: submitDisabled ? 0.55 : 1,
                   pointerEvents: submitDisabled ? 'none' : 'auto',
-                  background: promptHasContent || (isChatMode && chatStreaming)
-                    ? 'var(--semi-color-primary)'
-                    : 'var(--semi-color-fill-0)',
-                  borderColor: promptHasContent || (isChatMode && chatStreaming)
-                    ? 'var(--semi-color-primary)'
-                    : 'var(--semi-color-border)',
+                  background:
+                    promptHasContent || (isChatMode && chatStreaming)
+                      ? 'var(--semi-color-primary)'
+                      : 'var(--semi-color-fill-0)',
+                  borderColor:
+                    promptHasContent || (isChatMode && chatStreaming)
+                      ? 'var(--semi-color-primary)'
+                      : 'var(--semi-color-border)',
                   color:
                     promptHasContent || (isChatMode && chatStreaming)
                       ? '#fff'
@@ -8448,7 +8740,9 @@ const ImageGeneration = () => {
             <div style={styles.promptControls}>
               <div style={styles.promptControlsLeft}>
                 {renderComposerModeSwitch()}
-                <div style={styles.composerParameterRow}>{activeParameters}</div>
+                <div style={styles.composerParameterRow}>
+                  {activeParameters}
+                </div>
               </div>
             </div>
 
@@ -8473,8 +8767,17 @@ const ImageGeneration = () => {
                 >
                   {t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
                 </Text>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  {maskImage ? renderReferenceThumb(maskImage, handleMaskRemove) : null}
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                  }}
+                >
+                  {maskImage
+                    ? renderReferenceThumb(maskImage, handleMaskRemove)
+                    : null}
                   <Upload
                     action=''
                     accept='image/*'
@@ -8490,7 +8793,9 @@ const ImageGeneration = () => {
                         ...styles.addImageBtn,
                         opacity: referenceImages.length === 0 ? 0.5 : 1,
                         cursor:
-                          referenceImages.length === 0 ? 'not-allowed' : 'pointer',
+                          referenceImages.length === 0
+                            ? 'not-allowed'
+                            : 'pointer',
                       }}
                     >
                       <IconSetting size='large' />
@@ -8531,7 +8836,14 @@ const ImageGeneration = () => {
         {imageUrl ? (
           <img src={imageUrl} alt='' style={styles.assetThumb} />
         ) : (
-          <div style={{ ...styles.assetThumb, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div
+            style={{
+              ...styles.assetThumb,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
             <IconImage size='large' />
           </div>
         )}
@@ -8611,17 +8923,19 @@ const ImageGeneration = () => {
         >
           <div style={styles.assetPreviewImagePane}>
             {imageUrl ? (
-              <img
-                src={imageUrl}
-                alt=''
-                style={styles.assetPreviewImage}
-              />
+              <img src={imageUrl} alt='' style={styles.assetPreviewImage} />
             ) : (
               <IconImage size='extra-large' />
             )}
           </div>
           <div style={styles.assetPreviewInfo}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 12,
+              }}
+            >
               <div style={{ minWidth: 0 }}>
                 <Text strong ellipsis={{ rows: 2 }}>
                   {getAssetDisplayName(selectedAssetPreview)}
@@ -8717,7 +9031,14 @@ const ImageGeneration = () => {
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: 8,
+              flexWrap: 'wrap',
+            }}
+          >
             <Text type='tertiary' size='small'>
               {t('资产总数')}：{canvasAssetsTotal}
             </Text>
@@ -8729,7 +9050,15 @@ const ImageGeneration = () => {
               {t('刷新')}
             </Button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              flexWrap: 'wrap',
+            }}
+          >
             <Checkbox
               checked={allCurrentCanvasAssetsSelected}
               indeterminate={partiallyCurrentCanvasAssetsSelected}
@@ -8742,7 +9071,14 @@ const ImageGeneration = () => {
                 ? t('取消选择当前页')
                 : t('选择当前页')}
             </Checkbox>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                flexWrap: 'wrap',
+              }}
+            >
               <Tag color={selectedCanvasAssetCount > 0 ? 'blue' : 'grey'}>
                 {t('已选 {{count}} 项', { count: selectedCanvasAssetCount })}
               </Tag>
@@ -8783,9 +9119,14 @@ const ImageGeneration = () => {
               </Button>,
             )
           ) : canvasAssets.length === 0 ? (
-            renderSidebarEmpty(t('暂无图片资产'), t('完成图片生成后会出现在这里'))
+            renderSidebarEmpty(
+              t('暂无图片资产'),
+              t('完成图片生成后会出现在这里'),
+            )
           ) : (
-            <div style={styles.assetGrid}>{canvasAssets.map(renderAssetCard)}</div>
+            <div style={styles.assetGrid}>
+              {canvasAssets.map(renderAssetCard)}
+            </div>
           )}
         </Spin>
         <div style={styles.drawerFooterPager}>
@@ -8845,12 +9186,21 @@ const ImageGeneration = () => {
                 disabled: item.usable === false,
               }))}
               onChange={(value) =>
-                handleCanvasChatSessionSettingsField('model', String(value || ''))
+                handleCanvasChatSessionSettingsField(
+                  'model',
+                  String(value || ''),
+                )
               }
               placeholder={t('请选择模型')}
             />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+              gap: 12,
+            }}
+          >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <Text strong>{t('温度')}</Text>
               <Select
@@ -8860,7 +9210,10 @@ const ImageGeneration = () => {
                   value: item,
                 }))}
                 onChange={(value) =>
-                  handleCanvasChatSessionSettingsField('temperature', String(value || '0'))
+                  handleCanvasChatSessionSettingsField(
+                    'temperature',
+                    String(value || '0'),
+                  )
                 }
               />
             </div>
@@ -8873,7 +9226,10 @@ const ImageGeneration = () => {
                   value: item,
                 }))}
                 onChange={(value) =>
-                  handleCanvasChatSessionSettingsField('contextCount', String(value || '0'))
+                  handleCanvasChatSessionSettingsField(
+                    'contextCount',
+                    String(value || '0'),
+                  )
                 }
               />
             </div>
@@ -8902,7 +9258,14 @@ const ImageGeneration = () => {
             >
               {t('启用摘要记忆')}
             </Checkbox>
-            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12, opacity: draft.summaryEnabled ? 1 : 0.6 }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+                gap: 12,
+                opacity: draft.summaryEnabled ? 1 : 0.6,
+              }}
+            >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <Text strong>{t('摘要触发阈值')}</Text>
                 <Select
@@ -9000,7 +9363,9 @@ const ImageGeneration = () => {
 
   return (
     <div style={styles.container}>
-      {!isMobile ? renderTaskSidebar({ collapsed: desktopSidebarCollapsed }) : null}
+      {!isMobile
+        ? renderTaskSidebar({ collapsed: desktopSidebarCollapsed })
+        : null}
       {renderWorkspace()}
       {isMobile ? (
         <SideSheet
