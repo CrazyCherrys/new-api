@@ -326,6 +326,18 @@ func callUpstreamVideoAPIViaRelay(ctx context.Context, userId int, modelId strin
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+userToken)
+	// TODO(remove after diagnosing /v1/videos submit path): temporary low-frequency diagnostics
+	// to confirm the local relay request is being sent with the expected protocol.
+	common.SysLog(fmt.Sprintf(
+		"[TEMP video submit] local relay request endpoint=%s request_url=%s model=%s content_type=%s duration=%d resolution=%s has_reference=%t",
+		requestEndpoint,
+		requestURL,
+		modelId,
+		contentType,
+		params.Duration,
+		strings.TrimSpace(params.Resolution),
+		strings.TrimSpace(imageInput) != "",
+	))
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)

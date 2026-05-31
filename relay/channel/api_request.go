@@ -546,6 +546,20 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	// TODO(remove after diagnosing /v1/videos submit path): temporary low-frequency diagnostics
+	// to confirm which upstream target/proxy a local /v1/videos submit actually hits.
+	if c.Request.Method == http.MethodPost && c.Request.URL.Path == "/v1/videos" {
+		logger.LogInfo(c, fmt.Sprintf(
+			"[TEMP video submit] upstream request channel_id=%d model=%s action=%s request_url=%s base_url=%s proxy=%s content_type=%s",
+			info.ChannelId,
+			info.OriginModelName,
+			info.Action,
+			common2.MaskSensitiveInfo(fullRequestURL),
+			common2.MaskSensitiveInfo(info.ChannelBaseUrl),
+			common2.MaskSensitiveInfo(info.ChannelSetting.Proxy),
+			req.Header.Get("Content-Type"),
+		))
+	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)

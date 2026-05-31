@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
@@ -223,6 +224,20 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 	if resp != nil && resp.StatusCode != http.StatusOK {
 		responseBody, _ := io.ReadAll(resp.Body)
+		// TODO(remove after diagnosing /v1/videos submit path): temporary low-frequency diagnostics
+		// to capture the exact non-200 upstream response together with resolved channel routing.
+		if c.Request.Method == http.MethodPost && c.Request.URL.Path == "/v1/videos" {
+			logger.LogInfo(c, fmt.Sprintf(
+				"[TEMP video submit] upstream non-200 channel_id=%d model=%s action=%s status=%d base_url=%s proxy=%s response=%s",
+				info.ChannelId,
+				info.OriginModelName,
+				info.Action,
+				resp.StatusCode,
+				common.MaskSensitiveInfo(info.ChannelBaseUrl),
+				common.MaskSensitiveInfo(info.ChannelSetting.Proxy),
+				string(responseBody),
+			))
+		}
 		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
 	}
 
