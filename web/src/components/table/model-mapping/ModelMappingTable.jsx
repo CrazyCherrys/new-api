@@ -29,7 +29,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { IconEdit, IconDelete } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess } from '../../../helpers';
+import { API, showError, showSuccess, showWarning } from '../../../helpers';
 
 const { Text } = Typography;
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
@@ -270,6 +270,13 @@ const ModelMappingTable = ({
 
       if (res.data.success) {
         showSuccess(t('状态更新成功'));
+        const warningMessages =
+          res.data.data?.canvas_chat_diagnostic?.warning_messages || [];
+        warningMessages.forEach((warningMessage) => {
+          if (warningMessage) {
+            showWarning(warningMessage);
+          }
+        });
         refresh();
       } else {
         showError(res.data.message || t('状态更新失败'));

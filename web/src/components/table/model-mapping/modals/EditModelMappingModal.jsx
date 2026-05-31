@@ -26,7 +26,7 @@ import {
   Switch,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess } from '../../../../helpers';
+import { API, showError, showSuccess, showWarning } from '../../../../helpers';
 
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
 const DEFAULT_VIDEO_CAPABILITIES = ['image_to_video', 'text_to_video'];
@@ -452,10 +452,17 @@ const EditModelMappingModal = ({
       const method = editingMapping ? 'put' : 'post';
 
       const res = await API[method](url, payload);
-      const { success, message } = res.data;
+      const { success, message, data } = res.data;
 
       if (success) {
         showSuccess(editingMapping ? t('更新成功') : t('创建成功'));
+        const warningMessages =
+          data?.canvas_chat_diagnostic?.warning_messages || [];
+        warningMessages.forEach((warningMessage) => {
+          if (warningMessage) {
+            showWarning(warningMessage);
+          }
+        });
         handleClose();
         refresh();
       } else {

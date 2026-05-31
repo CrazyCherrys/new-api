@@ -108,6 +108,7 @@ func SetApiRouter(router *gin.Engine) {
 		canvasRoute := apiRouter.Group("/canvas")
 		canvasRoute.Use(middleware.UserAuth())
 		{
+			canvasRoute.GET("/chat/models", controller.ListCanvasChatModels)
 			canvasRoute.GET("/sessions", controller.ListCanvasSessions)
 			canvasRoute.POST("/sessions", controller.CreateCanvasSession)
 			canvasRoute.PATCH("/sessions/:id", controller.UpdateCanvasSession)

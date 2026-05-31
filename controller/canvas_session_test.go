@@ -132,3 +132,56 @@ func TestListCanvasSessionsSupportsPaginationResponse(t *testing.T) {
 		t.Fatalf("unexpected response items: %#v", response.Data.Items)
 	}
 }
+
+func TestListCanvasChatModelsReturnsStructuredOptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	previousListCanvasChatModels := listCanvasChatModelsForController
+	t.Cleanup(func() {
+		listCanvasChatModelsForController = previousListCanvasChatModels
+	})
+
+	var capturedUserID int
+	listCanvasChatModelsForController = func(userId int) ([]service.CanvasChatModelOption, error) {
+		capturedUserID = userId
+		return []service.CanvasChatModelOption{
+			{
+				RequestModel:    "gpt-4.1",
+				DisplayName:     "GPT 4.1",
+				ModelSeries:     "openai",
+				RequestEndpoint: "openai",
+				Usable:          true,
+				AvailableGroups: []string{"default"},
+			},
+		}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", 9)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/canvas/chat/models", nil)
+
+	ListCanvasChatModels(c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d", recorder.Code)
+	}
+	if capturedUserID != 9 {
+		t.Fatalf("expected user id 9, got %d", capturedUserID)
+	}
+
+	var response struct {
+		Success bool                            `json:"success"`
+		Message string                          `json:"message"`
+		Data    []service.CanvasChatModelOption `json:"data"`
+	}
+	if err := common.DecodeJson(recorder.Body, &response); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if !response.Success || len(response.Data) != 1 {
+		t.Fatalf("unexpected response payload: %#v", response)
+	}
+	if response.Data[0].RequestModel != "gpt-4.1" || response.Data[0].DisplayName != "GPT 4.1" {
+		t.Fatalf("unexpected model option: %#v", response.Data[0])
+	}
+}

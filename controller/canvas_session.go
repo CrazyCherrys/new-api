@@ -51,6 +51,7 @@ type createCanvasMessageRequest struct {
 
 var (
 	listCanvasSessionsForController      = service.ListCanvasSessions
+	listCanvasChatModelsForController    = service.ListUserCanvasChatModelOptions
 	getCanvasSessionByIDForController    = model.GetCanvasSessionByID
 	createCanvasMessageForController     = service.CreateCanvasMessageWithContext
 	streamCanvasChatMessageForController = service.StreamCanvasChatMessage
@@ -71,6 +72,21 @@ func ListCanvasSessions(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, sessions)
+}
+
+func ListCanvasChatModels(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		common.ApiErrorMsg(c, "未授权")
+		return
+	}
+
+	models, err := listCanvasChatModelsForController(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, models)
 }
 
 func CreateCanvasSession(c *gin.Context) {

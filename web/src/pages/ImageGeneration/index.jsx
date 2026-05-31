@@ -1095,6 +1095,101 @@ const ImageGeneration = () => {
     [videoModels],
   );
 
+  const chatModelOptionMap = useMemo(() => {
+    const nextMap = new Map();
+    chatModels.forEach((item) => {
+      const requestModel = String(item?.request_model || '').trim();
+      if (requestModel) {
+        nextMap.set(requestModel, item);
+      }
+    });
+    return nextMap;
+  }, [chatModels]);
+
+  const getChatModelDisplayText = (item) => {
+    const requestModel = String(item?.request_model || '').trim();
+    const displayName = String(item?.display_name || '').trim();
+    if (!displayName) {
+      return requestModel;
+    }
+    if (!requestModel || displayName === requestModel) {
+      return displayName;
+    }
+    return `${displayName} / ${requestModel}`;
+  };
+
+  const buildUnavailableChatModelOption = (requestModel, reasonText) => ({
+    request_model: String(requestModel || '').trim(),
+    display_name: String(requestModel || '').trim(),
+    model_series: '',
+    request_endpoint: '',
+    usable: false,
+    unavailable_reason: reasonText || t('当前会话模型，现不可用'),
+    available_groups: [],
+  });
+
+  const buildChatModelOptionLabel = (item) => {
+    const text = getChatModelDisplayText(item);
+    const unavailableReason =
+      item?.usable === false
+        ? String(item?.unavailable_reason || t('当前不可用'))
+        : '';
+    return (
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span>{text || t('未命名模型')}</span>
+        {unavailableReason ? (
+          <span
+            style={{
+              fontSize: 12,
+              color: 'rgba(148, 163, 184, 0.82)',
+            }}
+          >
+            {unavailableReason}
+          </span>
+        ) : null}
+      </span>
+    );
+  };
+
+  const getChatModelsWithPreservedCurrent = (currentModel, reasonText) => {
+    const normalizedCurrentModel = String(currentModel || '').trim();
+    if (!normalizedCurrentModel) {
+      return chatModels;
+    }
+    if (chatModelOptionMap.has(normalizedCurrentModel)) {
+      return chatModels;
+    }
+    return [
+      buildUnavailableChatModelOption(normalizedCurrentModel, reasonText),
+      ...chatModels,
+    ];
+  };
+
+  const activeChatModelOption = useMemo(() => {
+    const normalizedChatModel = String(chatModel || '').trim();
+    if (!normalizedChatModel) {
+      return null;
+    }
+    const existing = chatModelOptionMap.get(normalizedChatModel);
+    if (existing) {
+      return existing;
+    }
+    const isCurrentSessionModel =
+      normalizedChatModel ===
+      String(selectedCanvasSession?.current_model || '').trim();
+    return buildUnavailableChatModelOption(
+      normalizedChatModel,
+      isCurrentSessionModel
+        ? t('当前会话模型，现不可用')
+        : t('当前选择的模型，现不可用'),
+    );
+  }, [
+    chatModel,
+    chatModelOptionMap,
+    selectedCanvasSession?.current_model,
+    t,
+  ]);
+
   const buildRemoteReferenceFile = (imageUrl) => {
     if (!imageUrl) {
       return null;
@@ -1111,7 +1206,6 @@ const ImageGeneration = () => {
   useEffect(() => {
     loadImageGenerationGroups();
     loadVideoModels();
-    loadChatModels();
     loadWorkerSettings();
     connectSSE();
 
@@ -1120,6 +1214,13 @@ const ImageGeneration = () => {
       stopPolling();
     };
   }, []);
+
+  useEffect(() => {
+    if (generationMode !== CANVAS_MODE_CHAT) {
+      return;
+    }
+    loadChatModels();
+  }, [generationMode]);
 
   useEffect(() => {
     if (!pollingTimerRef.current) {
@@ -1390,9 +1491,7 @@ const ImageGeneration = () => {
 
   const loadChatModels = async () => {
     try {
-      const res = await API.get('/api/user/models', {
-        params: { mode: 'chat' },
-      });
+      const res = await API.get('/api/canvas/chat/models');
       if (!res.data.success) {
         showError(res.data.message || t('加载聊天模型失败'));
         return;
@@ -1400,10 +1499,25 @@ const ImageGeneration = () => {
       const items = Array.isArray(res.data.data) ? res.data.data : [];
       setChatModels(items);
       setChatModel((current) => {
-        if (current && items.includes(current)) {
-          return current;
+        const normalizedCurrent = String(current || '').trim();
+        const sessionCurrentModel = String(
+          selectedCanvasSession?.current_model || '',
+        ).trim();
+        if (
+          normalizedCurrent &&
+          normalizedCurrent === sessionCurrentModel &&
+          sessionCurrentModel
+        ) {
+          return normalizedCurrent;
         }
-        return items[0] || '';
+        if (
+          normalizedCurrent &&
+          items.some((item) => item?.request_model === normalizedCurrent)
+        ) {
+          return normalizedCurrent;
+        }
+        const firstUsable = items.find((item) => item?.usable !== false);
+        return String(firstUsable?.request_model || '');
       });
     } catch (error) {
       showError(error.message || t('加载聊天模型失败'));
@@ -4570,14 +4684,20 @@ const ImageGeneration = () => {
     ) {
       return;
     }
-    if (
-      selectedCanvasSession.current_model &&
-      !(
-        chatModels.length > 0 &&
-        !chatModels.includes(selectedCanvasSession.current_model)
-      )
-    ) {
-      setChatModel(selectedCanvasSession.current_model);
+    if (selectedCanvasSession.current_model) {
+      setChatModel(String(selectedCanvasSession.current_model));
+    } else {
+      setChatModel((current) => {
+        const normalizedCurrent = String(current || '').trim();
+        if (
+          normalizedCurrent &&
+          chatModels.some((item) => item?.request_model === normalizedCurrent)
+        ) {
+          return normalizedCurrent;
+        }
+        const firstUsable = chatModels.find((item) => item?.usable !== false);
+        return String(firstUsable?.request_model || '');
+      });
     }
     if (Number.isFinite(Number(selectedCanvasSession.chat_temperature))) {
       setChatTemperature(String(selectedCanvasSession.chat_temperature));
@@ -4626,6 +4746,12 @@ const ImageGeneration = () => {
     }
     if (!chatModel) {
       showError(t('请选择模型'));
+      return;
+    }
+    if (activeChatModelOption?.usable === false) {
+      showError(
+        activeChatModelOption.unavailable_reason || t('当前选择的模型不可用'),
+      );
       return;
     }
 
@@ -6359,14 +6485,20 @@ const ImageGeneration = () => {
         {options.length > 0 ? (
           options.map((option) => {
             const selected = option.value === value;
+            const optionDisabled = !!option.disabled;
             return (
               <Dropdown.Item
                 key={option.value}
                 style={{
                   ...styles.darkMenuItem,
                   ...(selected ? styles.darkMenuItemActive : null),
+                  opacity: optionDisabled ? 0.5 : 1,
+                  cursor: optionDisabled ? 'not-allowed' : 'pointer',
                 }}
                 onClick={() => {
+                  if (optionDisabled) {
+                    return;
+                  }
                   onChange(option.value);
                   closeDropdown();
                 }}
@@ -8035,8 +8167,11 @@ const ImageGeneration = () => {
     const isVideoMode = generationMode === CANVAS_MODE_VIDEO;
     const isImageMode = generationMode === CANVAS_MODE_IMAGE;
     const activeModel = isVideoMode ? videoSelectedModelData : selectedModelData;
+    const activeChatModelLabel = activeChatModelOption
+      ? getChatModelDisplayText(activeChatModelOption)
+      : chatModel || t('请选择模型');
     const activeModelLabel = isChatMode
-      ? chatModel || t('请选择模型')
+      ? activeChatModelLabel
       : activeModel
         ? getModelDisplayName(activeModel)
         : t('请选择模型');
@@ -8110,19 +8245,30 @@ const ImageGeneration = () => {
         <IconUpload size='small' />
       </div>
     );
+    const chatDropdownModels = getChatModelsWithPreservedCurrent(
+      chatModel,
+      String(chatModel || '').trim() ===
+        String(selectedCanvasSession?.current_model || '').trim()
+        ? t('当前会话模型，现不可用')
+        : t('当前选择的模型，现不可用'),
+    );
     const chatComposerParameters = [
       renderPillDropdown({
         key: 'chat-model',
         label: t('模型'),
         icon: <IconLayers size='small' />,
         value: chatModel,
-        displayValue: chatModel,
+        displayValue: activeChatModelLabel,
         onChange: (value) => {
           setChatModel(value);
           updateCurrentCanvasSessionModel(CANVAS_MODE_CHAT, value);
         },
-        options: chatModels.map((model) => ({ value: model, label: model })),
-        disabled: chatModels.length === 0,
+        options: chatDropdownModels.map((model) => ({
+          value: model.request_model,
+          label: buildChatModelOptionLabel(model),
+          disabled: model.usable === false,
+        })),
+        disabled: chatDropdownModels.length === 0,
       }),
       renderChatSettingsDropdown(),
     ];
@@ -8675,11 +8821,10 @@ const ImageGeneration = () => {
       return null;
     }
 
-    const availableChatModels = chatModels.includes(draft.model)
-      ? chatModels
-      : draft.model
-        ? [draft.model, ...chatModels]
-        : chatModels;
+    const availableChatModels = getChatModelsWithPreservedCurrent(
+      draft.model,
+      t('当前会话模型，现不可用'),
+    );
 
     return (
       <SideSheet
@@ -8695,8 +8840,9 @@ const ImageGeneration = () => {
             <Select
               value={draft.model}
               optionList={availableChatModels.map((item) => ({
-                label: item,
-                value: item,
+                label: buildChatModelOptionLabel(item),
+                value: item.request_model,
+                disabled: item.usable === false,
               }))}
               onChange={(value) =>
                 handleCanvasChatSessionSettingsField('model', String(value || ''))

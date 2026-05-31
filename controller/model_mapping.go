@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -151,6 +152,18 @@ func validateVideoDurationOptions(modelType int, raw string) (string, error) {
 	return normalized, nil
 }
 
+func respondModelMappingSaveSuccess(c *gin.Context, mm *model.ModelMapping) {
+	diagnostic, err := service.DiagnoseCanvasChatModelMapping(mm.RequestModel)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"mapping":                mm,
+		"canvas_chat_diagnostic": diagnostic,
+	})
+}
+
 // GetAllModelMappings 获取模型映射列表（分页）
 func GetAllModelMappings(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
@@ -276,7 +289,7 @@ func CreateModelMapping(c *gin.Context) {
 		return
 	}
 
-	common.ApiSuccess(c, mm)
+	respondModelMappingSaveSuccess(c, &mm)
 }
 
 // UpdateModelMapping 更新模型映射
@@ -346,7 +359,7 @@ func UpdateModelMapping(c *gin.Context) {
 		return
 	}
 
-	common.ApiSuccess(c, mm)
+	respondModelMappingSaveSuccess(c, &mm)
 }
 
 // DeleteModelMapping 删除模型映射

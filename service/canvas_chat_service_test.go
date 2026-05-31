@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -38,6 +39,22 @@ func seedCanvasChatModelAbility(
 	}
 	if err := model.DB.Create(ability).Error; err != nil {
 		t.Fatalf("failed to create ability %s: %v", modelName, err)
+	}
+}
+
+func seedCanvasChatUser(t *testing.T, userId int, userGroup string) {
+	t.Helper()
+
+	user := &model.User{
+		Id:       userId,
+		Username: "canvas-chat-user-" + userGroup,
+		Password: "password123",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Group:    userGroup,
+	}
+	if err := model.DB.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
 	}
 }
 
@@ -126,4 +143,243 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 	if resolved != chatModel {
 		t.Fatalf("expected chat model fallback %q, got %q", chatModel, resolved)
 	}
+}
+
+func TestListUserCanvasChatModelOptionsReturnsStructuredData(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	const (
+		userID          = 61
+		userGroup       = "default"
+		usableModel     = "gpt-structured"
+		hiddenModel     = "gpt-hidden"
+		displayName     = "Structured Chat Model"
+		requestEndpoint = "openai"
+	)
+
+	seedCanvasChatCapability(t, db, userID, userGroup, userGroup, userGroup, usableModel)
+
+	mappings := []*model.ModelMapping{
+		{
+			RequestModel:    usableModel,
+			ActualModel:     usableModel,
+			DisplayName:     displayName,
+			ModelSeries:     "openai",
+			ModelType:       1,
+			Status:          1,
+			RequestEndpoint: requestEndpoint,
+		},
+		{
+			RequestModel:    hiddenModel,
+			ActualModel:     hiddenModel,
+			DisplayName:     "Hidden Chat Model",
+			ModelSeries:     "openai",
+			ModelType:       1,
+			Status:          1,
+			RequestEndpoint: requestEndpoint,
+		},
+	}
+	for _, mapping := range mappings {
+		if err := db.Create(mapping).Error; err != nil {
+			t.Fatalf("failed to create model mapping %s: %v", mapping.RequestModel, err)
+		}
+	}
+
+	options, err := ListUserCanvasChatModelOptions(userID)
+	if err != nil {
+		t.Fatalf("expected structured chat model options: %v", err)
+	}
+	if len(options) != 1 {
+		t.Fatalf("expected only visible model option, got %#v", options)
+	}
+	if options[0].RequestModel != usableModel || options[0].DisplayName != displayName {
+		t.Fatalf("unexpected model option payload: %#v", options[0])
+	}
+	if !options[0].Usable || len(options[0].AvailableGroups) != 1 || options[0].AvailableGroups[0] != userGroup {
+		t.Fatalf("expected usable model with available group %q, got %#v", userGroup, options[0])
+	}
+	if options[0].RequestEndpoint != requestEndpoint {
+		t.Fatalf("expected request endpoint %q, got %#v", requestEndpoint, options[0])
+	}
+}
+
+func TestListUserCanvasChatModelOptionsMarksUnreachableModel(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	const (
+		userID      = 71
+		userGroup   = "default"
+		modelID     = "gpt-no-token"
+		displayName = "No Token Chat Model"
+	)
+
+	seedCanvasChatUser(t, userID, userGroup)
+	seedCanvasChatModelAbility(t, userID+2000, userGroup, modelID)
+	if err := model.DB.Create(&model.ModelMapping{
+		RequestModel:    modelID,
+		ActualModel:     modelID,
+		DisplayName:     displayName,
+		ModelSeries:     "openai",
+		ModelType:       1,
+		Status:          1,
+		RequestEndpoint: "openai",
+	}).Error; err != nil {
+		t.Fatalf("failed to create model mapping: %v", err)
+	}
+
+	options, err := ListUserCanvasChatModelOptions(userID)
+	if err != nil {
+		t.Fatalf("expected structured chat model options: %v", err)
+	}
+	if len(options) != 1 {
+		t.Fatalf("expected one visible but unreachable model, got %#v", options)
+	}
+	if options[0].Usable {
+		t.Fatalf("expected model to be marked unusable, got %#v", options[0])
+	}
+	if options[0].UnavailableReason != "当前没有可达分组/令牌支持该模型" {
+		t.Fatalf("unexpected unavailable reason: %#v", options[0])
+	}
+}
+
+func TestResolveCanvasChatModelRejectsUnavailableCurrentSessionModel(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	const (
+		userID       = 81
+		userGroup    = "default"
+		usableModel  = "gpt-usable"
+		invalidModel = "gpt-orphaned"
+	)
+
+	seedCanvasChatCapability(t, db, userID, userGroup, userGroup, userGroup, usableModel)
+	seedCanvasChatModelAbility(t, userID+3000, "vip", invalidModel)
+
+	mappings := []*model.ModelMapping{
+		{
+			RequestModel:    usableModel,
+			ActualModel:     usableModel,
+			DisplayName:     "Usable",
+			ModelSeries:     "openai",
+			ModelType:       1,
+			Status:          1,
+			RequestEndpoint: "openai",
+		},
+		{
+			RequestModel:    invalidModel,
+			ActualModel:     invalidModel,
+			DisplayName:     "Unavailable",
+			ModelSeries:     "openai",
+			ModelType:       1,
+			Status:          1,
+			RequestEndpoint: "openai",
+		},
+	}
+	for _, mapping := range mappings {
+		if err := db.Create(mapping).Error; err != nil {
+			t.Fatalf("failed to create model mapping %s: %v", mapping.RequestModel, err)
+		}
+	}
+
+	_, err := resolveCanvasChatModel(userID, &model.CanvasSession{CurrentModel: invalidModel}, "")
+	if err == nil {
+		t.Fatal("expected unavailable current session model to be rejected")
+	}
+	if !strings.Contains(err.Error(), invalidModel) {
+		t.Fatalf("expected error to mention invalid model %q, got %v", invalidModel, err)
+	}
+}
+
+func TestDiagnoseCanvasChatModelMappingWarnings(t *testing.T) {
+	t.Run("warns without ability", func(t *testing.T) {
+		setupCanvasSessionServiceTestDB(t)
+		const modelID = "gpt-no-ability"
+		if err := model.DB.Create(&model.ModelMapping{
+			RequestModel:    modelID,
+			ActualModel:     modelID,
+			DisplayName:     "No Ability",
+			ModelSeries:     "openai",
+			ModelType:       1,
+			Status:          1,
+			RequestEndpoint: "openai",
+		}).Error; err != nil {
+			t.Fatalf("failed to create model mapping: %v", err)
+		}
+
+		diagnostic, err := DiagnoseCanvasChatModelMapping(modelID)
+		if err != nil {
+			t.Fatalf("expected diagnostic result: %v", err)
+		}
+		if diagnostic == nil || len(diagnostic.WarningMessages) != 1 {
+			t.Fatalf("expected a single warning, got %#v", diagnostic)
+		}
+		if diagnostic.WarningMessages[0] != "映射已保存，但没有任何启用能力声明该模型，Canvas 不会显示" {
+			t.Fatalf("unexpected warning: %#v", diagnostic.WarningMessages)
+		}
+	})
+
+	t.Run("warns without reachable token", func(t *testing.T) {
+		setupCanvasSessionServiceTestDB(t)
+		const (
+			userID    = 91
+			userGroup = "default"
+			modelID   = "gpt-no-route"
+		)
+		seedCanvasChatUser(t, userID, userGroup)
+		seedCanvasChatModelAbility(t, userID+4000, userGroup, modelID)
+		if err := model.DB.Create(&model.ModelMapping{
+			RequestModel:    modelID,
+			ActualModel:     modelID,
+			DisplayName:     "No Route",
+			ModelSeries:     "openai",
+			ModelType:       1,
+			Status:          1,
+			RequestEndpoint: "openai",
+		}).Error; err != nil {
+			t.Fatalf("failed to create model mapping: %v", err)
+		}
+
+		diagnostic, err := DiagnoseCanvasChatModelMapping(modelID)
+		if err != nil {
+			t.Fatalf("expected diagnostic result: %v", err)
+		}
+		if diagnostic == nil || len(diagnostic.WarningMessages) != 1 {
+			t.Fatalf("expected a single warning, got %#v", diagnostic)
+		}
+		if diagnostic.WarningMessages[0] != "映射已保存，但当前没有可达分组/令牌支持该模型" {
+			t.Fatalf("unexpected warning: %#v", diagnostic.WarningMessages)
+		}
+	})
+
+	t.Run("no warning when mapping is reachable", func(t *testing.T) {
+		db := setupCanvasSessionServiceTestDB(t)
+		const (
+			userID    = 101
+			userGroup = "default"
+			modelID   = "gpt-reachable"
+		)
+		seedCanvasChatCapability(t, db, userID, userGroup, userGroup, userGroup, modelID)
+		if err := model.DB.Create(&model.ModelMapping{
+			RequestModel:    modelID,
+			ActualModel:     modelID,
+			DisplayName:     "Reachable",
+			ModelSeries:     "openai",
+			ModelType:       1,
+			Status:          1,
+			RequestEndpoint: "openai",
+		}).Error; err != nil {
+			t.Fatalf("failed to create model mapping: %v", err)
+		}
+
+		diagnostic, err := DiagnoseCanvasChatModelMapping(modelID)
+		if err != nil {
+			t.Fatalf("expected diagnostic result: %v", err)
+		}
+		if diagnostic == nil {
+			t.Fatal("expected diagnostic payload")
+		}
+		if len(diagnostic.WarningMessages) != 0 || !diagnostic.VisibleInCanvas {
+			t.Fatalf("expected reachable mapping without warnings, got %#v", diagnostic)
+		}
+	})
 }

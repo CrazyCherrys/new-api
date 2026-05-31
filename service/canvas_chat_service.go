@@ -103,6 +103,46 @@ type canvasChatSSEEvent struct {
 	Error    string                   `json:"error,omitempty"`
 }
 
+type CanvasChatModelOption struct {
+	RequestModel      string   `json:"request_model"`
+	DisplayName       string   `json:"display_name"`
+	ModelSeries       string   `json:"model_series"`
+	RequestEndpoint   string   `json:"request_endpoint"`
+	Usable            bool     `json:"usable"`
+	UnavailableReason string   `json:"unavailable_reason,omitempty"`
+	AvailableGroups   []string `json:"available_groups"`
+}
+
+type CanvasChatModelMappingDiagnostic struct {
+	RequestModel         string   `json:"request_model"`
+	DisplayName          string   `json:"display_name"`
+	RequestEndpoint      string   `json:"request_endpoint"`
+	HasEnabledAbility    bool     `json:"has_enabled_ability"`
+	HasCompatibleChannel bool     `json:"has_compatible_channel"`
+	VisibleInCanvas      bool     `json:"visible_in_canvas"`
+	AbilityGroups        []string `json:"ability_groups"`
+	CompatibleGroups     []string `json:"compatible_groups"`
+	AvailableGroups      []string `json:"available_groups"`
+	WarningMessages      []string `json:"warning_messages,omitempty"`
+}
+
+type canvasChatAbilityChannel struct {
+	model.Ability
+	ChannelType   int `json:"channel_type"`
+	ChannelStatus int `json:"channel_status"`
+}
+
+type canvasChatUserModelContext struct {
+	User            *model.UserBase
+	UsableGroups    map[string]string
+	CandidateGroups []string
+}
+
+type canvasChatTokenRoute struct {
+	UserGroup     string
+	SelectedGroup string
+}
+
 var (
 	callCanvasChatRelay           = defaultCallCanvasChatRelay
 	queueCanvasChatBackgroundTask = defaultQueueCanvasChatBackgroundTask
@@ -195,11 +235,12 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 		return nil, fmt.Errorf("user not found")
 	}
 
-	finalModel, err := resolveCanvasChatModel(userId, session, input.ModelId)
+	chatMapping, err := resolveCanvasChatModelMapping(userId, session, input.ModelId)
 	if err != nil {
 		return nil, err
 	}
-	finalGroup, err := resolveCanvasChatGroup(userId, user.Group, session, input.Group, finalModel)
+	finalModel := strings.TrimSpace(chatMapping.RequestModel)
+	finalGroup, err := resolveCanvasChatGroup(userId, user.Group, session, input.Group, chatMapping)
 	if err != nil {
 		return nil, err
 	}
@@ -420,26 +461,54 @@ func finalizeCanvasChatRunError(prepared *canvasChatPreparedRequest, callbacks *
 }
 
 func resolveCanvasChatModel(userId int, session *model.CanvasSession, inputModel string) (string, error) {
+	mapping, err := resolveCanvasChatModelMapping(userId, session, inputModel)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(mapping.RequestModel), nil
+}
+
+func resolveCanvasChatModelMapping(userId int, session *model.CanvasSession, inputModel string) (*model.ModelMapping, error) {
 	candidates := []string{
 		strings.TrimSpace(inputModel),
 		strings.TrimSpace(session.CurrentModel),
 	}
+	seen := make(map[string]struct{}, len(candidates))
 	for _, candidate := range candidates {
-		if candidate != "" {
-			return candidate, nil
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		mapping, _, err := getUsableCanvasChatModelMappingForUser(userId, candidate)
+		return mapping, err
+	}
+	options, err := ListUserCanvasChatModelOptions(userId)
+	if err != nil {
+		return nil, err
+	}
+	for _, option := range options {
+		if !option.Usable {
+			continue
+		}
+		mapping, err := model.GetActiveModelMappingByRequestModel(option.RequestModel)
+		if err != nil {
+			return nil, err
+		}
+		if mapping != nil {
+			return mapping, nil
 		}
 	}
-	models, err := ListUserCanvasChatModels(userId)
-	if err != nil {
-		return "", err
-	}
-	if len(models) == 0 {
-		return "", fmt.Errorf("no available chat model")
-	}
-	return models[0], nil
+	return nil, fmt.Errorf("no available chat model")
 }
 
-func resolveCanvasChatGroup(userId int, userGroup string, session *model.CanvasSession, inputGroup string, modelId string) (string, error) {
+func resolveCanvasChatGroup(userId int, userGroup string, session *model.CanvasSession, inputGroup string, mapping *model.ModelMapping) (string, error) {
+	if mapping == nil {
+		return "", fmt.Errorf("chat model mapping is required")
+	}
+	modelId := strings.TrimSpace(mapping.RequestModel)
 	tryGroups := make([]string, 0, 2)
 	appendCandidate := func(group string) {
 		group = strings.TrimSpace(group)
@@ -486,7 +555,73 @@ func ListUserCanvasChatModels(userId int) ([]string, error) {
 	return listUserCanvasChatModels(userId)
 }
 
+func ListUserCanvasChatModelOptions(userId int) ([]CanvasChatModelOption, error) {
+	return listUserCanvasChatModelOptions(userId)
+}
+
 func listUserCanvasChatModels(userId int) ([]string, error) {
+	options, err := listUserCanvasChatModelOptions(userId)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(options))
+	for _, option := range options {
+		if !option.Usable {
+			continue
+		}
+		result = append(result, option.RequestModel)
+	}
+	return result, nil
+}
+
+func listUserCanvasChatModelOptions(userId int) ([]CanvasChatModelOption, error) {
+	ctx, err := buildCanvasChatUserModelContext(userId)
+	if err != nil {
+		return nil, err
+	}
+
+	activeMappings, _, err := model.GetActiveChatModelMappings(0, 1000)
+	if err != nil {
+		return nil, err
+	}
+	requestModels := make([]string, 0, len(activeMappings))
+	for _, mapping := range activeMappings {
+		if mapping == nil {
+			continue
+		}
+		requestModel := strings.TrimSpace(mapping.RequestModel)
+		if requestModel == "" {
+			continue
+		}
+		requestModels = append(requestModels, requestModel)
+	}
+	recordsByModel, err := listCanvasChatAbilityChannelsByModels(requestModels)
+	if err != nil {
+		return nil, err
+	}
+
+	options := make([]CanvasChatModelOption, 0, len(activeMappings))
+	for _, mapping := range activeMappings {
+		if mapping == nil {
+			continue
+		}
+		option, visibleInCanvas, err := buildCanvasChatModelOptionForUserContext(
+			ctx,
+			mapping,
+			recordsByModel[strings.TrimSpace(mapping.RequestModel)],
+		)
+		if err != nil {
+			return nil, err
+		}
+		if !visibleInCanvas {
+			continue
+		}
+		options = append(options, *option)
+	}
+	return options, nil
+}
+
+func buildCanvasChatUserModelContext(userId int) (*canvasChatUserModelContext, error) {
 	user, err := model.GetUserCache(userId)
 	if err != nil {
 		return nil, err
@@ -494,37 +629,285 @@ func listUserCanvasChatModels(userId int) ([]string, error) {
 	if user == nil {
 		return nil, fmt.Errorf("user not found")
 	}
-	activeMappings, _, err := model.GetActiveChatModelMappings(0, 1000)
+	candidateGroups, err := listCanvasChatCandidateGroups(userId, user.Group)
 	if err != nil {
 		return nil, err
 	}
-	activeChatModels := make(map[string]struct{}, len(activeMappings))
-	for _, mapping := range activeMappings {
-		trimmed := strings.TrimSpace(mapping.RequestModel)
-		if trimmed == "" {
+	return &canvasChatUserModelContext{
+		User:            user,
+		UsableGroups:    GetUserUsableGroups(user.Group),
+		CandidateGroups: candidateGroups,
+	}, nil
+}
+
+func buildCanvasChatModelOptionForUserContext(ctx *canvasChatUserModelContext, mapping *model.ModelMapping, records []canvasChatAbilityChannel) (*CanvasChatModelOption, bool, error) {
+	if ctx == nil || ctx.User == nil {
+		return nil, false, fmt.Errorf("canvas chat user context is required")
+	}
+	if mapping == nil {
+		return nil, false, fmt.Errorf("canvas chat model mapping is required")
+	}
+
+	userHasEnabledAbility := false
+	userHasEnabledChannel := false
+	for _, record := range records {
+		groupName := strings.TrimSpace(record.Group)
+		if groupName == "" {
 			continue
 		}
-		activeChatModels[trimmed] = struct{}{}
+		if _, ok := ctx.UsableGroups[groupName]; !ok {
+			continue
+		}
+		userHasEnabledAbility = true
+		if record.ChannelStatus != common.ChannelStatusEnabled {
+			continue
+		}
+		userHasEnabledChannel = true
 	}
-	modelSet := make(map[string]struct{})
-	for group := range GetUserUsableGroups(user.Group) {
-		for _, modelName := range model.GetGroupEnabledModels(group) {
-			trimmed := strings.TrimSpace(modelName)
-			if trimmed == "" {
-				continue
-			}
-			if _, ok := activeChatModels[trimmed]; !ok {
-				continue
-			}
-			modelSet[trimmed] = struct{}{}
+
+	availableGroups := make([]string, 0, len(ctx.CandidateGroups))
+	for _, groupName := range ctx.CandidateGroups {
+		ok, err := canvasChatGroupSupportsModel(ctx.User.Id, ctx.User.Group, groupName, mapping.RequestModel)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			availableGroups = append(availableGroups, groupName)
 		}
 	}
-	result := make([]string, 0, len(modelSet))
-	for modelName := range modelSet {
-		result = append(result, modelName)
+
+	option := &CanvasChatModelOption{
+		RequestModel:    strings.TrimSpace(mapping.RequestModel),
+		DisplayName:     strings.TrimSpace(mapping.DisplayName),
+		ModelSeries:     strings.TrimSpace(mapping.ModelSeries),
+		RequestEndpoint: strings.TrimSpace(mapping.RequestEndpoint),
+		Usable:          len(availableGroups) > 0,
+		AvailableGroups: availableGroups,
 	}
-	sort.Strings(result)
+	if !option.Usable {
+		option.UnavailableReason = buildCanvasChatModelUnavailableReason(userHasEnabledAbility, userHasEnabledChannel)
+	}
+	return option, userHasEnabledChannel, nil
+}
+
+func getUsableCanvasChatModelMappingForUser(userId int, requestModel string) (*model.ModelMapping, *CanvasChatModelOption, error) {
+	requestModel = strings.TrimSpace(requestModel)
+	if requestModel == "" {
+		return nil, nil, fmt.Errorf("chat model is required")
+	}
+
+	mapping, err := model.GetActiveModelMappingByRequestModel(requestModel)
+	if err != nil {
+		return nil, nil, err
+	}
+	if mapping == nil || mapping.ModelType != 1 || strings.TrimSpace(mapping.RequestEndpoint) == "" {
+		return nil, nil, fmt.Errorf("聊天模型 %s 不存在或未启用", requestModel)
+	}
+
+	ctx, err := buildCanvasChatUserModelContext(userId)
+	if err != nil {
+		return nil, nil, err
+	}
+	recordsByModel, err := listCanvasChatAbilityChannelsByModels([]string{requestModel})
+	if err != nil {
+		return nil, nil, err
+	}
+	option, _, err := buildCanvasChatModelOptionForUserContext(ctx, mapping, recordsByModel[requestModel])
+	if err != nil {
+		return nil, nil, err
+	}
+	if option.Usable {
+		return mapping, option, nil
+	}
+	reason := strings.TrimSpace(option.UnavailableReason)
+	if reason == "" {
+		reason = "当前不可用"
+	}
+	return nil, option, fmt.Errorf("聊天模型 %s 当前不可用：%s", requestModel, reason)
+}
+
+func listCanvasChatAbilityChannelsByModels(requestModels []string) (map[string][]canvasChatAbilityChannel, error) {
+	modelSet := make(map[string]struct{}, len(requestModels))
+	filteredModels := make([]string, 0, len(requestModels))
+	for _, requestModel := range requestModels {
+		requestModel = strings.TrimSpace(requestModel)
+		if requestModel == "" {
+			continue
+		}
+		if _, ok := modelSet[requestModel]; ok {
+			continue
+		}
+		modelSet[requestModel] = struct{}{}
+		filteredModels = append(filteredModels, requestModel)
+	}
+	result := make(map[string][]canvasChatAbilityChannel, len(filteredModels))
+	if len(filteredModels) == 0 {
+		return result, nil
+	}
+
+	var records []canvasChatAbilityChannel
+	err := model.DB.Table("abilities").
+		Select("abilities.*, channels.type as channel_type, channels.status as channel_status").
+		Joins("left join channels on abilities.channel_id = channels.id").
+		Where("abilities.enabled = ? AND abilities.model IN ?", true, filteredModels).
+		Scan(&records).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range records {
+		requestModel := strings.TrimSpace(record.Model)
+		if requestModel == "" {
+			continue
+		}
+		result[requestModel] = append(result[requestModel], record)
+	}
 	return result, nil
+}
+
+func listValidCanvasChatTokenRoutes() ([]canvasChatTokenRoute, error) {
+	var tokens []*model.Token
+	now := common.GetTimestamp()
+	if err := model.DB.
+		Where("status = ?", common.TokenStatusEnabled).
+		Where("(expired_time = -1 OR expired_time > ?)", now).
+		Where("(unlimited_quota = ? OR remain_quota > 0)", true).
+		Find(&tokens).Error; err != nil {
+		return nil, err
+	}
+
+	userGroups := make(map[int]string, len(tokens))
+	routes := make([]canvasChatTokenRoute, 0, len(tokens))
+	for _, token := range tokens {
+		if token == nil {
+			continue
+		}
+		userGroup, ok := userGroups[token.UserId]
+		if !ok {
+			user, err := model.GetUserById(token.UserId, false)
+			if err != nil {
+				return nil, err
+			}
+			if user == nil || user.Status != common.UserStatusEnabled {
+				userGroups[token.UserId] = ""
+				continue
+			}
+			userGroup = strings.TrimSpace(user.Group)
+			userGroups[token.UserId] = userGroup
+		}
+		if userGroup == "" {
+			continue
+		}
+
+		selectedGroup := strings.TrimSpace(token.Group)
+		if selectedGroup == "" {
+			selectedGroup = userGroup
+		}
+		if selectedGroup == "" {
+			continue
+		}
+		routes = append(routes, canvasChatTokenRoute{
+			UserGroup:     userGroup,
+			SelectedGroup: selectedGroup,
+		})
+	}
+	return routes, nil
+}
+
+func buildCanvasChatModelUnavailableReason(userHasEnabledAbility bool, userHasEnabledChannel bool) string {
+	if !userHasEnabledAbility {
+		return "当前用户可用分组里没有任何启用能力声明该模型"
+	}
+	if !userHasEnabledChannel {
+		return "当前用户可用分组里没有任何可达渠道支持该模型"
+	}
+	return "当前没有可达分组/令牌支持该模型"
+}
+
+func DiagnoseCanvasChatModelMapping(requestModel string) (*CanvasChatModelMappingDiagnostic, error) {
+	requestModel = strings.TrimSpace(requestModel)
+	if requestModel == "" {
+		return nil, nil
+	}
+
+	mapping, err := model.GetModelMappingByRequestModel(requestModel)
+	if err != nil {
+		return nil, err
+	}
+	if mapping == nil || mapping.ModelType != 1 || mapping.Status != 1 || strings.TrimSpace(mapping.RequestEndpoint) == "" {
+		return nil, nil
+	}
+
+	recordsByModel, err := listCanvasChatAbilityChannelsByModels([]string{requestModel})
+	if err != nil {
+		return nil, err
+	}
+	abilityGroups := make(map[string]struct{})
+	compatibleGroups := make(map[string]struct{})
+	for _, record := range recordsByModel[requestModel] {
+		groupName := strings.TrimSpace(record.Group)
+		if groupName == "" {
+			continue
+		}
+		abilityGroups[groupName] = struct{}{}
+		if record.ChannelStatus != common.ChannelStatusEnabled {
+			continue
+		}
+		compatibleGroups[groupName] = struct{}{}
+	}
+
+	tokenRoutes, err := listValidCanvasChatTokenRoutes()
+	if err != nil {
+		return nil, err
+	}
+	availableGroups := make(map[string]struct{})
+	for _, route := range tokenRoutes {
+		ok, groupErr := canvasChatSelectedGroupHasChannel(route.UserGroup, route.SelectedGroup, requestModel)
+		if groupErr != nil {
+			return nil, groupErr
+		}
+		if ok {
+			availableGroups[route.SelectedGroup] = struct{}{}
+		}
+	}
+
+	warnings := make([]string, 0, 1)
+	switch {
+	case len(abilityGroups) == 0:
+		warnings = append(warnings, "映射已保存，但没有任何启用能力声明该模型，Canvas 不会显示")
+	case len(compatibleGroups) == 0:
+		warnings = append(warnings, "映射已保存，但没有任何启用渠道声明该模型，Canvas 不会显示")
+	case len(availableGroups) == 0:
+		warnings = append(warnings, "映射已保存，但当前没有可达分组/令牌支持该模型")
+	}
+
+	return &CanvasChatModelMappingDiagnostic{
+		RequestModel:         requestModel,
+		DisplayName:          strings.TrimSpace(mapping.DisplayName),
+		RequestEndpoint:      strings.TrimSpace(mapping.RequestEndpoint),
+		HasEnabledAbility:    len(abilityGroups) > 0,
+		HasCompatibleChannel: len(compatibleGroups) > 0,
+		VisibleInCanvas:      len(availableGroups) > 0,
+		AbilityGroups:        sortedCanvasChatGroupNames(abilityGroups),
+		CompatibleGroups:     sortedCanvasChatGroupNames(compatibleGroups),
+		AvailableGroups:      sortedCanvasChatGroupNames(availableGroups),
+		WarningMessages:      warnings,
+	}, nil
+}
+
+func sortedCanvasChatGroupNames(groupSet map[string]struct{}) []string {
+	if len(groupSet) == 0 {
+		return []string{}
+	}
+	groups := make([]string, 0, len(groupSet))
+	for groupName := range groupSet {
+		groupName = strings.TrimSpace(groupName)
+		if groupName == "" {
+			continue
+		}
+		groups = append(groups, groupName)
+	}
+	sort.Strings(groups)
+	return groups
 }
 
 func listCanvasChatCandidateGroups(userId int, userGroup string) ([]string, error) {
@@ -573,7 +956,16 @@ func canvasChatGroupSupportsModel(userId int, userGroup string, group string, mo
 	if len(tokens) == 0 {
 		return false, nil
 	}
-	if group == "auto" {
+	return canvasChatSelectedGroupHasChannel(userGroup, group, modelId)
+}
+
+func canvasChatSelectedGroupHasChannel(userGroup string, selectedGroup string, modelId string) (bool, error) {
+	selectedGroup = strings.TrimSpace(selectedGroup)
+	modelId = strings.TrimSpace(modelId)
+	if selectedGroup == "" || modelId == "" {
+		return false, nil
+	}
+	if selectedGroup == "auto" {
 		for _, autoGroup := range GetUserAutoGroup(userGroup) {
 			channel, channelErr := model.GetRandomSatisfiedChannel(autoGroup, modelId, 0)
 			if channelErr != nil {
@@ -585,7 +977,7 @@ func canvasChatGroupSupportsModel(userId int, userGroup string, group string, mo
 		}
 		return false, nil
 	}
-	channel, err := model.GetRandomSatisfiedChannel(group, modelId, 0)
+	channel, err := model.GetRandomSatisfiedChannel(selectedGroup, modelId, 0)
 	if err != nil {
 		return false, err
 	}
@@ -905,10 +1297,11 @@ func summarizeCanvasChatSession(ctx context.Context, userId int, sessionId int, 
 		return nil
 	}
 
-	modelId, err := resolveCanvasChatModel(userId, session, fallbackModel)
+	chatMapping, err := resolveCanvasChatModelMapping(userId, session, fallbackModel)
 	if err != nil {
 		return err
 	}
+	modelId := strings.TrimSpace(chatMapping.RequestModel)
 	user, err := model.GetUserCache(userId)
 	if err != nil {
 		return err
@@ -916,7 +1309,7 @@ func summarizeCanvasChatSession(ctx context.Context, userId int, sessionId int, 
 	if user == nil {
 		return fmt.Errorf("user not found")
 	}
-	group, err := resolveCanvasChatGroup(userId, user.Group, session, session.CurrentGroup, modelId)
+	group, err := resolveCanvasChatGroup(userId, user.Group, session, session.CurrentGroup, chatMapping)
 	if err != nil {
 		return err
 	}
