@@ -41,6 +41,7 @@ func setupCanvasSessionServiceTestDB(t *testing.T) *gorm.DB {
 
 	if err := db.AutoMigrate(
 		&model.User{},
+		&model.ModelMapping{},
 		&model.CanvasSession{},
 		&model.CanvasMessage{},
 		&model.ImageGenerationTask{},

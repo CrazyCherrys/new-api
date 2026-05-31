@@ -146,3 +146,64 @@ func TestBuildVideoRelaySubmitBodyKeepsJSONForOpenAIVideoTextOnly(t *testing.T) 
 		t.Fatalf("did not expect input_reference in text-only json body: %#v", req)
 	}
 }
+
+func TestBuildVideoRelaySubmitBodyDownloadsRemoteReferenceForOpenAIVideo(t *testing.T) {
+	previousDownloader := getVideoReferenceImageFromURL
+	getVideoReferenceImageFromURL = func(url string) (string, string, error) {
+		if url != "https://example.com/reference.png" {
+			t.Fatalf("unexpected url %q", url)
+		}
+		return "image/png", "cG5n", nil
+	}
+	defer func() {
+		getVideoReferenceImageFromURL = previousDownloader
+	}()
+
+	body, contentType, err := buildVideoRelaySubmitBody(
+		"sora-2",
+		"remote ref video",
+		"openai-video",
+		VideoGenerationParams{
+			Duration:   8,
+			Resolution: "720x1280",
+		},
+		"https://example.com/reference.png",
+	)
+	if err != nil {
+		t.Fatalf("buildVideoRelaySubmitBody returned error: %v", err)
+	}
+	if !strings.HasPrefix(contentType, "multipart/form-data;") {
+		t.Fatalf("expected multipart content type, got %q", contentType)
+	}
+
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		t.Fatalf("failed to parse multipart content type: %v", err)
+	}
+	payload, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read multipart body: %v", err)
+	}
+	form, err := multipart.NewReader(bytes.NewReader(payload), params["boundary"]).ReadForm(1024 * 1024)
+	if err != nil {
+		t.Fatalf("failed to read multipart form: %v", err)
+	}
+	defer form.RemoveAll()
+
+	files := form.File["input_reference"]
+	if len(files) != 1 || files[0].Filename != "reference.png" {
+		t.Fatalf("expected one downloaded input_reference file, got %#v", files)
+	}
+	file, err := files[0].Open()
+	if err != nil {
+		t.Fatalf("failed to open multipart file: %v", err)
+	}
+	defer file.Close()
+	content, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatalf("failed to read multipart file: %v", err)
+	}
+	if string(content) != "png" {
+		t.Fatalf("expected downloaded file content to be preserved, got %q", string(content))
+	}
+}

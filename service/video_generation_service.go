@@ -26,6 +26,8 @@ const (
 	videoCapabilityTextToVideo  = "text_to_video"
 )
 
+var getVideoReferenceImageFromURL = GetImageFromUrl
+
 type VideoGenerationParams struct {
 	Duration        int      `json:"duration"`
 	Resolution      string   `json:"resolution"`
@@ -389,13 +391,9 @@ func buildVideoRelaySubmitBody(modelId string, prompt string, requestEndpoint st
 }
 
 func buildOpenAIVideoMultipartSubmitBody(modelId string, prompt string, params VideoGenerationParams, imageInput string) (*bytes.Buffer, string, error) {
-	mimeType, base64Data, err := DecodeBase64FileData(imageInput)
+	mimeType, imageBytes, err := resolveVideoReferenceImageBytes(imageInput)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to decode reference image data: %w", err)
-	}
-	imageBytes, err := base64.StdEncoding.DecodeString(base64Data)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to decode reference image bytes: %w", err)
+		return nil, "", err
 	}
 
 	var body bytes.Buffer
@@ -432,6 +430,34 @@ func buildOpenAIVideoMultipartSubmitBody(modelId string, prompt string, params V
 		return nil, "", fmt.Errorf("failed to finalize multipart body: %w", err)
 	}
 	return &body, contentType, nil
+}
+
+func resolveVideoReferenceImageBytes(imageInput string) (string, []byte, error) {
+	imageInput = strings.TrimSpace(imageInput)
+	if imageInput == "" {
+		return "", nil, fmt.Errorf("reference image is required")
+	}
+	if model.IsProbablyHTTPURL(imageInput) {
+		mimeType, base64Data, err := getVideoReferenceImageFromURL(imageInput)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to download reference image: %w", err)
+		}
+		imageBytes, err := base64.StdEncoding.DecodeString(base64Data)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to decode downloaded reference image: %w", err)
+		}
+		return mimeType, imageBytes, nil
+	}
+
+	mimeType, base64Data, err := DecodeBase64FileData(imageInput)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to decode reference image data: %w", err)
+	}
+	imageBytes, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to decode reference image bytes: %w", err)
+	}
+	return mimeType, imageBytes, nil
 }
 
 func videoReferenceImageFilename(mimeType string) string {
