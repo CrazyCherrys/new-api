@@ -53,7 +53,6 @@ import {
   IconLayers,
   IconPlayCircle,
   IconRealSizeStroked,
-  IconText,
   IconExternalOpen,
   IconMore,
   IconSidebar,
@@ -73,6 +72,7 @@ import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal'
 import PlayableVideo from '../../components/PlayableVideo';
 import VideoGenerationTaskCard from '../../components/VideoGenerationTaskCard';
 import VideoGenerationTaskModal from '../../components/VideoGenerationTaskModal';
+import MarkdownRenderer from '../../components/common/markdown/MarkdownRenderer';
 import {
   getCanvasImageUiState,
   getCanvasImageSelectorVisibility,
@@ -651,6 +651,10 @@ const ImageGeneration = () => {
   const [canvasMessages, setCanvasMessages] = useState([]);
   const [canvasMessagesLoading, setCanvasMessagesLoading] = useState(false);
   const [canvasMessagesError, setCanvasMessagesError] = useState('');
+  const [hoveredSidebarNavKey, setHoveredSidebarNavKey] = useState('');
+  const [hoveredCanvasSessionId, setHoveredCanvasSessionId] = useState(null);
+  const [hoveredCanvasChatMessageId, setHoveredCanvasChatMessageId] =
+    useState(null);
 
   const [selectedSeries, setSelectedSeries] = useState(() =>
     getStoredValue(STORAGE_KEYS.SERIES, ''),
@@ -955,6 +959,8 @@ const ImageGeneration = () => {
 
   useEffect(() => {
     setSelectedCanvasMessageId(null);
+    setHoveredCanvasChatMessageId(null);
+    setHoveredCanvasSessionId(null);
   }, [selectedCanvasSessionId, generationMode]);
 
   useEffect(() => {
@@ -4605,13 +4611,15 @@ const ImageGeneration = () => {
     showError(t('暂未开放'));
   };
 
-  const handleSendChatMessage = async () => {
+  const handleSendChatMessage = async (promptOverride = '') => {
     if (chatStreaming) {
-      stopChatStream();
+      if (!promptOverride) {
+        stopChatStream();
+      }
       return;
     }
 
-    const prompt = chatPrompt.trim();
+    const prompt = String(promptOverride || chatPrompt).trim();
     if (!prompt) {
       showError(t('请输入消息'));
       return;
@@ -4953,6 +4961,17 @@ const ImageGeneration = () => {
       borderRight: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-bg-0)',
       overflow: 'hidden',
+      position: 'relative',
+      transition: isMobile
+        ? undefined
+        : 'width 0.24s ease, min-width 0.24s ease, opacity 0.2s ease, border-color 0.24s ease',
+    },
+    leftPanelCollapsed: {
+      width: 0,
+      minWidth: 0,
+      borderRightColor: 'transparent',
+      opacity: 0,
+      pointerEvents: 'none',
     },
     sidebarHeader: {
       minHeight: 44,
@@ -4982,24 +5001,27 @@ const ImageGeneration = () => {
     },
     sidebarNavItem: {
       width: '100%',
-      minHeight: 42,
-      border: '1px solid transparent',
-      borderRadius: 8,
+      minHeight: 40,
+      border: 'none',
+      borderRadius: 10,
       background: 'transparent',
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--semi-color-text-1)',
       display: 'flex',
       alignItems: 'center',
       gap: 10,
-      padding: '0 12px',
+      padding: '0 10px',
       cursor: 'pointer',
       textAlign: 'left',
       fontSize: 14,
-      transition: 'background 0.16s, border-color 0.16s, color 0.16s',
+      transition: 'background 0.16s, color 0.16s',
+    },
+    sidebarNavItemHover: {
+      background: 'var(--semi-color-fill-0)',
+      color: 'var(--semi-color-text-0)',
     },
     sidebarNavItemActive: {
-      borderColor: 'var(--semi-color-primary-light-default)',
-      background: 'var(--semi-color-primary-light-default)',
-      color: 'var(--semi-color-primary)',
+      background: 'var(--semi-color-fill-1)',
+      color: 'var(--semi-color-text-0)',
     },
     sidebarNavItemMuted: {
       color: 'var(--semi-color-text-2)',
@@ -5038,9 +5060,9 @@ const ImageGeneration = () => {
     },
     taskListItem: {
       width: '100%',
-      minHeight: 44,
-      borderRadius: 8,
-      border: '1px solid transparent',
+      minHeight: 40,
+      borderRadius: 10,
+      border: 'none',
       background: 'transparent',
       padding: '8px 10px',
       display: 'flex',
@@ -5048,11 +5070,13 @@ const ImageGeneration = () => {
       gap: 10,
       textAlign: 'left',
       cursor: 'pointer',
-      transition: 'border-color 0.16s, background 0.16s, color 0.16s',
+      transition: 'background 0.16s, color 0.16s',
+    },
+    taskListItemHover: {
+      background: 'var(--semi-color-fill-0)',
     },
     taskListItemActive: {
-      borderColor: 'var(--semi-color-primary-light-default)',
-      background: 'var(--semi-color-primary-light-default)',
+      background: 'var(--semi-color-fill-1)',
     },
     taskListText: {
       minWidth: 0,
@@ -5079,11 +5103,11 @@ const ImageGeneration = () => {
       alignItems: 'center',
       justifyContent: 'center',
       color: 'var(--semi-color-text-2)',
-      background: 'var(--semi-color-fill-0)',
+      background: 'rgba(15, 23, 42, 0.06)',
     },
     sessionListTitle: {
       fontSize: 14,
-      fontWeight: 600,
+      fontWeight: 500,
       color: 'var(--semi-color-text-0)',
       lineHeight: 1.35,
       overflow: 'hidden',
@@ -5180,30 +5204,35 @@ const ImageGeneration = () => {
       padding: isMobile ? '14px' : '18px',
     },
     promptArea: {
-      borderRadius: 10,
+      borderRadius: 18,
       border: '1px solid var(--semi-color-border)',
       background: 'var(--semi-color-bg-0)',
-      padding: isMobile ? '10px' : '12px',
-    },
-    promptInputRow: {
+      boxShadow: '0 18px 44px rgba(15, 23, 42, 0.08)',
+      padding: isMobile ? '12px' : '14px',
       display: 'flex',
-      alignItems: 'flex-start',
-      gap: 8,
-      flexWrap: isMobile ? 'wrap' : 'nowrap',
+      flexDirection: 'column',
+      gap: 10,
+    },
+    promptInputShell: {
+      display: 'flex',
+      alignItems: 'flex-end',
+      gap: 10,
       minWidth: 0,
+      borderRadius: 14,
+      background: 'var(--semi-color-bg-0)',
+      boxShadow: 'inset 0 0 0 1px rgba(148, 163, 184, 0.12)',
+      padding: isMobile ? '2px 2px 2px 12px' : '4px 4px 4px 14px',
     },
     promptInlineAssets: {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
       flexWrap: 'wrap',
-      flex: '0 0 auto',
-      maxWidth: isMobile ? '100%' : '48%',
       minHeight: 36,
     },
     promptInput: {
-      flex: '1 1 220px',
-      minWidth: isMobile ? 'min(220px, 100%)' : 0,
+      flex: 1,
+      minWidth: 0,
       border: 'none',
       background: 'transparent',
       resize: 'none',
@@ -5211,14 +5240,14 @@ const ImageGeneration = () => {
       color: 'var(--semi-color-text-0)',
       caretColor: 'var(--semi-color-primary)',
       fontSize: 15,
-      lineHeight: 1.55,
+      lineHeight: 1.65,
+      padding: '8px 0',
     },
     promptControls: {
       display: 'flex',
       justifyContent: 'space-between',
-      gap: 8,
-      alignItems: 'flex-end',
-      marginTop: 8,
+      gap: 10,
+      alignItems: 'center',
       flexWrap: 'wrap',
     },
     promptControlsLeft: {
@@ -5533,6 +5562,20 @@ const ImageGeneration = () => {
       justifyContent: 'center',
       transition: 'opacity 0.2s, background 0.2s, border-color 0.2s, color 0.2s',
     },
+    generateIconBtnEmbedded: {
+      width: 40,
+      height: 40,
+      minWidth: 40,
+      borderRadius: 12,
+      border: '1px solid var(--semi-color-border)',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+      marginBottom: 4,
+      transition: 'opacity 0.2s, background 0.2s, border-color 0.2s, color 0.2s',
+    },
     generateStopIcon: {
       width: 12,
       height: 12,
@@ -5728,6 +5771,101 @@ const ImageGeneration = () => {
       flexDirection: 'column',
       gap: isMobile ? 10 : 12,
       width: '100%',
+    },
+    canvasChatMessageRow: {
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+    },
+    canvasChatMessageRowUser: {
+      alignItems: 'flex-end',
+    },
+    canvasChatMessageRowAssistant: {
+      alignItems: 'flex-start',
+    },
+    canvasChatUserBubble: {
+      maxWidth: isMobile ? '92%' : '72%',
+      borderRadius: 18,
+      background: 'var(--semi-color-primary)',
+      color: '#fff',
+      padding: isMobile ? '11px 13px' : '12px 15px',
+      boxShadow: '0 10px 24px rgba(15, 23, 42, 0.12)',
+    },
+    canvasChatUserBubbleSelected: {
+      boxShadow: '0 14px 30px rgba(15, 23, 42, 0.18)',
+    },
+    canvasChatUserPrompt: {
+      whiteSpace: 'pre-wrap',
+      color: 'inherit',
+      lineHeight: 1.6,
+      wordBreak: 'break-word',
+    },
+    canvasChatAssistantContent: {
+      width: '100%',
+      maxWidth: isMobile ? '100%' : '82%',
+      color: 'var(--semi-color-text-0)',
+      lineHeight: 1.72,
+      padding: '4px 0',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+    },
+    canvasChatAssistantContentSelected: {
+      background: 'rgba(15, 23, 42, 0.03)',
+      borderRadius: 14,
+      padding: isMobile ? '10px 10px 8px' : '10px 12px 8px',
+    },
+    canvasChatMarkdown: {
+      width: '100%',
+      color: 'var(--semi-color-text-1)',
+    },
+    canvasChatInlineStatus: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 8,
+      color: 'var(--semi-color-text-2)',
+      minHeight: 24,
+      lineHeight: 1.6,
+    },
+    canvasChatErrorText: {
+      maxWidth: '100%',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      overflowWrap: 'anywhere',
+      lineHeight: 1.6,
+    },
+    canvasChatActions: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      opacity: isMobile ? 1 : 0,
+      transform: isMobile ? 'translateY(0)' : 'translateY(-2px)',
+      transition: 'opacity 0.16s ease, transform 0.16s ease',
+      pointerEvents: isMobile ? 'auto' : 'none',
+    },
+    canvasChatActionsVisible: {
+      opacity: 1,
+      transform: 'translateY(0)',
+      pointerEvents: 'auto',
+    },
+    canvasChatActionButton: {
+      minHeight: 28,
+      borderRadius: 999,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-bg-0)',
+      color: 'var(--semi-color-text-2)',
+      padding: '0 10px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      cursor: 'pointer',
+      transition: 'background 0.16s ease, color 0.16s ease, opacity 0.16s ease',
+    },
+    canvasChatActionButtonDisabled: {
+      opacity: 0.5,
+      cursor: 'not-allowed',
     },
     canvasMessageRow: {
       width: 'fit-content',
@@ -6337,6 +6475,97 @@ const ImageGeneration = () => {
     </button>
   );
 
+  const renderChatSettingsDropdown = () => {
+    const dropdownKey = 'chat-settings';
+    const iconOnly = isMobile;
+    const panel = (
+      <div
+        style={styles.imageParamPanel}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div style={styles.imageParamSection}>
+          <div style={styles.imageParamSectionTitle}>{t('温度')}</div>
+          <div style={styles.imageParamOptionRow}>
+            {['0', '0.2', '0.7', '1', '1.5'].map((item) =>
+              renderImageParamOption({
+                value: item,
+                label: item,
+                selected: item === chatTemperature,
+                onClick: (value) => {
+                  const nextValue = String(value);
+                  setChatTemperature(nextValue);
+                  const parsed = Number(nextValue);
+                  if (Number.isFinite(parsed)) {
+                    updateCurrentCanvasChatSessionConfig(
+                      { chat_temperature: parsed },
+                      t('更新会话温度失败'),
+                    );
+                  }
+                },
+              }),
+            )}
+          </div>
+        </div>
+        <div style={styles.imageParamDivider} />
+        <div style={styles.imageParamSection}>
+          <div style={styles.imageParamSectionTitle}>{t('上下文')}</div>
+          <div style={styles.imageParamOptionRow}>
+            {['0', '4', '8', '16', '32'].map((item) =>
+              renderImageParamOption({
+                value: item,
+                label: item,
+                selected: item === chatContext,
+                onClick: (value) => {
+                  const nextValue = String(value);
+                  setChatContext(nextValue);
+                  const parsed = Number(nextValue);
+                  if (Number.isFinite(parsed)) {
+                    updateCurrentCanvasChatSessionConfig(
+                      { chat_context_count: parsed },
+                      t('更新会话上下文失败'),
+                    );
+                  }
+                },
+              }),
+            )}
+          </div>
+        </div>
+      </div>
+    );
+
+    return (
+      <Dropdown
+        key={dropdownKey}
+        trigger='click'
+        position='bottomLeft'
+        render={panel}
+        visible={activeDropdownKey === dropdownKey}
+        onVisibleChange={(visible) => {
+          setActiveDropdownKey((current) =>
+            visible ? dropdownKey : current === dropdownKey ? '' : current,
+          );
+        }}
+      >
+        <button
+          type='button'
+          aria-label={t('聊天设置')}
+          title={t('聊天设置')}
+          style={{
+            ...styles.pillButton,
+            ...(iconOnly ? styles.pillButtonIconOnly : null),
+            ...(activeDropdownKey === dropdownKey
+              ? styles.pillButtonActive
+              : styles.pillButtonMuted),
+          }}
+        >
+          <IconSetting size='small' />
+          {!iconOnly ? <span>{t('设置')}</span> : null}
+          {!iconOnly ? <IconChevronDown size='small' /> : null}
+        </button>
+      </Dropdown>
+    );
+  };
+
   const renderGenerationParametersDropdown = ({
     key,
     ariaLabel,
@@ -6648,23 +6877,39 @@ const ImageGeneration = () => {
     onClick,
     suffix = null,
     ariaExpanded,
-  }) => (
-    <button
-      key={key}
-      type='button'
-      aria-expanded={ariaExpanded}
-      style={{
-        ...styles.sidebarNavItem,
-        ...(active ? styles.sidebarNavItemActive : null),
-        ...(muted ? styles.sidebarNavItemMuted : null),
-      }}
-      onClick={onClick}
-    >
-      <span style={styles.sidebarNavIcon}>{icon}</span>
-      <span style={styles.sidebarNavLabel}>{label}</span>
-      {suffix ? <span style={styles.sidebarNavSuffix}>{suffix}</span> : null}
-    </button>
-  );
+  }) => {
+    const hovered = !isMobile && hoveredSidebarNavKey === key;
+    return (
+      <button
+        key={key}
+        type='button'
+        aria-expanded={ariaExpanded}
+        style={{
+          ...styles.sidebarNavItem,
+          ...(hovered && !active ? styles.sidebarNavItemHover : null),
+          ...(active ? styles.sidebarNavItemActive : null),
+          ...(muted ? styles.sidebarNavItemMuted : null),
+        }}
+        onClick={onClick}
+        onMouseEnter={() => {
+          if (!isMobile) {
+            setHoveredSidebarNavKey(key);
+          }
+        }}
+        onMouseLeave={() => {
+          if (!isMobile) {
+            setHoveredSidebarNavKey((current) =>
+              current === key ? '' : current,
+            );
+          }
+        }}
+      >
+        <span style={styles.sidebarNavIcon}>{icon}</span>
+        <span style={styles.sidebarNavLabel}>{label}</span>
+        {suffix ? <span style={styles.sidebarNavSuffix}>{suffix}</span> : null}
+      </button>
+    );
+  };
 
   const renderCanvasSessionMenu = (session) => (
     <Dropdown.Menu style={styles.darkMenu}>
@@ -6783,6 +7028,8 @@ const ImageGeneration = () => {
               const active =
                 generationMode === sessionMode &&
                 session.id === selectedCanvasSessionIds[sessionMode];
+              const hovered =
+                !isMobile && hoveredCanvasSessionId === session.id;
               return (
                 <div
                   key={session.id}
@@ -6791,6 +7038,7 @@ const ImageGeneration = () => {
                   style={{
                     ...styles.taskListItem,
                     ...styles.sessionListItem,
+                    ...(hovered && !active ? styles.taskListItemHover : null),
                     ...(active ? styles.taskListItemActive : null),
                   }}
                   onClick={() => selectCanvasSession(session)}
@@ -6798,6 +7046,18 @@ const ImageGeneration = () => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
                       selectCanvasSession(session);
+                    }
+                  }}
+                  onMouseEnter={() => {
+                    if (!isMobile) {
+                      setHoveredCanvasSessionId(session.id);
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    if (!isMobile) {
+                      setHoveredCanvasSessionId((current) =>
+                        current === session.id ? null : current,
+                      );
                     }
                   }}
                 >
@@ -6851,69 +7111,80 @@ const ImageGeneration = () => {
     </Spin>
   );
 
-  const renderTaskSidebar = () => (
-    <div style={styles.leftPanel} data-canvas-task-sidebar={generationMode}>
-      <div style={styles.sidebarHeader}>
-        <Button
-          type='tertiary'
-          icon={<IconArchive />}
-          style={styles.sidebarHeaderActionButton}
-          onClick={() => {
-            setAssetLibraryVisible(true);
-            setMobileTaskbarVisible(false);
-          }}
-        >
-          {t('资产库')}
-        </Button>
-        {!isMobile ? (
-          <Tooltip content={t('隐藏侧边栏')} position='bottom'>
+  const renderTaskSidebar = ({ collapsed = false } = {}) => (
+    <div
+      style={{
+        ...styles.leftPanel,
+        ...(collapsed ? styles.leftPanelCollapsed : null),
+      }}
+      aria-hidden={collapsed ? 'true' : undefined}
+      data-canvas-task-sidebar={generationMode}
+    >
+      {collapsed ? null : (
+        <>
+          <div style={styles.sidebarHeader}>
             <Button
               type='tertiary'
-              aria-label={t('隐藏侧边栏')}
-              data-canvas-sidebar-collapse='true'
-              icon={<IconChevronLeft />}
-              style={styles.sidebarIconButton}
-              onClick={() => setDesktopSidebarCollapsed(true)}
-            />
-          </Tooltip>
-        ) : null}
-      </div>
-      <div style={styles.sidebarNav}>
-        {renderSidebarNavItem({
-          key: 'projects',
-          label: t('项目'),
-          icon: <IconExternalOpen />,
-          muted: true,
-          onClick: handleProjectEntryClick,
-        })}
-        {renderSidebarNavItem({
-          key: 'new-chat',
-          label: t('新聊天'),
-          icon: <IconCommentStroked />,
-          active:
-            generationMode === CANVAS_MODE_CHAT && !selectedCanvasSessionId,
-          onClick: handleNewBlankChat,
-        })}
-        {renderSidebarNavItem({
-          key: 'recent-sessions',
-          label: t('最近'),
-          icon: <IconClock />,
-          onClick: toggleRecentCanvasSessionsExpanded,
-          ariaExpanded: recentCanvasSessions.expanded,
-          suffix: (
-            <IconChevronDown
-              size='small'
-              style={{
-                transform: recentCanvasSessions.expanded
-                  ? 'rotate(0deg)'
-                  : 'rotate(-90deg)',
+              icon={<IconArchive />}
+              style={styles.sidebarHeaderActionButton}
+              onClick={() => {
+                setAssetLibraryVisible(true);
+                setMobileTaskbarVisible(false);
               }}
-            />
-          ),
-        })}
-      </div>
+            >
+              {t('资产库')}
+            </Button>
+            {!isMobile ? (
+              <Tooltip content={t('隐藏侧边栏')} position='bottom'>
+                <Button
+                  type='tertiary'
+                  aria-label={t('隐藏侧边栏')}
+                  data-canvas-sidebar-collapse='true'
+                  icon={<IconChevronLeft />}
+                  style={styles.sidebarIconButton}
+                  onClick={() => setDesktopSidebarCollapsed(true)}
+                />
+              </Tooltip>
+            ) : null}
+          </div>
+          <div style={styles.sidebarNav}>
+            {renderSidebarNavItem({
+              key: 'projects',
+              label: t('项目'),
+              icon: <IconExternalOpen />,
+              muted: true,
+              onClick: handleProjectEntryClick,
+            })}
+            {renderSidebarNavItem({
+              key: 'new-chat',
+              label: t('新聊天'),
+              icon: <IconCommentStroked />,
+              active:
+                generationMode === CANVAS_MODE_CHAT && !selectedCanvasSessionId,
+              onClick: handleNewBlankChat,
+            })}
+            {renderSidebarNavItem({
+              key: 'recent-sessions',
+              label: t('最近'),
+              icon: <IconClock />,
+              onClick: toggleRecentCanvasSessionsExpanded,
+              ariaExpanded: recentCanvasSessions.expanded,
+              suffix: (
+                <IconChevronDown
+                  size='small'
+                  style={{
+                    transform: recentCanvasSessions.expanded
+                      ? 'rotate(0deg)'
+                      : 'rotate(-90deg)',
+                  }}
+                />
+              ),
+            })}
+          </div>
 
-      {recentCanvasSessions.expanded ? renderCanvasSessionList() : null}
+          {recentCanvasSessions.expanded ? renderCanvasSessionList() : null}
+        </>
+      )}
     </div>
   );
 
@@ -7060,6 +7331,68 @@ const ImageGeneration = () => {
       }
     }
     return '1 / 1';
+  };
+
+  const getCanvasChatMessageText = (message) =>
+    String(message?.prompt || '').trim();
+
+  const getCanvasChatRetryPrompt = (message) => {
+    const requestId = String(message?.client_request_id || '').trim();
+    if (requestId) {
+      const matchedUserMessage = displayedCanvasMessages.find(
+        (item) =>
+          item?.role === 'user' &&
+          String(item?.client_request_id || '').trim() === requestId,
+      );
+      const prompt = String(matchedUserMessage?.prompt || '').trim();
+      if (prompt) {
+        return prompt;
+      }
+    }
+
+    const messageIndex = displayedCanvasMessages.findIndex(
+      (item) => String(item?.id || '') === String(message?.id || ''),
+    );
+    if (messageIndex <= 0) {
+      return '';
+    }
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      if (displayedCanvasMessages[index]?.role !== 'user') {
+        continue;
+      }
+      const prompt = String(displayedCanvasMessages[index]?.prompt || '').trim();
+      if (prompt) {
+        return prompt;
+      }
+    }
+    return '';
+  };
+
+  const handleCopyCanvasChatMessage = async (event, message) => {
+    event?.stopPropagation?.();
+    const text = getCanvasChatMessageText(message);
+    if (!text) {
+      return;
+    }
+    const ok = await copy(text);
+    if (ok) {
+      showSuccess(t('已复制到剪贴板'));
+    } else {
+      showError(t('复制失败'));
+    }
+  };
+
+  const handleRetryCanvasChatMessage = async (event, message) => {
+    event?.stopPropagation?.();
+    if (chatStreaming) {
+      return;
+    }
+    const prompt = getCanvasChatRetryPrompt(message);
+    if (!prompt) {
+      showError(t('未找到可重发的提问'));
+      return;
+    }
+    await handleSendChatMessage(prompt);
   };
 
   const handleCopyCanvasError = async (event, errorText) => {
@@ -7403,7 +7736,6 @@ const ImageGeneration = () => {
     const isUser = message.role === 'user';
     const references = getCanvasMessageReferenceFiles(message);
     const showMessageReferences = generationMode !== CANVAS_MODE_IMAGE;
-    const media = getCanvasMessageMedia(message);
     const isSelected = selectedCanvasMessageId === message.id;
     const isChatMode = generationMode === CANVAS_MODE_CHAT;
     const handleMessageClick = async () => {
@@ -7424,69 +7756,146 @@ const ImageGeneration = () => {
 
     if (isChatMode) {
       const chatStatus = String(message?.status || '');
+      const assistantText = getCanvasChatMessageText(message);
+      const retryPrompt = isUser ? '' : getCanvasChatRetryPrompt(message);
+      const actionVisible =
+        !isUser &&
+        (isMobile ||
+          hoveredCanvasChatMessageId === message.id ||
+          isSelected);
       return (
         <div
           key={message.id}
           data-canvas-message-row='true'
           style={{
-            ...styles.canvasMessageRow,
+            ...styles.canvasChatMessageRow,
             ...(isUser
-              ? styles.canvasMessageRowUser
-              : styles.canvasMessageRowAssistant),
-            ...(isSelected ? styles.canvasMessageRowSelected : null),
+              ? styles.canvasChatMessageRowUser
+              : styles.canvasChatMessageRowAssistant),
           }}
           onClick={handleMessageClick}
+          onMouseEnter={() => {
+            if (!isMobile && !isUser) {
+              setHoveredCanvasChatMessageId(message.id);
+            }
+          }}
+          onMouseLeave={() => {
+            if (!isMobile && !isUser) {
+              setHoveredCanvasChatMessageId((current) =>
+                current === message.id ? null : current,
+              );
+            }
+          }}
         >
-          <div style={styles.canvasMessageHead}>
-            <Text type='tertiary' size='small'>
-              {isUser ? t('你') : t('生成')}
-            </Text>
-          </div>
-          <div style={styles.canvasMessageBody}>
-            {isUser ? (
-              <div style={styles.canvasMessagePrompt}>
+          {isUser ? (
+            <div
+              style={{
+                ...styles.canvasChatUserBubble,
+                ...(isSelected ? styles.canvasChatUserBubbleSelected : null),
+              }}
+            >
+              <div style={styles.canvasChatUserPrompt}>
                 {message.prompt || t('请输入消息')}
               </div>
-            ) : message.prompt ? (
-              <div style={styles.canvasMessagePrompt}>{message.prompt}</div>
-            ) : chatStatus === 'generating' ? (
-              <div style={styles.messagePending}>
-                <Spin size='small' />
-                <span>{t('生成中')}</span>
+              {showMessageReferences && references.length > 0 ? (
+                <div style={styles.canvasMessageRefs}>
+                  {references.map((file) =>
+                    renderCanvasReferenceThumb(file, t('参考图')),
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div
+              style={{
+                ...styles.canvasChatAssistantContent,
+                ...(isSelected ? styles.canvasChatAssistantContentSelected : null),
+              }}
+            >
+              {assistantText ? (
+                <MarkdownRenderer
+                  content={assistantText}
+                  className='canvas-chat-markdown'
+                  style={styles.canvasChatMarkdown}
+                />
+              ) : chatStatus === 'generating' ? (
+                <div style={styles.canvasChatInlineStatus}>
+                  <Spin size='small' />
+                  <span>{t('生成中')}</span>
+                </div>
+              ) : chatStatus === 'stopped' ? (
+                <Text type='tertiary' size='small'>
+                  {t('已停止')}
+                </Text>
+              ) : chatStatus === 'failed' ? (
+                <Text type='danger' size='small' style={styles.canvasChatErrorText}>
+                  {message.error_message || t('发送失败')}
+                </Text>
+              ) : null}
+              {showMessageReferences && references.length > 0 ? (
+                <div style={styles.canvasMessageRefs}>
+                  {references.map((file) =>
+                    renderCanvasReferenceThumb(file, t('参考图')),
+                  )}
+                </div>
+              ) : null}
+              {assistantText && chatStatus === 'generating' ? (
+                <div style={styles.canvasChatInlineStatus}>
+                  <Spin size='small' />
+                  <span>{t('生成中')}</span>
+                </div>
+              ) : null}
+              {assistantText && chatStatus === 'stopped' ? (
+                <Text type='tertiary' size='small'>
+                  {t('已停止')}
+                </Text>
+              ) : null}
+              {assistantText && chatStatus === 'failed' ? (
+                <Text type='danger' size='small' style={styles.canvasChatErrorText}>
+                  {message.error_message}
+                </Text>
+              ) : null}
+              <div
+                style={{
+                  ...styles.canvasChatActions,
+                  ...(actionVisible ? styles.canvasChatActionsVisible : null),
+                }}
+              >
+                {assistantText ? (
+                  <button
+                    type='button'
+                    aria-label={t('复制')}
+                    style={styles.canvasChatActionButton}
+                    onClick={(event) =>
+                      handleCopyCanvasChatMessage(event, message)
+                    }
+                  >
+                    <IconCopy size='small' />
+                    <span>{t('复制')}</span>
+                  </button>
+                ) : null}
+                {retryPrompt ? (
+                  <button
+                    type='button'
+                    aria-label={t('重发')}
+                    style={{
+                      ...styles.canvasChatActionButton,
+                      ...(chatStreaming
+                        ? styles.canvasChatActionButtonDisabled
+                        : null),
+                    }}
+                    onClick={(event) =>
+                      handleRetryCanvasChatMessage(event, message)
+                    }
+                    disabled={chatStreaming}
+                  >
+                    <IconRefresh size='small' />
+                    <span>{t('重发')}</span>
+                  </button>
+                ) : null}
               </div>
-            ) : chatStatus === 'stopped' ? (
-              <Text type='tertiary' size='small'>
-                {t('已停止')}
-              </Text>
-            ) : chatStatus === 'failed' ? (
-              <Text type='danger' size='small' style={styles.canvasErrorText}>
-                {message.error_message || t('发送失败')}
-              </Text>
-            ) : null}
-            {showMessageReferences && references.length > 0 ? (
-              <div style={styles.canvasMessageRefs}>
-                {references.map((file) =>
-                  renderCanvasReferenceThumb(file, t('参考图')),
-                )}
-              </div>
-            ) : null}
-            {!isUser && chatStatus === 'generating' && message.prompt ? (
-              <div style={styles.messagePending}>
-                <Spin size='small' />
-                <span>{t('生成中')}</span>
-              </div>
-            ) : null}
-            {!isUser && chatStatus === 'stopped' && message.prompt ? (
-              <Text type='tertiary' size='small'>
-                {t('已停止')}
-              </Text>
-            ) : null}
-            {!isUser && chatStatus === 'failed' && message.prompt ? (
-              <Text type='danger' size='small' style={styles.canvasErrorText}>
-                {message.error_message}
-              </Text>
-            ) : null}
-          </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -7715,50 +8124,7 @@ const ImageGeneration = () => {
         options: chatModels.map((model) => ({ value: model, label: model })),
         disabled: chatModels.length === 0,
       }),
-      renderPillDropdown({
-        key: 'chat-temperature',
-        label: t('温度'),
-        icon: <IconSetting size='small' />,
-        value: chatTemperature,
-        displayValue: chatTemperature,
-        onChange: (value) => {
-          const nextValue = String(value);
-          setChatTemperature(nextValue);
-          const parsed = Number(nextValue);
-          if (Number.isFinite(parsed)) {
-            updateCurrentCanvasChatSessionConfig(
-              { chat_temperature: parsed },
-              t('更新会话温度失败'),
-            );
-          }
-        },
-        options: ['0', '0.2', '0.7', '1', '1.5'].map((item) => ({
-          value: item,
-          label: item,
-        })),
-      }),
-      renderPillDropdown({
-        key: 'chat-context',
-        label: t('上下文'),
-        icon: <IconText size='small' />,
-        value: chatContext,
-        displayValue: chatContext,
-        onChange: (value) => {
-          const nextValue = String(value);
-          setChatContext(nextValue);
-          const parsed = Number(nextValue);
-          if (Number.isFinite(parsed)) {
-            updateCurrentCanvasChatSessionConfig(
-              { chat_context_count: parsed },
-              t('更新会话上下文失败'),
-            );
-          }
-        },
-        options: ['0', '4', '8', '16', '32'].map((item) => ({
-          value: item,
-          label: item,
-        })),
-      }),
+      renderChatSettingsDropdown(),
     ];
     const imageComposerParameters = [
       renderModelDropdown(false, activeModelLabel),
@@ -7815,67 +8181,65 @@ const ImageGeneration = () => {
       <div style={styles.composerDock}>
         <div style={styles.composerShell} data-canvas-composer={generationMode}>
           <div style={styles.promptArea}>
-            <div style={styles.promptInputRow}>
-              {showPromptAssetBar ? (
-                <div style={styles.promptInlineAssets}>
-                  {isChatMode
-                    ? chatAttachments.map((file) =>
-                        renderReferenceThumb(file, () =>
-                          setChatAttachments((prev) =>
-                            prev.filter((item) => item.uid !== file.uid),
-                          ),
+            {showPromptAssetBar ? (
+              <div style={styles.promptInlineAssets}>
+                {isChatMode
+                  ? chatAttachments.map((file) =>
+                      renderReferenceThumb(file, () =>
+                        setChatAttachments((prev) =>
+                          prev.filter((item) => item.uid !== file.uid),
                         ),
-                      )
-                    : null}
-                  {isImageMode && selectedModelSupportsEditing ? (
-                    <Upload
-                      action=''
-                      accept='image/*'
-                      multiple
-                      fileList={referenceImages}
-                      onChange={handleImageUpload}
-                      showUploadList={false}
-                      beforeUpload={validateImageSize}
-                      disabled={referenceImageLimitReached}
-                    >
-                      {renderUploadIconButton({
-                        disabled: referenceImageLimitReached,
-                        title: referenceImageLimitReached
-                          ? t('已达到当前模型参考图上限')
-                          : t('上传图片'),
-                      })}
-                    </Upload>
-                  ) : null}
-                  {isImageMode && selectedModelSupportsEditing
-                    ? referenceImages.map((file) =>
-                        renderReferenceThumb(file, () =>
-                          handleImageRemove(file),
-                        ),
-                      )
-                    : null}
-                  {isVideoMode && videoSelectedModelSupportsImageToVideo ? (
-                    <Upload
-                      action=''
-                      accept='image/*'
-                      multiple={false}
-                      fileList={videoReferenceImage ? [videoReferenceImage] : []}
-                      onChange={handleVideoReferenceUpload}
-                      showUploadList={false}
-                      beforeUpload={validateImageSize}
-                    >
-                      {renderUploadIconButton({ title: t('上传图片') })}
-                    </Upload>
-                  ) : null}
-                  {isVideoMode &&
-                  videoSelectedModelSupportsImageToVideo &&
-                  videoReferenceImage
-                    ? renderReferenceThumb(
-                        videoReferenceImage,
-                        handleVideoReferenceRemove,
-                      )
-                    : null}
-                </div>
-              ) : null}
+                      ),
+                    )
+                  : null}
+                {isImageMode && selectedModelSupportsEditing ? (
+                  <Upload
+                    action=''
+                    accept='image/*'
+                    multiple
+                    fileList={referenceImages}
+                    onChange={handleImageUpload}
+                    showUploadList={false}
+                    beforeUpload={validateImageSize}
+                    disabled={referenceImageLimitReached}
+                  >
+                    {renderUploadIconButton({
+                      disabled: referenceImageLimitReached,
+                      title: referenceImageLimitReached
+                        ? t('已达到当前模型参考图上限')
+                        : t('上传图片'),
+                    })}
+                  </Upload>
+                ) : null}
+                {isImageMode && selectedModelSupportsEditing
+                  ? referenceImages.map((file) =>
+                      renderReferenceThumb(file, () => handleImageRemove(file)),
+                    )
+                  : null}
+                {isVideoMode && videoSelectedModelSupportsImageToVideo ? (
+                  <Upload
+                    action=''
+                    accept='image/*'
+                    multiple={false}
+                    fileList={videoReferenceImage ? [videoReferenceImage] : []}
+                    onChange={handleVideoReferenceUpload}
+                    showUploadList={false}
+                    beforeUpload={validateImageSize}
+                  >
+                    {renderUploadIconButton({ title: t('上传图片') })}
+                  </Upload>
+                ) : null}
+                {isVideoMode &&
+                videoSelectedModelSupportsImageToVideo &&
+                videoReferenceImage
+                  ? renderReferenceThumb(
+                      videoReferenceImage,
+                      handleVideoReferenceRemove,
+                    )
+                  : null}
+              </div>
+            ) : null}
+            <div style={styles.promptInputShell}>
               <TextArea
                 aria-label={placeholder}
                 data-canvas-prompt-input={generationMode}
@@ -7897,50 +8261,48 @@ const ImageGeneration = () => {
                 autosize={{ minRows: 1, maxRows: 12 }}
                 style={styles.promptInput}
               />
+              <button
+                aria-label={
+                  isChatMode
+                    ? chatStreaming
+                      ? t('停止生成')
+                      : t('发送消息')
+                    : isVideoMode
+                      ? t('生成视频')
+                      : t('生成图片')
+                }
+                style={{
+                  ...styles.generateIconBtnEmbedded,
+                  opacity: submitDisabled ? 0.55 : 1,
+                  pointerEvents: submitDisabled ? 'none' : 'auto',
+                  background: promptHasContent || (isChatMode && chatStreaming)
+                    ? 'var(--semi-color-primary)'
+                    : 'var(--semi-color-fill-0)',
+                  borderColor: promptHasContent || (isChatMode && chatStreaming)
+                    ? 'var(--semi-color-primary)'
+                    : 'var(--semi-color-border)',
+                  color:
+                    promptHasContent || (isChatMode && chatStreaming)
+                      ? '#fff'
+                      : 'var(--semi-color-text-2)',
+                }}
+                onClick={handleComposerSubmit}
+                disabled={submitDisabled}
+                type='button'
+              >
+                {isChatMode && chatStreaming ? (
+                  <span style={styles.generateStopIcon} />
+                ) : submitLoading ? (
+                  <Spin size='small' />
+                ) : (
+                  <IconSend size='small' />
+                )}
+              </button>
             </div>
             <div style={styles.promptControls}>
               <div style={styles.promptControlsLeft}>
                 {renderComposerModeSwitch()}
                 <div style={styles.composerParameterRow}>{activeParameters}</div>
-              </div>
-              <div style={styles.promptControlsRight}>
-                <button
-                  aria-label={
-                    isChatMode
-                      ? chatStreaming
-                        ? t('停止生成')
-                        : t('发送消息')
-                      : isVideoMode
-                        ? t('生成视频')
-                        : t('生成图片')
-                  }
-                  style={{
-                    ...styles.generateIconBtn,
-                    opacity: submitDisabled ? 0.55 : 1,
-                    pointerEvents: submitDisabled ? 'none' : 'auto',
-                    background: promptHasContent || (isChatMode && chatStreaming)
-                      ? 'var(--semi-color-primary)'
-                      : 'var(--semi-color-fill-0)',
-                    borderColor: promptHasContent || (isChatMode && chatStreaming)
-                      ? 'var(--semi-color-primary)'
-                      : 'var(--semi-color-border)',
-                    color:
-                      promptHasContent || (isChatMode && chatStreaming)
-                        ? '#fff'
-                        : 'var(--semi-color-text-2)',
-                  }}
-                  onClick={handleComposerSubmit}
-                  disabled={submitDisabled}
-                  type='button'
-                >
-                  {isChatMode && chatStreaming ? (
-                    <span style={styles.generateStopIcon} />
-                  ) : submitLoading ? (
-                    <Spin size='small' />
-                  ) : (
-                    <IconSend size='small' />
-                  )}
-                </button>
               </div>
             </div>
 
@@ -8492,7 +8854,7 @@ const ImageGeneration = () => {
 
   return (
     <div style={styles.container}>
-      {!isMobile && !desktopSidebarCollapsed ? renderTaskSidebar() : null}
+      {!isMobile ? renderTaskSidebar({ collapsed: desktopSidebarCollapsed }) : null}
       {renderWorkspace()}
       {isMobile ? (
         <SideSheet

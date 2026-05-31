@@ -8,6 +8,29 @@
   word-break: break-word;
 }
 
+.canvas-chat-markdown {
+  color: var(--semi-color-text-1);
+  line-height: 1.72;
+}
+
+.canvas-chat-markdown p,
+.canvas-chat-markdown li,
+.canvas-chat-markdown blockquote,
+.canvas-chat-markdown td,
+.canvas-chat-markdown th {
+  color: var(--semi-color-text-1);
+  line-height: 1.72;
+}
+
+.canvas-chat-markdown pre {
+  margin: 14px 0;
+  border-radius: 12px;
+}
+
+.canvas-chat-markdown pre code {
+  line-height: 1.7;
+}
+
 /* 用户消息样式 - 白色字体适配蓝色背景 */
 .user-message {
   color: white !important;
