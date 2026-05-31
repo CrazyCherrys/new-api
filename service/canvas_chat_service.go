@@ -581,6 +581,10 @@ func ListUserCanvasChatModels(userId int) ([]string, error) {
 	return listUserCanvasChatModels(userId)
 }
 
+func ListUserCanvasChatModelCatalog(userId int) ([]*dto.CanvasChatModelCatalogItem, error) {
+	return listUserCanvasChatModelCatalog(userId)
+}
+
 func ListUserCanvasChatModelOptions(userId int) ([]CanvasChatModelOption, error) {
 	return listUserCanvasChatModelOptions(userId)
 }
@@ -598,6 +602,33 @@ func listUserCanvasChatModels(userId int) ([]string, error) {
 		result = append(result, option.RequestModel)
 	}
 	return result, nil
+}
+
+func listUserCanvasChatModelCatalog(userId int) ([]*dto.CanvasChatModelCatalogItem, error) {
+	options, err := listUserCanvasChatModelOptions(userId)
+	if err != nil {
+		return nil, err
+	}
+	catalog := make([]*dto.CanvasChatModelCatalogItem, 0, len(options))
+	for _, option := range options {
+		if !option.Usable {
+			continue
+		}
+		displayName := strings.TrimSpace(option.DisplayName)
+		if displayName == "" {
+			displayName = strings.TrimSpace(option.RequestModel)
+		}
+		catalog = append(catalog, &dto.CanvasChatModelCatalogItem{
+			RequestModel:    strings.TrimSpace(option.RequestModel),
+			DisplayName:     displayName,
+			ModelSeries:     strings.TrimSpace(option.ModelSeries),
+			RequestEndpoint: strings.TrimSpace(option.RequestEndpoint),
+		})
+	}
+	sort.Slice(catalog, func(i, j int) bool {
+		return catalog[i].RequestModel < catalog[j].RequestModel
+	})
+	return catalog, nil
 }
 
 func listUserCanvasChatModelOptions(userId int) ([]CanvasChatModelOption, error) {

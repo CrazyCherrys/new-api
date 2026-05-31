@@ -27,55 +27,52 @@ export const useModelMappingData = () => {
   const [pageSize, setPageSize] = useState(10);
   const [mappingCount, setMappingCount] = useState(0);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [searchModelType, setSearchModelType] = useState(0);
+  const [submittedKeyword, setSubmittedKeyword] = useState('');
+  const [activeModelType, setActiveModelType] = useState(1);
+  const [reloadSignal, setReloadSignal] = useState(0);
   const [showEdit, setShowEdit] = useState(false);
   const [editingMapping, setEditingMapping] = useState(null);
 
-  const loadMappings = useCallback(
-    async (startIdx) => {
-      setLoading(true);
-      try {
-        let url = '';
-        if (searchKeyword || searchModelType > 0) {
-          url = `/api/model-mapping/search?keyword=${searchKeyword}&model_type=${searchModelType}&p=${startIdx}&page_size=${pageSize}`;
-        } else {
-          url = `/api/model-mapping/?p=${startIdx}&page_size=${pageSize}`;
-        }
-
-        const res = await API.get(url);
-        const { success, message, data } = res.data;
-        if (success) {
-          setMappings(data.items || []);
-          setMappingCount(data.total || 0);
-        } else {
-          showError(message);
-        }
-      } catch (error) {
-        showError(error.message);
-      } finally {
-        setLoading(false);
+  const loadMappings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await API.get('/api/model-mapping/search', {
+        params: {
+          keyword: submittedKeyword,
+          model_type: activeModelType,
+          p: (activePage - 1) * pageSize,
+          page_size: pageSize,
+        },
+      });
+      const { success, message, data } = res.data;
+      if (success) {
+        setMappings(data.items || []);
+        setMappingCount(data.total || 0);
+      } else {
+        showError(message);
       }
-    },
-    [searchKeyword, searchModelType, pageSize]
-  );
-
-  useEffect(() => {
-    loadMappings(0);
-  }, [loadMappings]);
+    } catch (error) {
+      showError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [activeModelType, activePage, pageSize, submittedKeyword]);
 
   const refresh = useCallback(() => {
-    loadMappings((activePage - 1) * pageSize);
-  }, [activePage, pageSize, loadMappings]);
+    setReloadSignal((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    loadMappings();
+  }, [loadMappings, reloadSignal]);
 
   const handlePageChange = (page) => {
     setActivePage(page);
-    loadMappings((page - 1) * pageSize);
   };
 
   const handlePageSizeChange = (size) => {
     setPageSize(size);
     setActivePage(1);
-    loadMappings(0);
   };
 
   const manageMapping = async (id, action, value) => {
@@ -113,7 +110,7 @@ export const useModelMappingData = () => {
   };
 
   const openEditModal = (mapping = null) => {
-    setEditingMapping(mapping);
+    setEditingMapping(mapping || { model_type: activeModelType });
     setShowEdit(true);
   };
 
@@ -123,8 +120,23 @@ export const useModelMappingData = () => {
   };
 
   const handleSearch = () => {
+    const nextKeyword = searchKeyword.trim();
     setActivePage(1);
-    loadMappings(0);
+    if (submittedKeyword !== nextKeyword) {
+      setSubmittedKeyword(nextKeyword);
+      return;
+    }
+    setReloadSignal((current) => current + 1);
+  };
+
+  const handleModelTypeChange = (modelType) => {
+    const nextModelType = Number(modelType) || 1;
+    setActivePage(1);
+    if (activeModelType !== nextModelType) {
+      setActiveModelType(nextModelType);
+      return;
+    }
+    setReloadSignal((current) => current + 1);
   };
 
   return {
@@ -134,11 +146,10 @@ export const useModelMappingData = () => {
     pageSize,
     mappingCount,
     searchKeyword,
-    searchModelType,
+    activeModelType,
     showEdit,
     editingMapping,
     setSearchKeyword,
-    setSearchModelType,
     handlePageChange,
     handlePageSizeChange,
     refresh,
@@ -147,5 +158,6 @@ export const useModelMappingData = () => {
     openEditModal,
     closeEditModal,
     handleSearch,
+    handleModelTypeChange,
   };
 };

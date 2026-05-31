@@ -89,6 +89,21 @@ func ListCanvasChatModels(c *gin.Context) {
 	common.ApiSuccess(c, models)
 }
 
+func GetCanvasChatModels(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		common.ApiErrorMsg(c, "未授权")
+		return
+	}
+
+	models, err := service.ListUserCanvasChatModelCatalog(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, models)
+}
+
 func CreateCanvasSession(c *gin.Context) {
 	userId := c.GetInt("id")
 	if userId == 0 {

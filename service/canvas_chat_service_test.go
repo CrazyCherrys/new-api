@@ -69,6 +69,7 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 		videoModel        = "sora-video"
 		unmappedModel     = "legacy-freeform-model"
 		disabledChatModel = "gpt-disabled-chat"
+		noTokenChatModel  = "gpt-no-token-chat"
 	)
 
 	seedCanvasChatCapability(t, db, userID, userGroup, userGroup, userGroup, chatModel)
@@ -76,17 +77,17 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 	seedCanvasChatModelAbility(t, userID+1002, userGroup, videoModel)
 	seedCanvasChatModelAbility(t, userID+1003, userGroup, unmappedModel)
 	seedCanvasChatModelAbility(t, userID+1004, userGroup, disabledChatModel)
+	seedCanvasChatModelAbility(t, userID+1005, "vip", noTokenChatModel)
+	if err := db.Model(&model.ModelMapping{}).
+		Where("request_model = ?", chatModel).
+		Updates(map[string]any{
+			"display_name": "Chat Model",
+			"model_series": "openai",
+		}).Error; err != nil {
+		t.Fatalf("failed to update seeded chat model mapping: %v", err)
+	}
 
 	mappings := []*model.ModelMapping{
-		{
-			RequestModel:    chatModel,
-			ActualModel:     chatModel,
-			DisplayName:     "Chat Model",
-			ModelSeries:     "openai",
-			ModelType:       1,
-			Status:          1,
-			RequestEndpoint: "openai",
-		},
 		{
 			RequestModel:      imageModel,
 			ActualModel:       imageModel,
@@ -116,6 +117,15 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 			Status:          0,
 			RequestEndpoint: "openai",
 		},
+		{
+			RequestModel:    noTokenChatModel,
+			ActualModel:     noTokenChatModel,
+			DisplayName:     "No Token Chat Model",
+			ModelSeries:     "claude",
+			ModelType:       1,
+			Status:          1,
+			RequestEndpoint: "anthropic",
+		},
 	}
 	for _, mapping := range mappings {
 		if err := db.Create(mapping).Error; err != nil {
@@ -135,6 +145,22 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 	if len(models) != 1 || models[0] != chatModel {
 		t.Fatalf("expected only chat model %q, got %#v", chatModel, models)
 	}
+	catalog, err := ListUserCanvasChatModelCatalog(userID)
+	if err != nil {
+		t.Fatalf("expected chat model catalog to load: %v", err)
+	}
+	if len(catalog) != 1 {
+		t.Fatalf("expected only one catalog item, got %#v", catalog)
+	}
+	if catalog[0].RequestModel != chatModel {
+		t.Fatalf("expected catalog request model %q, got %#v", chatModel, catalog[0])
+	}
+	if catalog[0].DisplayName != "Chat Model" {
+		t.Fatalf("expected catalog display name to be preserved, got %#v", catalog[0])
+	}
+	if catalog[0].ModelSeries != "openai" || catalog[0].RequestEndpoint != "openai" {
+		t.Fatalf("expected catalog metadata to be preserved, got %#v", catalog[0])
+	}
 
 	resolved, err := resolveCanvasChatModel(userID, &model.CanvasSession{}, "")
 	if err != nil {
@@ -142,6 +168,81 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 	}
 	if resolved != chatModel {
 		t.Fatalf("expected chat model fallback %q, got %q", chatModel, resolved)
+	}
+}
+
+func TestListUserCanvasChatModelCatalogRequiresAvailableToken(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	const (
+		userID    = 52
+		userGroup = "default"
+		modelName = "gpt-no-token"
+	)
+
+	user := &model.User{
+		Id:       userID,
+		Username: "catalog-no-token-user",
+		Password: "password123",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Group:    userGroup,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	channel := &model.Channel{
+		Id:     userID + 2000,
+		Type:   constant.ChannelTypeOpenAI,
+		Key:    "catalog-no-token-channel",
+		Status: common.ChannelStatusEnabled,
+		Name:   "catalog-no-token-channel",
+		Group:  userGroup,
+		Models: modelName,
+	}
+	if err := db.Create(channel).Error; err != nil {
+		t.Fatalf("failed to create channel: %v", err)
+	}
+
+	ability := &model.Ability{
+		Group:     userGroup,
+		Model:     modelName,
+		ChannelId: channel.Id,
+		Enabled:   true,
+		Weight:    0,
+	}
+	if err := db.Create(ability).Error; err != nil {
+		t.Fatalf("failed to create ability: %v", err)
+	}
+
+	mapping := &model.ModelMapping{
+		RequestModel:    modelName,
+		ActualModel:     modelName,
+		DisplayName:     "No Token Model",
+		ModelSeries:     "openai",
+		ModelType:       1,
+		Status:          1,
+		RequestEndpoint: "openai",
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create model mapping: %v", err)
+	}
+
+	catalog, err := ListUserCanvasChatModelCatalog(userID)
+	if err != nil {
+		t.Fatalf("expected empty catalog without token, got error: %v", err)
+	}
+	if len(catalog) != 0 {
+		t.Fatalf("expected no catalog items without available token, got %#v", catalog)
+	}
+
+	models, err := ListUserCanvasChatModels(userID)
+	if err != nil {
+		t.Fatalf("expected empty model list without token, got error: %v", err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("expected no model ids without available token, got %#v", models)
 	}
 }
 
@@ -158,17 +259,16 @@ func TestListUserCanvasChatModelOptionsReturnsStructuredData(t *testing.T) {
 	)
 
 	seedCanvasChatCapability(t, db, userID, userGroup, userGroup, userGroup, usableModel)
+	if err := db.Model(&model.ModelMapping{}).
+		Where("request_model = ?", usableModel).
+		Updates(map[string]any{
+			"display_name": displayName,
+			"model_series": "openai",
+		}).Error; err != nil {
+		t.Fatalf("failed to update seeded structured model mapping: %v", err)
+	}
 
 	mappings := []*model.ModelMapping{
-		{
-			RequestModel:    usableModel,
-			ActualModel:     usableModel,
-			DisplayName:     displayName,
-			ModelSeries:     "openai",
-			ModelType:       1,
-			Status:          1,
-			RequestEndpoint: requestEndpoint,
-		},
 		{
 			RequestModel:    hiddenModel,
 			ActualModel:     hiddenModel,
@@ -254,17 +354,16 @@ func TestResolveCanvasChatModelRejectsUnavailableCurrentSessionModel(t *testing.
 
 	seedCanvasChatCapability(t, db, userID, userGroup, userGroup, userGroup, usableModel)
 	seedCanvasChatModelAbility(t, userID+3000, "vip", invalidModel)
+	if err := db.Model(&model.ModelMapping{}).
+		Where("request_model = ?", usableModel).
+		Updates(map[string]any{
+			"display_name": "Usable",
+			"model_series": "openai",
+		}).Error; err != nil {
+		t.Fatalf("failed to update seeded usable model mapping: %v", err)
+	}
 
 	mappings := []*model.ModelMapping{
-		{
-			RequestModel:    usableModel,
-			ActualModel:     usableModel,
-			DisplayName:     "Usable",
-			ModelSeries:     "openai",
-			ModelType:       1,
-			Status:          1,
-			RequestEndpoint: "openai",
-		},
 		{
 			RequestModel:    invalidModel,
 			ActualModel:     invalidModel,
@@ -359,16 +458,13 @@ func TestDiagnoseCanvasChatModelMappingWarnings(t *testing.T) {
 			modelID   = "gpt-reachable"
 		)
 		seedCanvasChatCapability(t, db, userID, userGroup, userGroup, userGroup, modelID)
-		if err := model.DB.Create(&model.ModelMapping{
-			RequestModel:    modelID,
-			ActualModel:     modelID,
-			DisplayName:     "Reachable",
-			ModelSeries:     "openai",
-			ModelType:       1,
-			Status:          1,
-			RequestEndpoint: "openai",
-		}).Error; err != nil {
-			t.Fatalf("failed to create model mapping: %v", err)
+		if err := db.Model(&model.ModelMapping{}).
+			Where("request_model = ?", modelID).
+			Updates(map[string]any{
+				"display_name": "Reachable",
+				"model_series": "openai",
+			}).Error; err != nil {
+			t.Fatalf("failed to update seeded model mapping: %v", err)
 		}
 
 		diagnostic, err := DiagnoseCanvasChatModelMapping(modelID)

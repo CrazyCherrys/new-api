@@ -20,7 +20,6 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import {
   Table,
-  Tag,
   Typography,
   Popconfirm,
   Button,
@@ -30,6 +29,10 @@ import {
 import { IconEdit, IconDelete } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess, showWarning } from '../../../helpers';
+import {
+  formatModelSeriesLabel,
+  ModelSeriesIcon,
+} from '../../../helpers/modelSeries';
 
 const { Text } = Typography;
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
@@ -75,6 +78,7 @@ const ModelMappingTable = ({
   openEditModal,
   deleteMapping,
   refresh,
+  activeModelType,
 }) => {
   const { t } = useTranslation();
 
@@ -166,6 +170,9 @@ const ModelMappingTable = ({
       2: ['openai', 'openai-response', 'gemini'],
       3: ['openai-video-generation', 'openai-video'],
     };
+    if (!endpointOptions[Number(modelType)]) {
+      return true;
+    }
     return (endpointOptions[Number(modelType)] || []).includes(
       normalizedEndpoint,
     );
@@ -176,7 +183,10 @@ const ModelMappingTable = ({
     const modelType = Number(payload.model_type);
     payload.request_endpoint = normalizeRequestEndpoint(payload.request_endpoint);
 
-    if (!isValidRequestEndpointForModelType(modelType, payload.request_endpoint)) {
+    if (
+      [1, 2, 3].includes(modelType) &&
+      !isValidRequestEndpointForModelType(modelType, payload.request_endpoint)
+    ) {
       payload.request_endpoint = getDefaultRequestEndpoint(modelType);
     }
     if (modelType !== 2) {
@@ -214,49 +224,6 @@ const ModelMappingTable = ({
 
     return payload;
   };
-
-  const formatModelSeries = (series) => {
-    if (!series) return '-';
-
-    const seriesMap = {
-      openai: 'OpenAI',
-      gemini: 'Gemini',
-      claude: 'Claude',
-      grok: 'Grok',
-      deepseek: 'DeepSeek',
-      qwen: 'Qwen',
-      glm: 'GLM',
-      hunyuan: 'Hunyuan',
-      doubao: 'Doubao',
-      spark: 'Spark',
-      baichuan: 'Baichuan',
-      minimax: 'Minimax',
-      moonshot: 'Moonshot',
-      yi: 'Yi',
-      chatglm: 'ChatGLM',
-      ernie: 'ERNIE',
-      wenxin: 'Wenxin',
-      tongyi: 'Tongyi',
-      azure: 'Azure',
-      aws: 'AWS',
-      cohere: 'Cohere',
-      anthropic: 'Anthropic',
-      mistral: 'Mistral',
-      llama: 'Llama',
-      palm: 'PaLM',
-      bard: 'Bard',
-      midjourney: 'Midjourney',
-      'stable-diffusion': 'Stable Diffusion',
-      flux: 'Flux',
-      suno: 'Suno',
-    };
-
-    return (
-      seriesMap[series.toLowerCase()] ||
-      series.charAt(0).toUpperCase() + series.slice(1)
-    );
-  };
-
   const handleStatusToggle = async (record) => {
     try {
       const newStatus = record.status === 1 ? 0 : 1;
@@ -286,25 +253,6 @@ const ModelMappingTable = ({
     }
   };
 
-  const getModelTypeTag = (type) => {
-    const typeMap = {
-      1: { text: t('对话'), color: 'blue' },
-      2: { text: t('绘画'), color: 'purple' },
-      3: { text: t('视频'), color: 'orange' },
-      4: { text: t('音频'), color: 'green' },
-    };
-    const config = typeMap[type] || { text: t('未知'), color: 'grey' };
-    return <Tag color={config.color}>{config.text}</Tag>;
-  };
-
-  const getStatusTag = (status) => {
-    return status === 1 ? (
-      <Tag color='green'>{t('启用')}</Tag>
-    ) : (
-      <Tag color='red'>{t('禁用')}</Tag>
-    );
-  };
-
   const formatRequestEndpoint = (endpoint, modelType) => {
     const normalizedEndpoint = normalizeRequestEndpoint(endpoint);
     if (modelType === 1) {
@@ -326,16 +274,19 @@ const ModelMappingTable = ({
       return endpointMap[normalizedEndpoint] || endpoint || '-';
     }
 
-    const endpointMap = {
-      openai: 'OpenAI',
-      dalle: 'OpenAI',
-      gemini: 'Gemini',
-      'openai-video-generation':
-        'OpenAI Video Generations (/v1/video/generations)',
-      'openai-video': 'OpenAI Videos (Sora, /v1/videos)',
-    };
+    if (modelType === 3) {
+      const endpointMap = {
+        openai: 'OpenAI',
+        dalle: 'OpenAI',
+        gemini: 'Gemini',
+        'openai-video-generation':
+          'OpenAI Video Generations (/v1/video/generations)',
+        'openai-video': 'OpenAI Videos (Sora, /v1/videos)',
+      };
+      return endpointMap[normalizedEndpoint] || endpoint || '-';
+    }
 
-    return endpointMap[normalizedEndpoint] || endpoint || '-';
+    return endpoint || '-';
   };
 
   const formatImageCapabilities = (raw) => {
@@ -377,12 +328,24 @@ const ModelMappingTable = ({
     }
     const limit = Number(record.reference_image_limit) || 0;
     if (limit <= 0) {
-      return t('参考图：不限制');
+      return t('不限制');
     }
-    return t('参考图：最多 {{count}} 张', { count: limit });
+    return t('最多 {{count}} 张', { count: limit });
   };
 
-  const columns = [
+  const formatStringArrayField = (raw) => {
+    if (!raw) {
+      return '-';
+    }
+    try {
+      const items = JSON.parse(raw);
+      return Array.isArray(items) && items.length > 0 ? items.join(', ') : '-';
+    } catch (e) {
+      return '-';
+    }
+  };
+
+  const baseColumns = [
     {
       title: 'ID',
       dataIndex: 'id',
@@ -427,76 +390,60 @@ const ModelMappingTable = ({
     {
       title: t('模型系列'),
       dataIndex: 'model_series',
-      render: (text) => formatModelSeries(text),
-    },
-    {
-      title: t('模型类型'),
-      dataIndex: 'model_type',
-      render: (type) => getModelTypeTag(type),
+      render: (text) =>
+        text ? (
+          <Space spacing={6}>
+            <ModelSeriesIcon series={text} />
+            <span>{formatModelSeriesLabel(text)}</span>
+          </Space>
+        ) : (
+          '-'
+        ),
     },
     {
       title: t('请求端点'),
       dataIndex: 'request_endpoint',
       render: (text, record) => formatRequestEndpoint(text, record.model_type),
     },
+  ];
+
+  const imageColumns = [
     {
       title: t('模型能力'),
       dataIndex: 'image_capabilities',
-      render: (text, record) => {
-        if (record.model_type === 2) {
-          return (
-            <Space vertical align='start' spacing={2}>
-              <span>{formatImageCapabilities(text)}</span>
-              <Text type='tertiary' size='small'>
-                {formatReferenceImageLimit(record)}
-              </Text>
-            </Space>
-          );
-        }
-        if (record.model_type === 3) {
-          return formatVideoCapabilities(record.video_capabilities);
-        }
-        return '-';
-      },
+      render: (text) => formatImageCapabilities(text),
     },
     {
-      title: t('时长选项'),
-      dataIndex: 'duration_options',
-      render: (text, record) =>
-        record.model_type === 3 ? formatDurationOptions(text) : '-',
+      title: t('参考图限制'),
+      dataIndex: 'reference_image_limit',
+      render: (_, record) => formatReferenceImageLimit(record),
     },
     {
       title: t('分辨率'),
       dataIndex: 'resolutions',
-      render: (text, record) => {
-        if (record.model_type !== 2) {
-          return '-';
-        }
-        if (!text) return '-';
-        try {
-          const resolutions = JSON.parse(text);
-          return resolutions.join(', ');
-        } catch (e) {
-          return '-';
-        }
-      },
+      render: (text) => formatStringArrayField(text),
     },
     {
       title: t('宽高比'),
       dataIndex: 'aspect_ratios',
-      render: (text, record) => {
-        if (record.model_type !== 2) {
-          return '-';
-        }
-        if (!text) return '-';
-        try {
-          const ratios = JSON.parse(text);
-          return ratios.join(', ');
-        } catch (e) {
-          return '-';
-        }
-      },
+      render: (text) => formatStringArrayField(text),
     },
+  ];
+
+  const videoColumns = [
+    {
+      title: t('视频能力'),
+      dataIndex: 'video_capabilities',
+      render: (text) => formatVideoCapabilities(text),
+    },
+    {
+      title: t('时长选项'),
+      dataIndex: 'duration_options',
+      render: (text) => formatDurationOptions(text),
+    },
+  ];
+
+  const trailingColumns = [
     {
       title: t('创建时间'),
       dataIndex: 'created_time',
@@ -541,6 +488,14 @@ const ModelMappingTable = ({
       ),
     },
   ];
+
+  const typeSpecificColumns =
+    Number(activeModelType) === 2
+      ? imageColumns
+      : Number(activeModelType) === 3
+        ? videoColumns
+        : [];
+  const columns = [...baseColumns, ...typeSpecificColumns, ...trailingColumns];
 
   return (
     <Table

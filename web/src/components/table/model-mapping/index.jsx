@@ -19,9 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { Tabs, TabPane } from '@douyinfe/semi-ui';
 import CardPro from '../../common/ui/CardPro';
 import ModelMappingTable from './ModelMappingTable';
-import ModelMappingActions from './ModelMappingActions';
 import ModelMappingFilters from './ModelMappingFilters';
 import { useModelMappingData } from '../../../hooks/model-mapping/useModelMappingData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
@@ -32,6 +32,12 @@ const ModelMappingPage = () => {
   const { t } = useTranslation();
   const mappingData = useModelMappingData();
   const isMobile = useIsMobile();
+  const modelTypeTabs = [
+    { key: '1', label: t('对话') },
+    { key: '2', label: t('图片') },
+    { key: '3', label: t('视频') },
+    { key: '4', label: t('音频') },
+  ];
 
   return (
     <>
@@ -43,6 +49,17 @@ const ModelMappingPage = () => {
       />
       <CardPro
         type='type3'
+        tabsArea={
+          <Tabs
+            activeKey={String(mappingData.activeModelType)}
+            type='button'
+            onChange={(key) => mappingData.handleModelTypeChange(Number(key))}
+          >
+            {modelTypeTabs.map((tab) => (
+              <TabPane key={tab.key} itemKey={tab.key} tab={tab.label} />
+            ))}
+          </Tabs>
+        }
         searchArea={<ModelMappingFilters {...mappingData} />}
         paginationArea={createCardProPagination({
           currentPage: mappingData.activePage,

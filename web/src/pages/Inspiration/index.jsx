@@ -29,6 +29,7 @@ import { useTranslation } from 'react-i18next';
 import { Button, SideSheet, Spin, Typography } from '@douyinfe/semi-ui';
 import { IconCopy, IconDownload } from '@douyinfe/semi-icons';
 import { API, copy, showError, showSuccess } from '../../helpers';
+import { formatModelSeriesLabel } from '../../helpers/modelSeries';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { useContainerWidth } from '../../hooks/common/useContainerWidth';
 
@@ -322,18 +323,7 @@ const Inspiration = () => {
   const formatSeries = useCallback(
     (series) => {
       if (!series) return t('未分组');
-      const seriesMap = {
-        openai: 'OpenAI',
-        gemini: 'Gemini',
-        dalle: 'OpenAI',
-        flux: 'Flux',
-        midjourney: 'Midjourney',
-        'stable-diffusion': 'Stable Diffusion',
-      };
-      return (
-        seriesMap[series.toLowerCase()] ||
-        series.charAt(0).toUpperCase() + series.slice(1)
-      );
+      return formatModelSeriesLabel(series, t('未分组'));
     },
     [t],
   );

@@ -44,19 +44,18 @@ import {
   IconMenu,
   IconVideo,
   IconSetting,
-  IconUpload,
   IconCommentStroked,
   IconArchive,
   IconRefresh,
   IconDownload,
   IconClock,
-  IconLayers,
   IconPlayCircle,
   IconRealSizeStroked,
   IconExternalOpen,
   IconMore,
   IconSidebar,
   IconCopy,
+  IconPlus,
 } from '@douyinfe/semi-icons';
 import {
   API,
@@ -66,6 +65,7 @@ import {
   showError,
   showSuccess,
 } from '../../helpers';
+import { ModelSeriesIcon } from '../../helpers/modelSeries';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
 import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
@@ -635,7 +635,6 @@ const ImageGeneration = () => {
   const [chatToolsEnabled, setChatToolsEnabled] = useState(
     () => getStoredValue(STORAGE_KEYS.CHAT_TOOLS, 'false') === 'true',
   );
-  const [chatAttachments, setChatAttachments] = useState([]);
   const [chatStreaming, setChatStreaming] = useState(false);
   const [chatStreamRenderVersion, setChatStreamRenderVersion] = useState(0);
   const [chatSessionSettingsVisible, setChatSessionSettingsVisible] =
@@ -1516,12 +1515,14 @@ const ImageGeneration = () => {
 
   const loadChatModels = async () => {
     try {
-      const res = await API.get('/api/canvas/chat/models');
+      const res = await API.get('/api/canvas/chat-models');
       if (!res.data.success) {
         showError(res.data.message || t('加载聊天模型失败'));
         return;
       }
-      const items = Array.isArray(res.data.data) ? res.data.data : [];
+      const items = (Array.isArray(res.data.data) ? res.data.data : [])
+        .map((item) => normalizeCanvasChatModelRecord(item))
+        .filter(Boolean);
       setChatModels(items);
       setChatModel((current) => {
         const normalizedCurrent = String(current || '').trim();
@@ -1541,8 +1542,7 @@ const ImageGeneration = () => {
         ) {
           return normalizedCurrent;
         }
-        const firstUsable = items.find((item) => item?.usable !== false);
-        return String(firstUsable?.request_model || '');
+        return items[0]?.request_model || '';
       });
     } catch (error) {
       showError(error.message || t('加载聊天模型失败'));
@@ -2351,51 +2351,21 @@ const ImageGeneration = () => {
     }
   }, [videoSelectedModelData]);
 
-  const formatModelSeries = (series) => {
-    if (!series) return '';
-
-    const seriesMap = {
-      openai: 'OpenAI',
-      gemini: 'Gemini',
-      claude: 'Claude',
-      grok: 'Grok',
-      deepseek: 'DeepSeek',
-      qwen: 'Qwen',
-      glm: 'GLM',
-      hunyuan: 'Hunyuan',
-      doubao: 'Doubao',
-      spark: 'Spark',
-      baichuan: 'Baichuan',
-      minimax: 'Minimax',
-      moonshot: 'Moonshot',
-      yi: 'Yi',
-      chatglm: 'ChatGLM',
-      ernie: 'ERNIE',
-      wenxin: 'Wenxin',
-      tongyi: 'Tongyi',
-      azure: 'Azure',
-      aws: 'AWS',
-      cohere: 'Cohere',
-      anthropic: 'Anthropic',
-      mistral: 'Mistral',
-      llama: 'Llama',
-      palm: 'PaLM',
-      bard: 'Bard',
-      midjourney: 'Midjourney',
-      dalle: 'OpenAI',
-      'stable-diffusion': 'Stable Diffusion',
-      flux: 'Flux',
-      suno: 'Suno',
-    };
-
-    return (
-      seriesMap[series.toLowerCase()] ||
-      series.charAt(0).toUpperCase() + series.slice(1)
-    );
-  };
-
   const getModelDisplayName = (model) =>
     model?.display_name || model?.request_model || '';
+
+  function normalizeCanvasChatModelRecord(item) {
+    const requestModel = String(item?.request_model || '').trim();
+    if (!requestModel) {
+      return null;
+    }
+    return {
+      request_model: requestModel,
+      display_name: getModelDisplayName(item) || requestModel,
+      model_series: String(item?.model_series || '').trim(),
+      request_endpoint: String(item?.request_endpoint || '').trim(),
+    };
+  }
 
   const selectImageModelFromCatalog = (model) => {
     if (!model?.request_model) {
@@ -4811,7 +4781,6 @@ const ImageGeneration = () => {
       [CANVAS_MODE_CHAT]: null,
     }));
     setChatPrompt('');
-    setChatAttachments([]);
     setMobileTaskbarVisible(false);
   };
 
@@ -4907,7 +4876,6 @@ const ImageGeneration = () => {
 
       refreshRecentCanvasSessions({ silent: true });
       setChatPrompt('');
-      setChatAttachments([]);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -5452,6 +5420,14 @@ const ImageGeneration = () => {
       flexWrap: 'wrap',
       minHeight: 36,
     },
+    promptLeadingSlot: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: 'wrap',
+      flexShrink: 0,
+      maxWidth: isMobile ? '45%' : '50%',
+    },
     promptInput: {
       flex: 1,
       minWidth: 0,
@@ -5571,6 +5547,18 @@ const ImageGeneration = () => {
       gap: 8,
       minWidth: 0,
     },
+    dropdownOptionMetaWrap: {
+      minWidth: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'flex-start',
+      gap: 2,
+    },
+    dropdownOptionMeta: {
+      fontSize: 12,
+      color: 'var(--semi-color-text-2)',
+      lineHeight: 1.4,
+    },
     darkMenuItemActive: {
       background: 'var(--semi-color-primary-light-default)',
       color: 'var(--semi-color-primary)',
@@ -5688,6 +5676,30 @@ const ImageGeneration = () => {
     },
     modelMenuMeta: {
       fontSize: 11,
+      lineHeight: 1.4,
+      color: 'var(--semi-color-text-2)',
+      wordBreak: 'break-all',
+    },
+    selectModelOption: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      width: '100%',
+    },
+    selectModelOptionText: {
+      minWidth: 0,
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 2,
+    },
+    selectModelOptionTitle: {
+      fontSize: 14,
+      lineHeight: 1.4,
+      color: 'var(--semi-color-text-0)',
+    },
+    selectModelOptionMeta: {
+      fontSize: 12,
       lineHeight: 1.4,
       color: 'var(--semi-color-text-2)',
       wordBreak: 'break-all',
@@ -6642,11 +6654,23 @@ const ImageGeneration = () => {
                   closeDropdown();
                 }}
               >
-                <span style={styles.darkMenuItemContent}>
+                <span
+                  style={{
+                    ...styles.darkMenuItemContent,
+                    alignItems: option.meta ? 'flex-start' : 'center',
+                  }}
+                >
                   {option.icon ? (
                     <span style={styles.pillButtonIcon}>{option.icon}</span>
                   ) : null}
-                  <span>{option.label}</span>
+                  {option.meta ? (
+                    <span style={styles.dropdownOptionMetaWrap}>
+                      <span>{option.label}</span>
+                      <span style={styles.dropdownOptionMeta}>{option.meta}</span>
+                    </span>
+                  ) : (
+                    <span>{option.label}</span>
+                  )}
                 </span>
               </Dropdown.Item>
             );
@@ -7042,6 +7066,9 @@ const ImageGeneration = () => {
     const dropdownKey = isVideoMode ? 'video-model' : 'image-model';
     const modelOptions = isVideoMode ? enabledVideoModels : enabledImageModels;
     const selectedValue = isVideoMode ? videoSelectedModel : selectedModel;
+    const selectedModelItem = modelOptions.find(
+      (item) => item.request_model === selectedValue,
+    );
     const iconOnly = isMobile;
     const buttonLabel = isVideoMode
       ? `${t('选择视频模型')} ${activeModelLabel}`
@@ -7082,11 +7109,7 @@ const ImageGeneration = () => {
               >
                 <div style={styles.modelMenuOption}>
                   <span style={styles.modelMenuIcon}>
-                    {isVideoMode ? (
-                      <IconVideo size='small' />
-                    ) : (
-                      <IconImage size='small' />
-                    )}
+                    <ModelSeriesIcon series={model.model_series} />
                   </span>
                   <div style={styles.modelMenuItem}>
                     <span style={styles.modelMenuTitle}>
@@ -7141,11 +7164,10 @@ const ImageGeneration = () => {
           }}
           disabled={modelOptions.length === 0}
         >
-          {isVideoMode ? (
-            <IconVideo size='small' />
-          ) : (
-            <IconImage size='small' />
-          )}
+          <ModelSeriesIcon
+            series={selectedModelItem?.model_series}
+            size='small'
+          />
           {!iconOnly ? (
             <span
               style={{
@@ -8527,7 +8549,7 @@ const ImageGeneration = () => {
           cursor: disabled ? 'not-allowed' : 'pointer',
         }}
       >
-        <IconUpload size='small' />
+        <IconPlus size='small' />
       </div>
     );
     const chatDropdownModels = getChatModelsWithPreservedCurrent(
@@ -8541,7 +8563,12 @@ const ImageGeneration = () => {
       renderPillDropdown({
         key: 'chat-model',
         label: t('模型'),
-        icon: <IconLayers size='small' />,
+        icon: (
+          <ModelSeriesIcon
+            series={activeChatModelOption?.model_series}
+            size='small'
+          />
+        ),
         value: chatModel,
         displayValue: activeChatModelLabel,
         onChange: (value) => {
@@ -8551,6 +8578,7 @@ const ImageGeneration = () => {
         options: chatDropdownModels.map((model) => ({
           value: model.request_model,
           label: buildChatModelOptionLabel(model),
+          icon: <ModelSeriesIcon series={model.model_series} size='small' />,
           disabled: model.usable === false,
         })),
         disabled: chatDropdownModels.length === 0,
@@ -8605,73 +8633,78 @@ const ImageGeneration = () => {
       : isVideoMode
         ? videoComposerParameters
         : imageComposerParameters;
-    const showPromptAssetBar =
+    const showPromptUploadEntry =
       (isVideoMode && videoSelectedModelSupportsImageToVideo) ||
       (isImageMode && selectedModelSupportsEditing);
+    const hasInlineReferenceThumbs =
+      (isImageMode && referenceImages.length > 0) ||
+      (isVideoMode &&
+        videoSelectedModelSupportsImageToVideo &&
+        !!videoReferenceImage);
 
     return (
       <div style={styles.composerDock}>
         <div style={styles.composerShell} data-canvas-composer={generationMode}>
           <div style={styles.promptArea}>
-            {showPromptAssetBar ? (
-              <div style={styles.promptInlineAssets}>
-                {isChatMode
-                  ? chatAttachments.map((file) =>
-                      renderReferenceThumb(file, () =>
-                        setChatAttachments((prev) =>
-                          prev.filter((item) => item.uid !== file.uid),
-                        ),
-                      ),
-                    )
-                  : null}
-                {isImageMode && selectedModelSupportsEditing ? (
-                  <Upload
-                    action=''
-                    accept='image/*'
-                    multiple
-                    fileList={referenceImages}
-                    onChange={handleImageUpload}
-                    showUploadList={false}
-                    beforeUpload={validateImageSize}
-                    disabled={referenceImageLimitReached}
-                  >
-                    {renderUploadIconButton({
-                      disabled: referenceImageLimitReached,
-                      title: referenceImageLimitReached
-                        ? t('已达到当前模型参考图上限')
-                        : t('上传图片'),
-                    })}
-                  </Upload>
-                ) : null}
-                {isImageMode && selectedModelSupportsEditing
-                  ? referenceImages.map((file) =>
-                      renderReferenceThumb(file, () => handleImageRemove(file)),
-                    )
-                  : null}
-                {isVideoMode && videoSelectedModelSupportsImageToVideo ? (
-                  <Upload
-                    action=''
-                    accept='image/*'
-                    multiple={false}
-                    fileList={videoReferenceImage ? [videoReferenceImage] : []}
-                    onChange={handleVideoReferenceUpload}
-                    showUploadList={false}
-                    beforeUpload={validateImageSize}
-                  >
-                    {renderUploadIconButton({ title: t('上传图片') })}
-                  </Upload>
-                ) : null}
-                {isVideoMode &&
-                videoSelectedModelSupportsImageToVideo &&
-                videoReferenceImage
-                  ? renderReferenceThumb(
-                      videoReferenceImage,
-                      handleVideoReferenceRemove,
-                    )
-                  : null}
-              </div>
-            ) : null}
             <div style={styles.promptInputShell}>
+              {showPromptUploadEntry || hasInlineReferenceThumbs ? (
+                <div style={styles.promptLeadingSlot}>
+                  {isImageMode && selectedModelSupportsEditing ? (
+                    <Upload
+                      action=''
+                      accept='image/*'
+                      multiple
+                      fileList={referenceImages}
+                      onChange={handleImageUpload}
+                      showUploadList={false}
+                      beforeUpload={validateImageSize}
+                      disabled={referenceImageLimitReached}
+                    >
+                      {renderUploadIconButton({
+                        disabled: referenceImageLimitReached,
+                        title: referenceImageLimitReached
+                          ? t('已达到当前模型参考图上限')
+                          : t('上传图片'),
+                      })}
+                    </Upload>
+                  ) : null}
+                  {isVideoMode && videoSelectedModelSupportsImageToVideo ? (
+                    <Upload
+                      action=''
+                      accept='image/*'
+                      multiple={false}
+                      fileList={videoReferenceImage ? [videoReferenceImage] : []}
+                      onChange={handleVideoReferenceUpload}
+                      showUploadList={false}
+                      beforeUpload={validateImageSize}
+                    >
+                      {renderUploadIconButton({ title: t('上传图片') })}
+                    </Upload>
+                  ) : null}
+                  {(isImageMode && referenceImages.length > 0) ||
+                  (isVideoMode &&
+                    videoSelectedModelSupportsImageToVideo &&
+                    videoReferenceImage) ? (
+                    <div style={styles.promptInlineAssets}>
+                      {isImageMode
+                        ? referenceImages.map((file) =>
+                            renderReferenceThumb(file, () =>
+                              handleImageRemove(file),
+                            ),
+                          )
+                        : null}
+                      {isVideoMode &&
+                      videoSelectedModelSupportsImageToVideo &&
+                      videoReferenceImage
+                        ? renderReferenceThumb(
+                            videoReferenceImage,
+                            handleVideoReferenceRemove,
+                          )
+                        : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <TextArea
                 aria-label={placeholder}
                 data-canvas-prompt-input={generationMode}
@@ -8692,7 +8725,6 @@ const ImageGeneration = () => {
                   composerComposingRef.current = false;
                 }}
                 maxLength={5000}
-                showClear
                 borderless
                 autosize={{ minRows: 1, maxRows: 12 }}
                 style={styles.promptInput}
@@ -9166,6 +9198,76 @@ const ImageGeneration = () => {
       draft.model,
       t('当前会话模型，现不可用'),
     );
+    const availableChatModelOptions = availableChatModels.map((item) => ({
+      value: item.request_model,
+      label: getModelDisplayName(item),
+      meta: item.request_model,
+      disabled: item.usable === false,
+      model: item,
+    }));
+    const renderChatModelOption = (renderProps) => {
+      const {
+        disabled,
+        selected,
+        className,
+        style,
+        onMouseEnter,
+        onClick,
+        label,
+        value,
+      } = renderProps;
+      const modelItem = availableChatModels.find(
+        (item) => item?.request_model === value,
+      );
+      const unavailableReason =
+        modelItem?.usable === false
+          ? String(modelItem?.unavailable_reason || t('当前不可用'))
+          : '';
+      return (
+        <div
+          style={style}
+          className={className}
+          onClick={() => !disabled && onClick?.()}
+          onMouseEnter={() => onMouseEnter?.()}
+        >
+          <div style={styles.selectModelOption}>
+            <ModelSeriesIcon series={modelItem?.model_series} />
+            <div style={styles.selectModelOptionText}>
+              <span style={styles.selectModelOptionTitle}>
+                {label || value}
+              </span>
+              <span style={styles.selectModelOptionMeta}>
+                {value}
+              </span>
+              {unavailableReason ? (
+                <span style={styles.selectModelOptionMeta}>
+                  {unavailableReason}
+                </span>
+              ) : null}
+            </div>
+            {selected ? <Text type='success'>{t('已选')}</Text> : null}
+          </div>
+        </div>
+      );
+    };
+    const renderChatModelSelectedItem = (optionNode) => {
+      const modelItem = availableChatModels.find(
+        (item) => item?.request_model === optionNode?.value,
+      );
+      return (
+        <div style={styles.selectModelOption}>
+          <ModelSeriesIcon series={modelItem?.model_series} />
+          <div style={styles.selectModelOptionText}>
+            <span style={styles.selectModelOptionTitle}>
+              {optionNode?.label || optionNode?.value || t('请选择模型')}
+            </span>
+            {optionNode?.value ? (
+              <span style={styles.selectModelOptionMeta}>{optionNode.value}</span>
+            ) : null}
+          </div>
+        </div>
+      );
+    };
 
     return (
       <SideSheet
@@ -9180,11 +9282,7 @@ const ImageGeneration = () => {
             <Text strong>{t('模型')}</Text>
             <Select
               value={draft.model}
-              optionList={availableChatModels.map((item) => ({
-                label: buildChatModelOptionLabel(item),
-                value: item.request_model,
-                disabled: item.usable === false,
-              }))}
+              optionList={availableChatModelOptions}
               onChange={(value) =>
                 handleCanvasChatSessionSettingsField(
                   'model',
@@ -9192,6 +9290,8 @@ const ImageGeneration = () => {
                 )
               }
               placeholder={t('请选择模型')}
+              renderOptionItem={renderChatModelOption}
+              renderSelectedItem={renderChatModelSelectedItem}
             />
           </div>
           <div

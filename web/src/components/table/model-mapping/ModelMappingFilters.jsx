@@ -18,29 +18,19 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Input, Select, Button, Space } from '@douyinfe/semi-ui';
+import { Input, Button, Space } from '@douyinfe/semi-ui';
 import { IconSearch, IconPlus, IconRefresh } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 
 const ModelMappingFilters = ({
   searchKeyword,
-  searchModelType,
   setSearchKeyword,
-  setSearchModelType,
   handleSearch,
   openEditModal,
   refresh,
   loading,
 }) => {
   const { t } = useTranslation();
-
-  const modelTypeOptions = [
-    { value: 0, label: t('全部类型') },
-    { value: 1, label: t('对话') },
-    { value: 2, label: t('绘画') },
-    { value: 3, label: t('视频') },
-    { value: 4, label: t('音频') },
-  ];
 
   return (
     <Space>
@@ -50,13 +40,6 @@ const ModelMappingFilters = ({
         onChange={(value) => setSearchKeyword(value)}
         onEnterPress={handleSearch}
         style={{ width: 200 }}
-      />
-      <Select
-        placeholder={t('模型类型')}
-        value={searchModelType}
-        onChange={(value) => setSearchModelType(value)}
-        optionList={modelTypeOptions}
-        style={{ width: 150 }}
       />
       <Button
         theme='solid'

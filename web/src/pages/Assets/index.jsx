@@ -39,6 +39,7 @@ import {
   Checkbox,
   Popconfirm,
 } from '@douyinfe/semi-ui';
+import { formatModelSeriesLabel } from '../../helpers/modelSeries';
 import {
   IconChevronUp,
   IconCopy,
@@ -109,18 +110,7 @@ const Assets = () => {
 
   const formatSeries = (series) => {
     if (!series) return t('未分组');
-    const seriesMap = {
-      openai: 'OpenAI',
-      gemini: 'Gemini',
-      dalle: 'OpenAI',
-      flux: 'Flux',
-      midjourney: 'Midjourney',
-      'stable-diffusion': 'Stable Diffusion',
-    };
-    return (
-      seriesMap[series.toLowerCase()] ||
-      series.charAt(0).toUpperCase() + series.slice(1)
-    );
+    return formatModelSeriesLabel(series, t('未分组'));
   };
 
   const parseJsonObject = (raw) => {

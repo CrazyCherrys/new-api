@@ -27,6 +27,10 @@ import {
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess, showWarning } from '../../../../helpers';
+import {
+  canonicalizeModelSeriesValue,
+  getModelSeriesOptionList,
+} from '../../../../helpers/modelSeries';
 
 const DEFAULT_IMAGE_CAPABILITIES = ['image_generation', 'image_editing'];
 const DEFAULT_VIDEO_CAPABILITIES = ['image_to_video', 'text_to_video'];
@@ -70,32 +74,15 @@ const EditModelMappingModal = ({
   const [selectedImageCapabilities, setSelectedImageCapabilities] = useState([]);
   const isImageModel = Number(selectedModelType) === 2;
   const isVideoModel = Number(selectedModelType) === 3;
+  const isAudioModel = Number(selectedModelType) === 4;
   const canConfigureReferenceImageLimit =
     isImageModel && selectedImageCapabilities.includes(IMAGE_CAPABILITY_EDITING);
   const canConfigureImageResolution = isImageModel;
-
-  const modelSeriesOptions = [
-    { value: 'openai', label: 'OpenAI' },
-    { value: 'anthropic', label: 'Anthropic (Claude)' },
-    { value: 'google', label: 'Google (Gemini)' },
-    { value: 'azure', label: 'Azure OpenAI' },
-    { value: 'aws', label: 'AWS Bedrock' },
-    { value: 'cohere', label: 'Cohere' },
-    { value: 'mistral', label: 'Mistral AI' },
-    { value: 'deepseek', label: 'DeepSeek' },
-    { value: 'zhipu', label: '智谱AI' },
-    { value: 'baidu', label: '百度文心' },
-    { value: 'alibaba', label: '阿里通义' },
-    { value: 'tencent', label: '腾讯混元' },
-    { value: 'moonshot', label: 'Moonshot (Kimi)' },
-    { value: 'minimax', label: 'MiniMax' },
-    { value: 'doubao', label: '豆包' },
-    { value: 'other', label: t('其他') },
-  ];
+  const modelSeriesOptions = getModelSeriesOptionList();
 
   const modelTypeOptions = [
     { value: 1, label: t('对话') },
-    { value: 2, label: t('绘画') },
+    { value: 2, label: t('图片') },
     { value: 3, label: t('视频') },
     { value: 4, label: t('音频') },
   ];
@@ -135,7 +122,7 @@ const EditModelMappingModal = ({
       case 3:
         return videoEndpointOptions;
       default:
-        return chatEndpointOptions;
+        return [];
     }
   };
 
@@ -146,7 +133,11 @@ const EditModelMappingModal = ({
 
   const isValidRequestEndpointForModelType = (modelType, endpoint) => {
     const normalizedEndpoint = normalizeRequestEndpoint(endpoint);
-    return getRequestEndpointOptions(modelType).some(
+    const options = getRequestEndpointOptions(modelType);
+    if (options.length === 0) {
+      return true;
+    }
+    return options.some(
       (option) => option.value === normalizedEndpoint,
     );
   };
@@ -289,6 +280,7 @@ const EditModelMappingModal = ({
 
         formApi.setValues({
           ...editingMapping,
+          model_series: canonicalizeModelSeriesValue(editingMapping.model_series),
           request_endpoint: nextEndpoint,
           actual_model:
             editingMapping.actual_model || editingMapping.request_model || '',
@@ -404,6 +396,7 @@ const EditModelMappingModal = ({
       const shouldSubmitImageSettings = modelType === 2;
       const payload = {
         ...values,
+        model_series: canonicalizeModelSeriesValue(values.model_series),
         request_endpoint: requestEndpoint,
         actual_model:
           typeof values.actual_model === 'string'
@@ -530,6 +523,7 @@ const EditModelMappingModal = ({
           label={t('模型系列')}
           placeholder={t('选择模型系列/厂商')}
           optionList={modelSeriesOptions}
+          allowCreate
           filter
         />
         <Form.Select
@@ -613,17 +607,26 @@ const EditModelMappingModal = ({
             }
           }}
         />
-        <Form.Select
-          field='request_endpoint'
-          label={t('请求端点')}
-          placeholder={t('选择请求端点类型')}
-          optionList={requestEndpointOptions}
-          rules={[{ required: true, message: t('请选择请求端点') }]}
-          onChange={(value) => {
-            const nextEndpoint = normalizeRequestEndpoint(value);
-            formApi?.setValue('request_endpoint', nextEndpoint);
-          }}
-        />
+        {isAudioModel ? (
+          <Form.Input
+            field='request_endpoint'
+            label={t('请求端点')}
+            placeholder={t('输入请求端点标识')}
+            rules={[{ required: true, message: t('请输入请求端点') }]}
+          />
+        ) : (
+          <Form.Select
+            field='request_endpoint'
+            label={t('请求端点')}
+            placeholder={t('选择请求端点类型')}
+            optionList={requestEndpointOptions}
+            rules={[{ required: true, message: t('请选择请求端点') }]}
+            onChange={(value) => {
+              const nextEndpoint = normalizeRequestEndpoint(value);
+              formApi?.setValue('request_endpoint', nextEndpoint);
+            }}
+          />
+        )}
         <Form.Switch field='status' label={t('状态')} size='large' />
         <Form.InputNumber
           field='priority'
