@@ -45,16 +45,20 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 	db := setupCanvasSessionServiceTestDB(t)
 
 	const (
-		userID     = 41
-		userGroup  = "default"
-		chatModel  = "gpt-4.1"
-		imageModel = "gpt-image-1"
-		videoModel = "sora-video"
+		userID            = 41
+		userGroup         = "default"
+		chatModel         = "gpt-4.1"
+		imageModel        = "gpt-image-1"
+		videoModel        = "sora-video"
+		unmappedModel     = "legacy-freeform-model"
+		disabledChatModel = "gpt-disabled-chat"
 	)
 
 	seedCanvasChatCapability(t, db, userID, userGroup, userGroup, userGroup, chatModel)
 	seedCanvasChatModelAbility(t, userID+1001, userGroup, imageModel)
 	seedCanvasChatModelAbility(t, userID+1002, userGroup, videoModel)
+	seedCanvasChatModelAbility(t, userID+1003, userGroup, unmappedModel)
+	seedCanvasChatModelAbility(t, userID+1004, userGroup, disabledChatModel)
 
 	mappings := []*model.ModelMapping{
 		{
@@ -86,11 +90,25 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 			RequestEndpoint:   "openai-video",
 			VideoCapabilities: `["text_to_video"]`,
 		},
+		{
+			RequestModel:    disabledChatModel,
+			ActualModel:     disabledChatModel,
+			DisplayName:     "Disabled Chat Model",
+			ModelSeries:     "openai",
+			ModelType:       1,
+			Status:          0,
+			RequestEndpoint: "openai",
+		},
 	}
 	for _, mapping := range mappings {
 		if err := db.Create(mapping).Error; err != nil {
 			t.Fatalf("failed to create model mapping %s: %v", mapping.RequestModel, err)
 		}
+	}
+	if err := db.Model(&model.ModelMapping{}).
+		Where("request_model = ?", disabledChatModel).
+		Update("status", 0).Error; err != nil {
+		t.Fatalf("failed to disable chat model mapping: %v", err)
 	}
 
 	models, err := ListUserCanvasChatModels(userID)

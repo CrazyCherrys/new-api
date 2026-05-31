@@ -494,6 +494,18 @@ func listUserCanvasChatModels(userId int) ([]string, error) {
 	if user == nil {
 		return nil, fmt.Errorf("user not found")
 	}
+	activeMappings, _, err := model.GetActiveChatModelMappings(0, 1000)
+	if err != nil {
+		return nil, err
+	}
+	activeChatModels := make(map[string]struct{}, len(activeMappings))
+	for _, mapping := range activeMappings {
+		trimmed := strings.TrimSpace(mapping.RequestModel)
+		if trimmed == "" {
+			continue
+		}
+		activeChatModels[trimmed] = struct{}{}
+	}
 	modelSet := make(map[string]struct{})
 	for group := range GetUserUsableGroups(user.Group) {
 		for _, modelName := range model.GetGroupEnabledModels(group) {
@@ -501,11 +513,7 @@ func listUserCanvasChatModels(userId int) ([]string, error) {
 			if trimmed == "" {
 				continue
 			}
-			chatModel, filterErr := isCanvasChatModelName(trimmed)
-			if filterErr != nil {
-				return nil, filterErr
-			}
-			if !chatModel {
+			if _, ok := activeChatModels[trimmed]; !ok {
 				continue
 			}
 			modelSet[trimmed] = struct{}{}
@@ -517,21 +525,6 @@ func listUserCanvasChatModels(userId int) ([]string, error) {
 	}
 	sort.Strings(result)
 	return result, nil
-}
-
-func isCanvasChatModelName(modelName string) (bool, error) {
-	modelName = strings.TrimSpace(modelName)
-	if modelName == "" {
-		return false, nil
-	}
-	mapping, err := model.GetActiveModelMappingByRequestModel(modelName)
-	if err != nil {
-		return false, err
-	}
-	if mapping == nil {
-		return true, nil
-	}
-	return mapping.ModelType == 1, nil
 }
 
 func listCanvasChatCandidateGroups(userId int, userGroup string) ([]string, error) {

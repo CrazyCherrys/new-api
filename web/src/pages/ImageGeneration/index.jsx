@@ -7692,7 +7692,7 @@ const ImageGeneration = () => {
                 maxLength={5000}
                 showClear
                 borderless
-                autosize={{ minRows: isMobile ? 2 : 3, maxRows: 8 }}
+                autosize={{ minRows: 1, maxRows: 12 }}
                 style={styles.promptInput}
               />
             </div>

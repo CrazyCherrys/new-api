@@ -428,6 +428,16 @@ func GetActiveVideoModelMappings(startIdx int, num int) ([]*ModelMapping, int64,
 	return mappings, int64(len(mappings)), err
 }
 
+func GetActiveChatModelMappings(startIdx int, num int) ([]*ModelMapping, int64, error) {
+	var mappings []*ModelMapping
+
+	query := DB.Model(&ModelMapping{}).
+		Where("model_type = ? AND status = ? AND request_endpoint <> ''", 1, 1)
+
+	err := query.Order("priority DESC, id DESC").Limit(num).Offset(startIdx).Find(&mappings).Error
+	return mappings, int64(len(mappings)), err
+}
+
 func DeleteModelMapping(id int) error {
 	return DB.Delete(&ModelMapping{}, id).Error
 }
