@@ -110,8 +110,6 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			canvasRoute.GET("/chat/models", controller.ListCanvasChatModels)
 			canvasRoute.GET("/chat-models", controller.GetCanvasChatModels)
-			canvasRoute.GET("/chat/models", controller.ListCanvasChatModels)
-			canvasRoute.GET("/chat-models", controller.GetCanvasChatModels)
 			canvasRoute.GET("/sessions", controller.ListCanvasSessions)
 			canvasRoute.POST("/sessions", controller.CreateCanvasSession)
 			canvasRoute.PATCH("/sessions/:id", controller.UpdateCanvasSession)
