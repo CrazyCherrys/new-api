@@ -2064,6 +2064,13 @@ const ImageGeneration = () => {
     return references;
   };
 
+  const getCanvasMessageReferencePreviewSrc = (message) => {
+    const firstReference = getCanvasMessageReferenceFiles(message).find(
+      (file) => file?.url,
+    );
+    return firstReference?.url || '';
+  };
+
   const getCanvasMessageMedia = (message) => {
     if (!message) {
       return null;
@@ -3442,6 +3449,7 @@ const ImageGeneration = () => {
           created_time: submittedAt,
           client_request_id: clientRequestId,
           canvas_aspect_ratio: aspectRatio || '',
+          reference_images: canvasReferenceFiles,
           image_task: {
             id:
               index === 0
@@ -5187,6 +5195,41 @@ const ImageGeneration = () => {
       color: 'var(--semi-color-text-2)',
       padding: 16,
     },
+    canvasMediaStatusBodyOverlay: {
+      width: '100%',
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      color: '#fff',
+      padding: 16,
+    },
+    canvasMediaStatusOverlay: {
+      position: 'absolute',
+      inset: 0,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background:
+        'linear-gradient(180deg, rgba(15, 23, 42, 0.16) 0%, rgba(15, 23, 42, 0.62) 100%)',
+      pointerEvents: 'none',
+    },
+    canvasMediaStatusOverlayError: {
+      background:
+        'linear-gradient(180deg, rgba(15, 23, 42, 0.18) 0%, rgba(127, 29, 29, 0.68) 100%)',
+    },
+    canvasMediaStatusOverlayText: {
+      color: '#fff',
+      maxWidth: '100%',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      overflowWrap: 'anywhere',
+      textAlign: 'center',
+      lineHeight: 1.5,
+      textShadow: '0 1px 2px rgba(0, 0, 0, 0.28)',
+    },
     canvasErrorText: {
       maxWidth: '100%',
       whiteSpace: 'pre-wrap',
@@ -6189,7 +6232,20 @@ const ImageGeneration = () => {
       (isVideo && (status === 'completed' || status === 'success')) ||
       (!isVideo && status === 'success');
     const isFailed = status === 'failed';
+    const normalizedStatus = String(status || '').toLowerCase();
+    const isQueued = ['queued', 'pending', 'submitted'].includes(
+      normalizedStatus,
+    );
+    const referencePreviewSrc = getCanvasMessageReferencePreviewSrc(message);
+    const showReferencePreview = Boolean(referencePreviewSrc) && !isDone;
     const canPreviewImage = isDone && media?.kind === 'image' && media.src;
+    const statusLabel = isFailed
+      ? media?.error || message.error_message || t('生成失败')
+      : isQueued
+        ? t('排队中')
+        : isVideo
+          ? t('正在生成视频')
+          : t('正在生成图片');
 
     let content = (
       <div style={styles.canvasMediaStatusBody}>
@@ -6200,7 +6256,31 @@ const ImageGeneration = () => {
       </div>
     );
 
-    if (isFailed) {
+    if (showReferencePreview) {
+      content = (
+        <>
+          <img
+            data-canvas-message-reference-preview='true'
+            src={referencePreviewSrc}
+            alt=''
+            style={styles.canvasMediaContent}
+          />
+          <div
+            style={{
+              ...styles.canvasMediaStatusOverlay,
+              ...(isFailed ? styles.canvasMediaStatusOverlayError : null),
+            }}
+          >
+            <div style={styles.canvasMediaStatusBodyOverlay}>
+              {isQueued || isFailed ? <IconClock size='small' /> : <Spin size='small' />}
+              <Text size='small' style={styles.canvasMediaStatusOverlayText}>
+                {statusLabel}
+              </Text>
+            </div>
+          </div>
+        </>
+      );
+    } else if (isFailed) {
       content = (
         <div style={styles.canvasMediaStatusBody}>
           <IconClock size='small' />
