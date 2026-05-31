@@ -57,8 +57,9 @@ import {
   IconExternalOpen,
   IconMore,
   IconSidebar,
+  IconCopy,
 } from '@douyinfe/semi-icons';
-import { API, showError, showSuccess } from '../../helpers';
+import { API, copy, showError, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
 import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
@@ -5220,6 +5221,9 @@ const ImageGeneration = () => {
       background:
         'linear-gradient(180deg, rgba(15, 23, 42, 0.18) 0%, rgba(127, 29, 29, 0.68) 100%)',
     },
+    canvasMediaStatusOverlayInteractive: {
+      pointerEvents: 'auto',
+    },
     canvasMediaStatusOverlayText: {
       color: '#fff',
       maxWidth: '100%',
@@ -5229,6 +5233,7 @@ const ImageGeneration = () => {
       textAlign: 'center',
       lineHeight: 1.5,
       textShadow: '0 1px 2px rgba(0, 0, 0, 0.28)',
+      userSelect: 'text',
     },
     canvasErrorText: {
       maxWidth: '100%',
@@ -5237,6 +5242,34 @@ const ImageGeneration = () => {
       overflowWrap: 'anywhere',
       textAlign: 'center',
       lineHeight: 1.5,
+      userSelect: 'text',
+    },
+    canvasErrorBlock: {
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 8,
+    },
+    canvasErrorCopyButton: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+      padding: '4px 10px',
+      borderRadius: 999,
+      border: '1px solid rgba(220, 38, 38, 0.2)',
+      background: 'rgba(255, 255, 255, 0.92)',
+      color: '#b91c1c',
+      cursor: 'pointer',
+      fontSize: 12,
+      lineHeight: 1,
+      boxShadow: '0 6px 18px rgba(15, 23, 42, 0.12)',
+    },
+    canvasErrorCopyButtonOverlay: {
+      border: '1px solid rgba(255, 255, 255, 0.24)',
+      background: 'rgba(15, 23, 42, 0.44)',
+      color: '#fff',
     },
     canvasMessageResult: {
       display: 'flex',
@@ -6218,6 +6251,51 @@ const ImageGeneration = () => {
     return '1 / 1';
   };
 
+  const handleCopyCanvasError = async (event, errorText) => {
+    event?.stopPropagation?.();
+    const text = String(errorText || '').trim();
+    if (!text) {
+      return;
+    }
+    const ok = await copy(text);
+    if (ok) {
+      showSuccess(t('已复制到剪贴板'));
+    } else {
+      showError(t('复制失败'));
+    }
+  };
+
+  const renderCanvasErrorBlock = (
+    errorText,
+    { overlay = false, size = 'small' } = {},
+  ) => {
+    const text = String(errorText || '').trim() || t('生成失败');
+    return (
+      <div style={styles.canvasErrorBlock}>
+        <Text
+          type={overlay ? undefined : 'danger'}
+          size={size}
+          style={overlay ? styles.canvasMediaStatusOverlayText : styles.canvasErrorText}
+        >
+          {text}
+        </Text>
+        <button
+          type='button'
+          aria-label={t('复制')}
+          title={t('复制')}
+          style={{
+            ...styles.canvasErrorCopyButton,
+            ...(overlay ? styles.canvasErrorCopyButtonOverlay : null),
+          }}
+          onClick={(event) => handleCopyCanvasError(event, text)}
+        >
+          <IconCopy size='small' />
+          <span>{t('复制')}</span>
+        </button>
+      </div>
+    );
+  };
+
   const renderCanvasMediaCard = (
     message,
     { batchLayout = false, batchAspectRatio = '' } = {},
@@ -6239,8 +6317,9 @@ const ImageGeneration = () => {
     const referencePreviewSrc = getCanvasMessageReferencePreviewSrc(message);
     const showReferencePreview = Boolean(referencePreviewSrc) && !isDone;
     const canPreviewImage = isDone && media?.kind === 'image' && media.src;
+    const errorText = media?.error || message.error_message || t('生成失败');
     const statusLabel = isFailed
-      ? media?.error || message.error_message || t('生成失败')
+      ? errorText
       : isQueued
         ? t('排队中')
         : isVideo
@@ -6268,14 +6347,24 @@ const ImageGeneration = () => {
           <div
             style={{
               ...styles.canvasMediaStatusOverlay,
+              ...(isFailed
+                ? styles.canvasMediaStatusOverlayInteractive
+                : null),
               ...(isFailed ? styles.canvasMediaStatusOverlayError : null),
             }}
           >
             <div style={styles.canvasMediaStatusBodyOverlay}>
               {isQueued || isFailed ? <IconClock size='small' /> : <Spin size='small' />}
-              <Text size='small' style={styles.canvasMediaStatusOverlayText}>
-                {statusLabel}
-              </Text>
+              {isFailed ? (
+                renderCanvasErrorBlock(errorText, {
+                  overlay: true,
+                  size: 'small',
+                })
+              ) : (
+                <Text size='small' style={styles.canvasMediaStatusOverlayText}>
+                  {statusLabel}
+                </Text>
+              )}
             </div>
           </div>
         </>
@@ -6284,9 +6373,7 @@ const ImageGeneration = () => {
       content = (
         <div style={styles.canvasMediaStatusBody}>
           <IconClock size='small' />
-          <Text type='danger' size='small' style={styles.canvasErrorText}>
-            {media?.error || message.error_message || t('生成失败')}
-          </Text>
+          {renderCanvasErrorBlock(errorText, { size: 'small' })}
         </div>
       );
     } else if (isDone && media?.kind === 'image' && media.src) {
