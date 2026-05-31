@@ -17,6 +17,18 @@ import (
 	"github.com/QuantumNous/new-api/setting/worker_setting"
 )
 
+func buildTestImageGenerationPNG(t *testing.T) []byte {
+	t.Helper()
+
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to encode test image: %v", err)
+	}
+	return buf.Bytes()
+}
+
 func TestStoreImageGenerationResultLocally(t *testing.T) {
 	cfg := worker_setting.GetWorkerSetting()
 	previousStorageType := cfg.StorageType
@@ -84,6 +96,112 @@ func TestStoreImageGenerationResultLocally(t *testing.T) {
 	_ = thumbFile.Close()
 	if thumbContentType != "image/jpeg" {
 		t.Fatalf("expected opaque thumbnail to use jpeg, got %q", thumbContentType)
+	}
+}
+
+func TestReferenceImageAsDataURLDownloadsHTTPImage(t *testing.T) {
+	previousLoader := loadImageGenerationReferenceAssetFn
+	t.Cleanup(func() {
+		loadImageGenerationReferenceAssetFn = previousLoader
+	})
+
+	pngBytes := buildTestImageGenerationPNG(t)
+	loadImageGenerationReferenceAssetFn = func(ctx context.Context, ref string) (*imageGenerationAsset, error) {
+		if ref != "https://example.com/reference.png" {
+			t.Fatalf("unexpected reference URL %q", ref)
+		}
+		return normalizeImageGenerationAsset(pngBytes, "image/png")
+	}
+
+	dataURL, err := referenceImageAsDataURL(context.Background(), "https://example.com/reference.png")
+	if err != nil {
+		t.Fatalf("expected remote reference image to convert to data URL: %v", err)
+	}
+	if !strings.HasPrefix(dataURL, "data:image/png;base64,") {
+		t.Fatalf("expected png data URL, got %q", dataURL)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(dataURL, "data:image/png;base64,"))
+	if err != nil {
+		t.Fatalf("failed to decode returned data URL: %v", err)
+	}
+	if !bytes.Equal(decoded, pngBytes) {
+		t.Fatalf("unexpected downloaded image payload")
+	}
+}
+
+func TestReferenceImageAsDataURLSupportsAbsoluteLocalAssetURL(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceLocalPath := cfg.ReferenceLocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceLocalStoragePath = previousReferenceLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+	cfg.ReferenceStorageType = "local"
+	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+
+	objectKey := "image-generation/ref/20260531/absolute-reference.png"
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
+	if err != nil {
+		t.Fatalf("failed to resolve local reference path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("failed to create local reference directory: %v", err)
+	}
+	pngBytes := buildTestImageGenerationPNG(t)
+	if err := os.WriteFile(fullPath, pngBytes, 0o644); err != nil {
+		t.Fatalf("failed to write local reference image: %v", err)
+	}
+
+	absoluteURL := "https://canvas.example.com" + buildImageGenerationLocalObjectURL(objectKey)
+	if extracted, ok := imageGenerationLocalAssetKeyFromURL(absoluteURL); !ok || extracted != objectKey {
+		t.Fatalf("expected absolute local asset URL to resolve to %q, got %q ok=%t", objectKey, extracted, ok)
+	}
+
+	dataURL, err := referenceImageAsDataURL(context.Background(), absoluteURL)
+	if err != nil {
+		t.Fatalf("expected absolute local asset URL to convert to data URL: %v", err)
+	}
+	if !strings.HasPrefix(dataURL, "data:image/png;base64,") {
+		t.Fatalf("expected png data URL, got %q", dataURL)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(dataURL, "data:image/png;base64,"))
+	if err != nil {
+		t.Fatalf("failed to decode returned data URL: %v", err)
+	}
+	if !bytes.Equal(decoded, pngBytes) {
+		t.Fatalf("unexpected local asset image payload")
+	}
+}
+
+func TestStoreImageGenerationReferenceImagesKeepsAbsoluteStoredReferenceURL(t *testing.T) {
+	previousLoader := loadImageGenerationReferenceAssetFn
+	t.Cleanup(func() {
+		loadImageGenerationReferenceAssetFn = previousLoader
+	})
+	loadImageGenerationReferenceAssetFn = func(ctx context.Context, ref string) (*imageGenerationAsset, error) {
+		t.Fatalf("expected stored absolute reference URL to be reused without reloading, got %q", ref)
+		return nil, nil
+	}
+
+	objectKey := "image-generation/ref/20260531/already-stored-reference.png"
+	absoluteURL := "https://canvas.example.com" + buildImageGenerationLocalObjectURL(objectKey)
+
+	references, err := storeImageGenerationReferenceImages(context.Background(), 123, []string{absoluteURL})
+	if err != nil {
+		t.Fatalf("expected absolute stored reference URL reuse to succeed: %v", err)
+	}
+	if len(references) != 1 {
+		t.Fatalf("expected 1 reference, got %v", references)
+	}
+	if references[0] != absoluteURL {
+		t.Fatalf("expected reference URL to remain unchanged, got %q", references[0])
 	}
 }
 

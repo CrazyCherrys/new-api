@@ -52,6 +52,7 @@ var (
 	imageGenerationLocalAssetAccessCache     *cachex.HybridCache[int]
 	inspirationLocalAssetAccessCacheOnce     sync.Once
 	inspirationLocalAssetAccessCache         *cachex.HybridCache[int]
+	loadImageGenerationReferenceAssetFn      imageGenerationAssetLoader = loadImageGenerationReferenceAsset
 )
 
 type imageGenerationAsset struct {
@@ -286,7 +287,7 @@ func storeImageGenerationReferenceImageAsset(ctx context.Context, taskId int, im
 		return &imageGenerationStoredReference{}, nil
 	}
 
-	asset, err := loadImageGenerationReferenceAsset(ctx, imageUrl)
+	asset, err := loadImageGenerationReferenceAssetFn(ctx, imageUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -607,11 +608,11 @@ func referenceImageAsDataURL(ctx context.Context, ref string) (string, error) {
 	if strings.HasPrefix(ref, "data:") {
 		return ref, nil
 	}
-	if !isImageGenerationStoredAssetURL(ref) {
+	if !model.IsProbablyHTTPURL(ref) && !isImageGenerationStoredAssetURL(ref) {
 		return ref, nil
 	}
 
-	asset, err := loadImageGenerationReferenceAsset(ctx, ref)
+	asset, err := loadImageGenerationReferenceAssetFn(ctx, ref)
 	if err != nil {
 		return "", err
 	}
@@ -628,8 +629,8 @@ func isImageGenerationStoredReferenceURL(ref string) bool {
 	if ref == "" {
 		return false
 	}
-	if _, ok := imageGenerationLocalAssetKeyFromURL(ref); ok {
-		return isImageGenerationReferenceObjectKey(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(ref, imageGenerationAssetURLPrefix)), "/"))
+	if objectKey, ok := imageGenerationLocalAssetKeyFromURL(ref); ok {
+		return isImageGenerationReferenceObjectKey(objectKey)
 	}
 	cfg := worker_setting.GetWorkerSetting()
 	if cfg == nil {
@@ -1143,6 +1144,17 @@ func imageGenerationLocalAssetKeyFromURL(imageUrl string) (string, bool) {
 	trimmed := strings.TrimSpace(imageUrl)
 	if strings.HasPrefix(trimmed, imageGenerationAssetURLPrefix) {
 		return strings.TrimPrefix(trimmed[len(imageGenerationAssetURLPrefix):], "/"), true
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", false
+	}
+	assetPath := parsed.EscapedPath()
+	if assetPath == "" {
+		assetPath = parsed.Path
+	}
+	if strings.HasPrefix(assetPath, imageGenerationAssetURLPrefix) {
+		return strings.TrimPrefix(assetPath[len(imageGenerationAssetURLPrefix):], "/"), true
 	}
 	return "", false
 }

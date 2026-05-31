@@ -1499,6 +1499,118 @@ func TestCreateImageGenerationTaskStoresReferenceImagesOutsideDatabase(t *testin
 	}
 }
 
+func TestCreateImageGenerationTaskStoresRemoteReferenceImagesOutsideDatabase(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+
+	previousLoader := loadImageGenerationReferenceAssetFn
+	t.Cleanup(func() {
+		loadImageGenerationReferenceAssetFn = previousLoader
+	})
+
+	user := &model.User{
+		Username: "image-remote-storage-user",
+		Password: "hashed-password",
+		Status:   1,
+		Group:    "default",
+		Quota:    1000000,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	seedUserToken(t, db, user.Id, "sk-image-remote-storage")
+
+	mapping := &model.ModelMapping{
+		RequestModel:      "gpt-image-edit-remote",
+		ActualModel:       "gpt-image-edit",
+		DisplayName:       "GPT Image Edit Remote",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation","image_editing"]`,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+	seedImageAbility(t, db, "default", "gpt-image-edit-remote")
+
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to encode test image: %v", err)
+	}
+	imageBytes := buf.Bytes()
+	remoteReferenceURL := "https://example.com/reference.png"
+	loadImageGenerationReferenceAssetFn = func(ctx context.Context, ref string) (*imageGenerationAsset, error) {
+		if ref != remoteReferenceURL {
+			t.Fatalf("unexpected reference URL %q", ref)
+		}
+		return normalizeImageGenerationAsset(imageBytes, "image/png")
+	}
+
+	previousEnqueue := enqueueImageGenerationTask
+	enqueueImageGenerationTask = func(taskId int) {}
+	t.Cleanup(func() {
+		enqueueImageGenerationTask = previousEnqueue
+	})
+
+	task, err := CreateImageGenerationTask(
+		user.Id,
+		"gpt-image-edit-remote",
+		"default",
+		"prompt",
+		"openai",
+		`{"reference_images":["`+remoteReferenceURL+`"]}`,
+	)
+	if err != nil {
+		t.Fatalf("expected remote reference task creation to succeed: %v", err)
+	}
+
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("expected task to be reloaded")
+	}
+	if strings.Contains(reloaded.Params, remoteReferenceURL) {
+		t.Fatalf("expected database params to avoid raw remote reference URL, got %s", reloaded.Params)
+	}
+
+	references, err := extractImageGenerationReferenceImages(reloaded.Params)
+	if err != nil {
+		t.Fatalf("failed to extract stored reference images: %v", err)
+	}
+	if len(references) != 1 {
+		t.Fatalf("expected 1 stored reference image, got %v", references)
+	}
+	if !strings.HasPrefix(references[0], imageGenerationAssetURLPrefix) {
+		t.Fatalf("expected stored reference image URL, got %q", references[0])
+	}
+	objectKey, ok := imageGenerationLocalAssetKeyFromURL(references[0])
+	if !ok {
+		t.Fatalf("expected local asset key from %q", references[0])
+	}
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
+	if err != nil {
+		t.Fatalf("failed to resolve local reference image path: %v", err)
+	}
+	if _, err := os.Stat(fullPath); err != nil {
+		t.Fatalf("expected stored reference image file to exist: %v", err)
+	}
+}
+
 func TestCreateImageGenerationTaskReservesAndSuccessReleasesQueueSlot(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
 
