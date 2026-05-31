@@ -114,7 +114,7 @@ func TestBuildVideoRelaySubmitBodyUsesMultipartForOpenAIVideoReferenceImage(t *t
 	}
 }
 
-func TestBuildVideoRelaySubmitBodyKeepsJSONForOpenAIVideoTextOnly(t *testing.T) {
+func TestBuildVideoRelaySubmitBodyUsesMultipartForOpenAIVideoTextOnly(t *testing.T) {
 	body, contentType, err := buildVideoRelaySubmitBody(
 		"sora-2",
 		"text only video",
@@ -128,22 +128,38 @@ func TestBuildVideoRelaySubmitBodyKeepsJSONForOpenAIVideoTextOnly(t *testing.T) 
 	if err != nil {
 		t.Fatalf("buildVideoRelaySubmitBody returned error: %v", err)
 	}
-	if contentType != "application/json" {
-		t.Fatalf("expected json content type, got %q", contentType)
+	if !strings.HasPrefix(contentType, "multipart/form-data;") {
+		t.Fatalf("expected multipart content type, got %q", contentType)
+	}
+
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		t.Fatalf("failed to parse multipart content type: %v", err)
 	}
 	payload, err := io.ReadAll(body)
 	if err != nil {
-		t.Fatalf("failed to read json body: %v", err)
+		t.Fatalf("failed to read multipart body: %v", err)
 	}
-	var req map[string]any
-	if err := common.Unmarshal(payload, &req); err != nil {
-		t.Fatalf("failed to unmarshal json body: %v", err)
+	form, err := multipart.NewReader(bytes.NewReader(payload), params["boundary"]).ReadForm(1024 * 1024)
+	if err != nil {
+		t.Fatalf("failed to read multipart form: %v", err)
 	}
-	if req["prompt"] != "text only video" {
-		t.Fatalf("expected prompt to be preserved, got %#v", req["prompt"])
+	defer form.RemoveAll()
+
+	if got := form.Value["model"]; len(got) != 1 || got[0] != "sora-2" {
+		t.Fatalf("expected model field sora-2, got %#v", got)
 	}
-	if _, exists := req["input_reference"]; exists {
-		t.Fatalf("did not expect input_reference in text-only json body: %#v", req)
+	if got := form.Value["prompt"]; len(got) != 1 || got[0] != "text only video" {
+		t.Fatalf("expected prompt field text only video, got %#v", got)
+	}
+	if got := form.Value["seconds"]; len(got) != 1 || got[0] != "4" {
+		t.Fatalf("expected seconds field 4, got %#v", got)
+	}
+	if got := form.Value["size"]; len(got) != 1 || got[0] != "1280x720" {
+		t.Fatalf("expected size field 1280x720, got %#v", got)
+	}
+	if files := form.File["input_reference"]; len(files) != 0 {
+		t.Fatalf("did not expect input_reference file for text-only submit, got %#v", files)
 	}
 }
 

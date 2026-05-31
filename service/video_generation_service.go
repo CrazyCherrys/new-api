@@ -358,13 +358,11 @@ func buildVideoRelaySubmitBody(modelId string, prompt string, requestEndpoint st
 		Size:     params.Resolution,
 	}
 	if normalizeVideoEndpoint(requestEndpoint) == "openai-video" {
-		if imageInput != "" {
-			body, contentType, err := buildOpenAIVideoMultipartSubmitBody(modelId, prompt, params, imageInput)
-			if err != nil {
-				return nil, "", err
-			}
-			return body, contentType, nil
+		body, contentType, err := buildOpenAIVideoMultipartSubmitBody(modelId, prompt, params, imageInput)
+		if err != nil {
+			return nil, "", err
 		}
+		return body, contentType, nil
 	} else {
 		if imageInput != "" {
 			videoReq.Image = imageInput
@@ -391,11 +389,6 @@ func buildVideoRelaySubmitBody(modelId string, prompt string, requestEndpoint st
 }
 
 func buildOpenAIVideoMultipartSubmitBody(modelId string, prompt string, params VideoGenerationParams, imageInput string) (*bytes.Buffer, string, error) {
-	mimeType, imageBytes, err := resolveVideoReferenceImageBytes(imageInput)
-	if err != nil {
-		return nil, "", err
-	}
-
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	if err := writer.WriteField("model", modelId); err != nil {
@@ -414,16 +407,21 @@ func buildOpenAIVideoMultipartSubmitBody(modelId string, prompt string, params V
 			return nil, "", fmt.Errorf("failed to write size field: %w", err)
 		}
 	}
-
-	header := make(textproto.MIMEHeader)
-	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="input_reference"; filename="%s"`, videoReferenceImageFilename(mimeType)))
-	header.Set("Content-Type", mimeType)
-	part, err := writer.CreatePart(header)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to create input_reference part: %w", err)
-	}
-	if _, err := part.Write(imageBytes); err != nil {
-		return nil, "", fmt.Errorf("failed to write input_reference part: %w", err)
+	if strings.TrimSpace(imageInput) != "" {
+		mimeType, imageBytes, err := resolveVideoReferenceImageBytes(imageInput)
+		if err != nil {
+			return nil, "", err
+		}
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="input_reference"; filename="%s"`, videoReferenceImageFilename(mimeType)))
+		header.Set("Content-Type", mimeType)
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to create input_reference part: %w", err)
+		}
+		if _, err := part.Write(imageBytes); err != nil {
+			return nil, "", fmt.Errorf("failed to write input_reference part: %w", err)
+		}
 	}
 	contentType := writer.FormDataContentType()
 	if err := writer.Close(); err != nil {
