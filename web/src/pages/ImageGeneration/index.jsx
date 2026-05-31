@@ -107,12 +107,54 @@ const CANVAS_MODE_CHAT = 'chat';
 const CANVAS_MODE_IMAGE = 'image';
 const CANVAS_MODE_VIDEO = 'video';
 const CANVAS_MODES = [CANVAS_MODE_CHAT, CANVAS_MODE_IMAGE, CANVAS_MODE_VIDEO];
+const DEFAULT_CANVAS_SESSION_RECENT_PAGE_SIZE = 20;
+const MAX_CANVAS_SESSION_RECENT_PAGE_SIZE = 100;
 const DEFAULT_ASSET_PAGE_SIZE = 24;
 const DEFAULT_CHAT_TEMPERATURE = '0.7';
 const DEFAULT_CHAT_CONTEXT_COUNT = '8';
 const DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES = '8';
 const DEFAULT_CHAT_SUMMARY_RECENT_MESSAGES = '8';
 const CHAT_SUMMARY_STRATEGY_OPTIONS = ['0', '4', '8', '12', '16', '24', '32'];
+
+const sortCanvasSessionsByRecent = (a, b) => {
+  if (!!a?.pinned !== !!b?.pinned) {
+    return a?.pinned ? -1 : 1;
+  }
+  const updatedDiff =
+    (Number(b?.updated_time) || 0) - (Number(a?.updated_time) || 0);
+  if (updatedDiff !== 0) {
+    return updatedDiff;
+  }
+  return (Number(b?.id) || 0) - (Number(a?.id) || 0);
+};
+
+const normalizeCanvasSessionRecord = (
+  session,
+  fallbackMode = CANVAS_MODE_IMAGE,
+) => {
+  if (!session?.id) {
+    return null;
+  }
+  const normalizedMode = CANVAS_MODES.includes(session.mode)
+    ? session.mode
+    : fallbackMode;
+  return {
+    ...session,
+    mode: normalizedMode,
+  };
+};
+
+const mergeCanvasSessionItems = (existing = [], incoming = []) => {
+  const merged = new Map();
+  [...existing, ...incoming].forEach((session) => {
+    const normalized = normalizeCanvasSessionRecord(session);
+    if (!normalized) {
+      return;
+    }
+    merged.set(String(normalized.id), normalized);
+  });
+  return Array.from(merged.values()).sort(sortCanvasSessionsByRecent);
+};
 
 const normalizeImageCapabilities = (raw) => {
   if (Array.isArray(raw)) {
@@ -590,15 +632,14 @@ const ImageGeneration = () => {
     [CANVAS_MODE_IMAGE]: [],
     [CANVAS_MODE_VIDEO]: [],
   });
-  const [canvasSessionsLoading, setCanvasSessionsLoading] = useState({
-    [CANVAS_MODE_CHAT]: false,
-    [CANVAS_MODE_IMAGE]: false,
-    [CANVAS_MODE_VIDEO]: false,
-  });
-  const [canvasSessionErrors, setCanvasSessionErrors] = useState({
-    [CANVAS_MODE_CHAT]: '',
-    [CANVAS_MODE_IMAGE]: '',
-    [CANVAS_MODE_VIDEO]: '',
+  const [recentCanvasSessions, setRecentCanvasSessions] = useState({
+    items: [],
+    expanded: true,
+    initialLoading: false,
+    loadingMore: false,
+    hasMore: true,
+    offset: 0,
+    error: '',
   });
   const [selectedCanvasSessionIds, setSelectedCanvasSessionIds] = useState({
     [CANVAS_MODE_CHAT]: null,
@@ -711,6 +752,7 @@ const ImageGeneration = () => {
   const canvasMessageDetailRequestSeqRef = useRef(new Map());
   const canvasMessageHydrationAttemptRef = useRef(new Set());
   const canvasMessageClientRequestSeqRef = useRef(0);
+  const recentCanvasSessionsRequestSeqRef = useRef(0);
   const sseRef = useRef(null);
   const pollingTimerRef = useRef(null);
   const pollingIntervalRef = useRef(DEFAULT_POLLING_INTERVAL_SECONDS);
@@ -719,11 +761,6 @@ const ImageGeneration = () => {
   const taskDetailRequestSeqRef = useRef(0);
   const drawingModelsRequestSeqRef = useRef(0);
   const loadedModelsGroupRef = useRef('');
-  const canvasSessionsRequestSeqRef = useRef({
-    [CANVAS_MODE_CHAT]: 0,
-    [CANVAS_MODE_IMAGE]: 0,
-    [CANVAS_MODE_VIDEO]: 0,
-  });
   const canvasMessagesRequestSeqRef = useRef(0);
   const canvasMessagesSessionIdRef = useRef(null);
   const taskUpdatesCompletedSinceRef = useRef(
@@ -764,32 +801,46 @@ const ImageGeneration = () => {
   );
   const showsReliableTaskTotal = !canUseTaskCursorPagination;
   const hasNextTaskPage = taskHasMore;
-  const currentCanvasSessions = canvasSessions[generationMode] || [];
   const selectedCanvasSessionId = selectedCanvasSessionIds[generationMode];
-  const selectedCanvasSession = currentCanvasSessions.find(
-    (session) => session.id === selectedCanvasSessionId,
+  const findCanvasSessionById = (sessionId, mode = '') => {
+    if (!sessionId) {
+      return null;
+    }
+    const normalizedMode = CANVAS_MODES.includes(mode) ? mode : '';
+    if (normalizedMode) {
+      const directMatch = (canvasSessions[normalizedMode] || []).find(
+        (item) => item.id === sessionId,
+      );
+      if (directMatch) {
+        return directMatch;
+      }
+      const recentMatch = recentCanvasSessions.items.find(
+        (item) => item.id === sessionId && item.mode === normalizedMode,
+      );
+      if (recentMatch) {
+        return recentMatch;
+      }
+    }
+    const anyRecentMatch = recentCanvasSessions.items.find(
+      (item) => item.id === sessionId,
+    );
+    if (anyRecentMatch) {
+      return anyRecentMatch;
+    }
+    for (const canvasMode of CANVAS_MODES) {
+      const match = (canvasSessions[canvasMode] || []).find(
+        (item) => item.id === sessionId,
+      );
+      if (match) {
+        return match;
+      }
+    }
+    return null;
+  };
+  const selectedCanvasSession = findCanvasSessionById(
+    selectedCanvasSessionId,
+    generationMode,
   );
-  const unifiedCanvasSessions = useMemo(
-    () =>
-      CANVAS_MODES.flatMap((mode) =>
-        (canvasSessions[mode] || []).map((session) => ({
-          ...session,
-          mode: session.mode || mode,
-        })),
-      ).sort((a, b) => {
-        if (!!a.pinned !== !!b.pinned) {
-          return a.pinned ? -1 : 1;
-        }
-        return (Number(b.updated_time) || 0) - (Number(a.updated_time) || 0);
-      }),
-    [canvasSessions],
-  );
-  const unifiedCanvasSessionsLoading = CANVAS_MODES.some(
-    (mode) => canvasSessionsLoading[mode],
-  );
-  const unifiedCanvasSessionError = CANVAS_MODES.map(
-    (mode) => canvasSessionErrors[mode],
-  ).find(Boolean);
   const displayedCanvasMessages =
     canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [];
   const isCurrentCanvasMessageSession = (sessionId) =>
@@ -797,9 +848,7 @@ const ImageGeneration = () => {
   const updateCurrentCanvasSessionModel = async (mode, modelId) => {
     const normalizedMode = CANVAS_MODES.includes(mode) ? mode : generationMode;
     const sessionId = selectedCanvasSessionIds[normalizedMode];
-    const session = (canvasSessions[normalizedMode] || []).find(
-      (item) => item.id === sessionId,
-    );
+    const session = findCanvasSessionById(sessionId, normalizedMode);
     if (!session?.id) {
       return;
     }
@@ -828,9 +877,7 @@ const ImageGeneration = () => {
     errorMessage,
   ) => {
     const sessionId = selectedCanvasSessionIds[CANVAS_MODE_CHAT];
-    const session = (canvasSessions[CANVAS_MODE_CHAT] || []).find(
-      (item) => item.id === sessionId,
-    );
+    const session = findCanvasSessionById(sessionId, CANVAS_MODE_CHAT);
     if (!session?.id || !updates || Object.keys(updates).length === 0) {
       return;
     }
@@ -871,6 +918,7 @@ const ImageGeneration = () => {
     canvasSessions,
     chatSessionSettingsSessionId,
     chatSessionSettingsVisible,
+    recentCanvasSessions.items,
   ]);
 
   useEffect(() => {
@@ -1184,9 +1232,7 @@ const ImageGeneration = () => {
   ]);
 
   useEffect(() => {
-    CANVAS_MODES.forEach((mode) => {
-      loadCanvasSessions(mode);
-    });
+    loadRecentCanvasSessions({ reset: true });
   }, []);
 
   useEffect(() => {
@@ -1400,93 +1446,184 @@ const ImageGeneration = () => {
     }));
   };
 
-  const setCanvasSessionsLoadingForMode = (mode, loading) => {
-    setCanvasSessionsLoading((prev) => ({
-      ...prev,
-      [mode]: loading,
-    }));
-  };
-
-  const setCanvasSessionErrorForMode = (mode, message) => {
-    setCanvasSessionErrors((prev) => ({
-      ...prev,
-      [mode]: message || '',
-    }));
-  };
-
-  const loadCanvasSessions = async (mode = generationMode, options = {}) => {
-    const normalizedMode = CANVAS_MODES.includes(mode) ? mode : CANVAS_MODE_IMAGE;
-    const requestSeq =
-      (canvasSessionsRequestSeqRef.current[normalizedMode] || 0) + 1;
-    canvasSessionsRequestSeqRef.current[normalizedMode] = requestSeq;
-    if (!options.silent) {
-      setCanvasSessionsLoadingForMode(normalizedMode, true);
+  const mergeCanvasSessionsIntoState = (sessions) => {
+    if (!sessions?.length) {
+      return;
     }
+    const grouped = {
+      [CANVAS_MODE_CHAT]: [],
+      [CANVAS_MODE_IMAGE]: [],
+      [CANVAS_MODE_VIDEO]: [],
+    };
+    sessions.forEach((session) => {
+      const normalized = normalizeCanvasSessionRecord(session);
+      if (!normalized) {
+        return;
+      }
+      grouped[normalized.mode].push(normalized);
+    });
+    setCanvasSessions((prev) => {
+      const next = { ...prev };
+      CANVAS_MODES.forEach((mode) => {
+        if (grouped[mode].length === 0) {
+          return;
+        }
+        next[mode] = mergeCanvasSessionItems(prev[mode] || [], grouped[mode]);
+      });
+      return next;
+    });
+  };
+
+  const upsertCanvasSessionInCollections = (session) => {
+    const normalized = normalizeCanvasSessionRecord(session);
+    if (!normalized) {
+      return;
+    }
+    mergeCanvasSessionsIntoState([normalized]);
+    setRecentCanvasSessions((prev) => ({
+      ...prev,
+      items: mergeCanvasSessionItems(prev.items, [normalized]),
+    }));
+  };
+
+  const removeCanvasSessionFromCollections = (session) => {
+    if (!session?.id) {
+      return;
+    }
+    const normalizedMode = CANVAS_MODES.includes(session.mode)
+      ? session.mode
+      : CANVAS_MODE_IMAGE;
+    setCanvasSessionsForMode(normalizedMode, (prev) =>
+      prev.filter((item) => item.id !== session.id),
+    );
+    setRecentCanvasSessions((prev) => ({
+      ...prev,
+      items: prev.items.filter((item) => item.id !== session.id),
+    }));
+  };
+
+  const syncCanvasSessionSelectionDefaults = (sessions) => {
+    if (!sessions?.length) {
+      return;
+    }
+    const firstByMode = {};
+    sessions.forEach((session) => {
+      if (!firstByMode[session.mode]) {
+        firstByMode[session.mode] = session;
+      }
+    });
+    setSelectedCanvasSessionIds((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      CANVAS_MODES.forEach((mode) => {
+        if (next[mode]) {
+          return;
+        }
+        if (blankCanvasSelectionModesRef.current[mode]) {
+          if (next[mode] !== null) {
+            next[mode] = null;
+            changed = true;
+          }
+          return;
+        }
+        const firstSession = firstByMode[mode];
+        if (firstSession?.id) {
+          next[mode] = firstSession.id;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  };
+
+  const loadRecentCanvasSessions = async (options = {}) => {
+    const reset = !!options.reset;
+    const silent = !!options.silent;
+    const nextOffset = reset ? 0 : Math.max(0, recentCanvasSessions.offset || 0);
+    const requestedLimit = Number.parseInt(options.limit, 10);
+    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, MAX_CANVAS_SESSION_RECENT_PAGE_SIZE)
+      : DEFAULT_CANVAS_SESSION_RECENT_PAGE_SIZE;
+    const requestSeq = recentCanvasSessionsRequestSeqRef.current + 1;
+    recentCanvasSessionsRequestSeqRef.current = requestSeq;
+    setRecentCanvasSessions((prev) => ({
+      ...prev,
+      initialLoading: reset ? !silent : prev.initialLoading,
+      loadingMore: reset ? false : !silent,
+      error: reset && !silent ? '' : prev.error,
+    }));
     try {
       const res = await API.get('/api/canvas/sessions', {
-        params: { mode: normalizedMode },
+        params: {
+          limit,
+          offset: nextOffset,
+        },
       });
-      if (requestSeq !== canvasSessionsRequestSeqRef.current[normalizedMode]) {
+      if (requestSeq !== recentCanvasSessionsRequestSeqRef.current) {
         return [];
       }
       if (!res.data.success) {
         const message = res.data.message || t('加载会话失败');
-        setCanvasSessionErrorForMode(normalizedMode, message);
-        if (!options.silent) {
+        setRecentCanvasSessions((prev) => ({
+          ...prev,
+          initialLoading: false,
+          loadingMore: false,
+          error: message,
+        }));
+        if (!silent) {
           showError(message);
         }
         return [];
       }
-      const sessions = (res.data.data || [])
-        .map((session) => ({
-          ...session,
-          mode: session.mode || normalizedMode,
-        }))
-        .filter((session) => session.mode === normalizedMode);
-      setCanvasSessionErrorForMode(normalizedMode, '');
-      setCanvasSessionsForMode(normalizedMode, sessions);
-      setSelectedCanvasSessionIds((prev) => {
-        const currentId = prev[normalizedMode];
-        if (currentId && sessions.some((session) => session.id === currentId)) {
-          return prev;
-        }
-        if (blankCanvasSelectionModesRef.current[normalizedMode]) {
-          return {
-            ...prev,
-            [normalizedMode]: null,
-          };
-        }
-        return {
-          ...prev,
-          [normalizedMode]: sessions[0]?.id || null,
-        };
-      });
-      return sessions;
+      const items = Array.isArray(res.data.data?.items)
+        ? res.data.data.items
+            .map((session) => normalizeCanvasSessionRecord(session))
+            .filter(Boolean)
+        : [];
+      mergeCanvasSessionsIntoState(items);
+      syncCanvasSessionSelectionDefaults(items);
+      setRecentCanvasSessions((prev) => ({
+        ...prev,
+        items: reset ? items : mergeCanvasSessionItems(prev.items, items),
+        hasMore: Boolean(res.data.data?.has_more),
+        offset: nextOffset + items.length,
+        initialLoading: false,
+        loadingMore: false,
+        error: '',
+      }));
+      return items;
     } catch (error) {
-      if (requestSeq !== canvasSessionsRequestSeqRef.current[normalizedMode]) {
+      if (requestSeq !== recentCanvasSessionsRequestSeqRef.current) {
         return [];
       }
       const message = error.message || t('加载会话失败');
-      setCanvasSessionErrorForMode(normalizedMode, message);
-      if (!options.silent) {
+      setRecentCanvasSessions((prev) => ({
+        ...prev,
+        initialLoading: false,
+        loadingMore: false,
+        error: message,
+      }));
+      if (!silent) {
         showError(message);
       }
       return [];
-    } finally {
-      if (
-        !options.silent &&
-        requestSeq === canvasSessionsRequestSeqRef.current[normalizedMode]
-      ) {
-        setCanvasSessionsLoadingForMode(normalizedMode, false);
-      }
     }
+  };
+
+  const refreshRecentCanvasSessions = async (options = {}) => {
+    const loadedCount =
+      Number(recentCanvasSessions.offset) > 0
+        ? Number(recentCanvasSessions.offset)
+        : DEFAULT_CANVAS_SESSION_RECENT_PAGE_SIZE;
+    return loadRecentCanvasSessions({
+      reset: true,
+      silent: options.silent !== false,
+      limit: loadedCount,
+    });
   };
 
   const createCanvasSession = async (mode = generationMode, title = '') => {
     const normalizedMode = CANVAS_MODES.includes(mode) ? mode : generationMode;
-    canvasSessionsRequestSeqRef.current[normalizedMode] =
-      (canvasSessionsRequestSeqRef.current[normalizedMode] || 0) + 1;
-    setCanvasSessionsLoadingForMode(normalizedMode, false);
     const payload = {
       mode: normalizedMode,
       title,
@@ -1508,13 +1645,7 @@ const ImageGeneration = () => {
     }
     const session = res.data.data;
     blankCanvasSelectionModesRef.current[normalizedMode] = false;
-    canvasSessionsRequestSeqRef.current[normalizedMode] =
-      (canvasSessionsRequestSeqRef.current[normalizedMode] || 0) + 1;
-    setCanvasSessionErrorForMode(normalizedMode, '');
-    setCanvasSessionsForMode(normalizedMode, (prev) => [
-      session,
-      ...prev.filter((item) => item.id !== session.id),
-    ]);
+    upsertCanvasSessionInCollections(session);
     setSelectedCanvasSessionIds((prev) => ({
       ...prev,
       [normalizedMode]: session.id,
@@ -1530,11 +1661,8 @@ const ImageGeneration = () => {
   };
 
   const ensureCanvasSession = async (mode = generationMode) => {
-    const sessions = canvasSessions[mode] || [];
     const existingId = selectedCanvasSessionIds[mode];
-    const existing = sessions.find(
-      (session) => session.id === existingId,
-    );
+    const existing = findCanvasSessionById(existingId, mode);
     if (existing) {
       return existing;
     }
@@ -1698,18 +1826,7 @@ const ImageGeneration = () => {
   };
 
   const updateCanvasSessionInState = (session) => {
-    if (!session?.mode) {
-      return;
-    }
-    setCanvasSessionsForMode(session.mode, (prev) => {
-      const next = [session, ...prev.filter((item) => item.id !== session.id)];
-      return next.sort((a, b) => {
-        if (a.pinned !== b.pinned) {
-          return a.pinned ? -1 : 1;
-        }
-        return (Number(b.updated_time) || 0) - (Number(a.updated_time) || 0);
-      });
-    });
+    upsertCanvasSessionInCollections(session);
   };
 
   const buildCanvasChatSessionSettingsDraft = (session) => ({
@@ -1738,9 +1855,6 @@ const ImageGeneration = () => {
         ? String(session?.summary_recent_messages)
         : DEFAULT_CHAT_SUMMARY_RECENT_MESSAGES,
   });
-
-  const findCanvasSessionById = (sessionId, mode = CANVAS_MODE_CHAT) =>
-    (canvasSessions[mode] || []).find((item) => item.id === sessionId) || null;
 
   const openCanvasChatSessionSettings = (session) => {
     if (session?.mode !== CANVAS_MODE_CHAT || !session?.id) {
@@ -1995,15 +2109,18 @@ const ImageGeneration = () => {
         return;
       }
       showSuccess(t('删除成功'));
-      setCanvasSessionsForMode(session.mode, (prev) =>
-        prev.filter((item) => item.id !== session.id),
-      );
+      removeCanvasSessionFromCollections(session);
       setSelectedCanvasSessionIds((prev) => {
         if (prev[session.mode] !== session.id) {
           return prev;
         }
-        const nextSessions = (canvasSessions[session.mode] || []).filter(
-          (item) => item.id !== session.id,
+        const nextSessions = mergeCanvasSessionItems(
+          (canvasSessions[session.mode] || []).filter(
+            (item) => item.id !== session.id,
+          ),
+          recentCanvasSessions.items.filter(
+            (item) => item.mode === session.mode && item.id !== session.id,
+          ),
         );
         return {
           ...prev,
@@ -2024,6 +2141,7 @@ const ImageGeneration = () => {
       if (session.mode === CANVAS_MODE_VIDEO) {
         loadVideoTasks();
       }
+      refreshRecentCanvasSessions({ silent: true });
     } catch (error) {
       showError(error.message || t('删除会话失败'));
     } finally {
@@ -3894,7 +4012,7 @@ const ImageGeneration = () => {
           attachPendingReferencesToMessages(createdMessages, canvasReferenceFiles),
           { canvasAspectRatio: aspectRatio || '' },
         );
-        loadCanvasSessions(CANVAS_MODE_IMAGE, { silent: true });
+        refreshRecentCanvasSessions({ silent: true });
         setInspiration('');
         showSuccess(
           createdTasks.length === 1
@@ -4109,7 +4227,7 @@ const ImageGeneration = () => {
         attachPendingReferencesToMessages(createdMessages, canvasReferenceFiles),
         { canvasAspectRatio: videoAspectRatio || '' },
       );
-      loadCanvasSessions(CANVAS_MODE_VIDEO, { silent: true });
+      refreshRecentCanvasSessions({ silent: true });
       setVideoSelectedTask(newTask);
       if (
         newTask &&
@@ -4565,7 +4683,7 @@ const ImageGeneration = () => {
         throw new Error(t('聊天流不可用'));
       }
 
-      loadCanvasSessions(CANVAS_MODE_CHAT, { silent: true });
+      refreshRecentCanvasSessions({ silent: true });
       setChatPrompt('');
       setChatAttachments([]);
 
@@ -4617,7 +4735,7 @@ const ImageGeneration = () => {
 
         if (event.event === 'canvas.message.completed') {
           bumpChatStreamRenderVersion();
-          loadCanvasSessions(CANVAS_MODE_CHAT, { silent: true });
+          refreshRecentCanvasSessions({ silent: true });
           return;
         }
 
@@ -4660,7 +4778,7 @@ const ImageGeneration = () => {
       chatStreamingSessionIdRef.current = null;
       setChatStreaming(false);
       if (activeSessionId) {
-        loadCanvasSessions(CANVAS_MODE_CHAT, { silent: true });
+        refreshRecentCanvasSessions({ silent: true });
         if (
           generationModeRef.current === CANVAS_MODE_CHAT &&
           selectedCanvasSessionIdsRef.current?.[CANVAS_MODE_CHAT] ===
@@ -4837,12 +4955,18 @@ const ImageGeneration = () => {
       overflow: 'hidden',
     },
     sidebarHeader: {
-      height: 40,
+      minHeight: 44,
       flexShrink: 0,
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'flex-end',
-      padding: '8px 10px 0',
+      justifyContent: 'space-between',
+      gap: 8,
+      padding: '10px 10px 6px',
+    },
+    sidebarHeaderActionButton: {
+      height: 30,
+      borderRadius: 8,
+      padding: '0 10px',
     },
     sidebarIconButton: {
       width: 30,
@@ -4854,7 +4978,7 @@ const ImageGeneration = () => {
       display: 'flex',
       flexDirection: 'column',
       gap: 6,
-      padding: isMobile ? 10 : '6px 10px 10px',
+      padding: '0 10px 10px',
     },
     sidebarNavItem: {
       width: '100%',
@@ -4888,10 +5012,20 @@ const ImageGeneration = () => {
       justifyContent: 'center',
     },
     sidebarNavLabel: {
+      flex: 1,
       minWidth: 0,
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
+    },
+    sidebarNavSuffix: {
+      marginLeft: 'auto',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'var(--semi-color-text-2)',
+      flexShrink: 0,
+      transition: 'transform 0.16s ease',
     },
     taskList: {
       flex: 1,
@@ -4962,6 +5096,11 @@ const ImageGeneration = () => {
       minWidth: 28,
       borderRadius: 8,
       flexShrink: 0,
+    },
+    recentListFooter: {
+      display: 'flex',
+      justifyContent: 'center',
+      padding: '6px 0 2px',
     },
     rightPanel: {
       flex: 1,
@@ -6507,10 +6646,13 @@ const ImageGeneration = () => {
     active = false,
     muted = false,
     onClick,
+    suffix = null,
+    ariaExpanded,
   }) => (
     <button
       key={key}
       type='button'
+      aria-expanded={ariaExpanded}
       style={{
         ...styles.sidebarNavItem,
         ...(active ? styles.sidebarNavItemActive : null),
@@ -6520,6 +6662,7 @@ const ImageGeneration = () => {
     >
       <span style={styles.sidebarNavIcon}>{icon}</span>
       <span style={styles.sidebarNavLabel}>{label}</span>
+      {suffix ? <span style={styles.sidebarNavSuffix}>{suffix}</span> : null}
     </button>
   );
 
@@ -6591,78 +6734,118 @@ const ImageGeneration = () => {
     return <IconImage size='small' />;
   };
 
+  const toggleRecentCanvasSessionsExpanded = () => {
+    setRecentCanvasSessions((prev) => ({
+      ...prev,
+      expanded: !prev.expanded,
+    }));
+  };
+
+  const handleRecentCanvasSessionsScroll = (event) => {
+    if (
+      recentCanvasSessions.initialLoading ||
+      recentCanvasSessions.loadingMore ||
+      !recentCanvasSessions.hasMore
+    ) {
+      return;
+    }
+    const container = event.currentTarget;
+    const remainingDistance =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (remainingDistance <= 48) {
+      loadRecentCanvasSessions();
+    }
+  };
+
   const renderCanvasSessionList = () => (
-    <Spin spinning={unifiedCanvasSessionsLoading || deletingCanvasSession}>
-      <div style={styles.taskList}>
-        {unifiedCanvasSessionError ? (
+    <Spin spinning={recentCanvasSessions.initialLoading || deletingCanvasSession}>
+      <div style={styles.taskList} onScroll={handleRecentCanvasSessionsScroll}>
+        {recentCanvasSessions.error && recentCanvasSessions.items.length === 0 ? (
           renderSidebarEmpty(
             t('会话加载失败'),
-            unifiedCanvasSessionError,
+            recentCanvasSessions.error,
             <Button
               size='small'
               icon={<IconRefresh />}
-              onClick={() => {
-                CANVAS_MODES.forEach((mode) => {
-                  loadCanvasSessions(mode);
-                });
-              }}
+              onClick={() => loadRecentCanvasSessions({ reset: true })}
             >
               {t('重试')}
             </Button>,
           )
-        ) : unifiedCanvasSessions.length === 0 ? (
+        ) : recentCanvasSessions.items.length === 0 ? (
           <div style={{ minHeight: 28 }} />
         ) : (
-          unifiedCanvasSessions.map((session) => {
-            const sessionMode = CANVAS_MODES.includes(session.mode)
-              ? session.mode
-              : CANVAS_MODE_IMAGE;
-            const active =
-              generationMode === sessionMode &&
-              session.id === selectedCanvasSessionIds[sessionMode];
-            return (
-              <div
-                key={session.id}
-                role='button'
-                tabIndex={0}
-                style={{
-                  ...styles.taskListItem,
-                  ...styles.sessionListItem,
-                  ...(active ? styles.taskListItemActive : null),
-                }}
-                onClick={() => selectCanvasSession(session)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    selectCanvasSession(session);
-                  }
-                }}
-              >
-                <span style={styles.sessionTypeIcon}>
-                  {renderCanvasSessionIcon(sessionMode)}
-                </span>
-                <div style={styles.taskListText}>
-                  <div style={styles.sessionListTitle}>
-                    {summarizeText(session.title, t('新会话'))}
-                  </div>
-                </div>
-                <Dropdown
-                  trigger='click'
-                  position='bottomRight'
-                  render={renderCanvasSessionMenu(session)}
+          <>
+            {recentCanvasSessions.items.map((session) => {
+              const sessionMode = CANVAS_MODES.includes(session.mode)
+                ? session.mode
+                : CANVAS_MODE_IMAGE;
+              const active =
+                generationMode === sessionMode &&
+                session.id === selectedCanvasSessionIds[sessionMode];
+              return (
+                <div
+                  key={session.id}
+                  role='button'
+                  tabIndex={0}
+                  style={{
+                    ...styles.taskListItem,
+                    ...styles.sessionListItem,
+                    ...(active ? styles.taskListItemActive : null),
+                  }}
+                  onClick={() => selectCanvasSession(session)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      selectCanvasSession(session);
+                    }
+                  }}
                 >
-                  <Button
-                    size='small'
-                    type='tertiary'
-                    aria-label={t('会话菜单')}
-                    icon={<IconMore />}
-                    style={styles.sessionMenuButton}
-                    onClick={(event) => event.stopPropagation()}
-                  />
-                </Dropdown>
+                  <span style={styles.sessionTypeIcon}>
+                    {renderCanvasSessionIcon(sessionMode)}
+                  </span>
+                  <div style={styles.taskListText}>
+                    <div style={styles.sessionListTitle}>
+                      {summarizeText(session.title, t('新会话'))}
+                    </div>
+                  </div>
+                  <Dropdown
+                    trigger='click'
+                    position='bottomRight'
+                    render={renderCanvasSessionMenu(session)}
+                  >
+                    <Button
+                      size='small'
+                      type='tertiary'
+                      aria-label={t('会话菜单')}
+                      icon={<IconMore />}
+                      style={styles.sessionMenuButton}
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  </Dropdown>
+                </div>
+              );
+            })}
+            {recentCanvasSessions.loadingMore ? (
+              <div style={styles.recentListFooter}>
+                <Spin size='small' spinning />
               </div>
-            );
-          })
+            ) : null}
+            {recentCanvasSessions.error ? (
+              <div style={styles.recentListFooter}>
+                <Button
+                  size='small'
+                  type='tertiary'
+                  icon={<IconRefresh />}
+                  onClick={() =>
+                    refreshRecentCanvasSessions({ silent: false })
+                  }
+                >
+                  {t('重试')}
+                </Button>
+              </div>
+            ) : null}
+          </>
         )}
       </div>
     </Spin>
@@ -6670,8 +6853,19 @@ const ImageGeneration = () => {
 
   const renderTaskSidebar = () => (
     <div style={styles.leftPanel} data-canvas-task-sidebar={generationMode}>
-      {!isMobile ? (
-        <div style={styles.sidebarHeader}>
+      <div style={styles.sidebarHeader}>
+        <Button
+          type='tertiary'
+          icon={<IconArchive />}
+          style={styles.sidebarHeaderActionButton}
+          onClick={() => {
+            setAssetLibraryVisible(true);
+            setMobileTaskbarVisible(false);
+          }}
+        >
+          {t('资产库')}
+        </Button>
+        {!isMobile ? (
           <Tooltip content={t('隐藏侧边栏')} position='bottom'>
             <Button
               type='tertiary'
@@ -6682,18 +6876,9 @@ const ImageGeneration = () => {
               onClick={() => setDesktopSidebarCollapsed(true)}
             />
           </Tooltip>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
       <div style={styles.sidebarNav}>
-        {renderSidebarNavItem({
-          key: 'asset-library',
-          label: t('资产库'),
-          icon: <IconArchive />,
-          onClick: () => {
-            setAssetLibraryVisible(true);
-            setMobileTaskbarVisible(false);
-          },
-        })}
         {renderSidebarNavItem({
           key: 'projects',
           label: t('项目'),
@@ -6709,9 +6894,26 @@ const ImageGeneration = () => {
             generationMode === CANVAS_MODE_CHAT && !selectedCanvasSessionId,
           onClick: handleNewBlankChat,
         })}
+        {renderSidebarNavItem({
+          key: 'recent-sessions',
+          label: t('最近'),
+          icon: <IconClock />,
+          onClick: toggleRecentCanvasSessionsExpanded,
+          ariaExpanded: recentCanvasSessions.expanded,
+          suffix: (
+            <IconChevronDown
+              size='small'
+              style={{
+                transform: recentCanvasSessions.expanded
+                  ? 'rotate(0deg)'
+                  : 'rotate(-90deg)',
+              }}
+            />
+          ),
+        })}
       </div>
 
-      {renderCanvasSessionList()}
+      {recentCanvasSessions.expanded ? renderCanvasSessionList() : null}
     </div>
   );
 

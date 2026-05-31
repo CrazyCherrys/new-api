@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -173,10 +174,11 @@ func TestCanvasSessionCreateRenamePinSortAndModeFilter(t *testing.T) {
 		t.Fatalf("unexpected updated session: %#v", updated)
 	}
 
-	sessions, err := ListCanvasSessions(1, model.CanvasModeImage)
+	imagePage, err := ListCanvasSessions(1, model.CanvasModeImage, 20, 0)
 	if err != nil {
 		t.Fatalf("failed to list image sessions: %v", err)
 	}
+	sessions := imagePage.Items
 	if len(sessions) != 2 {
 		t.Fatalf("expected 2 image sessions for user, got %d", len(sessions))
 	}
@@ -189,12 +191,124 @@ func TestCanvasSessionCreateRenamePinSortAndModeFilter(t *testing.T) {
 		}
 	}
 
-	videoSessions, err := ListCanvasSessions(1, model.CanvasModeVideo)
+	videoPage, err := ListCanvasSessions(1, model.CanvasModeVideo, 20, 0)
 	if err != nil {
 		t.Fatalf("failed to list video sessions: %v", err)
 	}
+	videoSessions := videoPage.Items
 	if len(videoSessions) != 1 || videoSessions[0].Id != videoSession.Id {
 		t.Fatalf("expected only the video session, got %#v", videoSessions)
+	}
+}
+
+func TestCanvasSessionListPaginationAndMixedMode(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	created := make([]*model.CanvasSession, 0, 25)
+	modes := []string{
+		model.CanvasModeChat,
+		model.CanvasModeImage,
+		model.CanvasModeVideo,
+	}
+	for i := 0; i < 25; i++ {
+		session, err := CreateCanvasSession(1, CreateCanvasSessionInput{
+			Mode:  modes[i%len(modes)],
+			Title: fmt.Sprintf("session-%02d", i),
+		})
+		if err != nil {
+			t.Fatalf("failed to create session %d: %v", i, err)
+		}
+		created = append(created, session)
+		if err := db.Model(&model.CanvasSession{}).
+			Where("id = ?", session.Id).
+			Updates(map[string]interface{}{
+				"updated_time": int64(1000 + i),
+				"pinned":       i == 3 || i == 17,
+			}).Error; err != nil {
+			t.Fatalf("failed to adjust session ordering data: %v", err)
+		}
+		session.UpdatedTime = int64(1000 + i)
+		session.Pinned = i == 3 || i == 17
+	}
+	if _, err := CreateCanvasSession(2, CreateCanvasSessionInput{
+		Mode:  model.CanvasModeChat,
+		Title: "other-user",
+	}); err != nil {
+		t.Fatalf("failed to create other user session: %v", err)
+	}
+
+	expected := append([]*model.CanvasSession(nil), created...)
+	sort.Slice(expected, func(i, j int) bool {
+		if expected[i].Pinned != expected[j].Pinned {
+			return expected[i].Pinned
+		}
+		if expected[i].UpdatedTime != expected[j].UpdatedTime {
+			return expected[i].UpdatedTime > expected[j].UpdatedTime
+		}
+		return expected[i].Id > expected[j].Id
+	})
+
+	firstPage, err := ListCanvasSessions(1, "", 20, 0)
+	if err != nil {
+		t.Fatalf("failed to list mixed sessions: %v", err)
+	}
+	if len(firstPage.Items) != 20 {
+		t.Fatalf("expected 20 mixed sessions on first page, got %d", len(firstPage.Items))
+	}
+	if !firstPage.HasMore {
+		t.Fatal("expected first mixed page to report has_more=true")
+	}
+	for i, session := range firstPage.Items {
+		if session.Id != expected[i].Id {
+			t.Fatalf("unexpected first page order at %d: got %d want %d", i, session.Id, expected[i].Id)
+		}
+	}
+
+	secondPage, err := ListCanvasSessions(1, "", 20, 20)
+	if err != nil {
+		t.Fatalf("failed to list second mixed page: %v", err)
+	}
+	if len(secondPage.Items) != 5 {
+		t.Fatalf("expected 5 mixed sessions on second page, got %d", len(secondPage.Items))
+	}
+	if secondPage.HasMore {
+		t.Fatal("expected second mixed page to report has_more=false")
+	}
+	seen := make(map[int]struct{}, len(firstPage.Items))
+	for _, session := range firstPage.Items {
+		seen[session.Id] = struct{}{}
+	}
+	for i, session := range secondPage.Items {
+		if session.Id != expected[20+i].Id {
+			t.Fatalf("unexpected second page order at %d: got %d want %d", i, session.Id, expected[20+i].Id)
+		}
+		if _, ok := seen[session.Id]; ok {
+			t.Fatalf("session %d appeared in both mixed pages", session.Id)
+		}
+	}
+
+	for _, mode := range modes {
+		page, err := ListCanvasSessions(1, mode, 20, 0)
+		if err != nil {
+			t.Fatalf("failed to list mode %s: %v", mode, err)
+		}
+		expectedMode := make([]*model.CanvasSession, 0)
+		for _, session := range expected {
+			if session.Mode == mode {
+				expectedMode = append(expectedMode, session)
+			}
+		}
+		if len(page.Items) != len(expectedMode) {
+			t.Fatalf("expected %d %s sessions, got %d", len(expectedMode), mode, len(page.Items))
+		}
+		for i, session := range page.Items {
+			if session.Mode != mode {
+				t.Fatalf("mode filter %s returned session with mode %s", mode, session.Mode)
+			}
+			if session.Id != expectedMode[i].Id {
+				t.Fatalf("unexpected %s order at %d: got %d want %d", mode, i, session.Id, expectedMode[i].Id)
+			}
+		}
 	}
 }
 

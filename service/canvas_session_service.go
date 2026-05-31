@@ -61,12 +61,39 @@ var (
 	createVideoGenerationTaskForCanvas = CreateVideoGenerationTask
 )
 
-func ListCanvasSessions(userId int, mode string) ([]*model.CanvasSession, error) {
-	normalizedMode := model.NormalizeCanvasMode(mode)
-	if normalizedMode == "" {
+const (
+	defaultCanvasSessionListLimit = 20
+	maxCanvasSessionListLimit     = 100
+)
+
+type CanvasSessionListPage struct {
+	Items   []*model.CanvasSession `json:"items"`
+	HasMore bool                   `json:"has_more"`
+}
+
+func ListCanvasSessions(userId int, mode string, limit int, offset int) (*CanvasSessionListPage, error) {
+	rawMode := strings.TrimSpace(mode)
+	normalizedMode := model.NormalizeCanvasMode(rawMode)
+	if rawMode != "" && normalizedMode == "" {
 		return nil, fmt.Errorf("invalid canvas mode")
 	}
-	return model.ListCanvasSessions(userId, normalizedMode)
+	if limit <= 0 {
+		limit = defaultCanvasSessionListLimit
+	}
+	if limit > maxCanvasSessionListLimit {
+		limit = maxCanvasSessionListLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	items, hasMore, err := model.ListCanvasSessions(userId, normalizedMode, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	return &CanvasSessionListPage{
+		Items:   items,
+		HasMore: hasMore,
+	}, nil
 }
 
 func CreateCanvasSession(userId int, input CreateCanvasSessionInput) (*model.CanvasSession, error) {

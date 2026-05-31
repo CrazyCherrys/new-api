@@ -105,14 +105,29 @@ func GetCanvasSessionByID(userId int, id int) (*CanvasSession, error) {
 	return &session, nil
 }
 
-func ListCanvasSessions(userId int, mode string) ([]*CanvasSession, error) {
+func ListCanvasSessions(userId int, mode string, limit int, offset int) ([]*CanvasSession, bool, error) {
 	var sessions []*CanvasSession
 	query := DB.Where("user_id = ? AND deleted_time = 0", userId)
 	if normalizedMode := NormalizeCanvasMode(mode); normalizedMode != "" {
 		query = query.Where("mode = ?", normalizedMode)
 	}
-	err := query.Order("pinned DESC").Order("updated_time DESC").Order("id DESC").Find(&sessions).Error
-	return sessions, err
+	query = query.Order("pinned DESC").Order("updated_time DESC").Order("id DESC")
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		err := query.Find(&sessions).Error
+		return sessions, false, err
+	}
+	err := query.Offset(offset).Limit(limit + 1).Find(&sessions).Error
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := len(sessions) > limit
+	if hasMore {
+		sessions = sessions[:limit]
+	}
+	return sessions, hasMore, nil
 }
 
 func UpdateCanvasSessionFields(userId int, id int, updates map[string]interface{}) error {
