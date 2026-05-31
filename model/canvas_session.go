@@ -15,21 +15,37 @@ const (
 	CanvasMessageRoleUser      = "user"
 	CanvasMessageRoleAssistant = "assistant"
 
+	CanvasMessageStatusPlaceholder = "placeholder"
+	CanvasMessageStatusGenerating  = "generating"
+	CanvasMessageStatusSuccess     = "success"
+	CanvasMessageStatusFailed      = "failed"
+	CanvasMessageStatusStopped     = "stopped"
+
 	CanvasTaskTypeImage = "image_generation"
 	CanvasTaskTypeVideo = "video_generation"
 )
 
 type CanvasSession struct {
-	Id               int    `json:"id" gorm:"primaryKey"`
-	UserId           int    `json:"user_id" gorm:"index:idx_canvas_sessions_user_mode_deleted,priority:1;index:idx_canvas_sessions_user_updated,priority:1;not null"`
-	Mode             string `json:"mode" gorm:"size:16;index:idx_canvas_sessions_user_mode_deleted,priority:2;not null"`
-	Title            string `json:"title" gorm:"size:255;not null;default:''"`
-	CurrentModel     string `json:"current_model" gorm:"size:255;not null;default:''"`
-	Pinned           bool   `json:"pinned" gorm:"index;default:false"`
-	TitleManuallySet bool   `json:"title_manually_set" gorm:"default:false"`
-	CreatedTime      int64  `json:"created_time" gorm:"bigint;index"`
-	UpdatedTime      int64  `json:"updated_time" gorm:"bigint;index:idx_canvas_sessions_user_updated,priority:2"`
-	DeletedTime      int64  `json:"deleted_time" gorm:"bigint;index:idx_canvas_sessions_user_mode_deleted,priority:3;default:0"`
+	Id                      int     `json:"id" gorm:"primaryKey"`
+	UserId                  int     `json:"user_id" gorm:"index:idx_canvas_sessions_user_mode_deleted,priority:1;index:idx_canvas_sessions_user_updated,priority:1;not null"`
+	Mode                    string  `json:"mode" gorm:"size:16;index:idx_canvas_sessions_user_mode_deleted,priority:2;not null"`
+	Title                   string  `json:"title" gorm:"size:255;not null;default:''"`
+	CurrentModel            string  `json:"current_model" gorm:"size:255;not null;default:''"`
+	CurrentGroup            string  `json:"current_group" gorm:"size:64;not null;default:''"`
+	ChatTemperature         float64 `json:"chat_temperature" gorm:"default:0.7"`
+	ChatContextCount        int     `json:"chat_context_count" gorm:"default:8"`
+	SystemPrompt            string  `json:"system_prompt" gorm:"type:text"`
+	SummaryEnabled          bool    `json:"summary_enabled" gorm:"default:true"`
+	SummaryTriggerMessages  int     `json:"summary_trigger_messages" gorm:"default:8"`
+	SummaryRecentMessages   int     `json:"summary_recent_messages" gorm:"default:8"`
+	SummaryPrompt           string  `json:"summary_prompt" gorm:"type:text"`
+	LastSummarizedMessageId int     `json:"last_summarized_message_id" gorm:"default:0"`
+	ClearContextMessageId   int     `json:"clear_context_message_id" gorm:"default:0"`
+	Pinned                  bool    `json:"pinned" gorm:"index;default:false"`
+	TitleManuallySet        bool    `json:"title_manually_set" gorm:"default:false"`
+	CreatedTime             int64   `json:"created_time" gorm:"bigint;index"`
+	UpdatedTime             int64   `json:"updated_time" gorm:"bigint;index:idx_canvas_sessions_user_updated,priority:2"`
+	DeletedTime             int64   `json:"deleted_time" gorm:"bigint;index:idx_canvas_sessions_user_mode_deleted,priority:3;default:0"`
 }
 
 type CanvasMessage struct {
@@ -43,6 +59,7 @@ type CanvasMessage struct {
 	Status          string `json:"status" gorm:"size:32;index;default:''"`
 	TaskId          string `json:"task_id" gorm:"size:64;index;default:''"`
 	TaskType        string `json:"task_type" gorm:"size:32;index;default:''"`
+	Metadata        string `json:"metadata" gorm:"type:text"`
 	ErrorMessage    string `json:"error_message" gorm:"type:text"`
 	CreatedTime     int64  `json:"created_time" gorm:"bigint;index:idx_canvas_messages_session_deleted_created,priority:3"`
 	UpdatedTime     int64  `json:"updated_time" gorm:"bigint"`
@@ -73,7 +90,7 @@ func CreateCanvasSession(session *CanvasSession) error {
 	if session.UpdatedTime == 0 {
 		session.UpdatedTime = now
 	}
-	return DB.Create(session).Error
+	return DB.Select("*").Create(session).Error
 }
 
 func GetCanvasSessionByID(userId int, id int) (*CanvasSession, error) {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -18,15 +19,29 @@ type CanvasMessageWithTask struct {
 }
 
 type CreateCanvasSessionInput struct {
-	Mode         string
-	Title        string
-	CurrentModel string
+	Mode                   string
+	Title                  string
+	CurrentModel           string
+	ChatTemperature        *float64
+	ChatContextCount       *int
+	SystemPrompt           *string
+	SummaryEnabled         *bool
+	SummaryTriggerMessages *int
+	SummaryRecentMessages  *int
 }
 
 type UpdateCanvasSessionInput struct {
-	Title        *string
-	Pinned       *bool
-	CurrentModel *string
+	Title                  *string
+	Pinned                 *bool
+	CurrentModel           *string
+	ChatTemperature        *float64
+	ChatContextCount       *int
+	SystemPrompt           *string
+	SummaryEnabled         *bool
+	SummaryTriggerMessages *int
+	SummaryRecentMessages  *int
+	ClearContextMessageId  *int
+	ClearContextToLatest   *bool
 }
 
 type CreateCanvasMessageInput struct {
@@ -35,6 +50,9 @@ type CreateCanvasMessageInput struct {
 	Group           string
 	RequestEndpoint string
 	Params          string
+	Stream          *bool
+	Temperature     *float64
+	ContextCount    *int
 	ClientRequestId string
 }
 
@@ -67,10 +85,51 @@ func CreateCanvasSession(userId int, input CreateCanvasSessionInput) (*model.Can
 		CurrentModel:     strings.TrimSpace(input.CurrentModel),
 		TitleManuallySet: strings.TrimSpace(input.Title) != "",
 	}
-	if err := model.CreateCanvasSession(session); err != nil {
+	chatTemperature := canvasChatDefaultTemperature
+	chatContextCount := canvasChatDefaultContextCount
+	systemPrompt := ""
+	summaryEnabled := canvasChatSummaryEnabledDefault
+	summaryTriggerMessages := canvasChatSummaryTriggerMessagesDefault
+	summaryRecentMessages := canvasChatSummaryRecentMessagesDefault
+	if mode == model.CanvasModeChat {
+		chatTemperature = normalizeCanvasChatTemperatureValue(input.ChatTemperature, canvasChatDefaultTemperature)
+		chatContextCount = normalizeCanvasChatContextCountValue(input.ChatContextCount, canvasChatDefaultContextCount)
+		systemPrompt = normalizeCanvasChatSystemPromptValue(input.SystemPrompt)
+		summaryEnabled = normalizeCanvasChatSummaryEnabledValue(input.SummaryEnabled, canvasChatSummaryEnabledDefault)
+		summaryTriggerMessages = normalizeCanvasChatSummaryTriggerMessagesValue(input.SummaryTriggerMessages, canvasChatSummaryTriggerMessagesDefault)
+		summaryRecentMessages = normalizeCanvasChatSummaryRecentMessagesValue(input.SummaryRecentMessages, canvasChatSummaryRecentMessagesDefault)
+		session.ChatTemperature = chatTemperature
+		session.ChatContextCount = chatContextCount
+		session.SystemPrompt = systemPrompt
+		session.SummaryEnabled = summaryEnabled
+		session.SummaryTriggerMessages = summaryTriggerMessages
+		session.SummaryRecentMessages = summaryRecentMessages
+	}
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Select("*").Create(session).Error; err != nil {
+			return err
+		}
+		if mode != model.CanvasModeChat {
+			return nil
+		}
+		return tx.Exec(
+			`UPDATE canvas_sessions
+			 SET chat_temperature = ?, chat_context_count = ?, system_prompt = ?, summary_enabled = ?, summary_trigger_messages = ?, summary_recent_messages = ?
+			 WHERE id = ? AND user_id = ? AND deleted_time = 0`,
+			chatTemperature,
+			chatContextCount,
+			systemPrompt,
+			canvasChatSummaryEnabledDBValue(summaryEnabled),
+			summaryTriggerMessages,
+			summaryRecentMessages,
+			session.Id,
+			userId,
+		).Error
+	})
+	if err != nil {
 		return nil, err
 	}
-	return session, nil
+	return model.GetCanvasSessionByID(userId, session.Id)
 }
 
 func UpdateCanvasSession(userId int, id int, input UpdateCanvasSessionInput) (*model.CanvasSession, error) {
@@ -97,6 +156,70 @@ func UpdateCanvasSession(userId int, id int, input UpdateCanvasSessionInput) (*m
 	if input.CurrentModel != nil {
 		updates["current_model"] = strings.TrimSpace(*input.CurrentModel)
 	}
+	if input.ChatTemperature != nil {
+		if session.Mode != model.CanvasModeChat {
+			return nil, fmt.Errorf("chat configuration is only supported for chat sessions")
+		}
+		updates["chat_temperature"] = normalizeCanvasChatTemperatureValue(input.ChatTemperature, session.ChatTemperature)
+	}
+	if input.ChatContextCount != nil {
+		if session.Mode != model.CanvasModeChat {
+			return nil, fmt.Errorf("chat configuration is only supported for chat sessions")
+		}
+		updates["chat_context_count"] = normalizeCanvasChatContextCountValue(input.ChatContextCount, session.ChatContextCount)
+	}
+	if input.SystemPrompt != nil {
+		if session.Mode != model.CanvasModeChat {
+			return nil, fmt.Errorf("chat configuration is only supported for chat sessions")
+		}
+		updates["system_prompt"] = normalizeCanvasChatSystemPromptValue(input.SystemPrompt)
+	}
+	if input.SummaryEnabled != nil {
+		if session.Mode != model.CanvasModeChat {
+			return nil, fmt.Errorf("chat configuration is only supported for chat sessions")
+		}
+		updates["summary_enabled"] = normalizeCanvasChatSummaryEnabledValue(input.SummaryEnabled, session.SummaryEnabled)
+	}
+	if input.SummaryTriggerMessages != nil {
+		if session.Mode != model.CanvasModeChat {
+			return nil, fmt.Errorf("chat configuration is only supported for chat sessions")
+		}
+		updates["summary_trigger_messages"] = normalizeCanvasChatSummaryTriggerMessagesValue(input.SummaryTriggerMessages, session.SummaryTriggerMessages)
+	}
+	if input.SummaryRecentMessages != nil {
+		if session.Mode != model.CanvasModeChat {
+			return nil, fmt.Errorf("chat configuration is only supported for chat sessions")
+		}
+		updates["summary_recent_messages"] = normalizeCanvasChatSummaryRecentMessagesValue(input.SummaryRecentMessages, session.SummaryRecentMessages)
+	}
+	if input.ClearContextMessageId != nil && input.ClearContextToLatest != nil {
+		return nil, fmt.Errorf("clear context input is ambiguous")
+	}
+	if input.ClearContextMessageId != nil {
+		if session.Mode != model.CanvasModeChat {
+			return nil, fmt.Errorf("clear context is only supported for chat sessions")
+		}
+		clearContextMessageID, err := validateCanvasSessionClearContextMessageID(userId, session.Id, *input.ClearContextMessageId)
+		if err != nil {
+			return nil, err
+		}
+		updates["clear_context_message_id"] = clearContextMessageID
+		updates["last_summarized_message_id"] = getCanvasChatSummaryCursorForClearContext(session, clearContextMessageID)
+	}
+	if input.ClearContextToLatest != nil {
+		if session.Mode != model.CanvasModeChat {
+			return nil, fmt.Errorf("clear context is only supported for chat sessions")
+		}
+		clearContextMessageID := 0
+		if *input.ClearContextToLatest {
+			clearContextMessageID, err = getLatestCanvasChatClearContextMessageID(userId, session.Id)
+			if err != nil {
+				return nil, err
+			}
+		}
+		updates["clear_context_message_id"] = clearContextMessageID
+		updates["last_summarized_message_id"] = getCanvasChatSummaryCursorForClearContext(session, clearContextMessageID)
+	}
 	if err := model.UpdateCanvasSessionFields(userId, id, updates); err != nil {
 		return nil, err
 	}
@@ -119,6 +242,10 @@ func ListCanvasMessages(userId int, sessionId int) ([]*CanvasMessageWithTask, er
 }
 
 func CreateCanvasMessage(userId int, sessionId int, input CreateCanvasMessageInput) ([]*CanvasMessageWithTask, error) {
+	return CreateCanvasMessageWithContext(context.Background(), userId, sessionId, input)
+}
+
+func CreateCanvasMessageWithContext(ctx context.Context, userId int, sessionId int, input CreateCanvasMessageInput) ([]*CanvasMessageWithTask, error) {
 	session, err := model.GetCanvasSessionByID(userId, sessionId)
 	if err != nil {
 		return nil, err
@@ -178,16 +305,7 @@ func CreateCanvasMessage(userId int, sessionId int, input CreateCanvasMessageInp
 			}
 		}
 	case model.CanvasModeChat:
-		taskMessage = &model.CanvasMessage{
-			SessionId:       sessionId,
-			UserId:          userId,
-			Mode:            session.Mode,
-			Role:            model.CanvasMessageRoleAssistant,
-			Prompt:          "暂未接入聊天模型",
-			ClientRequestId: clientRequestId,
-			Status:          "placeholder",
-			ErrorMessage:    "chat mode is not connected yet",
-		}
+		return createCanvasChatMessage(ctx, userId, sessionId, session, input)
 	default:
 		return nil, fmt.Errorf("invalid canvas mode")
 	}
@@ -270,6 +388,12 @@ func DeleteCanvasSession(userId int, sessionId int) error {
 	}
 
 	for _, message := range messages {
+		if message != nil &&
+			message.Mode == model.CanvasModeChat &&
+			message.Role == model.CanvasMessageRoleAssistant &&
+			message.Status == model.CanvasMessageStatusGenerating {
+			return fmt.Errorf("running chat session cannot be deleted")
+		}
 		if message == nil || strings.TrimSpace(message.TaskId) == "" {
 			continue
 		}
@@ -441,4 +565,123 @@ func deleteVideoGenerationTaskForCanvas(userId int, id int64) error {
 	}
 	deleteVideoTaskStoredAssets(task)
 	return model.DB.Delete(&model.Task{}, task.ID).Error
+}
+
+func validateCanvasSessionClearContextMessageID(userId int, sessionId int, messageID int) (int, error) {
+	if messageID < 0 {
+		return 0, fmt.Errorf("invalid clear context message id")
+	}
+	if messageID == 0 {
+		return 0, nil
+	}
+
+	var message model.CanvasMessage
+	err := model.DB.
+		Where("id = ? AND session_id = ? AND user_id = ? AND mode = ? AND status = ? AND deleted_time = 0",
+			messageID, sessionId, userId, model.CanvasModeChat, model.CanvasMessageStatusSuccess).
+		First(&message).Error
+	if err == gorm.ErrRecordNotFound {
+		return 0, fmt.Errorf("clear context message not found")
+	}
+	if err != nil {
+		return 0, err
+	}
+	return message.Id, nil
+}
+
+func getLatestCanvasChatClearContextMessageID(userId int, sessionId int) (int, error) {
+	var message model.CanvasMessage
+	err := model.DB.
+		Where("session_id = ? AND user_id = ? AND mode = ? AND status = ? AND deleted_time = 0",
+			sessionId, userId, model.CanvasModeChat, model.CanvasMessageStatusSuccess).
+		Order("created_time DESC").
+		Order("id DESC").
+		First(&message).Error
+	if err == gorm.ErrRecordNotFound {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return message.Id, nil
+}
+
+func normalizeCanvasChatTemperatureValue(input *float64, fallback float64) float64 {
+	if input == nil {
+		input = common.GetPointer(fallback)
+	}
+	value := *input
+	if value < 0 {
+		value = 0
+	}
+	if value > 2 {
+		value = 2
+	}
+	return value
+}
+
+func normalizeCanvasChatContextCountValue(input *int, fallback int) int {
+	if input == nil {
+		input = common.GetPointer(fallback)
+	}
+	value := *input
+	if value < 0 {
+		return 0
+	}
+	if value > canvasChatMaxContextCount {
+		return canvasChatMaxContextCount
+	}
+	return value
+}
+
+func normalizeCanvasChatSystemPromptValue(input *string) string {
+	if input == nil {
+		return ""
+	}
+	return strings.TrimSpace(*input)
+}
+
+func normalizeCanvasChatSummaryEnabledValue(input *bool, fallback bool) bool {
+	if input == nil {
+		return fallback
+	}
+	return *input
+}
+
+func normalizeCanvasChatSummaryTriggerMessagesValue(input *int, fallback int) int {
+	if input == nil {
+		input = common.GetPointer(fallback)
+	}
+	value := *input
+	if value < 0 {
+		return 0
+	}
+	if value > 200 {
+		return 200
+	}
+	return value
+}
+
+func normalizeCanvasChatSummaryRecentMessagesValue(input *int, fallback int) int {
+	if input == nil {
+		input = common.GetPointer(fallback)
+	}
+	value := *input
+	if value < 0 {
+		return 0
+	}
+	if value > 200 {
+		return 200
+	}
+	return value
+}
+
+func canvasChatSummaryEnabledDBValue(enabled bool) any {
+	if common.UsingPostgreSQL {
+		return enabled
+	}
+	if enabled {
+		return 1
+	}
+	return 0
 }

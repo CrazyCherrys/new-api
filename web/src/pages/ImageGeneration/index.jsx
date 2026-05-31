@@ -59,7 +59,14 @@ import {
   IconSidebar,
   IconCopy,
 } from '@douyinfe/semi-icons';
-import { API, copy, showError, showSuccess } from '../../helpers';
+import {
+  API,
+  copy,
+  authHeader,
+  getUserIdFromLocalStorage,
+  showError,
+  showSuccess,
+} from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
 import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
@@ -101,6 +108,11 @@ const CANVAS_MODE_IMAGE = 'image';
 const CANVAS_MODE_VIDEO = 'video';
 const CANVAS_MODES = [CANVAS_MODE_CHAT, CANVAS_MODE_IMAGE, CANVAS_MODE_VIDEO];
 const DEFAULT_ASSET_PAGE_SIZE = 24;
+const DEFAULT_CHAT_TEMPERATURE = '0.7';
+const DEFAULT_CHAT_CONTEXT_COUNT = '8';
+const DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES = '8';
+const DEFAULT_CHAT_SUMMARY_RECENT_MESSAGES = '8';
+const CHAT_SUMMARY_STRATEGY_OPTIONS = ['0', '4', '8', '12', '16', '24', '32'];
 
 const normalizeImageCapabilities = (raw) => {
   if (Array.isArray(raw)) {
@@ -555,15 +567,24 @@ const ImageGeneration = () => {
   );
   const [chatPrompt, setChatPrompt] = useState('');
   const [chatTemperature, setChatTemperature] = useState(() =>
-    getStoredValue(STORAGE_KEYS.CHAT_TEMPERATURE, '0.7'),
+    getStoredValue(STORAGE_KEYS.CHAT_TEMPERATURE, DEFAULT_CHAT_TEMPERATURE),
   );
   const [chatContext, setChatContext] = useState(() =>
-    getStoredValue(STORAGE_KEYS.CHAT_CONTEXT, '8'),
+    getStoredValue(STORAGE_KEYS.CHAT_CONTEXT, DEFAULT_CHAT_CONTEXT_COUNT),
   );
   const [chatToolsEnabled, setChatToolsEnabled] = useState(() =>
     getStoredValue(STORAGE_KEYS.CHAT_TOOLS, 'false') === 'true',
   );
   const [chatAttachments, setChatAttachments] = useState([]);
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const [chatStreamRenderVersion, setChatStreamRenderVersion] = useState(0);
+  const [chatSessionSettingsVisible, setChatSessionSettingsVisible] =
+    useState(false);
+  const [chatSessionSettingsSessionId, setChatSessionSettingsSessionId] =
+    useState(null);
+  const [chatSessionSettingsDraft, setChatSessionSettingsDraft] = useState(null);
+  const [chatSessionSettingsSaving, setChatSessionSettingsSaving] =
+    useState(false);
   const [canvasSessions, setCanvasSessions] = useState({
     [CANVAS_MODE_CHAT]: [],
     [CANVAS_MODE_IMAGE]: [],
@@ -713,6 +734,11 @@ const ImageGeneration = () => {
   const prefillGroupFallbackNoticeShownRef = useRef(false);
   const composerComposingRef = useRef(false);
   const blankCanvasSelectionModesRef = useRef({});
+  const chatStreamAbortRef = useRef(null);
+  const chatStreamingMessageIdRef = useRef(null);
+  const chatStreamingSessionIdRef = useRef(null);
+  const generationModeRef = useRef(generationMode);
+  const selectedCanvasSessionIdsRef = useRef(selectedCanvasSessionIds);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
   const [userCustomWorkerKeyEnabled, setUserCustomWorkerKeyEnabled] =
     useState(false);
@@ -797,13 +823,87 @@ const ImageGeneration = () => {
     }
   };
 
+  const updateCurrentCanvasChatSessionConfig = async (
+    updates,
+    errorMessage,
+  ) => {
+    const sessionId = selectedCanvasSessionIds[CANVAS_MODE_CHAT];
+    const session = (canvasSessions[CANVAS_MODE_CHAT] || []).find(
+      (item) => item.id === sessionId,
+    );
+    if (!session?.id || !updates || Object.keys(updates).length === 0) {
+      return;
+    }
+    setCanvasSessionsForMode(CANVAS_MODE_CHAT, (prev) =>
+      prev.map((item) =>
+        item.id === session.id ? { ...item, ...updates } : item,
+      ),
+    );
+    try {
+      const res = await API.patch(`/api/canvas/sessions/${session.id}`, updates);
+      if (res.data.success && res.data.data) {
+        updateCanvasSessionInState(res.data.data);
+      } else {
+        showError(res.data.message || errorMessage);
+      }
+    } catch (error) {
+      showError(error.message || errorMessage);
+    }
+  };
+
+  useEffect(() => {
+    generationModeRef.current = generationMode;
+  }, [generationMode]);
+
+  useEffect(() => {
+    selectedCanvasSessionIdsRef.current = selectedCanvasSessionIds;
+  }, [selectedCanvasSessionIds]);
+
+  useEffect(() => {
+    if (!chatSessionSettingsVisible || !chatSessionSettingsSessionId) {
+      return;
+    }
+    const session = findCanvasSessionById(chatSessionSettingsSessionId);
+    if (!session) {
+      closeCanvasChatSessionSettings();
+    }
+  }, [
+    canvasSessions,
+    chatSessionSettingsSessionId,
+    chatSessionSettingsVisible,
+  ]);
+
   useEffect(() => {
     const container = canvasMessageViewportRef.current;
     if (!container) {
       return;
     }
     container.scrollTop = container.scrollHeight;
-  }, [canvasMessagesSessionId, displayedCanvasMessages.length, generationMode]);
+  }, [
+    canvasMessagesSessionId,
+    displayedCanvasMessages.length,
+    chatStreamRenderVersion,
+    generationMode,
+  ]);
+
+  useEffect(() => () => stopChatStream({ syncUI: false }), []);
+
+  useEffect(() => {
+    if (!chatStreaming) {
+      return;
+    }
+    const streamingSessionId = chatStreamingSessionIdRef.current;
+    if (!streamingSessionId) {
+      return;
+    }
+    const selectedChatSessionId = selectedCanvasSessionIds[CANVAS_MODE_CHAT];
+    if (
+      generationMode !== CANVAS_MODE_CHAT ||
+      selectedChatSessionId !== streamingSessionId
+    ) {
+      stopChatStream({ syncUI: false });
+    }
+  }, [chatStreaming, generationMode, selectedCanvasSessionIds]);
 
   useEffect(() => {
     setSelectedCanvasMessageId(null);
@@ -1385,10 +1485,22 @@ const ImageGeneration = () => {
     canvasSessionsRequestSeqRef.current[normalizedMode] =
       (canvasSessionsRequestSeqRef.current[normalizedMode] || 0) + 1;
     setCanvasSessionsLoadingForMode(normalizedMode, false);
-    const res = await API.post('/api/canvas/sessions', {
+    const payload = {
       mode: normalizedMode,
       title,
-    });
+    };
+    if (normalizedMode === CANVAS_MODE_CHAT) {
+      const chatTemperatureValue = Number(chatTemperature);
+      const chatContextValue = Number(chatContext);
+      payload.current_model = chatModel;
+      if (Number.isFinite(chatTemperatureValue)) {
+        payload.chat_temperature = chatTemperatureValue;
+      }
+      if (Number.isFinite(chatContextValue)) {
+        payload.chat_context_count = chatContextValue;
+      }
+    }
+    const res = await API.post('/api/canvas/sessions', payload);
     if (!res.data.success) {
       throw new Error(res.data.message || t('创建会话失败'));
     }
@@ -1494,6 +1606,45 @@ const ImageGeneration = () => {
     setCanvasMessages((prev) => [...prev, ...messages]);
   };
 
+  const bumpChatStreamRenderVersion = () => {
+    setChatStreamRenderVersion((current) => current + 1);
+  };
+
+  const upsertCanvasMessagesForSession = (sessionId, messages) => {
+    if (
+      !sessionId ||
+      !messages?.length ||
+      !isCurrentCanvasMessageSession(sessionId)
+    ) {
+      return;
+    }
+    setCanvasMessages((prev) => {
+      const next = [...prev];
+      messages.forEach((message) => {
+        if (!message?.id) {
+          return;
+        }
+        const index = next.findIndex((item) => item?.id === message.id);
+        if (index < 0) {
+          next.push(message);
+          return;
+        }
+        next[index] = {
+          ...next[index],
+          ...message,
+        };
+      });
+      return next.sort((a, b) => {
+        const createdDiff =
+          (Number(a?.created_time) || 0) - (Number(b?.created_time) || 0);
+        if (createdDiff !== 0) {
+          return createdDiff;
+        }
+        return (Number(a?.id) || 0) - (Number(b?.id) || 0);
+      });
+    });
+  };
+
   const replaceCanvasMessagesForSession = (
     sessionId,
     requestId,
@@ -1557,6 +1708,237 @@ const ImageGeneration = () => {
         return (Number(b.updated_time) || 0) - (Number(a.updated_time) || 0);
       });
     });
+  };
+
+  const buildCanvasChatSessionSettingsDraft = (session) => ({
+    model: String(session?.current_model || ''),
+    temperature:
+      session?.chat_temperature === 0 || Number(session?.chat_temperature)
+        ? String(session?.chat_temperature)
+        : DEFAULT_CHAT_TEMPERATURE,
+    contextCount:
+      session?.chat_context_count === 0 || Number(session?.chat_context_count)
+        ? String(session?.chat_context_count)
+        : DEFAULT_CHAT_CONTEXT_COUNT,
+    systemPrompt: String(session?.system_prompt || ''),
+    summaryEnabled:
+      typeof session?.summary_enabled === 'boolean'
+        ? session.summary_enabled
+        : true,
+    summaryTriggerMessages:
+      session?.summary_trigger_messages === 0 ||
+      Number(session?.summary_trigger_messages)
+        ? String(session?.summary_trigger_messages)
+        : DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES,
+    summaryRecentMessages:
+      session?.summary_recent_messages === 0 ||
+      Number(session?.summary_recent_messages)
+        ? String(session?.summary_recent_messages)
+        : DEFAULT_CHAT_SUMMARY_RECENT_MESSAGES,
+  });
+
+  const findCanvasSessionById = (sessionId, mode = CANVAS_MODE_CHAT) =>
+    (canvasSessions[mode] || []).find((item) => item.id === sessionId) || null;
+
+  const openCanvasChatSessionSettings = (session) => {
+    if (session?.mode !== CANVAS_MODE_CHAT || !session?.id) {
+      return;
+    }
+    setChatSessionSettingsSessionId(session.id);
+    setChatSessionSettingsDraft(buildCanvasChatSessionSettingsDraft(session));
+    setChatSessionSettingsVisible(true);
+  };
+
+  const closeCanvasChatSessionSettings = () => {
+    setChatSessionSettingsVisible(false);
+    setChatSessionSettingsSaving(false);
+    setChatSessionSettingsSessionId(null);
+    setChatSessionSettingsDraft(null);
+  };
+
+  const handleCanvasChatSessionSettingsField = (key, value) => {
+    setChatSessionSettingsDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            [key]: value,
+          }
+        : prev,
+    );
+  };
+
+  const saveCanvasChatSessionSettings = async () => {
+    if (!chatSessionSettingsSessionId || !chatSessionSettingsDraft) {
+      return;
+    }
+    const session = findCanvasSessionById(chatSessionSettingsSessionId);
+    if (!session) {
+      showError(t('会话不存在'));
+      return;
+    }
+
+    const payload = {
+      current_model: chatSessionSettingsDraft.model,
+      chat_temperature: Number(chatSessionSettingsDraft.temperature),
+      chat_context_count: Number(chatSessionSettingsDraft.contextCount),
+      system_prompt: chatSessionSettingsDraft.systemPrompt,
+      summary_enabled: !!chatSessionSettingsDraft.summaryEnabled,
+      summary_trigger_messages: Number(
+        chatSessionSettingsDraft.summaryTriggerMessages,
+      ),
+      summary_recent_messages: Number(
+        chatSessionSettingsDraft.summaryRecentMessages,
+      ),
+    };
+
+    if (!payload.current_model) {
+      showError(t('请选择模型'));
+      return;
+    }
+    if (
+      !Number.isFinite(payload.chat_temperature) ||
+      !Number.isFinite(payload.chat_context_count) ||
+      !Number.isFinite(payload.summary_trigger_messages) ||
+      !Number.isFinite(payload.summary_recent_messages)
+    ) {
+      showError(t('会话配置无效'));
+      return;
+    }
+
+    setChatSessionSettingsSaving(true);
+    try {
+      const res = await API.patch(
+        `/api/canvas/sessions/${session.id}`,
+        payload,
+      );
+      if (!res.data.success || !res.data.data) {
+        showError(res.data.message || t('保存会话设置失败'));
+        return;
+      }
+      updateCanvasSessionInState(res.data.data);
+      if (
+        generationModeRef.current === CANVAS_MODE_CHAT &&
+        selectedCanvasSessionIdsRef.current?.[CANVAS_MODE_CHAT] === session.id
+      ) {
+        setChatModel(String(res.data.data.current_model || ''));
+        setChatTemperature(
+          String(
+            res.data.data.chat_temperature ?? DEFAULT_CHAT_TEMPERATURE,
+          ),
+        );
+        setChatContext(
+          String(
+            res.data.data.chat_context_count ?? DEFAULT_CHAT_CONTEXT_COUNT,
+          ),
+        );
+      }
+      showSuccess(t('会话设置已更新'));
+      closeCanvasChatSessionSettings();
+    } catch (error) {
+      showError(error.message || t('保存会话设置失败'));
+    } finally {
+      setChatSessionSettingsSaving(false);
+    }
+  };
+
+  const toggleCanvasSessionContext = async (session) => {
+    if (session?.mode !== CANVAS_MODE_CHAT) {
+      return;
+    }
+    if (
+      chatStreaming &&
+      chatStreamingSessionIdRef.current &&
+      chatStreamingSessionIdRef.current === session.id
+    ) {
+      showError(t('请先停止当前对话生成'));
+      return;
+    }
+    const isRestoring = Number(session.clear_context_message_id) > 0;
+    try {
+      const res = await API.patch(`/api/canvas/sessions/${session.id}`, isRestoring
+        ? { clear_context_message_id: 0 }
+        : { clear_context_to_latest: true });
+      if (!res.data.success || !res.data.data) {
+        showError(
+          res.data.message ||
+            (isRestoring ? t('恢复上下文失败') : t('清空上下文失败')),
+        );
+        return;
+      }
+      updateCanvasSessionInState(res.data.data);
+      showSuccess(
+        isRestoring ? t('已恢复完整上下文') : t('后续消息将从新话题开始'),
+      );
+    } catch (error) {
+      showError(
+        error.message || (isRestoring ? t('恢复上下文失败') : t('清空上下文失败')),
+      );
+    }
+  };
+
+  const buildCanvasStreamRequestUrl = (path) => {
+    const baseURL = String(API.defaults.baseURL || '').replace(/\/$/, '');
+    return `${baseURL}${path}`;
+  };
+
+  const stopChatStream = ({ syncUI = true } = {}) => {
+    const controller = chatStreamAbortRef.current;
+    if (controller) {
+      controller.abort();
+      chatStreamAbortRef.current = null;
+    }
+    const streamingSessionId = chatStreamingSessionIdRef.current;
+    const streamingMessageId = chatStreamingMessageIdRef.current;
+    chatStreamingSessionIdRef.current = null;
+    chatStreamingMessageIdRef.current = null;
+    setChatStreaming(false);
+    if (syncUI && streamingSessionId && streamingMessageId) {
+      upsertCanvasMessagesForSession(streamingSessionId, [
+        {
+          id: streamingMessageId,
+          status: 'stopped',
+        },
+      ]);
+      bumpChatStreamRenderVersion();
+    }
+  };
+
+  const parseCanvasSSEPayload = (raw) => {
+    const normalized = String(raw || '').replace(/\r\n/g, '\n');
+    const blocks = normalized.split('\n\n');
+    const events = [];
+    let remainder = '';
+
+    blocks.forEach((block, index) => {
+      const isLastBlock = index === blocks.length - 1;
+      if (isLastBlock && normalized.endsWith('\n\n') === false) {
+        remainder = block;
+        return;
+      }
+
+      const lines = block.split('\n');
+      let eventType = 'message';
+      const dataLines = [];
+
+      lines.forEach((line) => {
+        if (line.startsWith('event:')) {
+          eventType = line.slice(6).trim() || 'message';
+          return;
+        }
+        if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trimStart());
+        }
+      });
+
+      if (dataLines.length > 0) {
+        events.push({
+          event: eventType,
+          data: dataLines.join('\n'),
+        });
+      }
+    });
+
+    return { events, remainder };
   };
 
   const renameCanvasSession = async (session) => {
@@ -4058,21 +4440,30 @@ const ImageGeneration = () => {
   useEffect(() => {
     if (
       generationMode !== CANVAS_MODE_CHAT ||
-      selectedCanvasSession?.mode !== CANVAS_MODE_CHAT ||
-      !selectedCanvasSession.current_model
+      selectedCanvasSession?.mode !== CANVAS_MODE_CHAT
     ) {
       return;
     }
     if (
-      chatModels.length > 0 &&
-      !chatModels.includes(selectedCanvasSession.current_model)
+      selectedCanvasSession.current_model &&
+      !(
+        chatModels.length > 0 &&
+        !chatModels.includes(selectedCanvasSession.current_model)
+      )
     ) {
-      return;
+      setChatModel(selectedCanvasSession.current_model);
     }
-    setChatModel(selectedCanvasSession.current_model);
+    if (Number.isFinite(Number(selectedCanvasSession.chat_temperature))) {
+      setChatTemperature(String(selectedCanvasSession.chat_temperature));
+    }
+    if (Number.isFinite(Number(selectedCanvasSession.chat_context_count))) {
+      setChatContext(String(selectedCanvasSession.chat_context_count));
+    }
   }, [
     chatModels,
     generationMode,
+    selectedCanvasSession?.chat_context_count,
+    selectedCanvasSession?.chat_temperature,
     selectedCanvasSession?.id,
     selectedCanvasSession?.current_model,
     selectedCanvasSession?.mode,
@@ -4095,27 +4486,195 @@ const ImageGeneration = () => {
   };
 
   const handleSendChatMessage = async () => {
+    if (chatStreaming) {
+      stopChatStream();
+      return;
+    }
+
     const prompt = chatPrompt.trim();
-    if (!prompt && chatAttachments.length === 0) {
+    if (!prompt) {
       showError(t('请输入消息'));
       return;
     }
+    if (!chatModel) {
+      showError(t('请选择模型'));
+      return;
+    }
+
+    const temperatureValue = Number(chatTemperature);
+    const contextCountValue = Number(chatContext);
+    let activeSessionId = null;
+
     try {
       const canvasSession = await ensureCanvasSession(CANVAS_MODE_CHAT);
-      const res = await API.post(
-        `/api/canvas/sessions/${canvasSession.id}/messages`,
-        { prompt: prompt || t('已添加素材引用'), model_id: chatModel },
+      activeSessionId = canvasSession.id;
+      const requestURL = buildCanvasStreamRequestUrl(
+        `/api/canvas/sessions/${activeSessionId}/messages`,
       );
-      if (!res.data.success) {
-        showError(res.data.message || t('发送失败'));
-        return;
+      const controller = new AbortController();
+      chatStreamAbortRef.current = controller;
+      chatStreamingSessionIdRef.current = activeSessionId;
+      chatStreamingMessageIdRef.current = null;
+      setChatStreaming(true);
+      setCanvasMessagesError('');
+
+      const response = await fetch(requestURL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+          'New-API-User': String(getUserIdFromLocalStorage()),
+          ...authHeader(),
+        },
+        body: JSON.stringify({
+          prompt,
+          model_id: chatModel,
+          stream: true,
+          temperature: Number.isFinite(temperatureValue)
+            ? temperatureValue
+            : undefined,
+          context_count: Number.isFinite(contextCountValue)
+            ? contextCountValue
+            : undefined,
+        }),
+        credentials: 'include',
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        let message = t('发送失败');
+        try {
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const data = await response.json();
+            message = data?.message || message;
+          } else {
+            const text = await response.text();
+            if (text) {
+              message = text;
+            }
+          }
+        } catch (e) {
+          // ignore parse error
+        }
+        throw new Error(message);
       }
-      appendCanvasMessagesForSession(canvasSession.id, res.data.data || []);
+      if (!response.body) {
+        throw new Error(t('聊天流不可用'));
+      }
+
       loadCanvasSessions(CANVAS_MODE_CHAT, { silent: true });
       setChatPrompt('');
       setChatAttachments([]);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamErrorMessage = '';
+
+      const applyStreamEvent = (event) => {
+        if (!event?.data) {
+          return;
+        }
+        let payload = null;
+        try {
+          payload = JSON.parse(event.data);
+        } catch (error) {
+          console.error('Failed to parse canvas SSE payload:', error);
+          return;
+        }
+
+        if (payload?.session) {
+          updateCanvasSessionInState(payload.session);
+        }
+
+        if (event.event === 'canvas.message.created') {
+          const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+          const assistantMessage = messages.find(
+            (message) => message?.role === 'assistant',
+          );
+          if (assistantMessage?.id) {
+            chatStreamingMessageIdRef.current = assistantMessage.id;
+          }
+          upsertCanvasMessagesForSession(activeSessionId, messages);
+          bumpChatStreamRenderVersion();
+          return;
+        }
+
+        if (payload?.message) {
+          upsertCanvasMessagesForSession(activeSessionId, [payload.message]);
+          if (payload.message?.id) {
+            chatStreamingMessageIdRef.current = payload.message.id;
+          }
+        }
+
+        if (event.event === 'canvas.message.delta') {
+          bumpChatStreamRenderVersion();
+          return;
+        }
+
+        if (event.event === 'canvas.message.completed') {
+          bumpChatStreamRenderVersion();
+          loadCanvasSessions(CANVAS_MODE_CHAT, { silent: true });
+          return;
+        }
+
+        if (event.event === 'canvas.message.error') {
+          streamErrorMessage =
+            payload?.error ||
+            payload?.message?.error_message ||
+            t('发送失败');
+          bumpChatStreamRenderVersion();
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const parsed = parseCanvasSSEPayload(buffer);
+        buffer = parsed.remainder;
+        parsed.events.forEach(applyStreamEvent);
+      }
+
+      if (buffer) {
+        const parsed = parseCanvasSSEPayload(`${buffer}\n\n`);
+        parsed.events.forEach(applyStreamEvent);
+      }
+
+      if (streamErrorMessage) {
+        showError(streamErrorMessage);
+      }
     } catch (error) {
+      if (error?.name === 'AbortError') {
+        return;
+      }
       showError(error.message || t('发送失败'));
+    } finally {
+      chatStreamAbortRef.current = null;
+      chatStreamingMessageIdRef.current = null;
+      chatStreamingSessionIdRef.current = null;
+      setChatStreaming(false);
+      if (activeSessionId) {
+        loadCanvasSessions(CANVAS_MODE_CHAT, { silent: true });
+        if (
+          generationModeRef.current === CANVAS_MODE_CHAT &&
+          selectedCanvasSessionIdsRef.current?.[CANVAS_MODE_CHAT] ===
+            activeSessionId
+        ) {
+          window.setTimeout(() => {
+            if (
+              generationModeRef.current === CANVAS_MODE_CHAT &&
+              selectedCanvasSessionIdsRef.current?.[CANVAS_MODE_CHAT] ===
+                activeSessionId
+            ) {
+              loadCanvasMessages(activeSessionId, { silent: true });
+            }
+          }, 200);
+        }
+      }
     }
   };
 
@@ -4186,25 +4745,8 @@ const ImageGeneration = () => {
     }
   };
 
-  const addAssetToChat = (asset) => {
-    const imageUrl = getAssetImageUrl(asset);
-    if (!imageUrl) {
-      showError(t('该资产没有可用图片'));
-      return;
-    }
-    const remoteReference = buildRemoteReferenceFile(imageUrl);
-    if (!remoteReference) {
-      return;
-    }
-    setChatAttachments((prev) => [
-      ...prev,
-      {
-        ...remoteReference,
-        uid: `chat-asset-${getAssetKey(asset) || Date.now()}`,
-        name: asset.prompt || t('图片资产'),
-      },
-    ]);
-    showSuccess(t('已插入当前对话'));
+  const addAssetToChat = () => {
+    showError(t('聊天模式暂不支持插入资产'));
   };
 
   const addAssetToImageReferences = (asset) => {
@@ -4850,6 +5392,13 @@ const ImageGeneration = () => {
       justifyContent: 'center',
       transition: 'opacity 0.2s, background 0.2s, border-color 0.2s, color 0.2s',
     },
+    generateStopIcon: {
+      width: 12,
+      height: 12,
+      borderRadius: 2,
+      background: 'currentColor',
+      display: 'block',
+    },
     addImageBtn: {
       width: 36,
       height: 36,
@@ -5009,6 +5558,23 @@ const ImageGeneration = () => {
       margin: '0 auto',
       padding: isMobile ? '8px 0 12px' : '12px 0 18px',
       width: '100%',
+    },
+    chatContextNotice: {
+      width: '100%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      border: '1px solid var(--semi-color-warning-light-default)',
+      background: 'var(--semi-color-warning-light-default)',
+      borderRadius: 8,
+      padding: isMobile ? '10px 12px' : '12px 14px',
+    },
+    chatContextNoticeText: {
+      flex: 1,
+      minWidth: 0,
+      color: 'var(--semi-color-text-0)',
+      lineHeight: 1.5,
     },
     canvasStreamEmpty: {
       maxWidth: 1080,
@@ -5975,6 +6541,30 @@ const ImageGeneration = () => {
       >
         {session.pinned ? t('取消置顶') : t('置顶')}
       </Dropdown.Item>
+      {session.mode === CANVAS_MODE_CHAT ? (
+        <Dropdown.Item
+          style={styles.darkMenuItem}
+          onClick={(event) => {
+            event?.domEvent?.stopPropagation?.();
+            openCanvasChatSessionSettings(session);
+          }}
+        >
+          {t('会话设置')}
+        </Dropdown.Item>
+      ) : null}
+      {session.mode === CANVAS_MODE_CHAT ? (
+        <Dropdown.Item
+          style={styles.darkMenuItem}
+          onClick={(event) => {
+            event?.domEvent?.stopPropagation?.();
+            toggleCanvasSessionContext(session);
+          }}
+        >
+          {Number(session.clear_context_message_id) > 0
+            ? t('恢复上下文')
+            : t('清空上下文')}
+        </Dropdown.Item>
+      ) : null}
       <Dropdown.Item
         style={{ ...styles.darkMenuItem, color: '#fca5a5' }}
         onClick={(event) => {
@@ -6192,8 +6782,25 @@ const ImageGeneration = () => {
   };
 
   const renderChatWorkspace = () => {
+    const contextCleared = Number(selectedCanvasSession?.clear_context_message_id) > 0;
     return (
       <div style={styles.chatStream}>
+        {contextCleared ? (
+          <div style={styles.chatContextNotice}>
+            <div style={styles.chatContextNoticeText}>
+              <Text size='small'>
+                {t('当前会话已从新话题继续，较早消息仅展示不再参与后续上下文')}
+              </Text>
+            </div>
+            <Button
+              size='small'
+              type='tertiary'
+              onClick={() => toggleCanvasSessionContext(selectedCanvasSession)}
+            >
+              {t('恢复上下文')}
+            </Button>
+          </div>
+        ) : null}
         {renderCanvasMessageStream()}
       </div>
     );
@@ -6612,6 +7219,7 @@ const ImageGeneration = () => {
     };
 
     if (isChatMode) {
+      const chatStatus = String(message?.status || '');
       return (
         <div
           key={message.id}
@@ -6633,8 +7241,23 @@ const ImageGeneration = () => {
           <div style={styles.canvasMessageBody}>
             {isUser ? (
               <div style={styles.canvasMessagePrompt}>
-                {message.prompt || t('已添加素材引用')}
+                {message.prompt || t('请输入消息')}
               </div>
+            ) : message.prompt ? (
+              <div style={styles.canvasMessagePrompt}>{message.prompt}</div>
+            ) : chatStatus === 'generating' ? (
+              <div style={styles.messagePending}>
+                <Spin size='small' />
+                <span>{t('生成中')}</span>
+              </div>
+            ) : chatStatus === 'stopped' ? (
+              <Text type='tertiary' size='small'>
+                {t('已停止')}
+              </Text>
+            ) : chatStatus === 'failed' ? (
+              <Text type='danger' size='small' style={styles.canvasErrorText}>
+                {message.error_message || t('发送失败')}
+              </Text>
             ) : null}
             {showMessageReferences && references.length > 0 ? (
               <div style={styles.canvasMessageRefs}>
@@ -6643,12 +7266,18 @@ const ImageGeneration = () => {
                 )}
               </div>
             ) : null}
-            {!isUser ? (
-              <div style={styles.canvasMessageResult}>
-                {renderCanvasMessageResult(message)}
+            {!isUser && chatStatus === 'generating' && message.prompt ? (
+              <div style={styles.messagePending}>
+                <Spin size='small' />
+                <span>{t('生成中')}</span>
               </div>
             ) : null}
-            {media?.status === 'failed' && message.error_message ? (
+            {!isUser && chatStatus === 'stopped' && message.prompt ? (
+              <Text type='tertiary' size='small'>
+                {t('已停止')}
+              </Text>
+            ) : null}
+            {!isUser && chatStatus === 'failed' && message.prompt ? (
               <Text type='danger' size='small' style={styles.canvasErrorText}>
                 {message.error_message}
               </Text>
@@ -6803,12 +7432,18 @@ const ImageGeneration = () => {
       : isVideoMode
         ? videoPrompt
         : inspiration;
-    const promptHasContent =
-      activePrompt.trim().length > 0 ||
-      (isChatMode && chatAttachments.length > 0);
-    const submitLoading = isVideoMode ? videoGenerating : isImageMode ? generating : false;
+    const promptHasContent = activePrompt.trim().length > 0;
+    const submitLoading = isChatMode
+      ? chatStreaming
+      : isVideoMode
+        ? videoGenerating
+        : isImageMode
+          ? generating
+          : false;
     const submitDisabled = isChatMode
-      ? !promptHasContent
+      ? chatStreaming
+        ? false
+        : !promptHasContent
       : isVideoMode
         ? videoGenerating || !canGenerateVideo
         : generating || !canGenerate;
@@ -6882,7 +7517,17 @@ const ImageGeneration = () => {
         icon: <IconSetting size='small' />,
         value: chatTemperature,
         displayValue: chatTemperature,
-        onChange: setChatTemperature,
+        onChange: (value) => {
+          const nextValue = String(value);
+          setChatTemperature(nextValue);
+          const parsed = Number(nextValue);
+          if (Number.isFinite(parsed)) {
+            updateCurrentCanvasChatSessionConfig(
+              { chat_temperature: parsed },
+              t('更新会话温度失败'),
+            );
+          }
+        },
         options: ['0', '0.2', '0.7', '1', '1.5'].map((item) => ({
           value: item,
           label: item,
@@ -6894,45 +7539,22 @@ const ImageGeneration = () => {
         icon: <IconText size='small' />,
         value: chatContext,
         displayValue: chatContext,
-        onChange: setChatContext,
-        options: ['4', '8', '16', '32'].map((item) => ({
+        onChange: (value) => {
+          const nextValue = String(value);
+          setChatContext(nextValue);
+          const parsed = Number(nextValue);
+          if (Number.isFinite(parsed)) {
+            updateCurrentCanvasChatSessionConfig(
+              { chat_context_count: parsed },
+              t('更新会话上下文失败'),
+            );
+          }
+        },
+        options: ['0', '4', '8', '16', '32'].map((item) => ({
           value: item,
           label: item,
         })),
       }),
-      isMobile ? (
-        <button
-          key='chat-tools'
-          type='button'
-          aria-label={t('工具')}
-          title={t('工具')}
-          aria-pressed={chatToolsEnabled}
-          style={{
-            ...styles.pillButton,
-            ...styles.pillButtonIconOnly,
-            ...(chatToolsEnabled ? styles.pillButtonActive : styles.pillButtonMuted),
-            cursor: 'pointer',
-          }}
-          onClick={() => setChatToolsEnabled((current) => !current)}
-        >
-          <IconSetting size='small' />
-        </button>
-      ) : (
-        <label
-          key='chat-tools'
-          style={{
-            ...styles.pillButton,
-            ...(chatToolsEnabled ? styles.pillButtonActive : styles.pillButtonMuted),
-            cursor: 'pointer',
-          }}
-        >
-          <Checkbox
-            checked={chatToolsEnabled}
-            onChange={(event) => setChatToolsEnabled(event.target.checked)}
-          />
-          <span>{t('工具')}</span>
-        </label>
-      ),
     ];
     const imageComposerParameters = [
       renderModelDropdown(false, activeModelLabel),
@@ -6982,7 +7604,6 @@ const ImageGeneration = () => {
         ? videoComposerParameters
         : imageComposerParameters;
     const showPromptAssetBar =
-      (isChatMode && chatAttachments.length > 0) ||
       (isVideoMode && videoSelectedModelSupportsImageToVideo) ||
       (isImageMode && selectedModelSupportsEditing);
 
@@ -7082,7 +7703,9 @@ const ImageGeneration = () => {
                 <button
                   aria-label={
                     isChatMode
-                      ? t('发送消息')
+                      ? chatStreaming
+                        ? t('停止生成')
+                        : t('发送消息')
                       : isVideoMode
                         ? t('生成视频')
                         : t('生成图片')
@@ -7091,19 +7714,28 @@ const ImageGeneration = () => {
                     ...styles.generateIconBtn,
                     opacity: submitDisabled ? 0.55 : 1,
                     pointerEvents: submitDisabled ? 'none' : 'auto',
-                    background: promptHasContent
+                    background: promptHasContent || (isChatMode && chatStreaming)
                       ? 'var(--semi-color-primary)'
                       : 'var(--semi-color-fill-0)',
-                    borderColor: promptHasContent
+                    borderColor: promptHasContent || (isChatMode && chatStreaming)
                       ? 'var(--semi-color-primary)'
                       : 'var(--semi-color-border)',
-                    color: promptHasContent ? '#fff' : 'var(--semi-color-text-2)',
+                    color:
+                      promptHasContent || (isChatMode && chatStreaming)
+                        ? '#fff'
+                        : 'var(--semi-color-text-2)',
                   }}
                   onClick={handleComposerSubmit}
                   disabled={submitDisabled}
                   type='button'
                 >
-                  {submitLoading ? <Spin size='small' /> : <IconSend size='small' />}
+                  {isChatMode && chatStreaming ? (
+                    <span style={styles.generateStopIcon} />
+                  ) : submitLoading ? (
+                    <Spin size='small' />
+                  ) : (
+                    <IconSend size='small' />
+                  )}
                 </button>
               </div>
             </div>
@@ -7197,20 +7829,18 @@ const ImageGeneration = () => {
           </Text>
         </div>
         <div style={styles.assetActions}>
-          <Button
-            size='small'
-            type='primary'
-            onClick={(event) => {
-              event.stopPropagation();
-              insertAssetIntoCurrentMode(asset);
-            }}
-          >
-            {generationMode === CANVAS_MODE_CHAT
-              ? t('插入')
-              : generationMode === CANVAS_MODE_VIDEO
-                ? t('首帧')
-                : t('参考图')}
-          </Button>
+          {generationMode !== CANVAS_MODE_CHAT ? (
+            <Button
+              size='small'
+              type='primary'
+              onClick={(event) => {
+                event.stopPropagation();
+                insertAssetIntoCurrentMode(asset);
+              }}
+            >
+              {generationMode === CANVAS_MODE_VIDEO ? t('首帧') : t('参考图')}
+            </Button>
+          ) : null}
           <Button
             size='small'
             aria-label={t('下载图片')}
@@ -7472,6 +8102,148 @@ const ImageGeneration = () => {
     </SideSheet>
   );
 
+  const renderCanvasChatSessionSettingsSheet = () => {
+    const session = findCanvasSessionById(chatSessionSettingsSessionId);
+    const draft = chatSessionSettingsDraft;
+    if (!session || !draft) {
+      return null;
+    }
+
+    const availableChatModels = chatModels.includes(draft.model)
+      ? chatModels
+      : draft.model
+        ? [draft.model, ...chatModels]
+        : chatModels;
+
+    return (
+      <SideSheet
+        visible={chatSessionSettingsVisible}
+        title={t('会话设置')}
+        width={isMobile ? '100%' : 520}
+        onCancel={closeCanvasChatSessionSettings}
+        bodyStyle={{ padding: isMobile ? 12 : 16 }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <Text strong>{t('模型')}</Text>
+            <Select
+              value={draft.model}
+              optionList={availableChatModels.map((item) => ({
+                label: item,
+                value: item,
+              }))}
+              onChange={(value) =>
+                handleCanvasChatSessionSettingsField('model', String(value || ''))
+              }
+              placeholder={t('请选择模型')}
+            />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Text strong>{t('温度')}</Text>
+              <Select
+                value={draft.temperature}
+                optionList={['0', '0.2', '0.7', '1', '1.5'].map((item) => ({
+                  label: item,
+                  value: item,
+                }))}
+                onChange={(value) =>
+                  handleCanvasChatSessionSettingsField('temperature', String(value || '0'))
+                }
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Text strong>{t('上下文')}</Text>
+              <Select
+                value={draft.contextCount}
+                optionList={['0', '4', '8', '16', '32'].map((item) => ({
+                  label: item,
+                  value: item,
+                }))}
+                onChange={(value) =>
+                  handleCanvasChatSessionSettingsField('contextCount', String(value || '0'))
+                }
+              />
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <Text strong>{t('系统提示词')}</Text>
+            <TextArea
+              value={draft.systemPrompt}
+              onChange={(value) =>
+                handleCanvasChatSessionSettingsField('systemPrompt', value)
+              }
+              placeholder={t('设置该会话的系统提示词，可为空')}
+              autosize={{ minRows: 4, maxRows: 10 }}
+              maxLength={4000}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Checkbox
+              checked={draft.summaryEnabled}
+              onChange={(event) =>
+                handleCanvasChatSessionSettingsField(
+                  'summaryEnabled',
+                  !!event.target.checked,
+                )
+              }
+            >
+              {t('启用摘要记忆')}
+            </Checkbox>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12, opacity: draft.summaryEnabled ? 1 : 0.6 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <Text strong>{t('摘要触发阈值')}</Text>
+                <Select
+                  value={draft.summaryTriggerMessages}
+                  disabled={!draft.summaryEnabled}
+                  optionList={CHAT_SUMMARY_STRATEGY_OPTIONS.map((item) => ({
+                    label: item,
+                    value: item,
+                  }))}
+                  onChange={(value) =>
+                    handleCanvasChatSessionSettingsField(
+                      'summaryTriggerMessages',
+                      String(value || '0'),
+                    )
+                  }
+                />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <Text strong>{t('摘要保留消息')}</Text>
+                <Select
+                  value={draft.summaryRecentMessages}
+                  disabled={!draft.summaryEnabled}
+                  optionList={CHAT_SUMMARY_STRATEGY_OPTIONS.map((item) => ({
+                    label: item,
+                    value: item,
+                  }))}
+                  onChange={(value) =>
+                    handleCanvasChatSessionSettingsField(
+                      'summaryRecentMessages',
+                      String(value || '0'),
+                    )
+                  }
+                />
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button type='tertiary' onClick={closeCanvasChatSessionSettings}>
+              {t('取消')}
+            </Button>
+            <Button
+              type='primary'
+              loading={chatSessionSettingsSaving}
+              onClick={saveCanvasChatSessionSettings}
+            >
+              {t('保存')}
+            </Button>
+          </div>
+        </div>
+      </SideSheet>
+    );
+  };
+
   const renderWorkspace = () => (
     <div style={styles.rightPanel}>
       {!isMobile && desktopSidebarCollapsed ? (
@@ -7530,6 +8302,7 @@ const ImageGeneration = () => {
         </SideSheet>
       ) : null}
       {renderAssetDrawer()}
+      {renderCanvasChatSessionSettingsSheet()}
       {renderAssetPreviewOverlay()}
       {renderCanvasImagePreviewOverlay()}
       <ImageGenerationTaskModal

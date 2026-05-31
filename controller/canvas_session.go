@@ -1,34 +1,59 @@
 package controller
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
 
 type createCanvasSessionRequest struct {
-	Mode         string `json:"mode"`
-	Title        string `json:"title"`
-	CurrentModel string `json:"current_model"`
+	Mode                   string   `json:"mode"`
+	Title                  string   `json:"title"`
+	CurrentModel           string   `json:"current_model"`
+	ChatTemperature        *float64 `json:"chat_temperature"`
+	ChatContextCount       *int     `json:"chat_context_count"`
+	SystemPrompt           *string  `json:"system_prompt"`
+	SummaryEnabled         *bool    `json:"summary_enabled"`
+	SummaryTriggerMessages *int     `json:"summary_trigger_messages"`
+	SummaryRecentMessages  *int     `json:"summary_recent_messages"`
 }
 
 type updateCanvasSessionRequest struct {
-	Title        *string `json:"title"`
-	Pinned       *bool   `json:"pinned"`
-	CurrentModel *string `json:"current_model"`
+	Title                  *string  `json:"title"`
+	Pinned                 *bool    `json:"pinned"`
+	CurrentModel           *string  `json:"current_model"`
+	ChatTemperature        *float64 `json:"chat_temperature"`
+	ChatContextCount       *int     `json:"chat_context_count"`
+	SystemPrompt           *string  `json:"system_prompt"`
+	SummaryEnabled         *bool    `json:"summary_enabled"`
+	SummaryTriggerMessages *int     `json:"summary_trigger_messages"`
+	SummaryRecentMessages  *int     `json:"summary_recent_messages"`
+	ClearContextMessageId  *int     `json:"clear_context_message_id"`
+	ClearContextToLatest   *bool    `json:"clear_context_to_latest"`
 }
 
 type createCanvasMessageRequest struct {
-	Prompt          string `json:"prompt"`
-	ModelId         string `json:"model_id"`
-	Group           string `json:"group"`
-	RequestEndpoint string `json:"request_endpoint"`
-	Params          string `json:"params"`
-	ClientRequestId string `json:"client_request_id"`
+	Prompt          string   `json:"prompt"`
+	ModelId         string   `json:"model_id"`
+	Group           string   `json:"group"`
+	RequestEndpoint string   `json:"request_endpoint"`
+	Params          string   `json:"params"`
+	Stream          *bool    `json:"stream"`
+	Temperature     *float64 `json:"temperature"`
+	ContextCount    *int     `json:"context_count"`
+	ClientRequestId string   `json:"client_request_id"`
 }
+
+var (
+	getCanvasSessionByIDForController    = model.GetCanvasSessionByID
+	createCanvasMessageForController     = service.CreateCanvasMessageWithContext
+	streamCanvasChatMessageForController = service.StreamCanvasChatMessage
+)
 
 func ListCanvasSessions(c *gin.Context) {
 	userId := c.GetInt("id")
@@ -59,9 +84,15 @@ func CreateCanvasSession(c *gin.Context) {
 	}
 
 	session, err := service.CreateCanvasSession(userId, service.CreateCanvasSessionInput{
-		Mode:         req.Mode,
-		Title:        req.Title,
-		CurrentModel: req.CurrentModel,
+		Mode:                   req.Mode,
+		Title:                  req.Title,
+		CurrentModel:           req.CurrentModel,
+		ChatTemperature:        req.ChatTemperature,
+		ChatContextCount:       req.ChatContextCount,
+		SystemPrompt:           req.SystemPrompt,
+		SummaryEnabled:         req.SummaryEnabled,
+		SummaryTriggerMessages: req.SummaryTriggerMessages,
+		SummaryRecentMessages:  req.SummaryRecentMessages,
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -89,9 +120,17 @@ func UpdateCanvasSession(c *gin.Context) {
 	}
 
 	session, err := service.UpdateCanvasSession(userId, sessionId, service.UpdateCanvasSessionInput{
-		Title:        req.Title,
-		Pinned:       req.Pinned,
-		CurrentModel: req.CurrentModel,
+		Title:                  req.Title,
+		Pinned:                 req.Pinned,
+		CurrentModel:           req.CurrentModel,
+		ChatTemperature:        req.ChatTemperature,
+		ChatContextCount:       req.ChatContextCount,
+		SystemPrompt:           req.SystemPrompt,
+		SummaryEnabled:         req.SummaryEnabled,
+		SummaryTriggerMessages: req.SummaryTriggerMessages,
+		SummaryRecentMessages:  req.SummaryRecentMessages,
+		ClearContextMessageId:  req.ClearContextMessageId,
+		ClearContextToLatest:   req.ClearContextToLatest,
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -157,14 +196,36 @@ func CreateCanvasMessage(c *gin.Context) {
 		return
 	}
 
-	messages, err := service.CreateCanvasMessage(userId, sessionId, service.CreateCanvasMessageInput{
+	input := service.CreateCanvasMessageInput{
 		Prompt:          req.Prompt,
 		ModelId:         req.ModelId,
 		Group:           req.Group,
 		RequestEndpoint: req.RequestEndpoint,
 		Params:          req.Params,
+		Stream:          req.Stream,
+		Temperature:     req.Temperature,
+		ContextCount:    req.ContextCount,
 		ClientRequestId: req.ClientRequestId,
-	})
+	}
+	if req.Stream != nil && *req.Stream {
+		session, err := getCanvasSessionByIDForController(userId, sessionId)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if session == nil {
+			common.ApiError(c, fmt.Errorf("canvas session not found"))
+			return
+		}
+		if session.Mode == model.CanvasModeChat {
+			if err := streamCanvasChatMessageForController(c, userId, sessionId, input); err != nil {
+				common.ApiError(c, err)
+			}
+			return
+		}
+	}
+
+	messages, err := createCanvasMessageForController(c.Request.Context(), userId, sessionId, input)
 	if err != nil {
 		common.ApiError(c, err)
 		return

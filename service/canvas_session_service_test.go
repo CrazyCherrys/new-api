@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -23,13 +24,19 @@ func setupCanvasSessionServiceTestDB(t *testing.T) *gorm.DB {
 	previousUsingMySQL := common.UsingMySQL
 	previousUsingPostgreSQL := common.UsingPostgreSQL
 	previousRedisEnabled := common.RedisEnabled
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
 	previousCreateImage := createImageGenerationTaskForCanvas
 	previousCreateVideo := createVideoGenerationTaskForCanvas
+	previousCallCanvasChatRelay := callCanvasChatRelay
+	previousQueueCanvasChatTask := queueCanvasChatBackgroundTask
 
 	common.UsingSQLite = true
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
 	common.RedisEnabled = false
+	common.MemoryCacheEnabled = false
+	model.InitCommonColumnNames()
+	queueCanvasChatBackgroundTask = func(fn func()) {}
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
@@ -41,6 +48,9 @@ func setupCanvasSessionServiceTestDB(t *testing.T) *gorm.DB {
 
 	if err := db.AutoMigrate(
 		&model.User{},
+		&model.Token{},
+		&model.Channel{},
+		&model.Ability{},
 		&model.ModelMapping{},
 		&model.CanvasSession{},
 		&model.CanvasMessage{},
@@ -61,6 +71,9 @@ func setupCanvasSessionServiceTestDB(t *testing.T) *gorm.DB {
 		common.UsingMySQL = previousUsingMySQL
 		common.UsingPostgreSQL = previousUsingPostgreSQL
 		common.RedisEnabled = previousRedisEnabled
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		callCanvasChatRelay = previousCallCanvasChatRelay
+		queueCanvasChatBackgroundTask = previousQueueCanvasChatTask
 
 		sqlDB, err := db.DB()
 		if err == nil {
@@ -69,6 +82,59 @@ func setupCanvasSessionServiceTestDB(t *testing.T) *gorm.DB {
 	})
 
 	return db
+}
+
+func seedCanvasChatCapability(t *testing.T, db *gorm.DB, userId int, userGroup string, tokenGroup string, abilityGroup string, modelId string) {
+	t.Helper()
+
+	user := &model.User{
+		Id:       userId,
+		Username: fmt.Sprintf("canvas-user-%d", userId),
+		Password: "password123",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Group:    userGroup,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	token := &model.Token{
+		UserId:         userId,
+		Key:            fmt.Sprintf("token-key-%d", userId),
+		Status:         common.TokenStatusEnabled,
+		Name:           fmt.Sprintf("token-%d", userId),
+		ExpiredTime:    -1,
+		UnlimitedQuota: true,
+		Group:          tokenGroup,
+	}
+	if err := db.Create(token).Error; err != nil {
+		t.Fatalf("failed to create token: %v", err)
+	}
+
+	channel := &model.Channel{
+		Id:     userId + 1000,
+		Type:   constant.ChannelTypeOpenAI,
+		Key:    fmt.Sprintf("channel-key-%d", userId),
+		Status: common.ChannelStatusEnabled,
+		Name:   fmt.Sprintf("channel-%d", userId),
+		Group:  abilityGroup,
+		Models: modelId,
+	}
+	if err := db.Create(channel).Error; err != nil {
+		t.Fatalf("failed to create channel: %v", err)
+	}
+
+	ability := &model.Ability{
+		Group:     abilityGroup,
+		Model:     modelId,
+		ChannelId: channel.Id,
+		Enabled:   true,
+		Weight:    0,
+	}
+	if err := db.Create(ability).Error; err != nil {
+		t.Fatalf("failed to create ability: %v", err)
+	}
 }
 
 func TestCanvasSessionCreateRenamePinSortAndModeFilter(t *testing.T) {
@@ -398,6 +464,772 @@ func TestCreateCanvasVideoMessagesPersistClientRequestID(t *testing.T) {
 	}
 }
 
+func TestCreateCanvasChatMessageAutoTitlesAndPersistsModelGroupAndMetadata(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+		if request.ModelId != "gpt-chat-test" {
+			t.Fatalf("expected model gpt-chat-test, got %q", request.ModelId)
+		}
+		if request.Group != "default" {
+			t.Fatalf("expected group default, got %q", request.Group)
+		}
+		if len(request.Messages) != 1 || request.Messages[0].Role != model.CanvasMessageRoleUser || request.Messages[0].StringContent() != "first chat prompt" {
+			t.Fatalf("unexpected relay messages: %#v", request.Messages)
+		}
+		if onDelta != nil {
+			if err := onDelta("assistant reply"); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: "assistant reply"}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	temperature := 0.2
+	contextCount := 4
+	created, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:       "first chat prompt",
+		ModelId:      "gpt-chat-test",
+		Temperature:  &temperature,
+		ContextCount: &contextCount,
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat message: %v", err)
+	}
+	if len(created) != 2 {
+		t.Fatalf("expected 2 chat messages, got %d", len(created))
+	}
+	if created[0].Role != model.CanvasMessageRoleUser || created[1].Role != model.CanvasMessageRoleAssistant {
+		t.Fatalf("unexpected chat roles: %#v", created)
+	}
+	if created[1].Prompt != "assistant reply" || created[1].Status != model.CanvasMessageStatusSuccess {
+		t.Fatalf("unexpected assistant message: %#v", created[1])
+	}
+
+	reloadedSession, err := model.GetCanvasSessionByID(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload chat session: %v", err)
+	}
+	if reloadedSession.Title != "first chat prompt" {
+		t.Fatalf("expected auto title to use first prompt, got %q", reloadedSession.Title)
+	}
+	if reloadedSession.CurrentModel != "gpt-chat-test" {
+		t.Fatalf("expected current_model to persist, got %q", reloadedSession.CurrentModel)
+	}
+	if reloadedSession.CurrentGroup != "default" {
+		t.Fatalf("expected current_group to persist, got %q", reloadedSession.CurrentGroup)
+	}
+
+	var metadata canvasChatMessageMetadata
+	if err := common.UnmarshalJsonStr(created[0].Metadata, &metadata); err != nil {
+		t.Fatalf("failed to decode message metadata: %v", err)
+	}
+	if metadata.ChatModel != "gpt-chat-test" || metadata.ChatGroup != "default" {
+		t.Fatalf("unexpected metadata snapshot: %#v", metadata)
+	}
+	if metadata.Temperature == nil || *metadata.Temperature != temperature {
+		t.Fatalf("expected temperature %.1f, got %#v", temperature, metadata.Temperature)
+	}
+	if metadata.ContextCount == nil || *metadata.ContextCount != contextCount {
+		t.Fatalf("expected context_count %d, got %#v", contextCount, metadata.ContextCount)
+	}
+}
+
+func TestCreateCanvasChatSessionPersistsConfigAndAllowsZeroValueUpdates(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	temperature := 1.5
+	contextCount := 16
+	systemPrompt := "You are a deliberate assistant."
+	summaryEnabled := false
+	summaryTriggerMessages := 12
+	summaryRecentMessages := 6
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{
+		Mode:                   model.CanvasModeChat,
+		CurrentModel:           "gpt-chat-test",
+		ChatTemperature:        &temperature,
+		ChatContextCount:       &contextCount,
+		SystemPrompt:           &systemPrompt,
+		SummaryEnabled:         &summaryEnabled,
+		SummaryTriggerMessages: &summaryTriggerMessages,
+		SummaryRecentMessages:  &summaryRecentMessages,
+	})
+	if err != nil {
+		t.Fatalf("failed to create configured chat session: %v", err)
+	}
+	if session.ChatTemperature != temperature {
+		t.Fatalf("expected chat temperature %.1f, got %.1f", temperature, session.ChatTemperature)
+	}
+	if session.ChatContextCount != contextCount {
+		t.Fatalf("expected chat context count %d, got %d", contextCount, session.ChatContextCount)
+	}
+	if session.SystemPrompt != systemPrompt {
+		t.Fatalf("expected system prompt %q, got %q", systemPrompt, session.SystemPrompt)
+	}
+	if session.SummaryEnabled != summaryEnabled {
+		t.Fatalf("expected summary enabled %v, got %v", summaryEnabled, session.SummaryEnabled)
+	}
+	if session.SummaryTriggerMessages != summaryTriggerMessages {
+		t.Fatalf("expected summary trigger messages %d, got %d", summaryTriggerMessages, session.SummaryTriggerMessages)
+	}
+	if session.SummaryRecentMessages != summaryRecentMessages {
+		t.Fatalf("expected summary recent messages %d, got %d", summaryRecentMessages, session.SummaryRecentMessages)
+	}
+
+	zeroTemperature := 0.0
+	zeroContextCount := 0
+	emptySystemPrompt := ""
+	summaryEnabled = true
+	zeroSummaryTrigger := 0
+	zeroSummaryRecent := 0
+	updated, err := UpdateCanvasSession(1, session.Id, UpdateCanvasSessionInput{
+		ChatTemperature:        &zeroTemperature,
+		ChatContextCount:       &zeroContextCount,
+		SystemPrompt:           &emptySystemPrompt,
+		SummaryEnabled:         &summaryEnabled,
+		SummaryTriggerMessages: &zeroSummaryTrigger,
+		SummaryRecentMessages:  &zeroSummaryRecent,
+	})
+	if err != nil {
+		t.Fatalf("failed to update chat config to zero values: %v", err)
+	}
+	if updated.ChatTemperature != zeroTemperature {
+		t.Fatalf("expected zero chat temperature to persist, got %.1f", updated.ChatTemperature)
+	}
+	if updated.ChatContextCount != zeroContextCount {
+		t.Fatalf("expected zero chat context count to persist, got %d", updated.ChatContextCount)
+	}
+	if updated.SystemPrompt != "" {
+		t.Fatalf("expected empty system prompt to persist, got %q", updated.SystemPrompt)
+	}
+	if updated.SummaryEnabled != summaryEnabled {
+		t.Fatalf("expected summary enabled toggle to persist, got %v", updated.SummaryEnabled)
+	}
+	if updated.SummaryTriggerMessages != zeroSummaryTrigger {
+		t.Fatalf("expected zero summary trigger to persist, got %d", updated.SummaryTriggerMessages)
+	}
+	if updated.SummaryRecentMessages != zeroSummaryRecent {
+		t.Fatalf("expected zero summary recent to persist, got %d", updated.SummaryRecentMessages)
+	}
+}
+
+func TestCreateCanvasChatMessageUsesSessionConfigFallbacks(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+	systemPrompt := "Focus on concise answers."
+
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+		if request.ModelId != "gpt-chat-test" {
+			t.Fatalf("expected session current model fallback, got %q", request.ModelId)
+		}
+		if request.Temperature == nil || *request.Temperature != 1.5 {
+			t.Fatalf("expected session chat temperature fallback 1.5, got %#v", request.Temperature)
+		}
+		if len(request.Messages) != 2 {
+			t.Fatalf("expected system prompt plus user message, got %#v", request.Messages)
+		}
+		if request.Messages[0].Role == model.CanvasMessageRoleUser || request.Messages[0].StringContent() != systemPrompt {
+			t.Fatalf("expected system prompt injection, got %#v", request.Messages[0])
+		}
+		if request.Messages[1].Role != model.CanvasMessageRoleUser || request.Messages[1].StringContent() != "use session config" {
+			t.Fatalf("unexpected relay messages: %#v", request.Messages)
+		}
+		if onDelta != nil {
+			if err := onDelta("assistant reply"); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: "assistant reply"}, nil
+	}
+
+	temperature := 1.5
+	contextCount := 2
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{
+		Mode:             model.CanvasModeChat,
+		CurrentModel:     "gpt-chat-test",
+		ChatTemperature:  &temperature,
+		ChatContextCount: &contextCount,
+		SystemPrompt:     &systemPrompt,
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	created, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt: "use session config",
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat message with session config fallback: %v", err)
+	}
+
+	var metadata canvasChatMessageMetadata
+	if err := common.UnmarshalJsonStr(created[0].Metadata, &metadata); err != nil {
+		t.Fatalf("failed to decode metadata snapshot: %v", err)
+	}
+	if metadata.Temperature == nil || *metadata.Temperature != temperature {
+		t.Fatalf("expected metadata temperature %.1f, got %#v", temperature, metadata.Temperature)
+	}
+	if metadata.ContextCount == nil || *metadata.ContextCount != contextCount {
+		t.Fatalf("expected metadata context count %d, got %#v", contextCount, metadata.ContextCount)
+	}
+	if metadata.SystemPrompt != systemPrompt {
+		t.Fatalf("expected metadata system prompt %q, got %q", systemPrompt, metadata.SystemPrompt)
+	}
+}
+
+func TestCanvasChatSummaryDisabledSkipsBackgroundSummary(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	queueCanvasChatBackgroundTask = func(fn func()) {
+		if fn != nil {
+			fn()
+		}
+	}
+
+	replyIndex := 0
+	summaryCalls := 0
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+		if len(request.Messages) > 0 && strings.Contains(request.Messages[0].StringContent(), "你负责维护长对话摘要记忆") {
+			summaryCalls++
+			return &canvasChatRelayResult{Text: "summary memory"}, nil
+		}
+		replyIndex++
+		reply := fmt.Sprintf("assistant-%d", replyIndex)
+		if onDelta != nil {
+			if err := onDelta(reply); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: reply}, nil
+	}
+
+	summaryEnabled := false
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{
+		Mode:           model.CanvasModeChat,
+		CurrentModel:   "gpt-chat-test",
+		SummaryEnabled: &summaryEnabled,
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	contextCount := 1
+	for i := 1; i <= 3; i++ {
+		if _, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+			Prompt:       fmt.Sprintf("user-%d", i),
+			ModelId:      "gpt-chat-test",
+			ContextCount: &contextCount,
+		}); err != nil {
+			t.Fatalf("failed to create chat message %d: %v", i, err)
+		}
+	}
+
+	if summaryCalls != 0 {
+		t.Fatalf("expected summary to remain disabled, got %d summary calls", summaryCalls)
+	}
+	reloadedSession, err := model.GetCanvasSessionByID(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload session: %v", err)
+	}
+	if reloadedSession.SummaryPrompt != "" || reloadedSession.LastSummarizedMessageId != 0 {
+		t.Fatalf("expected no summary state when disabled, got prompt=%q cursor=%d", reloadedSession.SummaryPrompt, reloadedSession.LastSummarizedMessageId)
+	}
+}
+
+func TestBuildCanvasChatRelayMessagesSkipsSummaryWhenDisabled(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+	summaryEnabled := false
+	systemPrompt := "system prompt"
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{
+		Mode:           model.CanvasModeChat,
+		SummaryEnabled: &summaryEnabled,
+		SystemPrompt:   &systemPrompt,
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+	if err := model.UpdateCanvasSessionFields(1, session.Id, map[string]interface{}{
+		"summary_prompt":             "default summary",
+		"last_summarized_message_id": 11,
+	}); err != nil {
+		t.Fatalf("failed to seed summary state: %v", err)
+	}
+	reloadedSession, err := model.GetCanvasSessionByID(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload session: %v", err)
+	}
+	prepared := &canvasChatPreparedRequest{
+		UserId:       1,
+		Session:      reloadedSession,
+		Prompt:       "current user message",
+		FinalModel:   "gpt-chat-test",
+		ContextCount: 0,
+		UserMessage:  &model.CanvasMessage{Id: 999},
+	}
+
+	messages, err := buildCanvasChatRelayMessages(prepared)
+	if err != nil {
+		t.Fatalf("failed to build relay messages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected only system prompt and current user message, got %#v", messages)
+	}
+	if messages[0].StringContent() != "system prompt" {
+		t.Fatalf("expected first message to be system prompt, got %#v", messages[0])
+	}
+	if messages[1].Role != model.CanvasMessageRoleUser || messages[1].StringContent() != "current user message" {
+		t.Fatalf("unexpected user relay message: %#v", messages[1])
+	}
+}
+
+func TestBuildCanvasChatRelayMessagesKeepsHistoryWhenSummaryDisabled(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	summaryEnabled := false
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{
+		Mode:           model.CanvasModeChat,
+		CurrentModel:   "gpt-chat-test",
+		SummaryEnabled: &summaryEnabled,
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	historyMessages := []*model.CanvasMessage{
+		{
+			SessionId:   session.Id,
+			UserId:      1,
+			Mode:        model.CanvasModeChat,
+			Role:        model.CanvasMessageRoleUser,
+			Prompt:      "history user",
+			Status:      model.CanvasMessageStatusSuccess,
+			CreatedTime: now,
+			UpdatedTime: now,
+		},
+		{
+			SessionId:   session.Id,
+			UserId:      1,
+			Mode:        model.CanvasModeChat,
+			Role:        model.CanvasMessageRoleAssistant,
+			Prompt:      "history assistant",
+			Status:      model.CanvasMessageStatusSuccess,
+			CreatedTime: now + 1,
+			UpdatedTime: now + 1,
+		},
+	}
+	for _, message := range historyMessages {
+		if err := model.CreateCanvasMessage(message); err != nil {
+			t.Fatalf("failed to create history message: %v", err)
+		}
+	}
+	if err := model.UpdateCanvasSessionFields(1, session.Id, map[string]interface{}{
+		"summary_prompt":             "legacy summary",
+		"last_summarized_message_id": historyMessages[1].Id,
+	}); err != nil {
+		t.Fatalf("failed to seed summary state: %v", err)
+	}
+	reloadedSession, err := model.GetCanvasSessionByID(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload session: %v", err)
+	}
+
+	prepared := &canvasChatPreparedRequest{
+		UserId:       1,
+		Session:      reloadedSession,
+		Prompt:       "current user message",
+		FinalModel:   "gpt-chat-test",
+		ContextCount: 2,
+		UserMessage:  &model.CanvasMessage{Id: 999},
+	}
+	messages, err := buildCanvasChatRelayMessages(prepared)
+	if err != nil {
+		t.Fatalf("failed to build relay messages: %v", err)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("expected historical messages to remain when summary disabled, got %#v", messages)
+	}
+	if messages[0].Role != model.CanvasMessageRoleUser || messages[0].StringContent() != "history user" {
+		t.Fatalf("expected first history user message, got %#v", messages[0])
+	}
+	if messages[1].Role != model.CanvasMessageRoleAssistant || messages[1].StringContent() != "history assistant" {
+		t.Fatalf("expected second history assistant message, got %#v", messages[1])
+	}
+	if messages[2].Role != model.CanvasMessageRoleUser || messages[2].StringContent() != "current user message" {
+		t.Fatalf("expected current user message last, got %#v", messages[2])
+	}
+}
+
+func TestCreateCanvasChatMessageFailureKeepsPartialText(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+		if onDelta != nil {
+			if err := onDelta("partial reply"); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: "partial reply"}, fmt.Errorf("upstream exploded")
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	if _, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "please fail",
+		ModelId: "gpt-chat-test",
+	}); err == nil {
+		t.Fatal("expected chat creation to fail")
+	}
+
+	messages, err := ListCanvasMessages(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to list chat messages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 persisted chat messages, got %d", len(messages))
+	}
+	assistant := messages[1]
+	if assistant.Prompt != "partial reply" {
+		t.Fatalf("expected partial assistant text to persist, got %q", assistant.Prompt)
+	}
+	if assistant.Status != model.CanvasMessageStatusFailed {
+		t.Fatalf("expected failed status, got %q", assistant.Status)
+	}
+	if !strings.Contains(assistant.ErrorMessage, "upstream exploded") {
+		t.Fatalf("expected upstream error message, got %q", assistant.ErrorMessage)
+	}
+}
+
+func TestCanvasChatSummaryBranchSelectionRestoresDefaultContext(t *testing.T) {
+	session := &model.CanvasSession{
+		Mode:                    model.CanvasModeChat,
+		ClearContextMessageId:   0,
+		SummaryPrompt:           "default summary",
+		LastSummarizedMessageId: 11,
+	}
+
+	storedPrompt, storedLast, err := setCanvasChatSummary(session, 90, "branch summary", 120)
+	if err != nil {
+		t.Fatalf("failed to add branch summary: %v", err)
+	}
+	session.SummaryPrompt = storedPrompt
+	session.LastSummarizedMessageId = storedLast
+
+	session.ClearContextMessageId = 90
+	branchSummary, branchCursor, err := getCanvasChatActiveSummary(session)
+	if err != nil {
+		t.Fatalf("failed to read branch summary: %v", err)
+	}
+	if branchSummary != "branch summary" || branchCursor != 120 {
+		t.Fatalf("expected active branch summary/cursor to restore, got summary=%q cursor=%d", branchSummary, branchCursor)
+	}
+
+	session.ClearContextMessageId = 0
+	restoredSummary, restoredCursor, err := getCanvasChatActiveSummary(session)
+	if err != nil {
+		t.Fatalf("failed to restore default summary: %v", err)
+	}
+	if restoredSummary != "default summary" || restoredCursor != 11 {
+		t.Fatalf("expected default summary/cursor to be restored, got summary=%q cursor=%d", restoredSummary, restoredCursor)
+	}
+	if getCanvasChatSummaryCursorForClearContext(session, 90) != 120 {
+		t.Fatalf("expected branch cursor lookup to remain available after restoring context")
+	}
+}
+
+func TestCanvasChatSummaryWriteBackSkipsStaleBranchChanges(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	queueCanvasChatBackgroundTask = func(fn func()) {
+		if fn != nil {
+			fn()
+		}
+	}
+
+	summaryRelayCalls := 0
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+		if len(request.Messages) > 0 && strings.Contains(request.Messages[0].StringContent(), "你负责维护长对话摘要记忆") {
+			summaryRelayCalls++
+			if summaryRelayCalls == 1 {
+				if err := model.UpdateCanvasSessionFields(1, 1, map[string]interface{}{
+					"clear_context_message_id": 999,
+				}); err != nil {
+					t.Fatalf("failed to mutate session clear context during summary: %v", err)
+				}
+			}
+			return &canvasChatRelayResult{Text: "summary memory"}, nil
+		}
+		if onDelta != nil {
+			if err := onDelta("assistant reply"); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: "assistant reply"}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{
+		Mode:         model.CanvasModeChat,
+		CurrentModel: "gpt-chat-test",
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+	if _, err := UpdateCanvasSession(1, session.Id, UpdateCanvasSessionInput{
+		SummaryTriggerMessages: common.GetPointer(0),
+		SummaryRecentMessages:  common.GetPointer(0),
+	}); err != nil {
+		t.Fatalf("failed to reduce summary thresholds: %v", err)
+	}
+
+	contextCount := 1
+	for i := 1; i <= 3; i++ {
+		if _, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+			Prompt:       fmt.Sprintf("user-%d", i),
+			ModelId:      "gpt-chat-test",
+			ContextCount: &contextCount,
+		}); err != nil {
+			t.Fatalf("failed to create chat message %d: %v", i, err)
+		}
+	}
+
+	reloadedSession, err := model.GetCanvasSessionByID(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload session: %v", err)
+	}
+	if reloadedSession.SummaryPrompt != "" || reloadedSession.LastSummarizedMessageId != 0 {
+		t.Fatalf("expected stale summary write-back to be skipped, got prompt=%q cursor=%d", reloadedSession.SummaryPrompt, reloadedSession.LastSummarizedMessageId)
+	}
+}
+
+func TestCanvasChatSummaryTriggerAdvancesCursor(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	queueCanvasChatBackgroundTask = func(fn func()) {
+		if fn != nil {
+			fn()
+		}
+	}
+
+	replyIndex := 0
+	summaryCalls := 0
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+		if len(request.Messages) > 0 && strings.Contains(request.Messages[0].StringContent(), "你负责维护长对话摘要记忆") {
+			summaryCalls++
+			return &canvasChatRelayResult{Text: "summary memory"}, nil
+		}
+		replyIndex++
+		reply := fmt.Sprintf("assistant-%d", replyIndex)
+		if onDelta != nil {
+			if err := onDelta(reply); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: reply}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	contextCount := 1
+	assistantIDs := make([]int, 0, 3)
+	if _, err := UpdateCanvasSession(1, session.Id, UpdateCanvasSessionInput{
+		SummaryTriggerMessages: common.GetPointer(0),
+		SummaryRecentMessages:  common.GetPointer(0),
+	}); err != nil {
+		t.Fatalf("failed to update summary policy: %v", err)
+	}
+	for i := 1; i <= 3; i++ {
+		created, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+			Prompt:       fmt.Sprintf("user-%d", i),
+			ModelId:      "gpt-chat-test",
+			ContextCount: &contextCount,
+		})
+		if err != nil {
+			t.Fatalf("failed to create chat message %d: %v", i, err)
+		}
+		assistantIDs = append(assistantIDs, created[1].Id)
+	}
+
+	if summaryCalls == 0 {
+		t.Fatal("expected summary request to be triggered")
+	}
+
+	reloadedSession, err := model.GetCanvasSessionByID(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload session: %v", err)
+	}
+	if reloadedSession.SummaryPrompt != "summary memory" {
+		t.Fatalf("expected summary prompt to persist, got %q", reloadedSession.SummaryPrompt)
+	}
+	if reloadedSession.LastSummarizedMessageId != assistantIDs[1] {
+		t.Fatalf("expected summary cursor to advance to second assistant message %d, got %d", assistantIDs[1], reloadedSession.LastSummarizedMessageId)
+	}
+}
+
+func TestCanvasChatClearContextTruncatesRelayHistory(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	var capturedRequests [][]dto.Message
+	replyIndex := 0
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta string) error) (*canvasChatRelayResult, error) {
+		cloned := make([]dto.Message, len(request.Messages))
+		copy(cloned, request.Messages)
+		capturedRequests = append(capturedRequests, cloned)
+		replyIndex++
+		reply := fmt.Sprintf("assistant-%d", replyIndex)
+		if onDelta != nil {
+			if err := onDelta(reply); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: reply}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	first, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "first turn",
+		ModelId: "gpt-chat-test",
+	})
+	if err != nil {
+		t.Fatalf("failed to create first chat message: %v", err)
+	}
+	second, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "second turn",
+		ModelId: "gpt-chat-test",
+	})
+	if err != nil {
+		t.Fatalf("failed to create second chat message: %v", err)
+	}
+	if err := model.UpdateCanvasSessionFields(1, session.Id, map[string]interface{}{
+		"clear_context_message_id": second[1].Id,
+	}); err != nil {
+		t.Fatalf("failed to update clear_context_message_id: %v", err)
+	}
+
+	if _, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "fresh turn",
+		ModelId: "gpt-chat-test",
+	}); err != nil {
+		t.Fatalf("failed to create fresh chat message: %v", err)
+	}
+
+	if len(capturedRequests) != 3 {
+		t.Fatalf("expected 3 captured relay requests, got %d", len(capturedRequests))
+	}
+	thirdRequest := capturedRequests[2]
+	if len(thirdRequest) != 1 {
+		t.Fatalf("expected clear-context request to send only the current user message, got %#v", thirdRequest)
+	}
+	if thirdRequest[0].Role != model.CanvasMessageRoleUser || thirdRequest[0].StringContent() != "fresh turn" {
+		t.Fatalf("unexpected clear-context relay payload: %#v", thirdRequest)
+	}
+	if first[1].Id >= second[1].Id {
+		t.Fatalf("expected message ids to increase across turns, got first=%d second=%d", first[1].Id, second[1].Id)
+	}
+}
+
+func TestUpdateCanvasChatSessionClearContextControls(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	messages := []*model.CanvasMessage{
+		{
+			SessionId:   session.Id,
+			UserId:      1,
+			Mode:        model.CanvasModeChat,
+			Role:        model.CanvasMessageRoleUser,
+			Prompt:      "user-1",
+			Status:      model.CanvasMessageStatusSuccess,
+			CreatedTime: now,
+			UpdatedTime: now,
+		},
+		{
+			SessionId:   session.Id,
+			UserId:      1,
+			Mode:        model.CanvasModeChat,
+			Role:        model.CanvasMessageRoleAssistant,
+			Prompt:      "assistant-1",
+			Status:      model.CanvasMessageStatusSuccess,
+			CreatedTime: now + 1,
+			UpdatedTime: now + 1,
+		},
+	}
+	for _, message := range messages {
+		if err := model.CreateCanvasMessage(message); err != nil {
+			t.Fatalf("failed to create chat message: %v", err)
+		}
+	}
+
+	cleared, err := UpdateCanvasSession(1, session.Id, UpdateCanvasSessionInput{
+		ClearContextToLatest: common.GetPointer(true),
+	})
+	if err != nil {
+		t.Fatalf("failed to clear chat context to latest: %v", err)
+	}
+	if cleared.ClearContextMessageId != messages[1].Id {
+		t.Fatalf("expected clear_context_message_id %d, got %d", messages[1].Id, cleared.ClearContextMessageId)
+	}
+
+	restored, err := UpdateCanvasSession(1, session.Id, UpdateCanvasSessionInput{
+		ClearContextMessageId: common.GetPointer(0),
+	})
+	if err != nil {
+		t.Fatalf("failed to restore full chat context: %v", err)
+	}
+	if restored.ClearContextMessageId != 0 {
+		t.Fatalf("expected restored clear_context_message_id to be 0, got %d", restored.ClearContextMessageId)
+	}
+
+	if _, err := UpdateCanvasSession(1, session.Id, UpdateCanvasSessionInput{
+		ClearContextMessageId: common.GetPointer(messages[0].Id + 999),
+	}); err == nil {
+		t.Fatal("expected invalid clear_context_message_id to be rejected")
+	}
+
+	imageSession, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage})
+	if err != nil {
+		t.Fatalf("failed to create image session: %v", err)
+	}
+	if _, err := UpdateCanvasSession(1, imageSession.Id, UpdateCanvasSessionInput{
+		ClearContextToLatest: common.GetPointer(true),
+	}); err == nil {
+		t.Fatal("expected clear context update on non-chat session to fail")
+	}
+
+	var sessionCount int64
+	if err := db.Model(&model.CanvasSession{}).Where("id = ?", session.Id).Count(&sessionCount).Error; err != nil {
+		t.Fatalf("failed to verify session remains persisted: %v", err)
+	}
+	if sessionCount != 1 {
+		t.Fatalf("expected chat session to remain persisted, count=%d", sessionCount)
+	}
+}
+
 func TestListCanvasMessagesIncludesEffectiveVideoResultURL(t *testing.T) {
 	setupCanvasSessionServiceTestDB(t)
 
@@ -654,5 +1486,37 @@ func TestDeleteCanvasSessionRejectsRunningAssociatedTasks(t *testing.T) {
 	}
 	if reloaded == nil {
 		t.Fatal("session should remain when deletion is rejected")
+	}
+}
+
+func TestDeleteCanvasSessionRejectsRunningChatGeneration(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat, Title: "running chat"})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+	if err := model.CreateCanvasMessage(&model.CanvasMessage{
+		SessionId:   session.Id,
+		UserId:      1,
+		Mode:        model.CanvasModeChat,
+		Role:        model.CanvasMessageRoleAssistant,
+		Prompt:      "working",
+		Status:      model.CanvasMessageStatusGenerating,
+		CreatedTime: common.GetTimestamp(),
+		UpdatedTime: common.GetTimestamp(),
+	}); err != nil {
+		t.Fatalf("failed to create generating chat message: %v", err)
+	}
+
+	if err := DeleteCanvasSession(1, session.Id); err == nil {
+		t.Fatal("expected running chat generation to block session deletion")
+	}
+	reloaded, err := model.GetCanvasSessionByID(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload chat session: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("chat session should remain when deletion is rejected")
 	}
 }

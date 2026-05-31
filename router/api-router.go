@@ -21,6 +21,9 @@ func SetApiRouter(router *gin.Engine) {
 			"/api/inspiration/assets",
 			"/api/creative-space/assets",
 		}),
+		gzip.WithExcludedPathsRegexs([]string{
+			`^/api/canvas/sessions/[^/]+/messages$`,
+		}),
 	))
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	apiRouter.Use(middleware.GlobalAPIRateLimit())
