@@ -15,22 +15,22 @@ const (
 )
 
 type CanvasChatMessage struct {
-	Id               int    `gorm:"primaryKey"`
-	SessionId        int    `gorm:"index:idx_canvas_chat_messages_session_deleted_created,priority:1;not null"`
-	UserId           int    `gorm:"index;not null"`
-	Mode             string `gorm:"size:16;index;not null"`
+	Id               int    `gorm:"primaryKey;index:idx_canvas_chat_messages_session_deleted_created,priority:4;index:idx_canvas_chat_messages_session_status_deleted_created,priority:5"`
+	SessionId        int    `gorm:"index:idx_canvas_chat_messages_session_deleted_created,priority:1;index:idx_canvas_chat_messages_session_status_deleted_created,priority:1;not null"`
+	UserId           int    `gorm:"index;index:idx_canvas_chat_messages_task_lookup,priority:1;not null"`
+	Mode             string `gorm:"size:16;index;index:idx_canvas_chat_messages_task_lookup,priority:2;not null"`
 	Role             string `gorm:"size:16;not null"`
 	Prompt           string `gorm:"type:text"`
 	ReasoningContent string `gorm:"type:text"`
 	ClientRequestId  string `gorm:"size:64;default:''"`
-	Status           string `gorm:"size:32;index;default:''"`
-	TaskId           string `gorm:"size:64;index;default:''"`
-	TaskType         string `gorm:"size:32;index;default:''"`
+	Status           string `gorm:"size:32;index;index:idx_canvas_chat_messages_session_status_deleted_created,priority:2;default:''"`
+	TaskId           string `gorm:"size:64;index;index:idx_canvas_chat_messages_task_lookup,priority:4;default:''"`
+	TaskType         string `gorm:"size:32;index;index:idx_canvas_chat_messages_task_lookup,priority:3;default:''"`
 	Metadata         string `gorm:"type:text"`
 	ErrorMessage     string `gorm:"type:text"`
-	CreatedTime      int64  `gorm:"bigint;index:idx_canvas_chat_messages_session_deleted_created,priority:3"`
+	CreatedTime      int64  `gorm:"bigint;index:idx_canvas_chat_messages_session_deleted_created,priority:3;index:idx_canvas_chat_messages_session_status_deleted_created,priority:4"`
 	UpdatedTime      int64  `gorm:"bigint"`
-	DeletedTime      int64  `gorm:"bigint;index:idx_canvas_chat_messages_session_deleted_created,priority:2;default:0"`
+	DeletedTime      int64  `gorm:"bigint;index:idx_canvas_chat_messages_session_deleted_created,priority:2;index:idx_canvas_chat_messages_session_status_deleted_created,priority:3;index:idx_canvas_chat_messages_task_lookup,priority:5;default:0"`
 }
 
 func (CanvasChatMessage) TableName() string {
@@ -38,22 +38,22 @@ func (CanvasChatMessage) TableName() string {
 }
 
 type CanvasImageMessage struct {
-	Id               int    `gorm:"primaryKey"`
-	SessionId        int    `gorm:"index:idx_canvas_image_messages_session_deleted_created,priority:1;not null"`
-	UserId           int    `gorm:"index;not null"`
-	Mode             string `gorm:"size:16;index;not null"`
+	Id               int    `gorm:"primaryKey;index:idx_canvas_image_messages_session_deleted_created,priority:4;index:idx_canvas_image_messages_session_status_deleted_created,priority:5"`
+	SessionId        int    `gorm:"index:idx_canvas_image_messages_session_deleted_created,priority:1;index:idx_canvas_image_messages_session_status_deleted_created,priority:1;not null"`
+	UserId           int    `gorm:"index;index:idx_canvas_image_messages_task_lookup,priority:1;not null"`
+	Mode             string `gorm:"size:16;index;index:idx_canvas_image_messages_task_lookup,priority:2;not null"`
 	Role             string `gorm:"size:16;not null"`
 	Prompt           string `gorm:"type:text"`
 	ReasoningContent string `gorm:"type:text"`
 	ClientRequestId  string `gorm:"size:64;default:''"`
-	Status           string `gorm:"size:32;index;default:''"`
-	TaskId           string `gorm:"size:64;index;default:''"`
-	TaskType         string `gorm:"size:32;index;default:''"`
+	Status           string `gorm:"size:32;index;index:idx_canvas_image_messages_session_status_deleted_created,priority:2;default:''"`
+	TaskId           string `gorm:"size:64;index;index:idx_canvas_image_messages_task_lookup,priority:4;default:''"`
+	TaskType         string `gorm:"size:32;index;index:idx_canvas_image_messages_task_lookup,priority:3;default:''"`
 	Metadata         string `gorm:"type:text"`
 	ErrorMessage     string `gorm:"type:text"`
-	CreatedTime      int64  `gorm:"bigint;index:idx_canvas_image_messages_session_deleted_created,priority:3"`
+	CreatedTime      int64  `gorm:"bigint;index:idx_canvas_image_messages_session_deleted_created,priority:3;index:idx_canvas_image_messages_session_status_deleted_created,priority:4"`
 	UpdatedTime      int64  `gorm:"bigint"`
-	DeletedTime      int64  `gorm:"bigint;index:idx_canvas_image_messages_session_deleted_created,priority:2;default:0"`
+	DeletedTime      int64  `gorm:"bigint;index:idx_canvas_image_messages_session_deleted_created,priority:2;index:idx_canvas_image_messages_session_status_deleted_created,priority:3;index:idx_canvas_image_messages_task_lookup,priority:5;default:0"`
 }
 
 func (CanvasImageMessage) TableName() string {
@@ -61,22 +61,22 @@ func (CanvasImageMessage) TableName() string {
 }
 
 type CanvasVideoMessage struct {
-	Id               int    `gorm:"primaryKey"`
-	SessionId        int    `gorm:"index:idx_canvas_video_messages_session_deleted_created,priority:1;not null"`
-	UserId           int    `gorm:"index;not null"`
-	Mode             string `gorm:"size:16;index;not null"`
+	Id               int    `gorm:"primaryKey;index:idx_canvas_video_messages_session_deleted_created,priority:4;index:idx_canvas_video_messages_session_status_deleted_created,priority:5"`
+	SessionId        int    `gorm:"index:idx_canvas_video_messages_session_deleted_created,priority:1;index:idx_canvas_video_messages_session_status_deleted_created,priority:1;not null"`
+	UserId           int    `gorm:"index;index:idx_canvas_video_messages_task_lookup,priority:1;not null"`
+	Mode             string `gorm:"size:16;index;index:idx_canvas_video_messages_task_lookup,priority:2;not null"`
 	Role             string `gorm:"size:16;not null"`
 	Prompt           string `gorm:"type:text"`
 	ReasoningContent string `gorm:"type:text"`
 	ClientRequestId  string `gorm:"size:64;default:''"`
-	Status           string `gorm:"size:32;index;default:''"`
-	TaskId           string `gorm:"size:64;index;default:''"`
-	TaskType         string `gorm:"size:32;index;default:''"`
+	Status           string `gorm:"size:32;index;index:idx_canvas_video_messages_session_status_deleted_created,priority:2;default:''"`
+	TaskId           string `gorm:"size:64;index;index:idx_canvas_video_messages_task_lookup,priority:4;default:''"`
+	TaskType         string `gorm:"size:32;index;index:idx_canvas_video_messages_task_lookup,priority:3;default:''"`
 	Metadata         string `gorm:"type:text"`
 	ErrorMessage     string `gorm:"type:text"`
-	CreatedTime      int64  `gorm:"bigint;index:idx_canvas_video_messages_session_deleted_created,priority:3"`
+	CreatedTime      int64  `gorm:"bigint;index:idx_canvas_video_messages_session_deleted_created,priority:3;index:idx_canvas_video_messages_session_status_deleted_created,priority:4"`
 	UpdatedTime      int64  `gorm:"bigint"`
-	DeletedTime      int64  `gorm:"bigint;index:idx_canvas_video_messages_session_deleted_created,priority:2;default:0"`
+	DeletedTime      int64  `gorm:"bigint;index:idx_canvas_video_messages_session_deleted_created,priority:2;index:idx_canvas_video_messages_session_status_deleted_created,priority:3;index:idx_canvas_video_messages_task_lookup,priority:5;default:0"`
 }
 
 func (CanvasVideoMessage) TableName() string {
@@ -87,6 +87,15 @@ type canvasMessageStore struct {
 	db        *gorm.DB
 	tableName string
 	mode      string
+}
+
+type CanvasMessageTaskRef struct {
+	Id       int
+	Mode     string
+	Role     string
+	Status   string
+	TaskId   string
+	TaskType string
 }
 
 func canvasMessageStoreForMode(mode string) (*canvasMessageStore, error) {
@@ -130,6 +139,21 @@ func canvasMessageStoreForMode(mode string) (*canvasMessageStore, error) {
 	default:
 		return nil, fmt.Errorf("invalid canvas mode")
 	}
+}
+
+func canvasMessageStoreForModeWithDB(mode string, db *gorm.DB) (*canvasMessageStore, error) {
+	store, err := canvasMessageStoreForMode(mode)
+	if err != nil {
+		return nil, err
+	}
+	if db == nil {
+		return store, nil
+	}
+	return &canvasMessageStore{
+		db:        db,
+		tableName: store.tableName,
+		mode:      store.mode,
+	}, nil
 }
 
 func (s *canvasMessageStore) query() *gorm.DB {
@@ -252,7 +276,7 @@ func (s *canvasMessageStore) updateFieldsByTask(userId int, taskId string, taskT
 	}
 	updates["updated_time"] = common.GetTimestamp()
 	return s.query().
-		Where("user_id = ? AND task_id = ? AND task_type = ? AND mode = ? AND deleted_time = 0", userId, taskId, taskType, s.mode).
+		Where("user_id = ? AND mode = ? AND task_type = ? AND task_id = ? AND deleted_time = 0", userId, s.mode, taskType, taskId).
 		Updates(updates).Error
 }
 
@@ -269,12 +293,64 @@ func (s *canvasMessageStore) softDeleteIDs(userId int, ids []int, deletedTime in
 	if len(ids) == 0 {
 		return nil
 	}
-	return s.query().
-		Where("user_id = ? AND id IN ? AND mode = ? AND deleted_time = 0", userId, ids, s.mode).
-		Updates(map[string]interface{}{
-			"deleted_time": deletedTime,
-			"updated_time": deletedTime,
-		}).Error
+	return forEachChunk(ids, func(chunk []int) error {
+		return s.query().
+			Where("user_id = ? AND id IN ? AND mode = ? AND deleted_time = 0", userId, chunk, s.mode).
+			Updates(map[string]interface{}{
+				"deleted_time": deletedTime,
+				"updated_time": deletedTime,
+			}).Error
+	})
+}
+
+func (s *canvasMessageStore) restoreIDs(userId int, ids []int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	restoredTime := common.GetTimestamp()
+	return forEachChunk(ids, func(chunk []int) error {
+		return s.query().
+			Where("user_id = ? AND id IN ? AND mode = ? AND deleted_time > 0", userId, chunk, s.mode).
+			Updates(map[string]interface{}{
+				"deleted_time": 0,
+				"updated_time": restoredTime,
+			}).Error
+	})
+}
+
+func listCanvasMessageTaskRefsForMode(db *gorm.DB, tableName string, mode string, userId int, sessionId int) ([]*CanvasMessageTaskRef, error) {
+	var refs []*CanvasMessageTaskRef
+	err := db.Table(tableName).
+		Select("id, mode, role, status, task_id, task_type").
+		Where("user_id = ? AND session_id = ? AND mode = ? AND deleted_time = 0", userId, sessionId, mode).
+		Order("id ASC").
+		Find(&refs).Error
+	return refs, err
+}
+
+func ListCanvasSessionMessageTaskRefsForMode(mode string, userId int, sessionId int) ([]*CanvasMessageTaskRef, error) {
+	mode = NormalizeCanvasMode(mode)
+	if mode == "" {
+		return nil, fmt.Errorf("invalid canvas mode")
+	}
+	if available, reason := CanvasAvailabilityStatus(); !available {
+		if reason == "" {
+			reason = "canvas is unavailable"
+		}
+		return nil, fmt.Errorf("%s", reason)
+	}
+	if !CanvasUsesDedicatedMessageDBs() {
+		if DB == nil {
+			return nil, fmt.Errorf("canvas main database is not initialized")
+		}
+		return listCanvasMessageTaskRefsForMode(DB, "canvas_messages", mode, userId, sessionId)
+	}
+
+	store, err := canvasMessageStoreForMode(mode)
+	if err != nil {
+		return nil, err
+	}
+	return listCanvasMessageTaskRefsForMode(store.db, store.tableName, mode, userId, sessionId)
 }
 
 func (s *canvasMessageStore) listSuccessful(userId int, sessionId int, afterMessageId int, beforeMessageId int, limit int, descending bool) ([]*CanvasMessage, error) {
@@ -416,6 +492,22 @@ func SoftDeleteCanvasMessagesByIDs(mode string, userId int, ids []int, deletedTi
 		return err
 	}
 	return store.softDeleteIDs(userId, ids, deletedTime)
+}
+
+func SoftDeleteCanvasMessagesByIDsWithDB(db *gorm.DB, mode string, userId int, ids []int, deletedTime int64) error {
+	store, err := canvasMessageStoreForModeWithDB(mode, db)
+	if err != nil {
+		return err
+	}
+	return store.softDeleteIDs(userId, ids, deletedTime)
+}
+
+func RestoreCanvasMessagesByIDs(mode string, userId int, ids []int) error {
+	store, err := canvasMessageStoreForMode(mode)
+	if err != nil {
+		return err
+	}
+	return store.restoreIDs(userId, ids)
 }
 
 func ListSuccessfulCanvasMessagesBefore(mode string, userId int, sessionId int, beforeMessageId int) ([]*CanvasMessage, error) {

@@ -199,28 +199,43 @@ func initCanvasDBs() error {
 		return fmt.Errorf("CANVAS_CHAT_SQL_DSN, CANVAS_IMAGE_SQL_DSN, and CANVAS_VIDEO_SQL_DSN must be configured together")
 	}
 
-	chatDB, err := openCanvasMessagePostgresDBFunc("CANVAS_CHAT_SQL_DSN", chatDSN)
+	openedByDSN := make(map[string]*gorm.DB, 3)
+	openCanvasDB := func(envName string, dsn string) (*gorm.DB, error) {
+		if db, ok := openedByDSN[dsn]; ok {
+			return db, nil
+		}
+		db, err := openCanvasMessagePostgresDBFunc(envName, dsn)
+		if err != nil {
+			return nil, err
+		}
+		openedByDSN[dsn] = db
+		return db, nil
+	}
+	closeOpenedCanvasDBs := func() {
+		for _, db := range openedByDSN {
+			_ = closeDB(db)
+		}
+	}
+
+	chatDB, err := openCanvasDB("CANVAS_CHAT_SQL_DSN", chatDSN)
 	if err != nil {
 		return err
 	}
-	imageDB, err := openCanvasMessagePostgresDBFunc("CANVAS_IMAGE_SQL_DSN", imageDSN)
+	imageDB, err := openCanvasDB("CANVAS_IMAGE_SQL_DSN", imageDSN)
 	if err != nil {
-		_ = closeDB(chatDB)
+		closeOpenedCanvasDBs()
 		return err
 	}
-	videoDB, err := openCanvasMessagePostgresDBFunc("CANVAS_VIDEO_SQL_DSN", videoDSN)
+	videoDB, err := openCanvasDB("CANVAS_VIDEO_SQL_DSN", videoDSN)
 	if err != nil {
-		_ = closeDB(chatDB)
-		_ = closeDB(imageDB)
+		closeOpenedCanvasDBs()
 		return err
 	}
 
 	if common.IsMasterNode {
 		common.SysLog("canvas database migration started")
 		if err := migrateCanvasDBs(chatDB, imageDB, videoDB); err != nil {
-			_ = closeDB(chatDB)
-			_ = closeDB(imageDB)
-			_ = closeDB(videoDB)
+			closeOpenedCanvasDBs()
 			return err
 		}
 	}
@@ -451,6 +466,7 @@ func migrateDB() error {
 		&ModelMapping{},
 		&CanvasSession{},
 		&CanvasMessage{},
+		&CanvasAssetCleanupJob{},
 		&ImageGenerationTask{},
 		&ImageGenerationReferenceAsset{},
 		&ImageGenerationTaskReferenceAsset{},
@@ -506,6 +522,7 @@ func migrateDBFast() error {
 		{&ModelMapping{}, "ModelMapping"},
 		{&CanvasSession{}, "CanvasSession"},
 		{&CanvasMessage{}, "CanvasMessage"},
+		{&CanvasAssetCleanupJob{}, "CanvasAssetCleanupJob"},
 		{&ImageGenerationTask{}, "ImageGenerationTask"},
 		{&ImageGenerationReferenceAsset{}, "ImageGenerationReferenceAsset"},
 		{&ImageGenerationTaskReferenceAsset{}, "ImageGenerationTaskReferenceAsset"},

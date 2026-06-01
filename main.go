@@ -115,6 +115,9 @@ func main() {
 	// Image cleanup task (daily)
 	service.StartImageCleanupTask()
 
+	// Canvas asset cleanup task
+	service.StartCanvasAssetCleanupTask()
+
 	// Image generation worker pool
 	service.StartImageGenerationWorkerPool()
 

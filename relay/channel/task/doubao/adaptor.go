@@ -355,7 +355,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 	openAIVideo.SetMetadata("url", dResp.Content.VideoURL)
 	openAIVideo.CreatedAt = originTask.CreatedAt
 	openAIVideo.CompletedAt = originTask.UpdatedAt
-	openAIVideo.Model = originTask.Properties.OriginModelName
+	openAIVideo.Model = originTask.EffectiveOriginModelName()
 
 	if dResp.Status == "failed" {
 		openAIVideo.Error = &dto.OpenAIVideoError{

@@ -183,6 +183,43 @@ func TestInitCanvasDBsSplitModeMigratesDedicatedTables(t *testing.T) {
 	}
 }
 
+func TestInitCanvasDBsSplitModeReusesSharedDSNPool(t *testing.T) {
+	setupCanvasMessageStoreTestDB(t)
+
+	sharedChildDSN := fmt.Sprintf("file:%s_reuse?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	sharedChildDB, err := gorm.Open(sqlite.Open(sharedChildDSN), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to open child sqlite db: %v", err)
+	}
+	defer func() {
+		sqlDB, dbErr := sharedChildDB.DB()
+		if dbErr == nil {
+			_ = sqlDB.Close()
+		}
+	}()
+
+	openCount := 0
+	openCanvasMessagePostgresDBFunc = func(envName string, dsn string) (*gorm.DB, error) {
+		openCount++
+		return sharedChildDB, nil
+	}
+	t.Setenv("CANVAS_CHAT_SQL_DSN", "postgres://canvas-shared")
+	t.Setenv("CANVAS_IMAGE_SQL_DSN", "postgres://canvas-shared")
+	t.Setenv("CANVAS_VIDEO_SQL_DSN", "postgres://canvas-shared")
+
+	InitCanvasDBs()
+
+	if openCount != 1 {
+		t.Fatalf("expected one shared dedicated DB open for identical DSNs, got %d", openCount)
+	}
+	if CANVAS_CHAT_DB == nil || CANVAS_IMAGE_DB == nil || CANVAS_VIDEO_DB == nil {
+		t.Fatal("expected dedicated canvas DB handles to be initialized")
+	}
+	if CANVAS_CHAT_DB != CANVAS_IMAGE_DB || CANVAS_CHAT_DB != CANVAS_VIDEO_DB {
+		t.Fatal("expected identical dedicated DSNs to reuse the same gorm DB handle")
+	}
+}
+
 func TestInitCanvasDBsDisablesCanvasOnPartialConfig(t *testing.T) {
 	setupCanvasMessageStoreTestDB(t)
 

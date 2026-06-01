@@ -67,10 +67,10 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 
 	// 从原始任务推导模型名称
 	if info.OriginModelName == "" {
-		if originTask.Properties.OriginModelName != "" {
-			info.OriginModelName = originTask.Properties.OriginModelName
-		} else if originTask.Properties.UpstreamModelName != "" {
-			info.OriginModelName = originTask.Properties.UpstreamModelName
+		if originTask.EffectiveOriginModelName() != "" {
+			info.OriginModelName = originTask.EffectiveOriginModelName()
+		} else if originTask.EffectiveUpstreamModelName() != "" {
+			info.OriginModelName = originTask.EffectiveUpstreamModelName()
 		} else {
 			var taskData map[string]interface{}
 			_ = common.Unmarshal(originTask.Data, &taskData)

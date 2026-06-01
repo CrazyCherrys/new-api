@@ -61,6 +61,7 @@ func setupCanvasSessionServiceTestDB(t *testing.T) *gorm.DB {
 		&model.ModelMapping{},
 		&model.CanvasSession{},
 		&model.CanvasMessage{},
+		&model.CanvasAssetCleanupJob{},
 		&model.ImageGenerationTask{},
 		&model.ImageGenerationReferenceAsset{},
 		&model.ImageGenerationTaskReferenceAsset{},
@@ -2195,23 +2196,9 @@ func TestDeleteCanvasSessionSoftDeletesSessionMessagesAndAssociatedTasks(t *test
 	if err := db.Create(imageTask).Error; err != nil {
 		t.Fatalf("failed to create image task: %v", err)
 	}
-	videoTask := &model.Task{
-		UserId:     1,
-		TaskID:     "task_delete_video",
-		Action:     constant.TaskActionTextGenerate,
-		Status:     model.TaskStatusSuccess,
-		SubmitTime: common.GetTimestamp(),
-		Properties: model.Properties{
-			Input: "video",
-		},
-	}
-	if err := db.Create(videoTask).Error; err != nil {
-		t.Fatalf("failed to create video task: %v", err)
-	}
 	for _, msg := range []*model.CanvasMessage{
 		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleUser, Prompt: "image"},
 		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleAssistant, Prompt: "image", Status: model.ImageTaskStatusSuccess, TaskId: strconv.Itoa(imageTask.Id), TaskType: model.CanvasTaskTypeImage},
-		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeVideo, Role: model.CanvasMessageRoleAssistant, Prompt: "video", Status: dto.VideoStatusCompleted, TaskId: strconv.FormatInt(videoTask.ID, 10), TaskType: model.CanvasTaskTypeVideo},
 	} {
 		if err := model.CreateCanvasMessage(msg); err != nil {
 			t.Fatalf("failed to create canvas message: %v", err)
@@ -2224,12 +2211,12 @@ func TestDeleteCanvasSessionSoftDeletesSessionMessagesAndAssociatedTasks(t *test
 	if reloaded, err := model.GetCanvasSessionByID(1, session.Id); err != nil || reloaded != nil {
 		t.Fatalf("expected session to be soft deleted, got %#v err=%v", reloaded, err)
 	}
-	messages, err := model.ListCanvasMessages(1, session.Id)
+	messages, err := model.ListCanvasSessionMessageTaskRefsForMode(model.CanvasModeImage, 1, session.Id)
 	if err != nil {
-		t.Fatalf("failed to list messages after delete: %v", err)
+		t.Fatalf("failed to list message refs after delete: %v", err)
 	}
 	if len(messages) != 0 {
-		t.Fatalf("expected messages to be soft deleted, got %d", len(messages))
+		t.Fatalf("expected message refs to be soft deleted, got %d", len(messages))
 	}
 
 	var imageTaskCount int64
@@ -2239,12 +2226,82 @@ func TestDeleteCanvasSessionSoftDeletesSessionMessagesAndAssociatedTasks(t *test
 	if imageTaskCount != 0 {
 		t.Fatalf("expected associated image task to be deleted, count=%d", imageTaskCount)
 	}
-	var videoTaskCount int64
-	if err := db.Model(&model.Task{}).Where("id = ?", videoTask.ID).Count(&videoTaskCount).Error; err != nil {
-		t.Fatalf("failed to count video task: %v", err)
+}
+
+func TestDeleteCanvasSessionRollsBackWhenMessageSoftDeleteFails(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage, Title: "rollback"})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
 	}
-	if videoTaskCount != 0 {
-		t.Fatalf("expected associated video task to be deleted, count=%d", videoTaskCount)
+
+	imageTask := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-test",
+		Prompt:          "image rollback",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusSuccess,
+		CreatedTime:     common.GetTimestamp(),
+	}
+	if err := db.Create(imageTask).Error; err != nil {
+		t.Fatalf("failed to create image task: %v", err)
+	}
+	for _, msg := range []*model.CanvasMessage{
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleUser, Prompt: "image"},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleAssistant, Prompt: "image", Status: model.ImageTaskStatusSuccess, TaskId: strconv.Itoa(imageTask.Id), TaskType: model.CanvasTaskTypeImage},
+	} {
+		if err := model.CreateCanvasMessage(msg); err != nil {
+			t.Fatalf("failed to create canvas message: %v", err)
+		}
+	}
+
+	updateCallbackName := "fail_canvas_message_soft_delete"
+	if err := db.Callback().Update().Before("gorm:update").Register(updateCallbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "canvas_messages" {
+			tx.AddError(fmt.Errorf("boom"))
+		}
+	}); err != nil {
+		t.Fatalf("failed to register update callback: %v", err)
+	}
+	defer func() {
+		_ = db.Callback().Update().Remove(updateCallbackName)
+	}()
+
+	if err := DeleteCanvasSession(1, session.Id); err == nil {
+		t.Fatal("expected DeleteCanvasSession to fail when message soft delete fails")
+	}
+
+	reloadedSession, err := model.GetCanvasSessionByID(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload session: %v", err)
+	}
+	if reloadedSession == nil || reloadedSession.DeletedTime != 0 {
+		t.Fatalf("expected session deletion to roll back, got %#v", reloadedSession)
+	}
+
+	messages, err := model.ListCanvasSessionMessageTaskRefsForMode(model.CanvasModeImage, 1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to list message refs after rollback: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected messages to remain visible after rollback, got %d", len(messages))
+	}
+
+	var imageTaskCount int64
+	if err := db.Model(&model.ImageGenerationTask{}).Where("id = ?", imageTask.Id).Count(&imageTaskCount).Error; err != nil {
+		t.Fatalf("failed to count image task after rollback: %v", err)
+	}
+	if imageTaskCount != 1 {
+		t.Fatalf("expected image task deletion to roll back, count=%d", imageTaskCount)
+	}
+
+	var cleanupJobCount int64
+	if err := db.Model(&model.CanvasAssetCleanupJob{}).Count(&cleanupJobCount).Error; err != nil {
+		t.Fatalf("failed to count cleanup jobs after rollback: %v", err)
+	}
+	if cleanupJobCount != 0 {
+		t.Fatalf("expected cleanup job creation to roll back, count=%d", cleanupJobCount)
 	}
 }
 
@@ -2322,5 +2379,220 @@ func TestDeleteCanvasSessionRejectsRunningChatGeneration(t *testing.T) {
 	}
 	if reloaded == nil {
 		t.Fatal("chat session should remain when deletion is rejected")
+	}
+}
+
+func TestDeleteCanvasSessionBatchesAssociatedTaskLookupsAndDeletes(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage, Title: "batched delete"})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	imageTaskIDs := make([]int, 0, 3)
+	for index := 0; index < 3; index++ {
+		task := &model.ImageGenerationTask{
+			UserId:          1,
+			ModelId:         "gpt-image-test",
+			Prompt:          fmt.Sprintf("image-%d", index),
+			RequestEndpoint: "openai",
+			Status:          model.ImageTaskStatusSuccess,
+			CreatedTime:     common.GetTimestamp(),
+		}
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create image task: %v", err)
+		}
+		imageTaskIDs = append(imageTaskIDs, task.Id)
+		if err := model.CreateCanvasMessage(&model.CanvasMessage{
+			SessionId: session.Id,
+			UserId:    1,
+			Mode:      model.CanvasModeImage,
+			Role:      model.CanvasMessageRoleAssistant,
+			Prompt:    task.Prompt,
+			Status:    model.ImageTaskStatusSuccess,
+			TaskId:    strconv.Itoa(task.Id),
+			TaskType:  model.CanvasTaskTypeImage,
+		}); err != nil {
+			t.Fatalf("failed to create image canvas message: %v", err)
+		}
+	}
+
+	queryCallbackName := "count_canvas_delete_task_queries"
+	deleteCallbackName := "count_canvas_delete_task_deletes"
+	imageTaskQueries := 0
+	imageTaskDeletes := 0
+	if err := db.Callback().Query().Before("gorm:query").Register(queryCallbackName, func(tx *gorm.DB) {
+		if tx.Statement == nil {
+			return
+		}
+		switch tx.Statement.Table {
+		case "image_generation_tasks":
+			imageTaskQueries++
+		}
+	}); err != nil {
+		t.Fatalf("failed to register query callback: %v", err)
+	}
+	if err := db.Callback().Delete().Before("gorm:delete").Register(deleteCallbackName, func(tx *gorm.DB) {
+		if tx.Statement == nil {
+			return
+		}
+		switch tx.Statement.Table {
+		case "image_generation_tasks":
+			imageTaskDeletes++
+		}
+	}); err != nil {
+		t.Fatalf("failed to register delete callback: %v", err)
+	}
+	defer func() {
+		_ = db.Callback().Query().Remove(queryCallbackName)
+		_ = db.Callback().Delete().Remove(deleteCallbackName)
+	}()
+
+	if err := DeleteCanvasSession(1, session.Id); err != nil {
+		t.Fatalf("DeleteCanvasSession returned error: %v", err)
+	}
+	if imageTaskQueries != 1 {
+		t.Fatalf("expected one batched image task query, got %d", imageTaskQueries)
+	}
+	if imageTaskDeletes != 1 {
+		t.Fatalf("expected one batched image task delete, got %d", imageTaskDeletes)
+	}
+
+	if reloaded, err := model.GetCanvasSessionByID(1, session.Id); err != nil || reloaded != nil {
+		t.Fatalf("expected session to be soft deleted, got %#v err=%v", reloaded, err)
+	}
+	messages, err := model.ListCanvasSessionMessageTaskRefsForMode(model.CanvasModeImage, 1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to list message refs after delete: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected message refs to be soft deleted, got %d", len(messages))
+	}
+	var imageTaskCount int64
+	if err := db.Model(&model.ImageGenerationTask{}).Where("id IN ?", imageTaskIDs).Count(&imageTaskCount).Error; err != nil {
+		t.Fatalf("failed to count image tasks: %v", err)
+	}
+	if imageTaskCount != 0 {
+		t.Fatalf("expected associated image tasks to be deleted, count=%d", imageTaskCount)
+	}
+}
+
+func TestDeleteCanvasSessionEnqueuesAssetCleanupJobs(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage, Title: "cleanup jobs"})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	imageTask := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-test",
+		Prompt:          "image cleanup",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusSuccess,
+		ImageUrl:        "/api/image-generation/files/image-generation/result/image.png",
+		ThumbnailUrl:    "/api/image-generation/files/image-generation/result/image-thumb.png",
+		Params:          `{"reference_images":["/api/image-generation/files/image-generation/reference/ref.png"]}`,
+		CreatedTime:     common.GetTimestamp(),
+	}
+	if err := db.Create(imageTask).Error; err != nil {
+		t.Fatalf("failed to create image task: %v", err)
+	}
+	for _, msg := range []*model.CanvasMessage{
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleAssistant, Prompt: "image", Status: model.ImageTaskStatusSuccess, TaskId: strconv.Itoa(imageTask.Id), TaskType: model.CanvasTaskTypeImage},
+	} {
+		if err := model.CreateCanvasMessage(msg); err != nil {
+			t.Fatalf("failed to create canvas message: %v", err)
+		}
+	}
+
+	if err := DeleteCanvasSession(1, session.Id); err != nil {
+		t.Fatalf("DeleteCanvasSession returned error: %v", err)
+	}
+
+	var jobs []*model.CanvasAssetCleanupJob
+	if err := db.Order("id asc").Find(&jobs).Error; err != nil {
+		t.Fatalf("failed to list cleanup jobs: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 cleanup job, got %d", len(jobs))
+	}
+	if jobs[0].Status != model.CanvasAssetCleanupJobStatusPending {
+		t.Fatalf("expected pending cleanup jobs, got %#v", jobs)
+	}
+
+	var imagePayload canvasImageAssetCleanupPayload
+	if err := common.UnmarshalJsonStr(jobs[0].Payload, &imagePayload); err != nil {
+		t.Fatalf("failed to unmarshal image cleanup payload: %v", err)
+	}
+	if imagePayload.TaskId != imageTask.Id || imagePayload.ImageURL != imageTask.ImageUrl {
+		t.Fatalf("unexpected image cleanup payload: %#v", imagePayload)
+	}
+}
+
+func TestDeleteCanvasVideoSessionDeletesAssociatedTaskAndEnqueuesCleanupJob(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeVideo, Title: "video cleanup"})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	videoTask := &model.Task{
+		UserId:     1,
+		TaskID:     "task_cleanup_video",
+		Action:     constant.TaskActionTextGenerate,
+		Status:     model.TaskStatusSuccess,
+		SubmitTime: common.GetTimestamp(),
+		Properties: model.Properties{
+			RequestParams: `{"image":"/api/image-generation/files/image-generation/reference/video-ref.png"}`,
+		},
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "/api/image-generation/files/image-generation/result/video.mp4",
+		},
+	}
+	if err := db.Create(videoTask).Error; err != nil {
+		t.Fatalf("failed to create video task: %v", err)
+	}
+	if err := model.CreateCanvasMessage(&model.CanvasMessage{
+		SessionId: session.Id,
+		UserId:    1,
+		Mode:      model.CanvasModeVideo,
+		Role:      model.CanvasMessageRoleAssistant,
+		Prompt:    "video",
+		Status:    dto.VideoStatusCompleted,
+		TaskId:    strconv.FormatInt(videoTask.ID, 10),
+		TaskType:  model.CanvasTaskTypeVideo,
+	}); err != nil {
+		t.Fatalf("failed to create video canvas message: %v", err)
+	}
+
+	if err := DeleteCanvasSession(1, session.Id); err != nil {
+		t.Fatalf("DeleteCanvasSession returned error: %v", err)
+	}
+
+	var jobs []*model.CanvasAssetCleanupJob
+	if err := db.Order("id asc").Find(&jobs).Error; err != nil {
+		t.Fatalf("failed to list cleanup jobs: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 cleanup job, got %d", len(jobs))
+	}
+
+	var videoPayload canvasVideoAssetCleanupPayload
+	if err := common.UnmarshalJsonStr(jobs[0].Payload, &videoPayload); err != nil {
+		t.Fatalf("failed to unmarshal video cleanup payload: %v", err)
+	}
+	if videoPayload.TaskId != videoTask.ID || videoPayload.ResultURL != videoTask.GetResultURL() {
+		t.Fatalf("unexpected video cleanup payload: %#v", videoPayload)
+	}
+
+	var videoTaskCount int64
+	if err := db.Model(&model.Task{}).Where("id = ?", videoTask.ID).Count(&videoTaskCount).Error; err != nil {
+		t.Fatalf("failed to count video task: %v", err)
+	}
+	if videoTaskCount != 0 {
+		t.Fatalf("expected associated video task to be deleted, count=%d", videoTaskCount)
 	}
 }

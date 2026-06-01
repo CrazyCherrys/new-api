@@ -100,9 +100,33 @@ func GetImageTasksByUserAndIDs(userId int, ids []int) ([]*ImageGenerationTask, e
 		return []*ImageGenerationTask{}, nil
 	}
 	var tasks []*ImageGenerationTask
-	err := DB.Where("user_id = ? AND id IN ?", userId, ids).
-		Find(&tasks).Error
+	err := forEachChunk(ids, func(chunk []int) error {
+		var partial []*ImageGenerationTask
+		if err := DB.Where("user_id = ? AND id IN ?", userId, chunk).
+			Find(&partial).Error; err != nil {
+			return err
+		}
+		tasks = append(tasks, partial...)
+		return nil
+	})
 	return tasks, err
+}
+
+func DeleteImageTasksByUserAndIDs(userId int, ids []int) error {
+	return DeleteImageTasksByUserAndIDsWithDB(DB, userId, ids)
+}
+
+func DeleteImageTasksByUserAndIDsWithDB(db *gorm.DB, userId int, ids []int) error {
+	if db == nil {
+		db = DB
+	}
+	if userId <= 0 || len(ids) == 0 {
+		return nil
+	}
+	return forEachChunk(ids, func(chunk []int) error {
+		return db.Where("user_id = ? AND id IN ?", userId, chunk).
+			Delete(&ImageGenerationTask{}).Error
+	})
 }
 
 // ImageTaskQueryParams 任务查询参数

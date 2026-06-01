@@ -97,9 +97,17 @@ import {
   getRenderableCanvasMessages,
 } from './canvasMessageBatches';
 import {
+  applyCanvasTaskUpdates,
+  buildCanvasChatRetryPromptMap,
+  buildCanvasMessageIndexes,
   mergeCanvasLatestTimelinePage,
   mergeCanvasMessagesById,
+  removeCanvasMessagesByRequestId,
+  replaceCanvasMessagesByRequestId,
   sortCanvasMessagesByCreated,
+  updateCanvasMessageById,
+  updateCanvasMessagesByTask,
+  upsertCanvasMessages,
 } from './canvasMessageTimeline';
 
 const { Text } = Typography;
@@ -224,6 +232,13 @@ const isDefaultTaskViewState = (state) =>
   state.sortBy === 'created_time' &&
   state.sortOrder === 'desc';
 
+const isDefaultVideoTaskViewState = (state) =>
+  !!state &&
+  state.page === 1 &&
+  !state.statusFilter &&
+  !state.modelFilter &&
+  !state.timeFilter;
+
 const areTasksVisuallyEquivalent = (oldTask, newTask) =>
   !!oldTask &&
   !!newTask &&
@@ -235,6 +250,19 @@ const areTasksVisuallyEquivalent = (oldTask, newTask) =>
   oldTask.started_time === newTask.started_time &&
   oldTask.progress === newTask.progress &&
   oldTask.error_message === newTask.error_message;
+
+const areVideoTasksVisuallyEquivalent = (oldTask, newTask) =>
+  !!oldTask &&
+  !!newTask &&
+  oldTask.id === newTask.id &&
+  oldTask.status === newTask.status &&
+  oldTask.thumbnail_url === newTask.thumbnail_url &&
+  oldTask.result_url === newTask.result_url &&
+  oldTask.video_url === newTask.video_url &&
+  oldTask.completed_time === newTask.completed_time &&
+  oldTask.started_time === newTask.started_time &&
+  oldTask.progress === newTask.progress &&
+  oldTask.fail_reason === newTask.fail_reason;
 
 const taskIsDeletable = (task) =>
   task?.status === 'success' || task?.status === 'failed';
@@ -781,6 +809,8 @@ const ImageGeneration = () => {
   const [videoTaskPageSize, setVideoTaskPageSize] = useState(
     DEFAULT_VIDEO_PAGE_SIZE,
   );
+  const [videoTaskHasMore, setVideoTaskHasMore] = useState(false);
+  const [videoTaskNextCursor, setVideoTaskNextCursor] = useState('');
   const [videoTaskStatusFilter, setVideoTaskStatusFilter] = useState('');
   const [videoTaskModelFilter, setVideoTaskModelFilter] = useState('');
   const [videoTaskTimeFilter, setVideoTaskTimeFilter] = useState('');
@@ -801,16 +831,23 @@ const ImageGeneration = () => {
   const pollingTimerRef = useRef(null);
   const pollingIntervalRef = useRef(DEFAULT_POLLING_INTERVAL_SECONDS);
   const taskListStateRef = useRef(null);
+  const videoTaskListStateRef = useRef(null);
   const taskListRequestSeqRef = useRef(0);
+  const videoTaskListRequestSeqRef = useRef(0);
   const taskDetailRequestSeqRef = useRef(0);
   const drawingModelsRequestSeqRef = useRef(0);
   const loadedModelsGroupRef = useRef('');
   const canvasMessagesRequestSeqRef = useRef(0);
   const canvasMessagesSessionIdRef = useRef(null);
+  const canvasMessageIndexesRef = useRef(buildCanvasMessageIndexes([]));
   const taskUpdatesCompletedSinceRef = useRef(
     Math.floor(Date.now() / 1000) - 60,
   );
+  const videoTaskUpdatesCompletedSinceRef = useRef(
+    Math.floor(Date.now() / 1000) - 60,
+  );
   const taskCursorHistoryRef = useRef(['']);
+  const videoTaskCursorHistoryRef = useRef(['']);
   const pendingCanvasPrefillRef = useRef(null);
   const prefillGroupFallbackNoticeShownRef = useRef(false);
   const composerComposingRef = useRef(false);
@@ -886,8 +923,36 @@ const ImageGeneration = () => {
     selectedCanvasSessionId,
     generationMode,
   );
-  const displayedCanvasMessages =
-    canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [];
+  const displayedCanvasMessages = useMemo(
+    () =>
+      canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [],
+    [canvasMessages, canvasMessagesSessionId, selectedCanvasSessionId],
+  );
+  const renderableCanvasMessages = useMemo(
+    () => getRenderableCanvasMessages(displayedCanvasMessages),
+    [displayedCanvasMessages],
+  );
+  const canvasChatRetryPromptByMessageId = useMemo(
+    () => buildCanvasChatRetryPromptMap(displayedCanvasMessages),
+    [displayedCanvasMessages],
+  );
+  const displayedCanvasReasoningMessages = useMemo(
+    () =>
+      generationMode === CANVAS_MODE_CHAT
+        ? displayedCanvasMessages.reduce((result, message) => {
+            if (message?.role !== 'assistant' || !message?.id) {
+              return result;
+            }
+            const display = extractCanvasChatReasoning(message);
+            if (!display.hasReasoning) {
+              return result;
+            }
+            result.push(message);
+            return result;
+          }, [])
+        : [],
+    [displayedCanvasMessages, generationMode],
+  );
   canvasMessagesRef.current = canvasMessages;
   const isCurrentCanvasMessageSession = (sessionId) =>
     String(canvasMessagesSessionIdRef.current || '') ===
@@ -1032,14 +1097,7 @@ const ImageGeneration = () => {
     }
 
     const nextReasoningMessages = new Map();
-    displayedCanvasMessages.forEach((message) => {
-      if (message?.role !== 'assistant' || !message?.id) {
-        return;
-      }
-      const display = extractCanvasChatReasoning(message);
-      if (!display.hasReasoning) {
-        return;
-      }
+    displayedCanvasReasoningMessages.forEach((message) => {
       nextReasoningMessages.set(String(message.id), message);
     });
 
@@ -1094,7 +1152,7 @@ const ImageGeneration = () => {
   }, [
     canvasMessagesSessionId,
     chatStreaming,
-    displayedCanvasMessages,
+    displayedCanvasReasoningMessages,
     generationMode,
   ]);
 
@@ -1103,9 +1161,8 @@ const ImageGeneration = () => {
       ([messageId, reasoningUiState]) => {
         const timerId =
           canvasChatReasoningAutoCollapseTimersRef.current.get(messageId);
-        const remainingMs = getCanvasChatReasoningAutoCollapseRemainingMs(
-          reasoningUiState,
-        );
+        const remainingMs =
+          getCanvasChatReasoningAutoCollapseRemainingMs(reasoningUiState);
 
         if (remainingMs === null) {
           if (timerId) {
@@ -1164,7 +1221,18 @@ const ImageGeneration = () => {
     sortBy: taskSortBy,
     sortOrder: taskSortOrder,
   };
+  videoTaskListStateRef.current = {
+    page: videoTaskPage,
+    pageSize: videoTaskPageSize,
+    statusFilter: videoTaskStatusFilter,
+    modelFilter: videoTaskModelFilter,
+    timeFilter: videoTaskTimeFilter,
+  };
   pollingIntervalRef.current = pollingIntervalSeconds;
+
+  useEffect(() => {
+    canvasMessageIndexesRef.current = buildCanvasMessageIndexes(canvasMessages);
+  }, [canvasMessages]);
 
   const taskMatchesTimeFilter = (task, timeFilter) => {
     if (!timeFilter) {
@@ -1497,6 +1565,9 @@ const ImageGeneration = () => {
 
   useEffect(() => {
     setVideoTaskPage(1);
+    setVideoTaskHasMore(false);
+    setVideoTaskNextCursor('');
+    videoTaskCursorHistoryRef.current = [''];
   }, [videoTaskStatusFilter, videoTaskModelFilter, videoTaskTimeFilter]);
 
   const loadImageGenerationGroups = async () => {
@@ -2061,7 +2132,7 @@ const ImageGeneration = () => {
     ) {
       return;
     }
-    setCanvasMessages((prev) => [...prev, ...messages]);
+    setCanvasMessages((prev) => mergeCanvasMessagesById(prev, messages));
   };
 
   const bumpChatStreamRenderVersion = () => {
@@ -2076,24 +2147,9 @@ const ImageGeneration = () => {
     ) {
       return;
     }
-    setCanvasMessages((prev) => {
-      const next = [...prev];
-      messages.forEach((message) => {
-        if (!message?.id) {
-          return;
-        }
-        const index = next.findIndex((item) => item?.id === message.id);
-        if (index < 0) {
-          next.push(message);
-          return;
-        }
-        next[index] = {
-          ...next[index],
-          ...message,
-        };
-      });
-      return next.sort(sortCanvasMessagesByCreated);
-    });
+    setCanvasMessages((prev) =>
+      upsertCanvasMessages(prev, messages, canvasMessageIndexesRef.current),
+    );
   };
 
   const appendCanvasChatDeltaForSession = (
@@ -2109,16 +2165,17 @@ const ImageGeneration = () => {
       return;
     }
     setCanvasMessages((prev) =>
-      prev.map((message) =>
-        message?.id === messageId
-          ? {
-              ...message,
-              prompt: `${String(message?.prompt || '')}${delta || ''}`,
-              reasoning_content: `${String(
-                message?.reasoning_content || '',
-              )}${reasoningDelta || ''}`,
-            }
-          : message,
+      updateCanvasMessageById(
+        prev,
+        messageId,
+        (message) => ({
+          ...message,
+          prompt: `${String(message?.prompt || '')}${delta || ''}`,
+          reasoning_content: `${String(
+            message?.reasoning_content || '',
+          )}${reasoningDelta || ''}`,
+        }),
+        canvasMessageIndexesRef.current,
       ),
     );
   };
@@ -2144,18 +2201,7 @@ const ImageGeneration = () => {
         message.canvas_aspect_ratio || options.canvasAspectRatio || '',
     }));
     setCanvasMessages((prev) => {
-      const insertionIndex = prev.findIndex(
-        (message) => message?.client_request_id === requestId,
-      );
-      const filtered = prev.filter(
-        (message) => message?.client_request_id !== requestId,
-      );
-      if (insertionIndex < 0) {
-        return [...filtered, ...nextMessages];
-      }
-      const before = filtered.slice(0, insertionIndex);
-      const after = filtered.slice(insertionIndex);
-      return [...before, ...nextMessages, ...after];
+      return replaceCanvasMessagesByRequestId(prev, requestId, nextMessages);
     });
   };
 
@@ -2169,7 +2215,7 @@ const ImageGeneration = () => {
       return;
     }
     setCanvasMessages((prev) =>
-      prev.filter((message) => message?.client_request_id !== requestId),
+      removeCanvasMessagesByRequestId(prev, requestId),
     );
   };
 
@@ -2675,8 +2721,8 @@ const ImageGeneration = () => {
       }
       if (res.data.success) {
         const newItems = res.data.data.items || [];
-        newItems.forEach((task) =>
-          updateCanvasMessageTask(task, CANVAS_MODE_IMAGE),
+        setCanvasMessages((prevMessages) =>
+          applyCanvasTaskUpdates(prevMessages, newItems, 'image'),
         );
         const hasTotal = Number.isFinite(res.data.data.total);
         const newTotal = hasTotal ? res.data.data.total : taskTotal;
@@ -2737,33 +2783,93 @@ const ImageGeneration = () => {
     }
   };
 
-  const loadVideoTasks = async () => {
-    setVideoLoadingTasks(true);
+  const loadVideoTasks = async (silent = false, options = {}) => {
+    const { forceRefresh = false } = options;
+    const queryState = videoTaskListStateRef.current || {
+      page: videoTaskPage,
+      pageSize: videoTaskPageSize,
+      statusFilter: videoTaskStatusFilter,
+      modelFilter: videoTaskModelFilter,
+      timeFilter: videoTaskTimeFilter,
+    };
+    const shouldAdvanceSeq = !silent || forceRefresh;
+    const requestSeq = shouldAdvanceSeq
+      ? videoTaskListRequestSeqRef.current + 1
+      : videoTaskListRequestSeqRef.current;
+    if (shouldAdvanceSeq) {
+      videoTaskListRequestSeqRef.current = requestSeq;
+    }
+    if (!silent) {
+      setVideoLoadingTasks(true);
+    }
     try {
       const params = {
-        p: videoTaskPage,
-        page_size: videoTaskPageSize,
+        p: queryState.page,
+        page_size: queryState.pageSize,
       };
-      if (videoTaskStatusFilter) {
-        params.status = videoTaskStatusFilter;
+      const cursorHistory = videoTaskCursorHistoryRef.current;
+      params.cursor = cursorHistory[queryState.page - 1] || '';
+      if (queryState.statusFilter) {
+        params.status = queryState.statusFilter;
       }
-      if (videoTaskModelFilter) {
-        params.model_id = videoTaskModelFilter;
+      if (queryState.modelFilter) {
+        params.model_id = queryState.modelFilter;
       }
-      const { start, end } = computeTimeRange(videoTaskTimeFilter);
+      const { start, end } = computeTimeRange(queryState.timeFilter);
       if (start > 0) {
         params.start_time = start;
         params.end_time = end;
       }
-      const res = await API.get('/api/video-generation/tasks', { params });
+      const res = await API.get('/api/video-generation/tasks', {
+        params,
+        timeout: TASK_LIST_REQUEST_TIMEOUT_MS,
+        skipErrorHandler: true,
+      });
+      if (requestSeq !== videoTaskListRequestSeqRef.current) {
+        return;
+      }
       if (res.data.success) {
         const newItems = res.data.data.items || [];
-        newItems.forEach((task) =>
-          updateCanvasMessageTask(task, CANVAS_MODE_VIDEO),
+        setCanvasMessages((prevMessages) =>
+          applyCanvasTaskUpdates(prevMessages, newItems, 'video'),
         );
+        const latestCompletedTime = newItems.reduce(
+          (latest, task) => {
+            const completedAt = Number(task?.completed_time) || 0;
+            return completedAt > latest ? completedAt : latest;
+          },
+          Number(videoTaskUpdatesCompletedSinceRef.current) || 0,
+        );
+        if (latestCompletedTime > videoTaskUpdatesCompletedSinceRef.current) {
+          videoTaskUpdatesCompletedSinceRef.current = latestCompletedTime;
+        }
+        const hasTotal = Number.isFinite(res.data.data.total);
         setVideoTaskListError('');
-        setVideoTasks(newItems);
-        setVideoTaskTotal(res.data.data.total || 0);
+        setVideoTasks((prev) => {
+          if (prev.length === newItems.length) {
+            const unchanged = newItems.every((newTask, index) =>
+              areVideoTasksVisuallyEquivalent(prev[index], newTask),
+            );
+            if (unchanged) {
+              return prev;
+            }
+          }
+          return newItems;
+        });
+        if (hasTotal) {
+          setVideoTaskTotal(res.data.data.total);
+        }
+        const nextCursor = res.data.data.next_cursor || '';
+        const nextCursorHistory = videoTaskCursorHistoryRef.current.slice(
+          0,
+          queryState.page,
+        );
+        if (nextCursor) {
+          nextCursorHistory[queryState.page] = nextCursor;
+        }
+        videoTaskCursorHistoryRef.current = nextCursorHistory;
+        setVideoTaskNextCursor(nextCursor);
+        setVideoTaskHasMore(res.data.data.has_more === true);
         setVideoSelectedTask((prev) => {
           if (prev && newItems.some((task) => task.id === prev.id)) {
             return {
@@ -2773,17 +2879,21 @@ const ImageGeneration = () => {
           }
           return prev || newItems[0] || null;
         });
-      } else {
+      } else if (!silent) {
         const message = res.data.message || t('加载视频任务列表失败');
         setVideoTaskListError(message);
         showError(message);
       }
     } catch (error) {
-      const message = error.message || t('加载视频任务列表失败');
-      setVideoTaskListError(message);
-      showError(message);
+      if (requestSeq === videoTaskListRequestSeqRef.current && !silent) {
+        const message = error.message || t('加载视频任务列表失败');
+        setVideoTaskListError(message);
+        showError(message);
+      }
     } finally {
-      setVideoLoadingTasks(false);
+      if (!silent && requestSeq === videoTaskListRequestSeqRef.current) {
+        setVideoLoadingTasks(false);
+      }
     }
   };
 
@@ -2794,35 +2904,102 @@ const ImageGeneration = () => {
     setTasks((prevTasks) =>
       mergeTaskCollections(prevTasks, updates, taskPageSize),
     );
-    updates.forEach((task) => updateCanvasMessageTask(task, CANVAS_MODE_IMAGE));
+    setCanvasMessages((prevMessages) =>
+      applyCanvasTaskUpdates(prevMessages, updates, 'image'),
+    );
+  };
+
+  const mergeVideoTaskUpdates = (updates) => {
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return;
+    }
+    setVideoTasks((prevTasks) =>
+      mergeTaskCollections(prevTasks, updates, videoTaskPageSize),
+    );
+    setVideoSelectedTask((prevTask) => {
+      if (!prevTask) {
+        return prevTask;
+      }
+      const updatedTask = updates.find((task) => task?.id === prevTask.id);
+      if (!updatedTask) {
+        return prevTask;
+      }
+      return {
+        ...prevTask,
+        ...updatedTask,
+      };
+    });
+    setCanvasMessages((prevMessages) =>
+      applyCanvasTaskUpdates(prevMessages, updates, 'video'),
+    );
+  };
+
+  const loadVideoTaskUpdates = async () => {
+    if (!isDefaultVideoTaskViewState(videoTaskListStateRef.current)) {
+      return;
+    }
+    const completedSince = Math.max(
+      1,
+      Number(videoTaskUpdatesCompletedSinceRef.current) || 0,
+    );
+
+    try {
+      const res = await API.get('/api/video-generation/tasks/updates', {
+        params: {
+          completed_since: completedSince,
+          limit: Math.max(
+            (videoTaskListStateRef.current?.pageSize || videoTaskPageSize) * 2,
+            50,
+          ),
+        },
+        timeout: TASK_LIST_REQUEST_TIMEOUT_MS,
+        skipErrorHandler: true,
+      });
+      if (!res.data.success) {
+        return;
+      }
+      const latestCompletedTime = (res.data.data?.items || []).reduce(
+        (latest, task) => {
+          const completedAt = Number(task?.completed_time) || 0;
+          return completedAt > latest ? completedAt : latest;
+        },
+        completedSince,
+      );
+      if (latestCompletedTime > videoTaskUpdatesCompletedSinceRef.current) {
+        videoTaskUpdatesCompletedSinceRef.current = latestCompletedTime;
+      }
+      mergeVideoTaskUpdates(res.data.data?.items || []);
+    } catch (error) {
+      console.error('Failed to load video task updates:', error);
+    }
   };
 
   const updateCanvasMessageTask = (updatedTask, mode) => {
     if (!updatedTask?.id) {
       return;
     }
+    const taskType =
+      mode === CANVAS_MODE_VIDEO ? 'video_generation' : 'image_generation';
     setCanvasMessages((prevMessages) =>
-      prevMessages.map((message) => {
-        if (
-          !message?.task_id ||
-          String(message.task_id) !== String(updatedTask.id)
-        ) {
-          return message;
-        }
-        const messageTaskType = getCanvasMessageTaskType(message);
-        if (
-          mode === CANVAS_MODE_VIDEO &&
-          messageTaskType !== 'video_generation'
-        ) {
-          return message;
-        }
-        if (
-          mode === CANVAS_MODE_IMAGE &&
-          messageTaskType !== 'image_generation'
-        ) {
-          return message;
-        }
-        if (mode === CANVAS_MODE_VIDEO) {
+      updateCanvasMessagesByTask(
+        prevMessages,
+        taskType,
+        updatedTask.id,
+        (message) => {
+          if (mode === CANVAS_MODE_VIDEO) {
+            return {
+              ...message,
+              status: updatedTask.status,
+              error_message:
+                updatedTask.error_message ||
+                updatedTask.fail_reason ||
+                message.error_message,
+              video_task: {
+                ...(message.video_task || {}),
+                ...updatedTask,
+              },
+            };
+          }
           return {
             ...message,
             status: updatedTask.status,
@@ -2830,40 +3007,33 @@ const ImageGeneration = () => {
               updatedTask.error_message ||
               updatedTask.fail_reason ||
               message.error_message,
-            video_task: {
-              ...(message.video_task || {}),
+            image_task: {
+              ...(message.image_task || {}),
               ...updatedTask,
             },
           };
-        }
-        return {
-          ...message,
-          status: updatedTask.status,
-          error_message:
-            updatedTask.error_message ||
-            updatedTask.fail_reason ||
-            message.error_message,
-          image_task: {
-            ...(message.image_task || {}),
-            ...updatedTask,
-          },
-        };
-      }),
+        },
+        canvasMessageIndexesRef.current,
+      ),
     );
   };
 
   const syncSelectedTaskFromCanvasMessages = (messages) => {
-    const taskMessages = (messages || []).filter((message) => message?.task_id);
-    const lastTaskMessage = taskMessages[taskMessages.length - 1];
-    if (!lastTaskMessage) {
-      return;
-    }
-    const taskType = getCanvasMessageTaskType(lastTaskMessage);
-    if (taskType === 'image_generation' && lastTaskMessage.image_task) {
-      setSelectedTask(lastTaskMessage.image_task);
-    }
-    if (taskType === 'video_generation' && lastTaskMessage.video_task) {
-      setVideoSelectedTask(lastTaskMessage.video_task);
+    const items = Array.isArray(messages) ? messages : [];
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const message = items[index];
+      if (!message?.task_id) {
+        continue;
+      }
+      const taskType = getCanvasMessageTaskType(message);
+      if (taskType === 'image_generation' && message.image_task) {
+        setSelectedTask(message.image_task);
+        return;
+      }
+      if (taskType === 'video_generation' && message.video_task) {
+        setVideoSelectedTask(message.video_task);
+        return;
+      }
     }
   };
 
@@ -3350,6 +3520,9 @@ const ImageGeneration = () => {
   const handleVideoTaskPageSizeChange = (nextPageSize) => {
     setVideoTaskPage(1);
     setVideoTaskPageSize(nextPageSize);
+    setVideoTaskHasMore(false);
+    setVideoTaskNextCursor('');
+    videoTaskCursorHistoryRef.current = [''];
   };
 
   // 全选/取消全选
@@ -3510,7 +3683,11 @@ const ImageGeneration = () => {
 
     pollingTimerRef.current = setInterval(() => {
       if (generationMode === CANVAS_MODE_VIDEO) {
-        loadVideoTasks();
+        if (isDefaultVideoTaskViewState(videoTaskListStateRef.current)) {
+          loadVideoTaskUpdates();
+          return;
+        }
+        loadVideoTasks(true);
         return;
       }
       if (generationMode !== CANVAS_MODE_IMAGE) {
@@ -3590,13 +3767,8 @@ const ImageGeneration = () => {
     setVideoTasks((prev) => {
       const index = prev.findIndex((task) => task.id === updatedTask.id);
       if (index === -1) {
-        if (
-          videoTaskPage === 1 &&
-          !videoTaskStatusFilter &&
-          !videoTaskModelFilter &&
-          !videoTaskTimeFilter
-        ) {
-          return [updatedTask, ...prev].slice(0, videoTaskPageSize);
+        if (isDefaultVideoTaskViewState(videoTaskListStateRef.current)) {
+          return mergeTaskCollections(prev, [updatedTask], videoTaskPageSize);
         }
         return prev;
       }
@@ -3608,10 +3780,7 @@ const ImageGeneration = () => {
       return next;
     });
     if (
-      videoTaskPage === 1 &&
-      !videoTaskStatusFilter &&
-      !videoTaskModelFilter &&
-      !videoTaskTimeFilter &&
+      isDefaultVideoTaskViewState(videoTaskListStateRef.current) &&
       !videoTasks.some((task) => task.id === updatedTask.id)
     ) {
       setVideoTaskTotal((prev) => prev + 1);
@@ -4575,16 +4744,18 @@ const ImageGeneration = () => {
       setVideoSelectedTask(newTask);
       if (
         newTask &&
-        videoTaskPage === 1 &&
-        !videoTaskStatusFilter &&
-        !videoTaskModelFilter &&
-        !videoTaskTimeFilter
+        isDefaultVideoTaskViewState(videoTaskListStateRef.current)
       ) {
-        setVideoTasks((prev) => [newTask, ...prev].slice(0, videoTaskPageSize));
+        setVideoTasks((prev) =>
+          mergeTaskCollections(prev, [newTask], videoTaskPageSize),
+        );
       } else {
         loadVideoTasks();
       }
-      if (newTask) {
+      if (
+        newTask &&
+        isDefaultVideoTaskViewState(videoTaskListStateRef.current)
+      ) {
         setVideoTaskTotal((prev) => prev + 1);
       }
     } catch (error) {
@@ -6865,7 +7036,9 @@ const ImageGeneration = () => {
                   {option.meta ? (
                     <span style={styles.dropdownOptionMetaWrap}>
                       <span>{option.label}</span>
-                      <span style={styles.dropdownOptionMeta}>{option.meta}</span>
+                      <span style={styles.dropdownOptionMeta}>
+                        {option.meta}
+                      </span>
                     </span>
                   ) : (
                     <span>{option.label}</span>
@@ -7858,10 +8031,11 @@ const ImageGeneration = () => {
     }
 
     setCanvasMessages((prev) =>
-      prev.map((item) =>
-        item.id === message.id
-          ? mergeCanvasMessageTaskDetail(item, detail)
-          : item,
+      updateCanvasMessageById(
+        prev,
+        message.id,
+        (item) => mergeCanvasMessageTaskDetail(item, detail),
+        canvasMessageIndexesRef.current,
       ),
     );
     setSelectedCanvasImagePreview({ src: detailSrc });
@@ -7905,37 +8079,7 @@ const ImageGeneration = () => {
   };
 
   const getCanvasChatRetryPrompt = (message) => {
-    const requestId = String(message?.client_request_id || '').trim();
-    if (requestId) {
-      const matchedUserMessage = displayedCanvasMessages.find(
-        (item) =>
-          item?.role === 'user' &&
-          String(item?.client_request_id || '').trim() === requestId,
-      );
-      const prompt = String(matchedUserMessage?.prompt || '').trim();
-      if (prompt) {
-        return prompt;
-      }
-    }
-
-    const messageIndex = displayedCanvasMessages.findIndex(
-      (item) => String(item?.id || '') === String(message?.id || ''),
-    );
-    if (messageIndex <= 0) {
-      return '';
-    }
-    for (let index = messageIndex - 1; index >= 0; index -= 1) {
-      if (displayedCanvasMessages[index]?.role !== 'user') {
-        continue;
-      }
-      const prompt = String(
-        displayedCanvasMessages[index]?.prompt || '',
-      ).trim();
-      if (prompt) {
-        return prompt;
-      }
-    }
-    return '';
+    return canvasChatRetryPromptByMessageId[String(message?.id || '')] || '';
   };
 
   const handleCopyCanvasChatMessage = async (event, message) => {
@@ -8204,10 +8348,11 @@ const ImageGeneration = () => {
                   return;
                 }
                 setCanvasMessages((prev) =>
-                  prev.map((item) =>
-                    item.id === message.id
-                      ? mergeCanvasMessageTaskDetail(item, detail)
-                      : item,
+                  updateCanvasMessageById(
+                    prev,
+                    message.id,
+                    (item) => mergeCanvasMessageTaskDetail(item, detail),
+                    canvasMessageIndexesRef.current,
                   ),
                 );
               }}
@@ -8336,16 +8481,19 @@ const ImageGeneration = () => {
         return;
       }
       setCanvasMessages((prev) =>
-        prev.map((item) =>
-          item.id === message.id
-            ? mergeCanvasMessageTaskDetail(item, detail)
-            : item,
+        updateCanvasMessageById(
+          prev,
+          message.id,
+          (item) => mergeCanvasMessageTaskDetail(item, detail),
+          canvasMessageIndexesRef.current,
         ),
       );
     };
 
     if (isChatMode) {
-      const chatStatus = String(message?.status || '').trim().toLowerCase();
+      const chatStatus = String(message?.status || '')
+        .trim()
+        .toLowerCase();
       const assistantDisplay = getCanvasChatMessageDisplay(message);
       const assistantText = assistantDisplay.content;
       const assistantReasoning = assistantDisplay.reasoningContent;
@@ -8370,10 +8518,12 @@ const ImageGeneration = () => {
       const reasoningTriggerText = hasAssistantReasoning
         ? getCanvasChatReasoningTriggerText(reasoningUiState)
         : '';
-      const hideAssistantTextWhileReasoning = shouldHideCanvasChatAssistantText({
-        hasReasoning: hasAssistantReasoning,
-        reasoningUiState,
-      });
+      const hideAssistantTextWhileReasoning = shouldHideCanvasChatAssistantText(
+        {
+          hasReasoning: hasAssistantReasoning,
+          reasoningUiState,
+        },
+      );
       const displayAssistantText = hideAssistantTextWhileReasoning
         ? ''
         : assistantText;
@@ -8681,9 +8831,7 @@ const ImageGeneration = () => {
             </Button>
           </div>
         ) : null}
-        {getRenderableCanvasMessages(displayedCanvasMessages).map(
-          renderCanvasMessage,
-        )}
+        {renderableCanvasMessages.map(renderCanvasMessage)}
       </div>
     );
   };
@@ -8925,7 +9073,9 @@ const ImageGeneration = () => {
                       action=''
                       accept='image/*'
                       multiple={false}
-                      fileList={videoReferenceImage ? [videoReferenceImage] : []}
+                      fileList={
+                        videoReferenceImage ? [videoReferenceImage] : []
+                      }
                       onChange={handleVideoReferenceUpload}
                       showUploadList={false}
                       beforeUpload={validateImageSize}
@@ -9488,9 +9638,7 @@ const ImageGeneration = () => {
               <span style={styles.selectModelOptionTitle}>
                 {label || value}
               </span>
-              <span style={styles.selectModelOptionMeta}>
-                {value}
-              </span>
+              <span style={styles.selectModelOptionMeta}>{value}</span>
               {unavailableReason ? (
                 <span style={styles.selectModelOptionMeta}>
                   {unavailableReason}
@@ -9514,7 +9662,9 @@ const ImageGeneration = () => {
               {optionNode?.label || optionNode?.value || t('请选择模型')}
             </span>
             {optionNode?.value ? (
-              <span style={styles.selectModelOptionMeta}>{optionNode.value}</span>
+              <span style={styles.selectModelOptionMeta}>
+                {optionNode.value}
+              </span>
             ) : null}
           </div>
         </div>

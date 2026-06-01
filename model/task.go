@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -42,24 +44,26 @@ const (
 )
 
 type Task struct {
-	ID         int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
-	CreatedAt  int64                 `json:"created_at" gorm:"index"`
-	UpdatedAt  int64                 `json:"updated_at"`
-	TaskID     string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
-	Platform   constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
-	UserId     int                   `json:"user_id" gorm:"index"`
-	Group      string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
-	ChannelId  int                   `json:"channel_id" gorm:"index"`
-	Quota      int                   `json:"quota"`
-	Action     string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
-	Status     TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
-	FailReason string                `json:"fail_reason"`
-	SubmitTime int64                 `json:"submit_time" gorm:"index"`
-	StartTime  int64                 `json:"start_time" gorm:"index"`
-	FinishTime int64                 `json:"finish_time" gorm:"index"`
-	Progress   string                `json:"progress" gorm:"type:varchar(20);index"`
-	Properties Properties            `json:"properties" gorm:"type:json"`
-	Username   string                `json:"username,omitempty" gorm:"-"`
+	ID                int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT;index:idx_tasks_user_action_submit_id,priority:4;index:idx_tasks_user_action_status_submit_id,priority:5;index:idx_tasks_user_action_status_finish_id,priority:5;index:idx_tasks_user_action_origin_model_id,priority:5;index:idx_tasks_user_action_upstream_model_id,priority:5"`
+	CreatedAt         int64                 `json:"created_at" gorm:"index"`
+	UpdatedAt         int64                 `json:"updated_at"`
+	TaskID            string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
+	Platform          constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
+	UserId            int                   `json:"user_id" gorm:"index;index:idx_tasks_user_action_submit_id,priority:1;index:idx_tasks_user_action_status_submit_id,priority:1;index:idx_tasks_user_action_status_finish_id,priority:1;index:idx_tasks_user_action_origin_model_id,priority:1;index:idx_tasks_user_action_upstream_model_id,priority:1"`
+	Group             string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
+	ChannelId         int                   `json:"channel_id" gorm:"index"`
+	Quota             int                   `json:"quota"`
+	Action            string                `json:"action" gorm:"type:varchar(40);index;index:idx_tasks_user_action_submit_id,priority:2;index:idx_tasks_user_action_status_submit_id,priority:2;index:idx_tasks_user_action_status_finish_id,priority:2;index:idx_tasks_user_action_origin_model_id,priority:2;index:idx_tasks_user_action_upstream_model_id,priority:2"` // 任务类型, song, lyrics, description-mode
+	Status            TaskStatus            `json:"status" gorm:"type:varchar(20);index;index:idx_tasks_user_action_status_submit_id,priority:3;index:idx_tasks_user_action_status_finish_id,priority:3"`                                                                                                                                                                  // 任务状态
+	FailReason        string                `json:"fail_reason"`
+	SubmitTime        int64                 `json:"submit_time" gorm:"index;index:idx_tasks_user_action_submit_id,priority:3;index:idx_tasks_user_action_status_submit_id,priority:4;index:idx_tasks_user_action_origin_model_id,priority:4;index:idx_tasks_user_action_upstream_model_id,priority:4"`
+	StartTime         int64                 `json:"start_time" gorm:"index"`
+	FinishTime        int64                 `json:"finish_time" gorm:"index;index:idx_tasks_user_action_status_finish_id,priority:4"`
+	Progress          string                `json:"progress" gorm:"type:varchar(20);index"`
+	OriginModelName   string                `json:"origin_model_name,omitempty" gorm:"type:varchar(191);index:idx_tasks_user_action_origin_model_id,priority:3"`
+	UpstreamModelName string                `json:"upstream_model_name,omitempty" gorm:"type:varchar(191);index:idx_tasks_user_action_upstream_model_id,priority:3"`
+	Properties        Properties            `json:"properties" gorm:"type:json"`
+	Username          string                `json:"username,omitempty" gorm:"-"`
 	// 禁止返回给用户，内部可能包含key等隐私信息
 	PrivateData TaskPrivateData `json:"-" gorm:"column:private_data;type:json"`
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
@@ -195,16 +199,18 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 	}
 
 	t := &Task{
-		TaskID:      taskID,
-		UserId:      relayInfo.UserId,
-		Group:       relayInfo.UsingGroup,
-		SubmitTime:  time.Now().Unix(),
-		Status:      TaskStatusNotStart,
-		Progress:    "0%",
-		ChannelId:   relayInfo.ChannelId,
-		Platform:    platform,
-		Properties:  properties,
-		PrivateData: privateData,
+		TaskID:            taskID,
+		UserId:            relayInfo.UserId,
+		Group:             relayInfo.UsingGroup,
+		SubmitTime:        time.Now().Unix(),
+		Status:            TaskStatusNotStart,
+		Progress:          "0%",
+		ChannelId:         relayInfo.ChannelId,
+		Platform:          platform,
+		OriginModelName:   properties.OriginModelName,
+		UpstreamModelName: properties.UpstreamModelName,
+		Properties:        properties,
+		PrivateData:       privateData,
 	}
 	return t
 }
@@ -402,6 +408,41 @@ func (Task *Task) Update() error {
 	return err
 }
 
+func (t *Task) EffectiveOriginModelName() string {
+	if t == nil {
+		return ""
+	}
+	value := strings.TrimSpace(t.OriginModelName)
+	if value != "" {
+		return value
+	}
+	return strings.TrimSpace(t.Properties.OriginModelName)
+}
+
+func (t *Task) EffectiveUpstreamModelName() string {
+	if t == nil {
+		return ""
+	}
+	value := strings.TrimSpace(t.UpstreamModelName)
+	if value != "" {
+		return value
+	}
+	return strings.TrimSpace(t.Properties.UpstreamModelName)
+}
+
+func (t *Task) syncModelFieldsFromProperties() {
+	if t == nil {
+		return
+	}
+	t.OriginModelName = strings.TrimSpace(t.Properties.OriginModelName)
+	t.UpstreamModelName = strings.TrimSpace(t.Properties.UpstreamModelName)
+}
+
+func (t *Task) BeforeSave(tx *gorm.DB) error {
+	t.syncModelFieldsFromProperties()
+	return nil
+}
+
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
 // Returns (true, nil) if this caller won the update, (false, nil) if
 // another process already moved the task out of fromStatus.
@@ -500,7 +541,7 @@ func (t *Task) ToOpenAIVideo() *dto.OpenAIVideo {
 	openAIVideo := dto.NewOpenAIVideo()
 	openAIVideo.ID = t.TaskID
 	openAIVideo.Status = t.Status.ToVideoStatus()
-	openAIVideo.Model = t.Properties.OriginModelName
+	openAIVideo.Model = t.EffectiveOriginModelName()
 	openAIVideo.SetProgressStr(t.Progress)
 	openAIVideo.CreatedAt = t.CreatedAt
 	openAIVideo.CompletedAt = t.UpdatedAt

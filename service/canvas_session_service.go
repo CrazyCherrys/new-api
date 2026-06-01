@@ -477,19 +477,30 @@ func DeleteCanvasSession(userId int, sessionId int) error {
 	if session == nil {
 		return fmt.Errorf("canvas session not found")
 	}
-	messages, err := model.ListCanvasMessagesForMode(session.Mode, userId, sessionId)
+	messageRefs, err := model.ListCanvasSessionMessageTaskRefsForMode(session.Mode, userId, sessionId)
 	if err != nil {
 		return err
 	}
 
-	for _, message := range messages {
-		if message != nil &&
-			message.Mode == model.CanvasModeChat &&
+	messageIDs := make([]int, 0, len(messageRefs))
+	imageTaskIDs := make([]int, 0)
+	videoTaskIDs := make([]int64, 0)
+	seenImageTaskIDs := make(map[int]struct{})
+	seenVideoTaskIDs := make(map[int64]struct{})
+
+	for _, message := range messageRefs {
+		if message == nil {
+			continue
+		}
+		if message.Id > 0 {
+			messageIDs = append(messageIDs, message.Id)
+		}
+		if session.Mode == model.CanvasModeChat &&
 			message.Role == model.CanvasMessageRoleAssistant &&
 			message.Status == model.CanvasMessageStatusGenerating {
 			return fmt.Errorf("running chat session cannot be deleted")
 		}
-		if message == nil || strings.TrimSpace(message.TaskId) == "" {
+		if strings.TrimSpace(message.TaskId) == "" {
 			continue
 		}
 		switch message.TaskType {
@@ -498,35 +509,77 @@ func DeleteCanvasSession(userId int, sessionId int) error {
 			if parseErr != nil {
 				return parseErr
 			}
-			task, err := model.GetImageTaskByID(taskID)
-			if err != nil {
-				return err
+			if taskID <= 0 {
+				continue
 			}
-			if task != nil && task.UserId == userId {
-				if task.Status == model.ImageTaskStatusPending || task.Status == model.ImageTaskStatusGenerating {
-					return fmt.Errorf("running task cannot be deleted")
-				}
-				if err := DeleteImageGenerationTask(task); err != nil {
-					return err
-				}
+			if _, ok := seenImageTaskIDs[taskID]; ok {
+				continue
 			}
+			seenImageTaskIDs[taskID] = struct{}{}
+			imageTaskIDs = append(imageTaskIDs, taskID)
 		case model.CanvasTaskTypeVideo:
 			taskID, parseErr := strconv.ParseInt(message.TaskId, 10, 64)
 			if parseErr != nil {
 				return parseErr
 			}
-			if err := deleteVideoGenerationTaskForCanvas(userId, taskID); err != nil {
-				return err
+			if taskID <= 0 {
+				continue
 			}
+			if _, ok := seenVideoTaskIDs[taskID]; ok {
+				continue
+			}
+			seenVideoTaskIDs[taskID] = struct{}{}
+			videoTaskIDs = append(videoTaskIDs, taskID)
 		}
 	}
 
-	deletedTime := common.GetTimestamp()
-	if err := model.SoftDeleteCanvasMessagesByMode(session.Mode, userId, sessionId, deletedTime); err != nil {
+	imageTasks, err := model.GetImageTasksByUserAndIDs(userId, imageTaskIDs)
+	if err != nil {
 		return err
 	}
-	if err := model.SoftDeleteCanvasSession(userId, sessionId, deletedTime); err != nil {
+	for _, task := range imageTasks {
+		if task == nil {
+			continue
+		}
+		if task.Status == model.ImageTaskStatusPending || task.Status == model.ImageTaskStatusGenerating {
+			return fmt.Errorf("running task cannot be deleted")
+		}
+	}
+
+	videoTasks, err := model.GetUserVideoTasksByIDs(userId, videoTaskIDs, nil)
+	if err != nil {
 		return err
+	}
+	for _, task := range videoTasks {
+		if task == nil {
+			continue
+		}
+		if task.Status == model.TaskStatusQueued || task.Status == model.TaskStatusInProgress || task.Status == model.TaskStatusSubmitted || task.Status == model.TaskStatusNotStart {
+			return fmt.Errorf("running task cannot be deleted")
+		}
+	}
+
+	cleanupJobs, err := buildCanvasAssetCleanupJobs(imageTasks, videoTasks)
+	if err != nil {
+		return err
+	}
+
+	deletedTime := common.GetTimestamp()
+	if model.CanvasUsesDedicatedMessageDBs() {
+		if err := model.SoftDeleteCanvasMessagesByIDs(session.Mode, userId, messageIDs, deletedTime); err != nil {
+			return err
+		}
+		if err := deleteCanvasSessionData(userId, sessionId, session.Mode, messageIDs, imageTasks, videoTasks, cleanupJobs, deletedTime); err != nil {
+			restoreErr := model.RestoreCanvasMessagesByIDs(session.Mode, userId, messageIDs)
+			if restoreErr != nil {
+				return fmt.Errorf("failed to delete canvas session data: %w (message restore also failed: %v)", err, restoreErr)
+			}
+			return err
+		}
+	} else {
+		if err := deleteCanvasSessionData(userId, sessionId, session.Mode, messageIDs, imageTasks, videoTasks, cleanupJobs, deletedTime); err != nil {
+			return err
+		}
 	}
 	InvalidateImageGenerationLocalAssetAccessCache()
 	return nil
@@ -765,30 +818,7 @@ func loadCanvasVideoTasksByID(userId int, messages []*model.CanvasMessage) (map[
 		common.SysLog(fmt.Sprintf("Failed to batch load canvas video tasks: %v", err))
 		return tasksByID, refsByID
 	}
-	modelIDs := make([]string, 0, len(tasks))
-	for _, task := range tasks {
-		if task == nil {
-			continue
-		}
-		modelID := extractVideoTaskModelID(task)
-		if strings.TrimSpace(modelID) == "" {
-			continue
-		}
-		modelIDs = append(modelIDs, modelID)
-	}
-	mappingsByModel := make(map[string]*model.ModelMapping, len(modelIDs))
-	mappings, mappingsErr := model.GetModelMappingsByRequestModels(modelIDs)
-	mappingsResolved := mappingsErr == nil
-	if mappingsErr != nil {
-		common.SysLog(fmt.Sprintf("Failed to batch load canvas video model mappings: %v", mappingsErr))
-	} else {
-		for _, mapping := range mappings {
-			if mapping == nil || strings.TrimSpace(mapping.RequestModel) == "" {
-				continue
-			}
-			mappingsByModel[strings.TrimSpace(mapping.RequestModel)] = mapping
-		}
-	}
+	mappingsByModel, mappingsResolved := loadVideoTaskMappingsByModelID(tasks)
 	for _, task := range tasks {
 		if task == nil {
 			continue
@@ -900,6 +930,54 @@ func deleteVideoGenerationTaskForCanvas(userId int, id int64) error {
 	}
 	deleteVideoTaskStoredAssets(task)
 	return model.DB.Delete(&model.Task{}, task.ID).Error
+}
+
+func deleteCanvasSessionData(userId int, sessionId int, messageMode string, messageIDs []int, imageTasks []*model.ImageGenerationTask, videoTasks []*model.Task, cleanupJobs []*model.CanvasAssetCleanupJob, deletedTime int64) error {
+	imageTaskIDs := make([]int, 0, len(imageTasks))
+	videoTaskIDs := make([]int64, 0, len(videoTasks))
+	queueSlotsToRelease := 0
+	for _, task := range imageTasks {
+		if task == nil || task.UserId != userId {
+			continue
+		}
+		imageTaskIDs = append(imageTaskIDs, task.Id)
+		if task.Status == model.ImageTaskStatusPending || task.Status == model.ImageTaskStatusGenerating {
+			queueSlotsToRelease++
+		}
+	}
+	for _, task := range videoTasks {
+		if task == nil || task.UserId != userId {
+			continue
+		}
+		videoTaskIDs = append(videoTaskIDs, task.ID)
+	}
+
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := model.CreateCanvasAssetCleanupJobsWithDB(tx, cleanupJobs); err != nil {
+			return err
+		}
+		if err := model.DeleteImageTasksByUserAndIDsWithDB(tx, userId, imageTaskIDs); err != nil {
+			return err
+		}
+		if err := model.DeleteUserVideoTasksByIDsWithDB(tx, userId, videoTaskIDs, nil); err != nil {
+			return err
+		}
+		if !model.CanvasUsesDedicatedMessageDBs() {
+			if err := model.SoftDeleteCanvasMessagesByIDsWithDB(tx, messageMode, userId, messageIDs, deletedTime); err != nil {
+				return err
+			}
+		}
+		return model.SoftDeleteCanvasSessionWithDB(tx, userId, sessionId, deletedTime)
+	}); err != nil {
+		return err
+	}
+
+	if queueSlotsToRelease > 0 {
+		if err := model.ReleaseUserImageGenerationQueueSlots(userId, queueSlotsToRelease); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to release image generation queue slots for user %d after canvas delete: %v", userId, err))
+		}
+	}
+	return nil
 }
 
 func validateCanvasSessionClearContextMessageID(userId int, sessionId int, messageID int) (int, error) {

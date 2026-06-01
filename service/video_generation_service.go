@@ -35,6 +35,14 @@ type VideoGenerationParams struct {
 	ReferenceImages []string `json:"reference_images"`
 }
 
+type VideoGenerationTaskPage struct {
+	Items      []*dto.VideoGenerationTaskSummary
+	Total      int64
+	HasTotal   bool
+	NextCursor string
+	HasMore    bool
+}
+
 func ListVideoGenerationModels() ([]*dto.VideoGenerationModel, error) {
 	mappings, _, err := model.GetActiveVideoModelMappings(0, 1000)
 	if err != nil {
@@ -150,7 +158,7 @@ func CreateVideoGenerationTask(userId int, modelId string, prompt string, reques
 	return buildVideoTaskSummary(task), nil
 }
 
-func ListVideoGenerationTasks(userId int, page int, pageSize int, status string, modelID string, startTime int64, endTime int64) ([]*dto.VideoGenerationTaskSummary, int64, error) {
+func ListVideoGenerationTasks(userId int, page int, pageSize int, cursor string, status string, modelID string, startTime int64, endTime int64) (*VideoGenerationTaskPage, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -158,21 +166,58 @@ func ListVideoGenerationTasks(userId int, page int, pageSize int, status string,
 		pageSize = 20
 	}
 
-	items, total, err := model.GetUserVideoTasks(userId, (page-1)*pageSize, pageSize, model.VideoTaskQueryParams{
+	queryParams := model.VideoTaskQueryParams{
 		Status:         normalizeVideoTaskStatus(status),
 		ModelID:        modelID,
 		StartTimestamp: startTime,
 		EndTimestamp:   endTime,
-	}, nil)
-	if err != nil {
-		return nil, 0, err
 	}
 
+	var taskPage *model.VideoTaskPage
+	var err error
+	if strings.TrimSpace(cursor) != "" {
+		taskPage, err = model.GetUserVideoTasksByCursor(userId, cursor, pageSize, queryParams, nil)
+	} else {
+		taskPage, err = model.GetUserVideoTasks(userId, (page-1)*pageSize, pageSize, queryParams, nil)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	mappingsByModel, mappingsResolved := loadVideoTaskMappingsByModelID(taskPage.Items)
+	result := make([]*dto.VideoGenerationTaskSummary, 0, len(taskPage.Items))
+	for _, task := range taskPage.Items {
+		result = append(result, buildVideoTaskSummaryWithResolvedMapping(
+			task,
+			mappingsByModel[extractVideoTaskModelID(task)],
+			mappingsResolved,
+		))
+	}
+	return &VideoGenerationTaskPage{
+		Items:      result,
+		Total:      taskPage.Total,
+		HasTotal:   taskPage.HasTotal,
+		NextCursor: taskPage.NextCursor,
+		HasMore:    taskPage.HasMore,
+	}, nil
+}
+
+func ListVideoGenerationTaskUpdates(userId int, completedSince int64, limit int) ([]*dto.VideoGenerationTaskSummary, error) {
+	items, err := model.GetUserVideoTaskUpdates(userId, completedSince, limit, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	mappingsByModel, mappingsResolved := loadVideoTaskMappingsByModelID(items)
 	result := make([]*dto.VideoGenerationTaskSummary, 0, len(items))
 	for _, task := range items {
-		result = append(result, buildVideoTaskSummary(task))
+		result = append(result, buildVideoTaskSummaryWithResolvedMapping(
+			task,
+			mappingsByModel[extractVideoTaskModelID(task)],
+			mappingsResolved,
+		))
 	}
-	return result, total, nil
+	return result, nil
 }
 
 func GetVideoGenerationTaskDetail(userId int, identifier string) (*dto.VideoGenerationTaskDetail, error) {
@@ -192,10 +237,7 @@ func RetryVideoGenerationTask(userId int, id int64) (*dto.VideoGenerationTaskSum
 		return nil, fmt.Errorf("task %d is not failed", id)
 	}
 
-	modelID := strings.TrimSpace(task.Properties.OriginModelName)
-	if modelID == "" {
-		modelID = strings.TrimSpace(task.Properties.UpstreamModelName)
-	}
+	modelID := extractVideoTaskModelID(task)
 	if modelID == "" {
 		return nil, fmt.Errorf("task %d is missing model info", id)
 	}
@@ -522,6 +564,38 @@ func buildVideoTaskSummaryWithMapping(task *model.Task, mapping *model.ModelMapp
 	return buildVideoTaskSummaryWithResolvedMapping(task, mapping, false)
 }
 
+func loadVideoTaskMappingsByModelID(tasks []*model.Task) (map[string]*model.ModelMapping, bool) {
+	modelIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		modelID := extractVideoTaskModelID(task)
+		if strings.TrimSpace(modelID) == "" {
+			continue
+		}
+		modelIDs = append(modelIDs, modelID)
+	}
+
+	mappingsByModel := make(map[string]*model.ModelMapping, len(modelIDs))
+	if len(modelIDs) == 0 {
+		return mappingsByModel, true
+	}
+
+	mappings, err := model.GetModelMappingsByRequestModels(modelIDs)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("Failed to batch load video model mappings: %v", err))
+		return mappingsByModel, false
+	}
+	for _, mapping := range mappings {
+		if mapping == nil || strings.TrimSpace(mapping.RequestModel) == "" {
+			continue
+		}
+		mappingsByModel[strings.TrimSpace(mapping.RequestModel)] = mapping
+	}
+	return mappingsByModel, true
+}
+
 func buildVideoTaskSummaryWithResolvedMapping(task *model.Task, mapping *model.ModelMapping, mappingResolved bool) *dto.VideoGenerationTaskSummary {
 	if task == nil {
 		return nil
@@ -572,9 +646,9 @@ func extractVideoTaskModelID(task *model.Task) string {
 	if task == nil {
 		return ""
 	}
-	modelID := strings.TrimSpace(task.Properties.OriginModelName)
+	modelID := task.EffectiveOriginModelName()
 	if modelID == "" {
-		modelID = strings.TrimSpace(task.Properties.UpstreamModelName)
+		modelID = task.EffectiveUpstreamModelName()
 	}
 	return modelID
 }

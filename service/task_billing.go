@@ -144,7 +144,7 @@ func taskModelName(task *model.Task) string {
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.OriginModelName != "" {
 		return bc.OriginModelName
 	}
-	return task.Properties.OriginModelName
+	return task.EffectiveOriginModelName()
 }
 
 // RefundTaskQuota 统一的任务失败退款逻辑。

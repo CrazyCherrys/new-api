@@ -27,9 +27,9 @@ const (
 )
 
 type CanvasSession struct {
-	Id                      int     `json:"id" gorm:"primaryKey"`
-	UserId                  int     `json:"user_id" gorm:"index:idx_canvas_sessions_user_mode_deleted,priority:1;index:idx_canvas_sessions_user_updated,priority:1;not null"`
-	Mode                    string  `json:"mode" gorm:"size:16;index:idx_canvas_sessions_user_mode_deleted,priority:2;not null"`
+	Id                      int     `json:"id" gorm:"primaryKey;index:idx_canvas_sessions_user_deleted_pinned_updated,priority:5;index:idx_canvas_sessions_user_mode_deleted_pinned_updated,priority:6"`
+	UserId                  int     `json:"user_id" gorm:"index:idx_canvas_sessions_user_deleted_pinned_updated,priority:1;index:idx_canvas_sessions_user_mode_deleted_pinned_updated,priority:1;not null"`
+	Mode                    string  `json:"mode" gorm:"size:16;index:idx_canvas_sessions_user_mode_deleted_pinned_updated,priority:2;not null"`
 	Title                   string  `json:"title" gorm:"size:255;not null;default:''"`
 	CurrentModel            string  `json:"current_model" gorm:"size:255;not null;default:''"`
 	CurrentGroup            string  `json:"current_group" gorm:"size:64;not null;default:''"`
@@ -42,30 +42,30 @@ type CanvasSession struct {
 	SummaryPrompt           string  `json:"summary_prompt" gorm:"type:text"`
 	LastSummarizedMessageId int     `json:"last_summarized_message_id" gorm:"default:0"`
 	ClearContextMessageId   int     `json:"clear_context_message_id" gorm:"default:0"`
-	Pinned                  bool    `json:"pinned" gorm:"index;default:false"`
+	Pinned                  bool    `json:"pinned" gorm:"index:idx_canvas_sessions_user_deleted_pinned_updated,priority:3;index:idx_canvas_sessions_user_mode_deleted_pinned_updated,priority:4;default:false"`
 	TitleManuallySet        bool    `json:"title_manually_set" gorm:"default:false"`
 	CreatedTime             int64   `json:"created_time" gorm:"bigint;index"`
-	UpdatedTime             int64   `json:"updated_time" gorm:"bigint;index:idx_canvas_sessions_user_updated,priority:2"`
-	DeletedTime             int64   `json:"deleted_time" gorm:"bigint;index:idx_canvas_sessions_user_mode_deleted,priority:3;default:0"`
+	UpdatedTime             int64   `json:"updated_time" gorm:"bigint;index:idx_canvas_sessions_user_deleted_pinned_updated,priority:4;index:idx_canvas_sessions_user_mode_deleted_pinned_updated,priority:5"`
+	DeletedTime             int64   `json:"deleted_time" gorm:"bigint;index:idx_canvas_sessions_user_deleted_pinned_updated,priority:2;index:idx_canvas_sessions_user_mode_deleted_pinned_updated,priority:3;default:0"`
 }
 
 type CanvasMessage struct {
-	Id               int    `json:"id" gorm:"primaryKey"`
-	SessionId        int    `json:"session_id" gorm:"index:idx_canvas_messages_session_deleted_created,priority:1;not null"`
-	UserId           int    `json:"user_id" gorm:"index;not null"`
-	Mode             string `json:"mode" gorm:"size:16;index;not null"`
+	Id               int    `json:"id" gorm:"primaryKey;index:idx_canvas_messages_session_deleted_created,priority:4;index:idx_canvas_messages_session_status_deleted_created,priority:5"`
+	SessionId        int    `json:"session_id" gorm:"index:idx_canvas_messages_session_deleted_created,priority:1;index:idx_canvas_messages_session_status_deleted_created,priority:1;not null"`
+	UserId           int    `json:"user_id" gorm:"index;index:idx_canvas_messages_task_lookup,priority:1;not null"`
+	Mode             string `json:"mode" gorm:"size:16;index;index:idx_canvas_messages_task_lookup,priority:2;not null"`
 	Role             string `json:"role" gorm:"size:16;not null"`
 	Prompt           string `json:"prompt" gorm:"type:text"`
 	ReasoningContent string `json:"reasoning_content" gorm:"type:text"`
 	ClientRequestId  string `json:"client_request_id" gorm:"size:64;default:''"`
-	Status           string `json:"status" gorm:"size:32;index;default:''"`
-	TaskId           string `json:"task_id" gorm:"size:64;index;default:''"`
-	TaskType         string `json:"task_type" gorm:"size:32;index;default:''"`
+	Status           string `json:"status" gorm:"size:32;index;index:idx_canvas_messages_session_status_deleted_created,priority:2;default:''"`
+	TaskId           string `json:"task_id" gorm:"size:64;index;index:idx_canvas_messages_task_lookup,priority:4;default:''"`
+	TaskType         string `json:"task_type" gorm:"size:32;index;index:idx_canvas_messages_task_lookup,priority:3;default:''"`
 	Metadata         string `json:"metadata" gorm:"type:text"`
 	ErrorMessage     string `json:"error_message" gorm:"type:text"`
-	CreatedTime      int64  `json:"created_time" gorm:"bigint;index:idx_canvas_messages_session_deleted_created,priority:3"`
+	CreatedTime      int64  `json:"created_time" gorm:"bigint;index:idx_canvas_messages_session_deleted_created,priority:3;index:idx_canvas_messages_session_status_deleted_created,priority:4"`
 	UpdatedTime      int64  `json:"updated_time" gorm:"bigint"`
-	DeletedTime      int64  `json:"deleted_time" gorm:"bigint;index:idx_canvas_messages_session_deleted_created,priority:2;default:0"`
+	DeletedTime      int64  `json:"deleted_time" gorm:"bigint;index:idx_canvas_messages_session_deleted_created,priority:2;index:idx_canvas_messages_session_status_deleted_created,priority:3;index:idx_canvas_messages_task_lookup,priority:5;default:0"`
 }
 
 func NormalizeCanvasMode(mode string) string {
@@ -150,7 +150,14 @@ func TouchCanvasSession(userId int, id int) error {
 }
 
 func SoftDeleteCanvasSession(userId int, id int, deletedTime int64) error {
-	return DB.Model(&CanvasSession{}).
+	return SoftDeleteCanvasSessionWithDB(DB, userId, id, deletedTime)
+}
+
+func SoftDeleteCanvasSessionWithDB(db *gorm.DB, userId int, id int, deletedTime int64) error {
+	if db == nil {
+		db = DB
+	}
+	return db.Model(&CanvasSession{}).
 		Where("id = ? AND user_id = ? AND deleted_time = 0", id, userId).
 		Updates(map[string]interface{}{
 			"deleted_time": deletedTime,

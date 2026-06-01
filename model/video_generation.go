@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"gorm.io/gorm"
 )
 
 type VideoTaskQueryParams struct {
@@ -17,6 +18,16 @@ type VideoTaskQueryParams struct {
 	StartTimestamp int64
 	EndTimestamp   int64
 }
+
+type VideoTaskPage struct {
+	Items      []*Task
+	Total      int64
+	HasTotal   bool
+	NextCursor string
+	HasMore    bool
+}
+
+const videoTaskSummarySelectColumns = "id, task_id, action, status, progress, fail_reason, submit_time, start_time, finish_time, origin_model_name, upstream_model_name, properties, private_data, data"
 
 var defaultVideoTaskActions = []string{
 	constant.TaskActionGenerate,
@@ -30,51 +41,64 @@ func DefaultVideoTaskActions() []string {
 	return append([]string(nil), defaultVideoTaskActions...)
 }
 
-func GetUserVideoTasks(userId int, startIdx int, num int, queryParams VideoTaskQueryParams, actions []string) ([]*Task, int64, error) {
+func GetUserVideoTasks(userId int, startIdx int, num int, queryParams VideoTaskQueryParams, actions []string) (*VideoTaskPage, error) {
 	if len(actions) == 0 {
 		actions = DefaultVideoTaskActions()
 	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if num <= 0 {
+		num = 20
+	}
+	if num > 100 {
+		num = 100
+	}
 
-	query := DB.Model(&Task{}).Where("user_id = ?", userId).Where("action IN ?", actions)
-	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
+	query := buildUserVideoTaskQuery(userId, queryParams, actions)
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
 	}
-	if queryParams.StartTimestamp > 0 {
-		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
-	}
-	if queryParams.EndTimestamp > 0 {
-		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
+	if total == 0 || int64(startIdx) >= total {
+		return &VideoTaskPage{
+			Items:    []*Task{},
+			Total:    total,
+			HasTotal: true,
+		}, nil
 	}
 
 	var tasks []*Task
-	if err := query.Order("id DESC").Find(&tasks).Error; err != nil {
-		return nil, 0, err
+	pageQuery := query.Session(&gorm.Session{}).
+		Select(videoTaskSummarySelectColumns).
+		Order("submit_time DESC").
+		Order("id DESC")
+	if startIdx > 0 {
+		pageQuery = pageQuery.Offset(startIdx)
+	}
+	if err := pageQuery.Limit(num + 1).Find(&tasks).Error; err != nil {
+		return nil, err
 	}
 
-	if queryParams.ModelID != "" {
-		filtered := make([]*Task, 0, len(tasks))
-		for _, task := range tasks {
-			if task == nil {
-				continue
-			}
-			originModel := strings.TrimSpace(task.Properties.OriginModelName)
-			upstreamModel := strings.TrimSpace(task.Properties.UpstreamModelName)
-			if originModel == queryParams.ModelID || upstreamModel == queryParams.ModelID {
-				filtered = append(filtered, task)
-			}
-		}
-		tasks = filtered
+	hasMore := len(tasks) > num
+	if hasMore {
+		tasks = tasks[:num]
 	}
 
-	total := int64(len(tasks))
-	if startIdx >= len(tasks) {
-		return []*Task{}, total, nil
+	nextCursor := ""
+	if hasMore && len(tasks) > 0 {
+		lastTask := tasks[len(tasks)-1]
+		nextCursor = encodeVideoTaskCursor(lastTask.SubmitTime, lastTask.ID)
 	}
-	endIdx := startIdx + num
-	if endIdx > len(tasks) {
-		endIdx = len(tasks)
-	}
-	return tasks[startIdx:endIdx], total, nil
+
+	return &VideoTaskPage{
+		Items:      tasks,
+		Total:      total,
+		HasTotal:   true,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
 }
 
 func GetUserVideoTaskByID(userId int, id int64, actions []string) (*Task, error) {
@@ -116,9 +140,196 @@ func GetUserVideoTasksByIDs(userId int, ids []int64, actions []string) ([]*Task,
 		actions = DefaultVideoTaskActions()
 	}
 	var tasks []*Task
-	err := DB.Where("user_id = ? AND id IN ? AND action IN ?", userId, ids, actions).
-		Find(&tasks).Error
+	err := forEachChunk(ids, func(chunk []int64) error {
+		var partial []*Task
+		if err := DB.Where("user_id = ? AND id IN ? AND action IN ?", userId, chunk, actions).
+			Find(&partial).Error; err != nil {
+			return err
+		}
+		tasks = append(tasks, partial...)
+		return nil
+	})
 	return tasks, err
+}
+
+func DeleteUserVideoTasksByIDs(userId int, ids []int64, actions []string) error {
+	return DeleteUserVideoTasksByIDsWithDB(DB, userId, ids, actions)
+}
+
+func DeleteUserVideoTasksByIDsWithDB(db *gorm.DB, userId int, ids []int64, actions []string) error {
+	if db == nil {
+		db = DB
+	}
+	if userId <= 0 || len(ids) == 0 {
+		return nil
+	}
+	if len(actions) == 0 {
+		actions = DefaultVideoTaskActions()
+	}
+	return forEachChunk(ids, func(chunk []int64) error {
+		return db.Where("user_id = ? AND id IN ? AND action IN ?", userId, chunk, actions).
+			Delete(&Task{}).Error
+	})
+}
+
+func encodeVideoTaskCursor(submitTime int64, id int64) string {
+	if id <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", submitTime, id)
+}
+
+func decodeVideoTaskCursor(cursor string) (int64, int64, error) {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return 0, 0, nil
+	}
+
+	parts := strings.Split(cursor, ":")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid cursor")
+	}
+
+	submitTime, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid cursor")
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, 0, fmt.Errorf("invalid cursor")
+	}
+	return submitTime, id, nil
+}
+
+func applyVideoTaskCursor(query *gorm.DB, cursor string) (*gorm.DB, error) {
+	submitTime, id, err := decodeVideoTaskCursor(cursor)
+	if err != nil {
+		return nil, err
+	}
+	if id == 0 {
+		return query, nil
+	}
+	return query.Where("(submit_time < ?) OR (submit_time = ? AND id < ?)", submitTime, submitTime, id), nil
+}
+
+func GetUserVideoTasksByCursor(userId int, cursor string, num int, queryParams VideoTaskQueryParams, actions []string) (*VideoTaskPage, error) {
+	if len(actions) == 0 {
+		actions = DefaultVideoTaskActions()
+	}
+	if num <= 0 {
+		num = 20
+	}
+	if num > 100 {
+		num = 100
+	}
+
+	baseQuery := buildUserVideoTaskQuery(userId, queryParams, actions)
+
+	page := &VideoTaskPage{
+		Items:    []*Task{},
+		HasTotal: strings.TrimSpace(cursor) == "",
+	}
+	if page.HasTotal {
+		if err := baseQuery.Count(&page.Total).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	cursorQuery, err := applyVideoTaskCursor(baseQuery, cursor)
+	if err != nil {
+		return nil, err
+	}
+
+	var tasks []*Task
+	if err := cursorQuery.
+		Select(videoTaskSummarySelectColumns).
+		Order("submit_time DESC").
+		Order("id DESC").
+		Limit(num + 1).
+		Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+
+	page.HasMore = len(tasks) > num
+	if page.HasMore {
+		tasks = tasks[:num]
+	}
+	page.Items = tasks
+	if page.HasMore && len(tasks) > 0 {
+		lastTask := tasks[len(tasks)-1]
+		page.NextCursor = encodeVideoTaskCursor(lastTask.SubmitTime, lastTask.ID)
+	}
+	return page, nil
+}
+
+func GetUserVideoTaskUpdates(userId int, completedSince int64, limit int, actions []string) ([]*Task, error) {
+	if len(actions) == 0 {
+		actions = DefaultVideoTaskActions()
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	activeStatuses := []TaskStatus{
+		TaskStatusNotStart,
+		TaskStatusSubmitted,
+		TaskStatusQueued,
+		TaskStatusInProgress,
+	}
+	baseQuery := buildUserVideoTaskQuery(userId, VideoTaskQueryParams{}, actions)
+
+	var tasks []*Task
+	if err := baseQuery.Session(&gorm.Session{}).
+		Select(videoTaskSummarySelectColumns).
+		Where("status IN ?", activeStatuses).
+		Order("submit_time DESC").
+		Order("id DESC").
+		Limit(limit).
+		Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+
+	if completedSince <= 0 || len(tasks) >= limit {
+		return tasks, nil
+	}
+
+	var terminalTasks []*Task
+	if err := baseQuery.Session(&gorm.Session{}).
+		Select(videoTaskSummarySelectColumns).
+		Where("status IN ?", []TaskStatus{TaskStatusSuccess, TaskStatusFailure}).
+		Where("finish_time >= ?", completedSince).
+		Order("finish_time DESC").
+		Order("id DESC").
+		Limit(limit - len(tasks)).
+		Find(&terminalTasks).Error; err != nil {
+		return nil, err
+	}
+
+	return append(tasks, terminalTasks...), nil
+}
+
+func buildUserVideoTaskQuery(userId int, queryParams VideoTaskQueryParams, actions []string) *gorm.DB {
+	query := DB.Model(&Task{}).Where("user_id = ?", userId).Where("action IN ?", actions)
+	if queryParams.Status != "" {
+		query = query.Where("status = ?", queryParams.Status)
+	}
+	if queryParams.StartTimestamp > 0 {
+		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
+	}
+	if queryParams.EndTimestamp > 0 {
+		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
+	}
+	if strings.TrimSpace(queryParams.ModelID) == "" {
+		return query
+	}
+	return query.Where(
+		"origin_model_name = ? OR upstream_model_name = ?",
+		queryParams.ModelID,
+		queryParams.ModelID,
+	)
 }
 
 func ExtractTaskThumbnailURL(task *Task) string {

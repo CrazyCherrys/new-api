@@ -100,6 +100,7 @@ func SetApiRouter(router *gin.Engine) {
 			videoGenRoute.GET("/models", controller.GetVideoGenerationModels)
 			videoGenRoute.POST("/tasks", controller.CreateVideoGenerationTask)
 			videoGenRoute.GET("/tasks", controller.GetVideoGenerationTasks)
+			videoGenRoute.GET("/tasks/updates", controller.GetVideoGenerationTaskUpdates)
 			videoGenRoute.GET("/tasks/:id", controller.GetVideoGenerationTaskDetail)
 			videoGenRoute.POST("/tasks/:id/retry", controller.RetryVideoGenerationTask)
 			videoGenRoute.DELETE("/tasks/:id", controller.DeleteVideoGenerationTask)

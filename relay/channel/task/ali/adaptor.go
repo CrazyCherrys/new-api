@@ -495,7 +495,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	openAIResp := dto.NewOpenAIVideo()
 	openAIResp.ID = task.TaskID
 	openAIResp.Status = convertAliStatus(aliResp.Output.TaskStatus)
-	openAIResp.Model = task.Properties.OriginModelName
+	openAIResp.Model = task.EffectiveOriginModelName()
 	openAIResp.SetProgressStr(task.Progress)
 	openAIResp.CreatedAt = task.CreatedAt
 	openAIResp.CompletedAt = task.UpdatedAt
