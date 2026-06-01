@@ -31,78 +31,73 @@
   line-height: 1.7;
 }
 
-/* 用户消息样式 - 白色字体适配蓝色背景 */
-.user-message {
-  color: white !important;
+/* Playground 用户消息样式 */
+.playground-user-chat-bubble {
+  color: var(--semi-color-text-0) !important;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(249, 250, 251, 0.98) 100%
+  ) !important;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
 }
 
-.user-message .markdown-body {
-  color: white !important;
+.playground-user-chat-bubble .semi-typography,
+.playground-user-chat-bubble .semi-typography code {
+  color: var(--semi-color-text-0) !important;
 }
 
+.user-message,
+.user-message .markdown-body,
 .user-message h1,
 .user-message h2,
 .user-message h3,
 .user-message h4,
 .user-message h5,
-.user-message h6 {
-  color: white !important;
-}
-
-.user-message p {
-  color: white !important;
-}
-
-.user-message span {
-  color: white !important;
-}
-
-.user-message div {
-  color: white !important;
-}
-
-.user-message li {
-  color: white !important;
-}
-
+.user-message h6,
+.user-message p,
+.user-message span,
+.user-message div,
+.user-message ul,
+.user-message ol,
+.user-message li,
 .user-message td,
 .user-message th {
-  color: white !important;
+  color: var(--semi-color-text-0) !important;
 }
 
 .user-message blockquote {
-  color: white !important;
-  border-left-color: rgba(255, 255, 255, 0.5) !important;
-  background-color: rgba(255, 255, 255, 0.1) !important;
+  color: var(--semi-color-text-0) !important;
+  border-left-color: rgba(var(--semi-grey-8), 0.18) !important;
+  background-color: rgba(var(--semi-grey-1), 1) !important;
 }
 
 .user-message code:not(pre code) {
-  color: #000 !important;
-  background-color: rgba(255, 255, 255, 0.9) !important;
+  color: var(--semi-color-text-0) !important;
+  background-color: var(--semi-color-fill-1) !important;
 }
 
 .user-message a {
-  color: #87ceeb !important;
-  /* 浅蓝色链接 */
+  color: var(--semi-color-link) !important;
 }
 
 .user-message a:hover {
-  color: #b0e0e6 !important;
-  /* hover时更浅的蓝色 */
+  color: var(--semi-color-link-hover) !important;
 }
 
 /* 表格在用户消息中的样式 */
 .user-message table {
-  border-color: rgba(255, 255, 255, 0.3) !important;
+  border-color: var(--semi-color-border) !important;
 }
 
 .user-message th {
-  background-color: rgba(255, 255, 255, 0.2) !important;
-  border-color: rgba(255, 255, 255, 0.3) !important;
+  background-color: var(--semi-color-fill-1) !important;
+  border-color: var(--semi-color-border) !important;
 }
 
 .user-message td {
-  border-color: rgba(255, 255, 255, 0.3) !important;
+  border-color: var(--semi-color-border) !important;
 }
 
 /* 加载动画 */

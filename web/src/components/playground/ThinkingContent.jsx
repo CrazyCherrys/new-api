@@ -71,7 +71,7 @@ const ThinkingContent = ({
   }
 
   return (
-    <div className='rounded-xl sm:rounded-2xl mb-2 sm:mb-4 overflow-hidden shadow-sm backdrop-blur-sm'>
+    <div className='rounded-xl sm:rounded-2xl mb-2 sm:mb-4 overflow-hidden'>
       <div
         className='flex items-center justify-between p-3 cursor-pointer hover:bg-gradient-to-r hover:from-white/20 hover:to-purple-50/30 transition-all'
         style={{
@@ -148,20 +148,20 @@ const ThinkingContent = ({
           message.isReasoningExpanded
             ? 'max-h-96 opacity-100'
             : 'max-h-0 opacity-0'
-        } overflow-hidden bg-gradient-to-br from-purple-50 via-indigo-50 to-violet-50`}
+        } overflow-hidden bg-gradient-to-br from-violet-50/90 via-white to-indigo-50/80`}
       >
         {message.isReasoningExpanded && (
-          <div className='p-3 sm:p-5 pt-2 sm:pt-4'>
+          <div className='p-3 sm:p-5 pt-2 sm:pt-3'>
             <div
               ref={scrollRef}
-              className='bg-white/70 backdrop-blur-sm rounded-lg sm:rounded-xl p-2 shadow-inner overflow-x-auto overflow-y-auto thinking-content-scroll'
+              className='overflow-x-auto overflow-y-auto thinking-content-scroll px-1 sm:px-0'
               style={{
                 maxHeight: '200px',
                 scrollbarWidth: 'thin',
                 scrollbarColor: 'rgba(0, 0, 0, 0.3) transparent',
               }}
             >
-              <div className='prose prose-xs sm:prose-sm prose-purple max-w-none text-xs sm:text-sm'>
+              <div className='prose prose-xs sm:prose-sm prose-slate max-w-none text-xs sm:text-sm text-[var(--semi-color-text-1)]'>
                 <MarkdownRenderer
                   content={finalExtractedThinkingContent}
                   className=''

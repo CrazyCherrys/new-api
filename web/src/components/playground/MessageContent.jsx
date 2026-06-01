@@ -41,6 +41,12 @@ const MessageContent = ({
 
   const isThinkingStatus =
     message.status === 'loading' || message.status === 'incomplete';
+  const containerClassName = [
+    className,
+    message.role === 'user' ? 'playground-user-chat-bubble' : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   useEffect(() => {
     if (!isThinkingStatus) {
@@ -65,8 +71,15 @@ const MessageContent = ({
     }
 
     return (
-      <div className={`${className}`}>
-        <Typography.Text className='text-white'>{errorText}</Typography.Text>
+      <div className={containerClassName}>
+        <Typography.Text
+          style={{
+            color:
+              message.role === 'user' ? 'var(--semi-color-text-0)' : 'white',
+          }}
+        >
+          {errorText}
+        </Typography.Text>
       </div>
     );
   }
@@ -164,7 +177,6 @@ const MessageContent = ({
 
   const finalExtractedThinkingContent = currentExtractedThinkingContent;
   const finalDisplayableFinalContent = currentDisplayableFinalContent;
-
   if (
     message.role === 'assistant' &&
     isThinkingStatus &&
@@ -187,7 +199,7 @@ const MessageContent = ({
   }
 
   return (
-    <div className={className}>
+    <div className={containerClassName}>
       {message.role === 'system' && (
         <div className='mb-2 sm:mb-4'>
           <div
