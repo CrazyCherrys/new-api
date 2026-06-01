@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
+import { getLobeHubIcon } from './render';
 
 const MODEL_SERIES_DEFINITIONS = [
   {
@@ -162,6 +163,24 @@ const MODEL_SERIES_BY_KEY = MODEL_SERIES_DEFINITIONS.reduce((map, definition) =>
   return map;
 }, {});
 
+const MODEL_SERIES_LOBEHUB_ICON_MAP = {
+  openai: 'OpenAI',
+  anthropic: 'Claude.Color',
+  google: 'Gemini.Color',
+  zhipu: 'Zhipu.Color',
+  baidu: 'Wenxin.Color',
+  alibaba: 'Qwen.Color',
+  tencent: 'Hunyuan.Color',
+  xunfei: 'Spark.Color',
+  deepseek: 'DeepSeek.Color',
+  minimax: 'Minimax.Color',
+  moonshot: 'Moonshot',
+  doubao: 'Doubao.Color',
+  cohere: 'Cohere.Color',
+  mistral: 'Mistral.Color',
+  yi: 'Yi.Color',
+};
+
 const normalizeSeriesToken = (value) =>
   String(value || '')
     .trim()
@@ -247,6 +266,14 @@ export const getModelSeriesMeta = (value) => {
   };
 };
 
+export const getModelSeriesLobeHubIconName = (value) => {
+  const normalized = normalizeModelSeriesAlias(value);
+  if (!normalized) {
+    return '';
+  }
+  return MODEL_SERIES_LOBEHUB_ICON_MAP[normalized] || '';
+};
+
 export const formatModelSeriesLabel = (value, fallback = '-') => {
   const meta = getModelSeriesMeta(value);
   return meta.rawValue || meta.isKnown ? meta.displayName : fallback;
@@ -259,10 +286,13 @@ export const getModelSeriesOptionList = () =>
   }));
 
 const MODEL_SERIES_ICON_SIZES = {
-  small: { size: 18, fontSize: 9, borderRadius: 6 },
-  medium: { size: 22, fontSize: 10, borderRadius: 7 },
-  large: { size: 26, fontSize: 11, borderRadius: 8 },
+  small: { size: 18, graphicSize: 18, fontSize: 9, borderRadius: 6 },
+  medium: { size: 22, graphicSize: 20, fontSize: 10, borderRadius: 7 },
+  large: { size: 26, graphicSize: 24, fontSize: 11, borderRadius: 8 },
 };
+
+const getModelSeriesIconSizeConfig = (size) =>
+  MODEL_SERIES_ICON_SIZES[size] || MODEL_SERIES_ICON_SIZES.medium;
 
 export const ModelSeriesIcon = ({
   series,
@@ -272,7 +302,7 @@ export const ModelSeriesIcon = ({
 }) => {
   const meta = getModelSeriesMeta(series);
   const { size: iconSize, fontSize, borderRadius } =
-    MODEL_SERIES_ICON_SIZES[size] || MODEL_SERIES_ICON_SIZES.medium;
+    getModelSeriesIconSizeConfig(size);
 
   return (
     <span
@@ -298,6 +328,47 @@ export const ModelSeriesIcon = ({
       }}
     >
       {meta.shortLabel}
+    </span>
+  );
+};
+
+export const CanvasModelSeriesIcon = ({
+  series,
+  size = 'medium',
+  style = undefined,
+  title = undefined,
+}) => {
+  const meta = getModelSeriesMeta(series);
+  const iconName = getModelSeriesLobeHubIconName(series);
+  if (!iconName) {
+    return (
+      <ModelSeriesIcon
+        series={series}
+        size={size}
+        style={style}
+        title={title || meta.displayName}
+      />
+    );
+  }
+
+  const { size: slotSize, graphicSize } = getModelSeriesIconSizeConfig(size);
+  return (
+    <span
+      aria-hidden='true'
+      title={title || meta.displayName}
+      style={{
+        width: slotSize,
+        height: slotSize,
+        minWidth: slotSize,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flex: '0 0 auto',
+        lineHeight: 1,
+        ...style,
+      }}
+    >
+      {getLobeHubIcon(iconName, graphicSize || slotSize)}
     </span>
   );
 };
