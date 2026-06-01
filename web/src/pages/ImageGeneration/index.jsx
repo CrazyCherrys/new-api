@@ -109,6 +109,7 @@ import {
   updateCanvasMessagesByTask,
   upsertCanvasMessages,
 } from './canvasMessageTimeline';
+import './canvasComposer.css';
 
 const { Text } = Typography;
 
@@ -5737,24 +5738,22 @@ const ImageGeneration = () => {
       padding: isMobile ? '14px' : '18px',
     },
     promptArea: {
-      borderRadius: 18,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
-      boxShadow: '0 18px 44px rgba(15, 23, 42, 0.08)',
-      padding: isMobile ? '12px' : '14px',
+      width: '100%',
+      maxWidth: 900,
+      minHeight: 140,
+      margin: '0 auto',
+      borderRadius: 24,
       display: 'flex',
       flexDirection: 'column',
-      gap: 10,
+      gap: 0,
+      overflow: 'hidden',
     },
     promptInputShell: {
       display: 'flex',
       alignItems: 'flex-end',
-      gap: 10,
+      gap: isMobile ? 12 : 16,
       minWidth: 0,
-      borderRadius: 14,
-      background: 'var(--semi-color-bg-0)',
-      boxShadow: 'inset 0 0 0 1px rgba(148, 163, 184, 0.12)',
-      padding: isMobile ? '2px 2px 2px 12px' : '4px 4px 4px 14px',
+      padding: '24px 24px 14px',
     },
     promptInlineAssets: {
       display: 'flex',
@@ -5778,23 +5777,25 @@ const ImageGeneration = () => {
       background: 'transparent',
       resize: 'none',
       boxShadow: 'none',
-      color: 'var(--semi-color-text-0)',
-      caretColor: 'var(--semi-color-primary)',
-      fontSize: 15,
-      lineHeight: 1.65,
-      padding: '8px 0',
+      color: 'rgba(255, 255, 255, 0.92)',
+      caretColor: '#7C5CFF',
+      fontSize: 16,
+      lineHeight: 1.7,
+      padding: 0,
     },
     promptControls: {
       display: 'flex',
       justifyContent: 'space-between',
-      gap: 10,
+      gap: 12,
       alignItems: 'center',
       flexWrap: 'wrap',
+      minHeight: 56,
+      padding: '0 20px 20px',
     },
     promptControlsLeft: {
       display: 'flex',
       alignItems: 'center',
-      gap: 6,
+      gap: 12,
       flexWrap: 'wrap',
       minWidth: 0,
       flex: 1,
@@ -5817,28 +5818,31 @@ const ImageGeneration = () => {
       width: 32,
       height: 32,
       minWidth: 32,
-      borderRadius: 8,
-      border: '1px dashed var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
+      borderRadius: 10,
+      border: '1px solid rgba(255, 255, 255, 0.08)',
+      background: 'transparent',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       cursor: 'pointer',
-      color: 'var(--semi-color-text-2)',
-      transition: 'opacity 0.2s, border-color 0.2s, background 0.2s',
+      color: 'rgba(255, 255, 255, 0.62)',
+      transition: 'all 0.2s ease',
     },
     pillButton: {
+      height: 32,
       minHeight: 32,
-      borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
-      color: 'var(--semi-color-text-1)',
-      padding: '0 10px',
+      borderRadius: 10,
+      border: '1px solid rgba(255, 255, 255, 0.08)',
+      background: 'transparent',
+      color: 'rgba(255, 255, 255, 0.78)',
+      padding: '0 12px',
       display: 'inline-flex',
       alignItems: 'center',
       gap: 6,
       fontSize: 13,
+      fontWeight: 500,
       lineHeight: 1,
+      transition: 'all 0.2s ease',
     },
     pillButtonIconOnly: {
       width: 32,
@@ -5848,12 +5852,12 @@ const ImageGeneration = () => {
       gap: 0,
     },
     pillButtonActive: {
-      borderColor: 'var(--semi-color-primary-light-active)',
-      background: 'var(--semi-color-primary-light-default)',
-      color: 'var(--semi-color-primary)',
+      borderColor: 'rgba(124, 92, 255, 0.24)',
+      background: 'rgba(124, 92, 255, 0.12)',
+      color: '#efe9ff',
     },
     pillButtonMuted: {
-      color: 'var(--semi-color-text-2)',
+      color: 'rgba(255, 255, 255, 0.58)',
     },
     pillButtonIcon: {
       display: 'inline-flex',
@@ -6144,16 +6148,16 @@ const ImageGeneration = () => {
       width: 40,
       height: 40,
       minWidth: 40,
-      borderRadius: 12,
-      border: '1px solid var(--semi-color-border)',
+      borderRadius: 999,
+      border: '1px solid transparent',
       cursor: 'pointer',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
-      marginBottom: 4,
+      marginBottom: 2,
       transition:
-        'opacity 0.2s, background 0.2s, border-color 0.2s, color 0.2s',
+        'transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease',
     },
     generateStopIcon: {
       width: 12,
@@ -6239,7 +6243,7 @@ const ImageGeneration = () => {
     composerParameterRow: {
       display: 'flex',
       alignItems: 'center',
-      gap: 6,
+      gap: 12,
       flexWrap: 'wrap',
       minWidth: 0,
     },
@@ -6260,7 +6264,7 @@ const ImageGeneration = () => {
       height: isMobile ? 44 : 0,
       flexShrink: 0,
       borderBottom: 'none',
-      background: 'var(--semi-color-bg-0)',
+      background: '#0F1117',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -6279,7 +6283,7 @@ const ImageGeneration = () => {
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      background: 'var(--semi-color-bg-0)',
+      background: '#0F1117',
     },
     workspaceScrollPanel: {
       flex: 1,
@@ -6287,7 +6291,7 @@ const ImageGeneration = () => {
       overflowY: 'auto',
       display: 'flex',
       flexDirection: 'column',
-      background: 'var(--semi-color-bg-0)',
+      background: '#0F1117',
     },
     mainViewport: {
       width: '100%',
@@ -6300,7 +6304,7 @@ const ImageGeneration = () => {
       zIndex: 2,
       flexShrink: 0,
       borderTop: 'none',
-      background: 'var(--semi-color-bg-0)',
+      background: '#0F1117',
       padding: isMobile ? '6px 10px 10px' : '8px 18px 14px',
     },
     composerShell: {
@@ -6993,6 +6997,12 @@ const ImageGeneration = () => {
   }) => {
     const dropdownKey = key;
     const iconOnly = isMobile && !!icon;
+    const controlKind =
+      dropdownKey === 'composer-mode'
+        ? 'mode-switch'
+        : dropdownKey.includes('model')
+          ? 'model-selector'
+          : 'parameter';
     const buttonText = label
       ? `${label} ${displayValue || t('请选择')}`
       : displayValue || t('请选择');
@@ -7084,9 +7094,16 @@ const ImageGeneration = () => {
         }}
       >
         <button
+          className='canvas-composer-pill'
           type='button'
           aria-label={buttonText}
           title={buttonText}
+          data-composer-control-kind={controlKind}
+          data-composer-control-active={
+            value !== '' && value !== null && value !== undefined
+              ? 'true'
+              : 'false'
+          }
           style={{
             ...styles.pillButton,
             ...(iconOnly ? styles.pillButtonIconOnly : null),
@@ -7223,9 +7240,14 @@ const ImageGeneration = () => {
         }}
       >
         <button
+          className='canvas-composer-pill'
           type='button'
           aria-label={t('聊天设置')}
           title={t('聊天设置')}
+          data-composer-control-kind='parameter'
+          data-composer-control-active={
+            activeDropdownKey === dropdownKey ? 'true' : 'false'
+          }
           style={{
             ...styles.pillButton,
             ...(iconOnly ? styles.pillButtonIconOnly : null),
@@ -7380,9 +7402,14 @@ const ImageGeneration = () => {
         }}
       >
         <button
+          className='canvas-composer-pill'
           type='button'
           aria-label={buttonLabel}
           title={buttonLabel}
+          data-composer-control-kind='parameter'
+          data-composer-control-active={
+            displayParts.length > 0 ? 'true' : 'false'
+          }
           style={{
             ...styles.pillButton,
             ...(iconOnly ? styles.pillButtonIconOnly : null),
@@ -7524,12 +7551,15 @@ const ImageGeneration = () => {
         }}
       >
         <button
+          className='canvas-composer-pill'
           type='button'
           aria-label={buttonLabel}
           title={buttonLabel}
           data-canvas-model-selector={
             isVideoMode ? CANVAS_MODE_VIDEO : CANVAS_MODE_IMAGE
           }
+          data-composer-control-kind='model-selector'
+          data-composer-control-active={selectedModelItem ? 'true' : 'false'}
           style={{
             ...styles.pillButton,
             ...(iconOnly ? styles.pillButtonIconOnly : null),
@@ -8902,6 +8932,8 @@ const ImageGeneration = () => {
       : isVideoMode
         ? videoGenerating || !canGenerateVideo
         : generating || !canGenerate;
+    const submitEmphasis =
+      promptHasContent || (isChatMode && chatStreaming) ? 'primary' : 'idle';
     const placeholder = isChatMode
       ? t('输入消息...')
       : isVideoMode
@@ -8941,8 +8973,11 @@ const ImageGeneration = () => {
       title = t('上传图片'),
     } = {}) => (
       <div
+        className='canvas-composer-upload-btn'
         aria-label={title}
+        aria-disabled={disabled}
         title={title}
+        data-composer-control-kind='upload'
         style={{
           ...styles.uploadIconBtn,
           opacity: disabled ? 0.5 : 1,
@@ -8991,9 +9026,14 @@ const ImageGeneration = () => {
       selectedModelSupportsMaskEditing && referenceImages.length > 0 && (
         <button
           key='image-advanced'
+          className='canvas-composer-pill'
           type='button'
           aria-label={t('高级')}
           title={t('高级')}
+          data-composer-control-kind='parameter'
+          data-composer-control-active={
+            composerAdvancedVisible ? 'true' : 'false'
+          }
           style={{
             ...styles.pillButton,
             ...(isMobile ? styles.pillButtonIconOnly : null),
@@ -9043,12 +9083,22 @@ const ImageGeneration = () => {
         !!videoReferenceImage);
 
     return (
-      <div style={styles.composerDock}>
-        <div style={styles.composerShell} data-canvas-composer={generationMode}>
-          <div style={styles.promptArea}>
-            <div style={styles.promptInputShell}>
+      <div style={styles.composerDock} className='canvas-composer-dock'>
+        <div
+          style={styles.composerShell}
+          className='canvas-composer-shell'
+          data-canvas-composer={generationMode}
+        >
+          <div style={styles.promptArea} className='canvas-composer-card'>
+            <div
+              style={styles.promptInputShell}
+              className='canvas-composer-input-shell'
+            >
               {showPromptUploadEntry || hasInlineReferenceThumbs ? (
-                <div style={styles.promptLeadingSlot}>
+                <div
+                  style={styles.promptLeadingSlot}
+                  className='canvas-composer-leading-slot'
+                >
                   {isImageMode && selectedModelSupportsEditing ? (
                     <Upload
                       action=''
@@ -9087,7 +9137,10 @@ const ImageGeneration = () => {
                   (isVideoMode &&
                     videoSelectedModelSupportsImageToVideo &&
                     videoReferenceImage) ? (
-                    <div style={styles.promptInlineAssets}>
+                    <div
+                      style={styles.promptInlineAssets}
+                      className='canvas-composer-inline-assets'
+                    >
                       {isImageMode
                         ? referenceImages.map((file) =>
                             renderReferenceThumb(file, () =>
@@ -9109,6 +9162,7 @@ const ImageGeneration = () => {
               ) : null}
               <TextArea
                 aria-label={placeholder}
+                className='canvas-composer-input'
                 data-canvas-prompt-input={generationMode}
                 placeholder={placeholder}
                 value={activePrompt}
@@ -9132,6 +9186,7 @@ const ImageGeneration = () => {
                 style={styles.promptInput}
               />
               <button
+                className='canvas-composer-submit'
                 aria-label={
                   isChatMode
                     ? chatStreaming
@@ -9145,19 +9200,8 @@ const ImageGeneration = () => {
                   ...styles.generateIconBtnEmbedded,
                   opacity: submitDisabled ? 0.55 : 1,
                   pointerEvents: submitDisabled ? 'none' : 'auto',
-                  background:
-                    promptHasContent || (isChatMode && chatStreaming)
-                      ? 'var(--semi-color-primary)'
-                      : 'var(--semi-color-fill-0)',
-                  borderColor:
-                    promptHasContent || (isChatMode && chatStreaming)
-                      ? 'var(--semi-color-primary)'
-                      : 'var(--semi-color-border)',
-                  color:
-                    promptHasContent || (isChatMode && chatStreaming)
-                      ? '#fff'
-                      : 'var(--semi-color-text-2)',
                 }}
+                data-submit-emphasis={submitEmphasis}
                 onClick={handleComposerSubmit}
                 disabled={submitDisabled}
                 type='button'
@@ -9171,10 +9215,19 @@ const ImageGeneration = () => {
                 )}
               </button>
             </div>
-            <div style={styles.promptControls}>
-              <div style={styles.promptControlsLeft}>
+            <div
+              style={styles.promptControls}
+              className='canvas-composer-controls'
+            >
+              <div
+                style={styles.promptControlsLeft}
+                className='canvas-composer-controls-left'
+              >
                 {renderComposerModeSwitch()}
-                <div style={styles.composerParameterRow}>
+                <div
+                  style={styles.composerParameterRow}
+                  className='canvas-composer-parameter-row'
+                >
                   {activeParameters}
                 </div>
               </div>
@@ -9186,7 +9239,7 @@ const ImageGeneration = () => {
             composerAdvancedVisible ? (
               <div
                 style={{
-                  borderTop: '1px solid var(--semi-color-border)',
+                  borderTop: '1px solid rgba(255, 255, 255, 0.06)',
                   paddingTop: 10,
                   marginTop: 8,
                 }}
@@ -9196,7 +9249,7 @@ const ImageGeneration = () => {
                   style={{
                     display: 'block',
                     marginBottom: 8,
-                    color: 'var(--semi-color-text-2)',
+                    color: 'rgba(255, 255, 255, 0.56)',
                   }}
                 >
                   {t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
@@ -9850,8 +9903,12 @@ const ImageGeneration = () => {
           </div>
         </div>
       ) : null}
-      <div style={styles.workspaceBody}>
-        <div ref={canvasMessageViewportRef} style={styles.workspaceScrollPanel}>
+      <div style={styles.workspaceBody} className='canvas-workspace-body'>
+        <div
+          ref={canvasMessageViewportRef}
+          style={styles.workspaceScrollPanel}
+          className='canvas-workspace-scroll-panel'
+        >
           <div style={styles.mainViewport}>
             {generationMode === CANVAS_MODE_CHAT
               ? renderChatWorkspace()
