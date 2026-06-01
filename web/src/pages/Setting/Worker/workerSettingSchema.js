@@ -33,7 +33,7 @@ export const WORKER_SETTING_DEFAULTS = Object.freeze({
   'worker_setting.s3_path_prefix': '',
   'worker_setting.s3_url_mode': 'direct',
   'worker_setting.s3_public_base_url': '',
-  'worker_setting.result_storage_type': '',
+  'worker_setting.result_storage_type': 'local',
   'worker_setting.result_local_storage_path': '',
   'worker_setting.result_s3_endpoint': '',
   'worker_setting.result_s3_bucket': '',
@@ -43,7 +43,7 @@ export const WORKER_SETTING_DEFAULTS = Object.freeze({
   'worker_setting.result_s3_path_prefix': '',
   'worker_setting.result_s3_url_mode': '',
   'worker_setting.result_s3_public_base_url': '',
-  'worker_setting.reference_storage_type': '',
+  'worker_setting.reference_storage_type': 'local',
   'worker_setting.reference_local_storage_path': '',
   'worker_setting.reference_s3_endpoint': '',
   'worker_setting.reference_s3_bucket': '',
@@ -183,6 +183,31 @@ export function normalizeWorkerSettingInputs(rawOptions = {}) {
     }
     nextInputs[key] = normalizeWorkerSettingValue(key, rawOptions[key]);
   });
+
+  const hasExplicitResultStorageType =
+    Object.prototype.hasOwnProperty.call(
+      rawOptions,
+      'worker_setting.result_storage_type',
+    ) &&
+    String(rawOptions['worker_setting.result_storage_type'] || '').trim() !== '';
+  const hasExplicitReferenceStorageType =
+    Object.prototype.hasOwnProperty.call(
+      rawOptions,
+      'worker_setting.reference_storage_type',
+    ) &&
+    String(rawOptions['worker_setting.reference_storage_type'] || '').trim() !==
+      '';
+
+  if (!hasExplicitResultStorageType) {
+    nextInputs['worker_setting.result_storage_type'] =
+      nextInputs['worker_setting.storage_type'] || 'local';
+  }
+  if (!hasExplicitReferenceStorageType) {
+    nextInputs['worker_setting.reference_storage_type'] =
+      nextInputs['worker_setting.result_storage_type'] ||
+      nextInputs['worker_setting.storage_type'] ||
+      'local';
+  }
 
   return nextInputs;
 }
