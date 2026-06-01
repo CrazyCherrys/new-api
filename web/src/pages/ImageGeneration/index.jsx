@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Brain } from 'lucide-react';
 import {
   Select,
   Dropdown,
@@ -82,10 +83,19 @@ import {
   modelSupportsMaskEditing,
 } from './canvasRules';
 import {
+  areCanvasChatReasoningUiStatesEqual,
+  createCanvasChatReasoningUiState,
+  extractCanvasChatReasoning,
+  getCanvasChatReasoningAutoCollapseRemainingMs,
+  getCanvasChatReasoningTriggerText,
+  shouldAutoCollapseCanvasChatReasoning,
+  shouldHideCanvasChatAssistantText,
+  syncCanvasChatReasoningUiState,
+} from './canvasChatReasoning';
+import {
   CANVAS_RENDERABLE_IMAGE_BATCH,
   getRenderableCanvasMessages,
 } from './canvasMessageBatches';
-import { extractCanvasChatReasoning } from './canvasChatReasoning';
 
 const { Text } = Typography;
 
@@ -674,8 +684,8 @@ const ImageGeneration = () => {
   const [hoveredCanvasChatMessageId, setHoveredCanvasChatMessageId] =
     useState(null);
   const [
-    expandedCanvasReasoningMessageIds,
-    setExpandedCanvasReasoningMessageIds,
+    canvasChatReasoningUiStateByMessageId,
+    setCanvasChatReasoningUiStateByMessageId,
   ] = useState({});
 
   const [selectedSeries, setSelectedSeries] = useState(() =>
@@ -798,6 +808,7 @@ const ImageGeneration = () => {
   const chatStreamAbortRef = useRef(null);
   const chatStreamingMessageIdRef = useRef(null);
   const chatStreamingSessionIdRef = useRef(null);
+  const canvasChatReasoningAutoCollapseTimersRef = useRef(new Map());
   const generationModeRef = useRef(generationMode);
   const selectedCanvasSessionIdsRef = useRef(selectedCanvasSessionIds);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
@@ -966,6 +977,16 @@ const ImageGeneration = () => {
 
   useEffect(() => () => stopChatStream({ syncUI: false }), []);
 
+  useEffect(
+    () => () => {
+      canvasChatReasoningAutoCollapseTimersRef.current.forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
+      canvasChatReasoningAutoCollapseTimersRef.current.clear();
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!chatStreaming) {
       return;
@@ -987,8 +1008,141 @@ const ImageGeneration = () => {
     setSelectedCanvasMessageId(null);
     setHoveredCanvasChatMessageId(null);
     setHoveredCanvasSessionId(null);
-    setExpandedCanvasReasoningMessageIds({});
+    canvasChatReasoningAutoCollapseTimersRef.current.forEach((timerId) => {
+      window.clearTimeout(timerId);
+    });
+    canvasChatReasoningAutoCollapseTimersRef.current.clear();
+    setCanvasChatReasoningUiStateByMessageId({});
   }, [selectedCanvasSessionId, generationMode]);
+
+  useEffect(() => {
+    if (generationMode !== CANVAS_MODE_CHAT) {
+      return;
+    }
+
+    const nextReasoningMessages = new Map();
+    displayedCanvasMessages.forEach((message) => {
+      if (message?.role !== 'assistant' || !message?.id) {
+        return;
+      }
+      const display = extractCanvasChatReasoning(message);
+      if (!display.hasReasoning) {
+        return;
+      }
+      nextReasoningMessages.set(String(message.id), message);
+    });
+
+    setCanvasChatReasoningUiStateByMessageId((prev) => {
+      let changed = false;
+      let next = prev;
+      const now = Date.now();
+
+      nextReasoningMessages.forEach((message, messageId) => {
+        const previousState = prev[messageId] || null;
+        const syncedState = syncCanvasChatReasoningUiState({
+          message,
+          previousState,
+          hasReasoning: true,
+          isLiveMessage:
+            chatStreaming &&
+            String(chatStreamingSessionIdRef.current || '') ===
+              String(canvasMessagesSessionId || '') &&
+            String(chatStreamingMessageIdRef.current || '') === messageId,
+          now,
+        });
+
+        if (
+          syncedState &&
+          !areCanvasChatReasoningUiStatesEqual(previousState, syncedState)
+        ) {
+          if (!changed) {
+            next = {
+              ...prev,
+            };
+            changed = true;
+          }
+          next[messageId] = syncedState;
+        }
+      });
+
+      Object.keys(prev).forEach((messageId) => {
+        if (nextReasoningMessages.has(String(messageId))) {
+          return;
+        }
+        if (!changed) {
+          next = {
+            ...prev,
+          };
+          changed = true;
+        }
+        delete next[messageId];
+      });
+
+      return changed ? next : prev;
+    });
+  }, [
+    canvasMessagesSessionId,
+    chatStreaming,
+    displayedCanvasMessages,
+    generationMode,
+  ]);
+
+  useEffect(() => {
+    Object.entries(canvasChatReasoningUiStateByMessageId).forEach(
+      ([messageId, reasoningUiState]) => {
+        const timerId =
+          canvasChatReasoningAutoCollapseTimersRef.current.get(messageId);
+        const remainingMs = getCanvasChatReasoningAutoCollapseRemainingMs(
+          reasoningUiState,
+        );
+
+        if (remainingMs === null) {
+          if (timerId) {
+            window.clearTimeout(timerId);
+            canvasChatReasoningAutoCollapseTimersRef.current.delete(messageId);
+          }
+          return;
+        }
+
+        if (timerId) {
+          return;
+        }
+
+        const nextTimerId = window.setTimeout(() => {
+          canvasChatReasoningAutoCollapseTimersRef.current.delete(messageId);
+          setCanvasChatReasoningUiStateByMessageId((prev) => {
+            const currentState = prev[messageId];
+            if (!shouldAutoCollapseCanvasChatReasoning(currentState)) {
+              return prev;
+            }
+            return {
+              ...prev,
+              [messageId]: {
+                ...currentState,
+                isExpanded: false,
+                hasAutoCollapsed: true,
+              },
+            };
+          });
+        }, remainingMs);
+
+        canvasChatReasoningAutoCollapseTimersRef.current.set(
+          messageId,
+          nextTimerId,
+        );
+      },
+    );
+
+    canvasChatReasoningAutoCollapseTimersRef.current.forEach(
+      (timerId, messageId) => {
+        if (canvasChatReasoningUiStateByMessageId[messageId]) {
+          return;
+        }
+        window.clearTimeout(timerId);
+        canvasChatReasoningAutoCollapseTimersRef.current.delete(messageId);
+      },
+    );
+  }, [canvasChatReasoningUiStateByMessageId]);
 
   useEffect(() => {
     if (
@@ -6054,10 +6208,11 @@ const ImageGeneration = () => {
     },
     canvasChatReasoningWrap: {
       width: '100%',
-      borderRadius: 12,
+      borderRadius: 14,
       border: '1px solid rgba(15, 23, 42, 0.08)',
-      background: 'rgba(248, 250, 252, 0.9)',
+      background: 'rgba(248, 250, 252, 0.92)',
       overflow: 'hidden',
+      boxShadow: '0 6px 18px rgba(15, 23, 42, 0.04)',
     },
     canvasChatReasoningToggle: {
       width: '100%',
@@ -6071,21 +6226,47 @@ const ImageGeneration = () => {
       cursor: 'pointer',
       color: 'var(--semi-color-text-1)',
     },
+    canvasChatReasoningToggleLead: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      minWidth: 0,
+      flex: 1,
+    },
+    canvasChatReasoningIcon: {
+      width: 22,
+      height: 22,
+      borderRadius: 999,
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'var(--semi-color-primary)',
+      background: 'rgba(46, 92, 255, 0.12)',
+      flexShrink: 0,
+    },
     canvasChatReasoningToggleText: {
       fontSize: 13,
       fontWeight: 600,
       color: 'inherit',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    },
+    canvasChatReasoningToggleArrow: {
+      color: 'var(--semi-color-text-2)',
+      flexShrink: 0,
     },
     canvasChatReasoningPanel: {
       borderTop: '1px solid rgba(15, 23, 42, 0.08)',
       padding: isMobile ? '10px 12px 12px' : '10px 14px 14px',
-      background: 'rgba(255, 255, 255, 0.72)',
+      background: 'rgba(255, 255, 255, 0.82)',
     },
     canvasChatReasoningMarkdown: {
       width: '100%',
       color: 'var(--semi-color-text-1)',
       fontSize: 13,
       lineHeight: 1.7,
+      whiteSpace: 'pre-wrap',
     },
     canvasChatMarkdown: {
       width: '100%',
@@ -7692,10 +7873,17 @@ const ImageGeneration = () => {
     if (!messageId) {
       return;
     }
-    setExpandedCanvasReasoningMessageIds((prev) => ({
-      ...prev,
-      [messageId]: !prev[messageId],
-    }));
+    setCanvasChatReasoningUiStateByMessageId((prev) => {
+      const currentState =
+        prev[messageId] || createCanvasChatReasoningUiState();
+      return {
+        ...prev,
+        [messageId]: {
+          ...currentState,
+          isExpanded: !currentState.isExpanded,
+        },
+      };
+    });
   };
 
   const getCanvasChatRetryPrompt = (message) => {
@@ -8139,12 +8327,38 @@ const ImageGeneration = () => {
     };
 
     if (isChatMode) {
-      const chatStatus = String(message?.status || '');
+      const chatStatus = String(message?.status || '').trim().toLowerCase();
       const assistantDisplay = getCanvasChatMessageDisplay(message);
       const assistantText = assistantDisplay.content;
       const assistantReasoning = assistantDisplay.reasoningContent;
       const hasAssistantReasoning = assistantDisplay.hasReasoning;
-      const reasoningExpanded = !!expandedCanvasReasoningMessageIds[message.id];
+      const isLiveReasoningMessage =
+        chatStreaming &&
+        String(chatStreamingSessionIdRef.current || '') ===
+          String(canvasMessagesSessionId || '') &&
+        String(chatStreamingMessageIdRef.current || '') === String(message.id);
+      const reasoningUiState =
+        canvasChatReasoningUiStateByMessageId[String(message.id)] ||
+        (hasAssistantReasoning
+          ? syncCanvasChatReasoningUiState({
+              message,
+              previousState: null,
+              hasReasoning: true,
+              isLiveMessage: isLiveReasoningMessage,
+              now: Date.now(),
+            })
+          : null);
+      const reasoningExpanded = !!reasoningUiState?.isExpanded;
+      const reasoningTriggerText = hasAssistantReasoning
+        ? getCanvasChatReasoningTriggerText(reasoningUiState)
+        : '';
+      const hideAssistantTextWhileReasoning = shouldHideCanvasChatAssistantText({
+        hasReasoning: hasAssistantReasoning,
+        reasoningUiState,
+      });
+      const displayAssistantText = hideAssistantTextWhileReasoning
+        ? ''
+        : assistantText;
       const retryPrompt = isUser ? '' : getCanvasChatRetryPrompt(message);
       const actionVisible =
         !isUser &&
@@ -8204,22 +8418,24 @@ const ImageGeneration = () => {
                 <div style={styles.canvasChatReasoningWrap}>
                   <button
                     type='button'
-                    aria-label={
-                      reasoningExpanded ? t('收起思考过程') : t('展开思考过程')
-                    }
+                    aria-label={reasoningTriggerText}
                     style={styles.canvasChatReasoningToggle}
                     onClick={(event) => {
                       event.stopPropagation();
                       toggleCanvasReasoningExpansion(message.id);
                     }}
                   >
-                    <span style={styles.canvasChatReasoningToggleText}>
-                      {chatStatus === 'generating'
-                        ? t('思考中...')
-                        : t('思考过程')}
+                    <span style={styles.canvasChatReasoningToggleLead}>
+                      <span style={styles.canvasChatReasoningIcon}>
+                        <Brain size={14} strokeWidth={2} />
+                      </span>
+                      <span style={styles.canvasChatReasoningToggleText}>
+                        {reasoningTriggerText}
+                      </span>
                     </span>
                     <IconChevronDown
                       style={{
+                        ...styles.canvasChatReasoningToggleArrow,
                         transform: reasoningExpanded
                           ? 'rotate(0deg)'
                           : 'rotate(-90deg)',
@@ -8238,13 +8454,13 @@ const ImageGeneration = () => {
                   ) : null}
                 </div>
               ) : null}
-              {assistantText ? (
+              {displayAssistantText ? (
                 <MarkdownRenderer
-                  content={assistantText}
+                  content={displayAssistantText}
                   className='canvas-chat-markdown'
                   style={styles.canvasChatMarkdown}
                 />
-              ) : chatStatus === 'generating' ? (
+              ) : chatStatus === 'generating' && !hasAssistantReasoning ? (
                 <div style={styles.canvasChatInlineStatus}>
                   <Spin size='small' />
                   <span>{t('生成中')}</span>
@@ -8269,18 +8485,18 @@ const ImageGeneration = () => {
                   )}
                 </div>
               ) : null}
-              {assistantText && chatStatus === 'generating' ? (
+              {displayAssistantText && chatStatus === 'generating' ? (
                 <div style={styles.canvasChatInlineStatus}>
                   <Spin size='small' />
                   <span>{t('生成中')}</span>
                 </div>
               ) : null}
-              {assistantText && chatStatus === 'stopped' ? (
+              {displayAssistantText && chatStatus === 'stopped' ? (
                 <Text type='tertiary' size='small'>
                   {t('已停止')}
                 </Text>
               ) : null}
-              {assistantText && chatStatus === 'failed' ? (
+              {displayAssistantText && chatStatus === 'failed' ? (
                 <Text
                   type='danger'
                   size='small'
@@ -8295,7 +8511,7 @@ const ImageGeneration = () => {
                   ...(actionVisible ? styles.canvasChatActionsVisible : null),
                 }}
               >
-                {assistantText ? (
+                {displayAssistantText ? (
                   <button
                     type='button'
                     aria-label={t('复制')}
