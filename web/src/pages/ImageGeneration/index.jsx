@@ -66,7 +66,7 @@ import {
   showError,
   showSuccess,
 } from '../../helpers';
-import { ModelSeriesIcon } from '../../helpers/modelSeries';
+import { CanvasModelSeriesIcon } from '../../helpers/modelSeries';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
 import ImageGenerationTaskModal from '../../components/ImageGenerationTaskModal';
@@ -7481,7 +7481,7 @@ const ImageGeneration = () => {
               >
                 <div style={styles.modelMenuOption}>
                   <span style={styles.modelMenuIcon}>
-                    <ModelSeriesIcon series={model.model_series} />
+                    <CanvasModelSeriesIcon series={model.model_series} />
                   </span>
                   <div style={styles.modelMenuItem}>
                     <span style={styles.modelMenuTitle}>
@@ -7536,7 +7536,7 @@ const ImageGeneration = () => {
           }}
           disabled={modelOptions.length === 0}
         >
-          <ModelSeriesIcon
+          <CanvasModelSeriesIcon
             series={selectedModelItem?.model_series}
             size='small'
           />
@@ -8964,7 +8964,7 @@ const ImageGeneration = () => {
         key: 'chat-model',
         label: t('模型'),
         icon: (
-          <ModelSeriesIcon
+          <CanvasModelSeriesIcon
             series={activeChatModelOption?.model_series}
             size='small'
           />
@@ -8978,7 +8978,12 @@ const ImageGeneration = () => {
         options: chatDropdownModels.map((model) => ({
           value: model.request_model,
           label: buildChatModelOptionLabel(model),
-          icon: <ModelSeriesIcon series={model.model_series} size='small' />,
+          icon: (
+            <CanvasModelSeriesIcon
+              series={model.model_series}
+              size='small'
+            />
+          ),
           disabled: model.usable === false,
         })),
         disabled: chatDropdownModels.length === 0,
@@ -9633,7 +9638,7 @@ const ImageGeneration = () => {
           onMouseEnter={() => onMouseEnter?.()}
         >
           <div style={styles.selectModelOption}>
-            <ModelSeriesIcon series={modelItem?.model_series} />
+            <CanvasModelSeriesIcon series={modelItem?.model_series} />
             <div style={styles.selectModelOptionText}>
               <span style={styles.selectModelOptionTitle}>
                 {label || value}
@@ -9656,7 +9661,7 @@ const ImageGeneration = () => {
       );
       return (
         <div style={styles.selectModelOption}>
-          <ModelSeriesIcon series={modelItem?.model_series} />
+          <CanvasModelSeriesIcon series={modelItem?.model_series} />
           <div style={styles.selectModelOptionText}>
             <span style={styles.selectModelOptionTitle}>
               {optionNode?.label || optionNode?.value || t('请选择模型')}
