@@ -79,6 +79,7 @@ const EditModelMappingModal = ({
     isImageModel && selectedImageCapabilities.includes(IMAGE_CAPABILITY_EDITING);
   const canConfigureImageResolution = isImageModel;
   const modelSeriesOptions = getModelSeriesOptionList();
+  const isEditing = Boolean(editingMapping?.id);
 
   const modelTypeOptions = [
     { value: 1, label: t('对话') },
@@ -235,7 +236,7 @@ const EditModelMappingModal = ({
 
   useEffect(() => {
     if (visible && formApi) {
-      if (editingMapping) {
+      if (isEditing) {
         // 解析 JSON 字符串为数组
         const resolutions = parseJsonArray(editingMapping.resolutions);
         const aspectRatios = parseJsonArray(editingMapping.aspect_ratios);
@@ -297,7 +298,8 @@ const EditModelMappingModal = ({
           priority: editingMapping.priority ?? 0,
         });
       } else {
-        setSelectedModelType(1);
+        const defaultModelType = Number(editingMapping?.model_type) || 1;
+        setSelectedModelType(defaultModelType);
         setSelectedImageCapabilities([]);
         setReferenceImageLimitEnabled(false);
 
@@ -306,10 +308,10 @@ const EditModelMappingModal = ({
           actual_model: '',
           display_name: '',
           model_series: '',
-          model_type: 1,
+          model_type: defaultModelType,
           status: true,
           priority: 0,
-          request_endpoint: 'openai',
+          request_endpoint: getDefaultRequestEndpoint(defaultModelType),
           resolutions: [],
           aspect_ratios: [],
           image_capabilities: [],
@@ -319,7 +321,7 @@ const EditModelMappingModal = ({
         });
       }
     }
-  }, [visible, editingMapping, formApi]);
+  }, [visible, editingMapping, formApi, isEditing]);
 
   useEffect(() => {
     if (!visible || !formApi || !isImageModel) {
@@ -435,20 +437,18 @@ const EditModelMappingModal = ({
             : '',
       };
 
-      if (editingMapping) {
+      if (isEditing) {
         payload.id = editingMapping.id;
       }
 
-      const url = editingMapping
-        ? '/api/model-mapping/'
-        : '/api/model-mapping/';
-      const method = editingMapping ? 'put' : 'post';
+      const url = '/api/model-mapping/';
+      const method = isEditing ? 'put' : 'post';
 
       const res = await API[method](url, payload);
       const { success, message, data } = res.data;
 
       if (success) {
-        showSuccess(editingMapping ? t('更新成功') : t('创建成功'));
+        showSuccess(isEditing ? t('更新成功') : t('创建成功'));
         const warningMessages =
           data?.canvas_chat_diagnostic?.warning_messages || [];
         warningMessages.forEach((warningMessage) => {
@@ -488,7 +488,7 @@ const EditModelMappingModal = ({
 
   return (
     <Modal
-      title={editingMapping ? t('编辑模型设置') : t('添加模型设置')}
+      title={isEditing ? t('编辑模型设置') : t('添加模型设置')}
       visible={visible}
       onCancel={handleClose}
       footer={null}
@@ -505,7 +505,7 @@ const EditModelMappingModal = ({
           label={t('模型ID')}
           placeholder={t('用户请求时使用的模型ID')}
           rules={[{ required: true, message: t('请输入模型ID') }]}
-          disabled={!!editingMapping}
+          disabled={isEditing}
         />
         <Form.Input
           field='actual_model'
