@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -161,86 +162,65 @@ func CreateCanvasMessage(message *CanvasMessage) error {
 	if message == nil {
 		return nil
 	}
-	now := common.GetTimestamp()
-	if message.CreatedTime == 0 {
-		message.CreatedTime = now
-	}
-	if message.UpdatedTime == 0 {
-		message.UpdatedTime = now
-	}
-	return DB.Create(message).Error
+	return CreateCanvasMessageForMode(message.Mode, message)
 }
 
 func ListCanvasMessages(userId int, sessionId int) ([]*CanvasMessage, error) {
-	var messages []*CanvasMessage
-	err := DB.Where("user_id = ? AND session_id = ? AND deleted_time = 0", userId, sessionId).
-		Order("created_time ASC").
-		Order("id ASC").
-		Find(&messages).Error
-	return messages, err
-}
-
-func ListCanvasMessagesByModePage(userId int, sessionId int, mode string, limit int, beforeCreatedTime int64, beforeID int) ([]*CanvasMessage, bool, error) {
-	var messages []*CanvasMessage
-	query := DB.Where("user_id = ? AND session_id = ? AND deleted_time = 0", userId, sessionId)
-	if normalizedMode := NormalizeCanvasMode(mode); normalizedMode != "" {
-		query = query.Where("mode = ?", normalizedMode)
-	}
-	if beforeID > 0 {
-		query = query.Where("(created_time < ?) OR (created_time = ? AND id < ?)", beforeCreatedTime, beforeCreatedTime, beforeID)
-	}
-	query = query.Order("created_time DESC").Order("id DESC")
-	if limit <= 0 {
-		err := query.Find(&messages).Error
-		return messages, false, err
-	}
-	err := query.Limit(limit + 1).Find(&messages).Error
-	if err != nil {
-		return nil, false, err
-	}
-	hasMore := len(messages) > limit
-	if hasMore {
-		messages = messages[:limit]
-	}
-	return messages, hasMore, nil
-}
-
-func GetCanvasMessageBySessionAndID(userId int, sessionId int, id int) (*CanvasMessage, error) {
-	var message CanvasMessage
-	err := DB.Where("id = ? AND session_id = ? AND user_id = ? AND deleted_time = 0", id, sessionId, userId).
-		First(&message).Error
-	if err == gorm.ErrRecordNotFound {
-		return nil, nil
-	}
+	mode, err := getCanvasMessageModeBySession(userId, sessionId)
 	if err != nil {
 		return nil, err
 	}
-	return &message, nil
+	return ListCanvasMessagesForMode(mode, userId, sessionId)
+}
+
+func ListCanvasMessagesByModePage(userId int, sessionId int, mode string, limit int, beforeCreatedTime int64, beforeID int) ([]*CanvasMessage, bool, error) {
+	return ListCanvasMessagesPageForMode(mode, userId, sessionId, limit, beforeCreatedTime, beforeID)
+}
+
+func GetCanvasMessageBySessionAndID(userId int, sessionId int, id int) (*CanvasMessage, error) {
+	mode, err := getCanvasMessageModeBySession(userId, sessionId)
+	if err != nil {
+		return nil, err
+	}
+	return GetCanvasMessageByModeSessionAndID(mode, userId, sessionId, id)
 }
 
 func CountCanvasMessages(userId int, sessionId int) (int64, error) {
-	var count int64
-	err := DB.Model(&CanvasMessage{}).
-		Where("user_id = ? AND session_id = ? AND deleted_time = 0", userId, sessionId).
-		Count(&count).Error
-	return count, err
+	mode, err := getCanvasMessageModeBySession(userId, sessionId)
+	if err != nil {
+		return 0, err
+	}
+	return CountCanvasMessagesByMode(mode, userId, sessionId)
 }
 
 func UpdateCanvasMessageFields(userId int, id int, updates map[string]interface{}) error {
-	if len(updates) == 0 {
-		return nil
+	if !CanvasUsesDedicatedMessageDBs() {
+		if len(updates) == 0 {
+			return nil
+		}
+		updates["updated_time"] = common.GetTimestamp()
+		return DB.Model(&CanvasMessage{}).
+			Where("id = ? AND user_id = ? AND deleted_time = 0", id, userId).
+			Updates(updates).Error
 	}
-	updates["updated_time"] = common.GetTimestamp()
-	return DB.Model(&CanvasMessage{}).
-		Where("id = ? AND user_id = ? AND deleted_time = 0", id, userId).
-		Updates(updates).Error
+	return fmt.Errorf("canvas message mode is required when dedicated canvas databases are enabled")
 }
 
 func SoftDeleteCanvasMessages(userId int, sessionId int, deletedTime int64) error {
-	return DB.Model(&CanvasMessage{}).
-		Where("user_id = ? AND session_id = ? AND deleted_time = 0", userId, sessionId).
-		Updates(map[string]interface{}{
-			"deleted_time": deletedTime,
-			"updated_time": deletedTime,
-		}).Error
+	mode, err := getCanvasMessageModeBySession(userId, sessionId)
+	if err != nil {
+		return err
+	}
+	return SoftDeleteCanvasMessagesByMode(mode, userId, sessionId, deletedTime)
+}
+
+func getCanvasMessageModeBySession(userId int, sessionId int) (string, error) {
+	session, err := GetCanvasSessionByID(userId, sessionId)
+	if err != nil {
+		return "", err
+	}
+	if session == nil {
+		return "", fmt.Errorf("canvas session not found")
+	}
+	return session.Mode, nil
 }

@@ -290,6 +290,7 @@ func InitResources() error {
 	if err != nil {
 		return err
 	}
+	model.InitCanvasDBs()
 
 	// Initialize Redis
 	err = common.InitRedisClient()

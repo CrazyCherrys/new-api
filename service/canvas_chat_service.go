@@ -21,7 +21,6 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 const (
@@ -299,49 +298,39 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 		},
 	}
 
-	err = model.DB.Transaction(func(tx *gorm.DB) error {
-		sessionUpdates := map[string]interface{}{
-			"current_model":      finalModel,
-			"current_group":      finalGroup,
-			"chat_temperature":   normalizeCanvasChatTemperatureValue(temperatureValue, session.ChatTemperature),
-			"chat_context_count": normalizeCanvasChatContextCountValue(common.GetPointer(contextCount), session.ChatContextCount),
-			"updated_time":       now,
-		}
-		if !session.TitleManuallySet {
-			var messageCount int64
-			if err := tx.Model(&model.CanvasMessage{}).
-				Where("user_id = ? AND session_id = ? AND deleted_time = 0", userId, session.Id).
-				Count(&messageCount).Error; err != nil {
-				return err
-			}
-			if messageCount == 0 {
-				sessionUpdates["title"] = truncateCanvasTitle(prompt)
-			}
-		}
-		if err := tx.Model(&model.CanvasSession{}).
-			Where("id = ? AND user_id = ? AND deleted_time = 0", session.Id, userId).
-			Updates(sessionUpdates).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(prepared.UserMessage).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(prepared.AssistantMessage).Error; err != nil {
-			return err
-		}
-		return nil
-	})
+	messageCount, err := model.CountCanvasMessagesByMode(model.CanvasModeChat, userId, session.Id)
 	if err != nil {
+		return nil, err
+	}
+	if err := model.CreateCanvasMessagesForMode(model.CanvasModeChat, []*model.CanvasMessage{
+		prepared.UserMessage,
+		prepared.AssistantMessage,
+	}); err != nil {
+		return nil, err
+	}
+
+	sessionUpdates := map[string]interface{}{
+		"current_model":      finalModel,
+		"current_group":      finalGroup,
+		"chat_temperature":   normalizeCanvasChatTemperatureValue(temperatureValue, session.ChatTemperature),
+		"chat_context_count": normalizeCanvasChatContextCountValue(common.GetPointer(contextCount), session.ChatContextCount),
+		"updated_time":       now,
+	}
+	if !session.TitleManuallySet && messageCount == 0 {
+		sessionUpdates["title"] = truncateCanvasTitle(prompt)
+	}
+	if err := model.UpdateCanvasSessionFields(userId, session.Id, sessionUpdates); err != nil {
+		cleanupCreatedCanvasMessages(model.CanvasModeChat, userId, []*model.CanvasMessage{
+			prepared.UserMessage,
+			prepared.AssistantMessage,
+		})
 		return nil, err
 	}
 
 	prepared.Session.CurrentModel = finalModel
 	prepared.Session.CurrentGroup = finalGroup
-	if !prepared.Session.TitleManuallySet {
-		messageCount, countErr := model.CountCanvasMessages(userId, session.Id)
-		if countErr == nil && messageCount == 2 {
-			prepared.Session.Title = truncateCanvasTitle(prompt)
-		}
+	if !prepared.Session.TitleManuallySet && messageCount == 0 {
+		prepared.Session.Title = truncateCanvasTitle(prompt)
 	}
 	prepared.Session.UpdatedTime = now
 	return prepared, nil
@@ -376,7 +365,7 @@ func executeCanvasChatRun(ctx context.Context, prepared *canvasChatPreparedReque
 			return nil
 		}
 		if shouldPersist {
-			if err := model.UpdateCanvasMessageFields(prepared.UserId, prepared.AssistantMessage.Id, map[string]interface{}{
+			if err := model.UpdateCanvasMessageFieldsByMode(model.CanvasModeChat, prepared.UserId, prepared.AssistantMessage.Id, map[string]interface{}{
 				"prompt":            currentPrompt,
 				"reasoning_content": currentReasoningContent,
 				"status":            model.CanvasMessageStatusGenerating,
@@ -433,7 +422,7 @@ func executeCanvasChatRun(ctx context.Context, prepared *canvasChatPreparedReque
 	if err := flushAssistantDelta(true); err != nil {
 		return finalizeCanvasChatRunError(prepared, callbacks, err)
 	}
-	if err := model.UpdateCanvasMessageFields(prepared.UserId, prepared.AssistantMessage.Id, map[string]interface{}{
+	if err := model.UpdateCanvasMessageFieldsByMode(model.CanvasModeChat, prepared.UserId, prepared.AssistantMessage.Id, map[string]interface{}{
 		"prompt":            fullTextBuilder.String(),
 		"reasoning_content": fullReasoningBuilder.String(),
 		"status":            model.CanvasMessageStatusSuccess,
@@ -467,7 +456,7 @@ func finalizeCanvasChatRunError(prepared *canvasChatPreparedRequest, callbacks *
 		status = model.CanvasMessageStatusStopped
 		errorMessage = "聊天已停止"
 	}
-	if err := model.UpdateCanvasMessageFields(prepared.UserId, prepared.AssistantMessage.Id, map[string]interface{}{
+	if err := model.UpdateCanvasMessageFieldsByMode(model.CanvasModeChat, prepared.UserId, prepared.AssistantMessage.Id, map[string]interface{}{
 		"prompt":            prepared.AssistantMessage.Prompt,
 		"reasoning_content": prepared.AssistantMessage.ReasoningContent,
 		"status":            status,
@@ -1140,66 +1129,19 @@ func buildCanvasChatRelayMessages(prepared *canvasChatPreparedRequest) ([]dto.Me
 }
 
 func listCanvasSuccessfulChatMessages(userId int, sessionId int, beforeMessageId int) ([]*model.CanvasMessage, error) {
-	var messages []*model.CanvasMessage
-	query := model.DB.Where("user_id = ? AND session_id = ? AND mode = ? AND status = ? AND deleted_time = 0",
-		userId, sessionId, model.CanvasModeChat, model.CanvasMessageStatusSuccess)
-	if beforeMessageId > 0 {
-		query = query.Where("id < ?", beforeMessageId)
-	}
-	err := query.Order("created_time ASC").Order("id ASC").Find(&messages).Error
-	return messages, err
+	return model.ListSuccessfulCanvasMessagesBefore(model.CanvasModeChat, userId, sessionId, beforeMessageId)
 }
 
 func listRecentCanvasSuccessfulChatMessages(userId int, sessionId int, afterMessageId int, beforeMessageId int, limit int) ([]*model.CanvasMessage, error) {
-	if limit <= 0 {
-		return []*model.CanvasMessage{}, nil
-	}
-	var messages []*model.CanvasMessage
-	query := model.DB.Where("user_id = ? AND session_id = ? AND mode = ? AND status = ? AND deleted_time = 0",
-		userId, sessionId, model.CanvasModeChat, model.CanvasMessageStatusSuccess)
-	if afterMessageId > 0 {
-		query = query.Where("id > ?", afterMessageId)
-	}
-	if beforeMessageId > 0 {
-		query = query.Where("id < ?", beforeMessageId)
-	}
-	if err := query.Order("created_time DESC").Order("id DESC").Limit(limit).Find(&messages).Error; err != nil {
-		return nil, err
-	}
-	if len(messages) > 1 {
-		for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
-			messages[left], messages[right] = messages[right], messages[left]
-		}
-	}
-	return messages, nil
+	return model.ListRecentSuccessfulCanvasMessages(model.CanvasModeChat, userId, sessionId, afterMessageId, beforeMessageId, limit)
 }
 
 func countCanvasSuccessfulChatMessagesAfter(userId int, sessionId int, afterMessageId int) (int64, error) {
-	var count int64
-	query := model.DB.Model(&model.CanvasMessage{}).
-		Where("user_id = ? AND session_id = ? AND mode = ? AND status = ? AND deleted_time = 0",
-			userId, sessionId, model.CanvasModeChat, model.CanvasMessageStatusSuccess)
-	if afterMessageId > 0 {
-		query = query.Where("id > ?", afterMessageId)
-	}
-	if err := query.Count(&count).Error; err != nil {
-		return 0, err
-	}
-	return count, nil
+	return model.CountSuccessfulCanvasMessagesAfter(model.CanvasModeChat, userId, sessionId, afterMessageId)
 }
 
 func listCanvasSuccessfulChatMessagesAfter(userId int, sessionId int, afterMessageId int, limit int) ([]*model.CanvasMessage, error) {
-	var messages []*model.CanvasMessage
-	query := model.DB.Where("user_id = ? AND session_id = ? AND mode = ? AND status = ? AND deleted_time = 0",
-		userId, sessionId, model.CanvasModeChat, model.CanvasMessageStatusSuccess)
-	if afterMessageId > 0 {
-		query = query.Where("id > ?", afterMessageId)
-	}
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
-	err := query.Order("created_time ASC").Order("id ASC").Find(&messages).Error
-	return messages, err
+	return model.ListSuccessfulCanvasMessagesAfter(model.CanvasModeChat, userId, sessionId, afterMessageId, limit)
 }
 
 func defaultCallCanvasChatRelay(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {

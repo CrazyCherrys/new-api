@@ -69,6 +69,170 @@ var DB *gorm.DB
 
 var LOG_DB *gorm.DB
 
+var CANVAS_CHAT_DB *gorm.DB
+var CANVAS_IMAGE_DB *gorm.DB
+var CANVAS_VIDEO_DB *gorm.DB
+
+type canvasMessageStorageMode string
+
+const (
+	canvasMessageStorageModeCompatibility canvasMessageStorageMode = "compatibility"
+	canvasMessageStorageModeSplit         canvasMessageStorageMode = "split"
+	canvasMessageStorageModeDisabled      canvasMessageStorageMode = "disabled"
+)
+
+var (
+	canvasStateMu                   sync.RWMutex
+	canvasCurrentStorageMode        = canvasMessageStorageModeCompatibility
+	canvasAvailable                 = true
+	canvasUnavailableReason         string
+	openCanvasMessagePostgresDBFunc = openCanvasMessagePostgresDB
+)
+
+func CanvasAvailabilityStatus() (bool, string) {
+	canvasStateMu.RLock()
+	defer canvasStateMu.RUnlock()
+	return canvasAvailable, canvasUnavailableReason
+}
+
+func CanvasUsesDedicatedMessageDBs() bool {
+	canvasStateMu.RLock()
+	defer canvasStateMu.RUnlock()
+	return canvasCurrentStorageMode == canvasMessageStorageModeSplit && canvasAvailable
+}
+
+func setCanvasMessageStorageState(mode canvasMessageStorageMode, available bool, reason string) {
+	canvasStateMu.Lock()
+	defer canvasStateMu.Unlock()
+	canvasCurrentStorageMode = mode
+	canvasAvailable = available
+	canvasUnavailableReason = strings.TrimSpace(reason)
+}
+
+func closeCanvasMessageDBs() error {
+	seen := map[*gorm.DB]struct{}{}
+	for _, db := range []*gorm.DB{CANVAS_CHAT_DB, CANVAS_IMAGE_DB, CANVAS_VIDEO_DB} {
+		if db == nil || db == DB || db == LOG_DB {
+			continue
+		}
+		if _, ok := seen[db]; ok {
+			continue
+		}
+		seen[db] = struct{}{}
+		if err := closeDB(db); err != nil {
+			return err
+		}
+	}
+	CANVAS_CHAT_DB = nil
+	CANVAS_IMAGE_DB = nil
+	CANVAS_VIDEO_DB = nil
+	return nil
+}
+
+func openCanvasMessagePostgresDB(envName string, dsn string) (*gorm.DB, error) {
+	dsn = strings.TrimSpace(dsn)
+	if dsn == "" {
+		return nil, fmt.Errorf("%s is empty", envName)
+	}
+	if !strings.HasPrefix(dsn, "postgres://") && !strings.HasPrefix(dsn, "postgresql://") {
+		return nil, fmt.Errorf("%s only supports PostgreSQL DSN", envName)
+	}
+	common.SysLog("using PostgreSQL as " + envName + " canvas database")
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		DSN:                  dsn,
+		PreferSimpleProtocol: true,
+	}), &gorm.Config{
+		PrepareStmt: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if common.DebugEnabled {
+		db = db.Debug()
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
+	sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
+	sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+	return db, nil
+}
+
+func migrateCanvasDBs(chatDB *gorm.DB, imageDB *gorm.DB, videoDB *gorm.DB) error {
+	if err := chatDB.AutoMigrate(&CanvasChatMessage{}); err != nil {
+		return fmt.Errorf("failed to migrate canvas_chat_messages: %w", err)
+	}
+	if err := imageDB.AutoMigrate(&CanvasImageMessage{}); err != nil {
+		return fmt.Errorf("failed to migrate canvas_image_messages: %w", err)
+	}
+	if err := videoDB.AutoMigrate(&CanvasVideoMessage{}); err != nil {
+		return fmt.Errorf("failed to migrate canvas_video_messages: %w", err)
+	}
+	return nil
+}
+
+func InitCanvasDBs() {
+	if err := initCanvasDBs(); err != nil {
+		common.SysError("canvas disabled: " + err.Error())
+		setCanvasMessageStorageState(canvasMessageStorageModeDisabled, false, "canvas is unavailable: "+err.Error())
+	}
+}
+
+func initCanvasDBs() error {
+	if err := closeCanvasMessageDBs(); err != nil {
+		return err
+	}
+
+	chatDSN := strings.TrimSpace(os.Getenv("CANVAS_CHAT_SQL_DSN"))
+	imageDSN := strings.TrimSpace(os.Getenv("CANVAS_IMAGE_SQL_DSN"))
+	videoDSN := strings.TrimSpace(os.Getenv("CANVAS_VIDEO_SQL_DSN"))
+
+	if chatDSN == "" && imageDSN == "" && videoDSN == "" {
+		setCanvasMessageStorageState(canvasMessageStorageModeCompatibility, true, "")
+		common.SysLog("canvas message storage using main database compatibility mode")
+		return nil
+	}
+
+	if chatDSN == "" || imageDSN == "" || videoDSN == "" {
+		return fmt.Errorf("CANVAS_CHAT_SQL_DSN, CANVAS_IMAGE_SQL_DSN, and CANVAS_VIDEO_SQL_DSN must be configured together")
+	}
+
+	chatDB, err := openCanvasMessagePostgresDBFunc("CANVAS_CHAT_SQL_DSN", chatDSN)
+	if err != nil {
+		return err
+	}
+	imageDB, err := openCanvasMessagePostgresDBFunc("CANVAS_IMAGE_SQL_DSN", imageDSN)
+	if err != nil {
+		_ = closeDB(chatDB)
+		return err
+	}
+	videoDB, err := openCanvasMessagePostgresDBFunc("CANVAS_VIDEO_SQL_DSN", videoDSN)
+	if err != nil {
+		_ = closeDB(chatDB)
+		_ = closeDB(imageDB)
+		return err
+	}
+
+	if common.IsMasterNode {
+		common.SysLog("canvas database migration started")
+		if err := migrateCanvasDBs(chatDB, imageDB, videoDB); err != nil {
+			_ = closeDB(chatDB)
+			_ = closeDB(imageDB)
+			_ = closeDB(videoDB)
+			return err
+		}
+	}
+
+	CANVAS_CHAT_DB = chatDB
+	CANVAS_IMAGE_DB = imageDB
+	CANVAS_VIDEO_DB = videoDB
+	setCanvasMessageStorageState(canvasMessageStorageModeSplit, true, "")
+	common.SysLog("canvas message storage using dedicated databases")
+	return nil
+}
+
 func createRootAccountIfNeed() error {
 	var user User
 	//if user.Status != common.UserStatusEnabled {
@@ -590,6 +754,9 @@ func closeDB(db *gorm.DB) error {
 }
 
 func CloseDB() error {
+	if err := closeCanvasMessageDBs(); err != nil {
+		return err
+	}
 	if LOG_DB != DB {
 		err := closeDB(LOG_DB)
 		if err != nil {

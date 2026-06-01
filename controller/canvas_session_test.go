@@ -15,6 +15,10 @@ import (
 
 func TestCreateCanvasMessageStreamsChatRequests(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	t.Setenv("CANVAS_CHAT_SQL_DSN", "")
+	t.Setenv("CANVAS_IMAGE_SQL_DSN", "")
+	t.Setenv("CANVAS_VIDEO_SQL_DSN", "")
+	model.InitCanvasDBs()
 
 	previousGetSession := getCanvasSessionByIDForController
 	previousCreateCanvasMessage := createCanvasMessageForController
@@ -76,6 +80,10 @@ func TestCreateCanvasMessageStreamsChatRequests(t *testing.T) {
 
 func TestListCanvasSessionsSupportsPaginationResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	t.Setenv("CANVAS_CHAT_SQL_DSN", "")
+	t.Setenv("CANVAS_IMAGE_SQL_DSN", "")
+	t.Setenv("CANVAS_VIDEO_SQL_DSN", "")
+	model.InitCanvasDBs()
 
 	previousListCanvasSessions := listCanvasSessionsForController
 	t.Cleanup(func() {
@@ -135,6 +143,10 @@ func TestListCanvasSessionsSupportsPaginationResponse(t *testing.T) {
 
 func TestListCanvasChatModelsReturnsStructuredOptions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	t.Setenv("CANVAS_CHAT_SQL_DSN", "")
+	t.Setenv("CANVAS_IMAGE_SQL_DSN", "")
+	t.Setenv("CANVAS_VIDEO_SQL_DSN", "")
+	model.InitCanvasDBs()
 
 	previousListCanvasChatModels := listCanvasChatModelsForController
 	t.Cleanup(func() {
@@ -183,5 +195,38 @@ func TestListCanvasChatModelsReturnsStructuredOptions(t *testing.T) {
 	}
 	if response.Data[0].RequestModel != "gpt-4.1" || response.Data[0].DisplayName != "GPT 4.1" {
 		t.Fatalf("unexpected model option: %#v", response.Data[0])
+	}
+}
+
+func TestCanvasControllersReturn503WhenCanvasDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("CANVAS_CHAT_SQL_DSN", "postgres://chat")
+	t.Setenv("CANVAS_IMAGE_SQL_DSN", "")
+	t.Setenv("CANVAS_VIDEO_SQL_DSN", "postgres://video")
+	model.InitCanvasDBs()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", 7)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/canvas/sessions", nil)
+
+	ListCanvasSessions(c)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected HTTP 503, got %d", recorder.Code)
+	}
+
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := common.DecodeJson(recorder.Body, &response); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if response.Success {
+		t.Fatalf("expected failure response, got success payload %#v", response)
+	}
+	if !strings.Contains(response.Message, "must be configured together") {
+		t.Fatalf("unexpected 503 message: %q", response.Message)
 	}
 }

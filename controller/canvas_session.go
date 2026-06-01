@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -58,7 +59,26 @@ var (
 	streamCanvasChatMessageForController   = service.StreamCanvasChatMessage
 )
 
+func ensureCanvasAvailable(c *gin.Context) bool {
+	if available, reason := model.CanvasAvailabilityStatus(); available {
+		return true
+	} else {
+		if strings.TrimSpace(reason) == "" {
+			reason = "canvas is unavailable"
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"message": reason,
+		})
+		c.Abort()
+		return false
+	}
+}
+
 func ListCanvasSessions(c *gin.Context) {
+	if !ensureCanvasAvailable(c) {
+		return
+	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
@@ -76,6 +96,9 @@ func ListCanvasSessions(c *gin.Context) {
 }
 
 func ListCanvasChatModels(c *gin.Context) {
+	if !ensureCanvasAvailable(c) {
+		return
+	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
@@ -91,6 +114,9 @@ func ListCanvasChatModels(c *gin.Context) {
 }
 
 func GetCanvasChatModels(c *gin.Context) {
+	if !ensureCanvasAvailable(c) {
+		return
+	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
@@ -106,6 +132,9 @@ func GetCanvasChatModels(c *gin.Context) {
 }
 
 func CreateCanvasSession(c *gin.Context) {
+	if !ensureCanvasAvailable(c) {
+		return
+	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
@@ -137,6 +166,9 @@ func CreateCanvasSession(c *gin.Context) {
 }
 
 func UpdateCanvasSession(c *gin.Context) {
+	if !ensureCanvasAvailable(c) {
+		return
+	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
@@ -175,6 +207,9 @@ func UpdateCanvasSession(c *gin.Context) {
 }
 
 func DeleteCanvasSession(c *gin.Context) {
+	if !ensureCanvasAvailable(c) {
+		return
+	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
@@ -194,6 +229,9 @@ func DeleteCanvasSession(c *gin.Context) {
 }
 
 func ListCanvasMessages(c *gin.Context) {
+	if !ensureCanvasAvailable(c) {
+		return
+	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
@@ -214,6 +252,9 @@ func ListCanvasMessages(c *gin.Context) {
 }
 
 func CreateCanvasMessage(c *gin.Context) {
+	if !ensureCanvasAvailable(c) {
+		return
+	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")

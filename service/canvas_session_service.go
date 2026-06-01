@@ -301,7 +301,7 @@ func ListCanvasMessages(userId int, sessionId int) ([]*CanvasMessageWithTask, er
 	if session == nil {
 		return nil, fmt.Errorf("canvas session not found")
 	}
-	messages, err := model.ListCanvasMessages(userId, sessionId)
+	messages, err := model.ListCanvasMessagesForMode(session.Mode, userId, sessionId)
 	if err != nil {
 		return nil, err
 	}
@@ -318,15 +318,15 @@ func ListCanvasMessageTimeline(userId int, sessionId int, limit int, cursor stri
 	}
 
 	limit = normalizeCanvasMessagePageLimit(limit)
-	beforeCursor, err := parseCanvasMessageTimelineCursor(userId, sessionId, cursor)
+	beforeCursor, err := parseCanvasMessageTimelineCursor(session.Mode, userId, sessionId, cursor)
 	if err != nil {
 		return nil, err
 	}
 
-	messages, hasMore, err := model.ListCanvasMessagesByModePage(
+	messages, hasMore, err := model.ListCanvasMessagesPageForMode(
+		session.Mode,
 		userId,
 		sessionId,
-		session.Mode,
 		limit,
 		beforeCursor.CreatedTime,
 		beforeCursor.ID,
@@ -420,62 +420,47 @@ func CreateCanvasMessageWithContext(ctx context.Context, userId int, sessionId i
 		return nil, fmt.Errorf("invalid canvas mode")
 	}
 
-	createdMessages := []*model.CanvasMessage{}
-	err = model.DB.Transaction(func(tx *gorm.DB) error {
-		now := common.GetTimestamp()
-		if !session.TitleManuallySet {
-			var messageCount int64
-			if err := tx.Model(&model.CanvasMessage{}).
-				Where("user_id = ? AND session_id = ? AND deleted_time = 0", userId, session.Id).
-				Count(&messageCount).Error; err != nil {
-				return err
-			}
-			if messageCount == 0 {
-				if err := tx.Model(&model.CanvasSession{}).
-					Where("id = ? AND user_id = ? AND deleted_time = 0", session.Id, userId).
-					Updates(map[string]interface{}{
-						"title":        truncateCanvasTitle(prompt),
-						"updated_time": now,
-					}).Error; err != nil {
-					return err
-				}
-			}
-		}
-
-		userMessage := &model.CanvasMessage{
-			SessionId:       sessionId,
-			UserId:          userId,
-			Mode:            session.Mode,
-			Role:            model.CanvasMessageRoleUser,
-			Prompt:          prompt,
-			ClientRequestId: clientRequestId,
-			Status:          "success",
-			CreatedTime:     now,
-			UpdatedTime:     now,
-		}
-		if err := tx.Create(userMessage).Error; err != nil {
-			return err
-		}
-		createdMessages = append(createdMessages, userMessage)
-
-		taskMessage.CreatedTime = now
-		taskMessage.UpdatedTime = now
-		if err := tx.Create(taskMessage).Error; err != nil {
-			return err
-		}
-		createdMessages = append(createdMessages, taskMessage)
-
-		sessionUpdates := map[string]interface{}{
-			"updated_time": now,
-		}
-		if strings.TrimSpace(input.ModelId) != "" {
-			sessionUpdates["current_model"] = strings.TrimSpace(input.ModelId)
-		}
-		return tx.Model(&model.CanvasSession{}).
-			Where("id = ? AND user_id = ? AND deleted_time = 0", sessionId, userId).
-			Updates(sessionUpdates).Error
-	})
+	messageCount, err := model.CountCanvasMessagesByMode(session.Mode, userId, session.Id)
 	if err != nil {
+		if cleanupCreatedTask != nil {
+			cleanupCreatedTask()
+		}
+		return nil, err
+	}
+
+	now := common.GetTimestamp()
+	userMessage := &model.CanvasMessage{
+		SessionId:       sessionId,
+		UserId:          userId,
+		Mode:            session.Mode,
+		Role:            model.CanvasMessageRoleUser,
+		Prompt:          prompt,
+		ClientRequestId: clientRequestId,
+		Status:          model.CanvasMessageStatusSuccess,
+		CreatedTime:     now,
+		UpdatedTime:     now,
+	}
+	taskMessage.CreatedTime = now
+	taskMessage.UpdatedTime = now
+	createdMessages := []*model.CanvasMessage{userMessage, taskMessage}
+	if err := model.CreateCanvasMessagesForMode(session.Mode, createdMessages); err != nil {
+		if cleanupCreatedTask != nil {
+			cleanupCreatedTask()
+		}
+		return nil, err
+	}
+
+	sessionUpdates := map[string]interface{}{
+		"updated_time": now,
+	}
+	if strings.TrimSpace(input.ModelId) != "" {
+		sessionUpdates["current_model"] = strings.TrimSpace(input.ModelId)
+	}
+	if !session.TitleManuallySet && messageCount == 0 {
+		sessionUpdates["title"] = truncateCanvasTitle(prompt)
+	}
+	if err := model.UpdateCanvasSessionFields(userId, sessionId, sessionUpdates); err != nil {
+		cleanupCreatedCanvasMessages(session.Mode, userId, createdMessages)
 		if cleanupCreatedTask != nil {
 			cleanupCreatedTask()
 		}
@@ -492,7 +477,7 @@ func DeleteCanvasSession(userId int, sessionId int) error {
 	if session == nil {
 		return fmt.Errorf("canvas session not found")
 	}
-	messages, err := model.ListCanvasMessages(userId, sessionId)
+	messages, err := model.ListCanvasMessagesForMode(session.Mode, userId, sessionId)
 	if err != nil {
 		return err
 	}
@@ -537,7 +522,7 @@ func DeleteCanvasSession(userId int, sessionId int) error {
 	}
 
 	deletedTime := common.GetTimestamp()
-	if err := model.SoftDeleteCanvasMessages(userId, sessionId, deletedTime); err != nil {
+	if err := model.SoftDeleteCanvasMessagesByMode(session.Mode, userId, sessionId, deletedTime); err != nil {
 		return err
 	}
 	if err := model.SoftDeleteCanvasSession(userId, sessionId, deletedTime); err != nil {
@@ -553,8 +538,10 @@ func SyncCanvasMessageTaskStatus(userId int, taskType string, taskId string) err
 		return nil
 	}
 	updates := map[string]interface{}{}
+	messageMode := ""
 	switch taskType {
 	case model.CanvasTaskTypeImage:
+		messageMode = model.CanvasModeImage
 		id, err := strconv.Atoi(taskId)
 		if err != nil {
 			return err
@@ -569,6 +556,7 @@ func SyncCanvasMessageTaskStatus(userId int, taskType string, taskId string) err
 		updates["status"] = task.Status
 		updates["error_message"] = task.ErrorMessage
 	case model.CanvasTaskTypeVideo:
+		messageMode = model.CanvasModeVideo
 		id, err := strconv.ParseInt(taskId, 10, 64)
 		if err != nil {
 			return err
@@ -582,9 +570,7 @@ func SyncCanvasMessageTaskStatus(userId int, taskType string, taskId string) err
 	default:
 		return nil
 	}
-	return model.DB.Model(&model.CanvasMessage{}).
-		Where("user_id = ? AND task_id = ? AND task_type = ? AND deleted_time = 0", userId, taskId, taskType).
-		Updates(updates).Error
+	return model.UpdateCanvasMessageFieldsByTask(messageMode, userId, taskId, taskType, updates)
 }
 
 func attachCanvasMessageTasks(userId int, messages []*model.CanvasMessage) []*CanvasMessageWithTask {
@@ -642,7 +628,7 @@ func encodeCanvasMessageTimelineCursor(message *model.CanvasMessage) string {
 	return fmt.Sprintf("%d:%d", message.CreatedTime, message.Id)
 }
 
-func parseCanvasMessageTimelineCursor(userId int, sessionId int, cursor string) (*canvasMessageTimelineCursor, error) {
+func parseCanvasMessageTimelineCursor(mode string, userId int, sessionId int, cursor string) (*canvasMessageTimelineCursor, error) {
 	cursor = strings.TrimSpace(cursor)
 	if cursor == "" {
 		return &canvasMessageTimelineCursor{}, nil
@@ -664,7 +650,7 @@ func parseCanvasMessageTimelineCursor(userId int, sessionId int, cursor string) 
 	if err != nil || id <= 0 {
 		return nil, fmt.Errorf("invalid canvas message cursor")
 	}
-	message, err := model.GetCanvasMessageBySessionAndID(userId, sessionId, id)
+	message, err := model.GetCanvasMessageByModeSessionAndID(mode, userId, sessionId, id)
 	if err != nil {
 		return nil, err
 	}
@@ -863,7 +849,7 @@ func maybeAutoTitleCanvasSession(userId int, session *model.CanvasSession, promp
 	if session == nil || session.TitleManuallySet || strings.TrimSpace(prompt) == "" {
 		return nil
 	}
-	messageCount, err := model.CountCanvasMessages(userId, session.Id)
+	messageCount, err := model.CountCanvasMessagesByMode(session.Mode, userId, session.Id)
 	if err != nil {
 		return err
 	}
@@ -924,35 +910,41 @@ func validateCanvasSessionClearContextMessageID(userId int, sessionId int, messa
 		return 0, nil
 	}
 
-	var message model.CanvasMessage
-	err := model.DB.
-		Where("id = ? AND session_id = ? AND user_id = ? AND mode = ? AND status = ? AND deleted_time = 0",
-			messageID, sessionId, userId, model.CanvasModeChat, model.CanvasMessageStatusSuccess).
-		First(&message).Error
-	if err == gorm.ErrRecordNotFound {
-		return 0, fmt.Errorf("clear context message not found")
-	}
+	message, err := model.GetCanvasMessageByModeSessionAndID(model.CanvasModeChat, userId, sessionId, messageID)
 	if err != nil {
 		return 0, err
+	}
+	if message == nil || message.Status != model.CanvasMessageStatusSuccess {
+		return 0, fmt.Errorf("clear context message not found")
 	}
 	return message.Id, nil
 }
 
 func getLatestCanvasChatClearContextMessageID(userId int, sessionId int) (int, error) {
-	var message model.CanvasMessage
-	err := model.DB.
-		Where("session_id = ? AND user_id = ? AND mode = ? AND status = ? AND deleted_time = 0",
-			sessionId, userId, model.CanvasModeChat, model.CanvasMessageStatusSuccess).
-		Order("created_time DESC").
-		Order("id DESC").
-		First(&message).Error
-	if err == gorm.ErrRecordNotFound {
-		return 0, nil
-	}
+	message, err := model.GetLatestSuccessfulCanvasMessage(model.CanvasModeChat, userId, sessionId)
 	if err != nil {
 		return 0, err
 	}
+	if message == nil {
+		return 0, nil
+	}
 	return message.Id, nil
+}
+
+func cleanupCreatedCanvasMessages(mode string, userId int, messages []*model.CanvasMessage) {
+	ids := make([]int, 0, len(messages))
+	for _, message := range messages {
+		if message == nil || message.Id <= 0 {
+			continue
+		}
+		ids = append(ids, message.Id)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	if err := model.SoftDeleteCanvasMessagesByIDs(mode, userId, ids, common.GetTimestamp()); err != nil {
+		common.SysLog(fmt.Sprintf("Failed to cleanup canvas messages %v after session update failure: %v", ids, err))
+	}
 }
 
 func normalizeCanvasChatTemperatureValue(input *float64, fallback float64) float64 {
