@@ -451,6 +451,31 @@ func GetModelMappingByRequestModel(requestModel string) (*ModelMapping, error) {
 	return &mm, err
 }
 
+func GetModelMappingsByRequestModels(requestModels []string) ([]*ModelMapping, error) {
+	if len(requestModels) == 0 {
+		return []*ModelMapping{}, nil
+	}
+	normalized := make([]string, 0, len(requestModels))
+	seen := make(map[string]struct{}, len(requestModels))
+	for _, requestModel := range requestModels {
+		requestModel = strings.TrimSpace(requestModel)
+		if requestModel == "" {
+			continue
+		}
+		if _, ok := seen[requestModel]; ok {
+			continue
+		}
+		seen[requestModel] = struct{}{}
+		normalized = append(normalized, requestModel)
+	}
+	if len(normalized) == 0 {
+		return []*ModelMapping{}, nil
+	}
+	var mappings []*ModelMapping
+	err := DB.Where("request_model IN ?", normalized).Find(&mappings).Error
+	return mappings, err
+}
+
 func GetActiveModelMappingByRequestModel(requestModel string) (*ModelMapping, error) {
 	var mm ModelMapping
 	err := DB.Where("request_model = ? AND status = 1", requestModel).

@@ -1104,6 +1104,60 @@ func TestBuildCanvasChatRelayMessagesKeepsHistoryWhenSummaryDisabled(t *testing.
 	}
 }
 
+func TestListRecentCanvasSuccessfulChatMessagesUsesCreatedTimeOrdering(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	for _, message := range []*model.CanvasMessage{
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeChat, Role: model.CanvasMessageRoleUser, Prompt: "created-300", Status: model.CanvasMessageStatusSuccess, CreatedTime: 300, UpdatedTime: 300},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeChat, Role: model.CanvasMessageRoleAssistant, Prompt: "created-100", Status: model.CanvasMessageStatusSuccess, CreatedTime: 100, UpdatedTime: 100},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeChat, Role: model.CanvasMessageRoleUser, Prompt: "created-200", Status: model.CanvasMessageStatusSuccess, CreatedTime: 200, UpdatedTime: 200},
+	} {
+		if err := model.CreateCanvasMessage(message); err != nil {
+			t.Fatalf("failed to create canvas chat history: %v", err)
+		}
+	}
+
+	messages, err := listRecentCanvasSuccessfulChatMessages(1, session.Id, 0, 0, 2)
+	if err != nil {
+		t.Fatalf("failed to list recent chat messages: %v", err)
+	}
+	if got := []string{messages[0].Prompt, messages[1].Prompt}; !equalStrings(got, []string{"created-200", "created-300"}) {
+		t.Fatalf("expected recent chat messages by created_time order, got %#v", got)
+	}
+}
+
+func TestListCanvasSuccessfulChatMessagesAfterUsesCreatedTimeOrdering(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	for _, message := range []*model.CanvasMessage{
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeChat, Role: model.CanvasMessageRoleUser, Prompt: "created-300", Status: model.CanvasMessageStatusSuccess, CreatedTime: 300, UpdatedTime: 300},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeChat, Role: model.CanvasMessageRoleAssistant, Prompt: "created-100", Status: model.CanvasMessageStatusSuccess, CreatedTime: 100, UpdatedTime: 100},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeChat, Role: model.CanvasMessageRoleUser, Prompt: "created-200", Status: model.CanvasMessageStatusSuccess, CreatedTime: 200, UpdatedTime: 200},
+	} {
+		if err := model.CreateCanvasMessage(message); err != nil {
+			t.Fatalf("failed to create canvas chat history: %v", err)
+		}
+	}
+
+	messages, err := listCanvasSuccessfulChatMessagesAfter(1, session.Id, 0, 3)
+	if err != nil {
+		t.Fatalf("failed to list chat messages after cursor: %v", err)
+	}
+	if got := []string{messages[0].Prompt, messages[1].Prompt, messages[2].Prompt}; !equalStrings(got, []string{"created-100", "created-200", "created-300"}) {
+		t.Fatalf("expected summary chat messages by created_time order, got %#v", got)
+	}
+}
+
 func TestCreateCanvasChatMessageFailureKeepsPartialText(t *testing.T) {
 	db := setupCanvasSessionServiceTestDB(t)
 	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
@@ -1664,6 +1718,7 @@ func TestListCanvasMessagesIncludesEffectiveVideoResultURL(t *testing.T) {
 			Input:             "canvas video prompt",
 			OriginModelName:   "sora-compatible",
 			UpstreamModelName: "sora-compatible",
+			RequestParams:     `{"input_reference":"https://cdn.example.com/reference.png"}`,
 		},
 		PrivateData: model.TaskPrivateData{
 			ResultURL: "https://gateway.example.com/v1/videos/task_canvas_direct/content",
@@ -1703,6 +1758,345 @@ func TestListCanvasMessagesIncludesEffectiveVideoResultURL(t *testing.T) {
 	if messages[0].VideoTask.ResultURL != "https://cdn.example.com/canvas.mp4" {
 		t.Fatalf("expected direct canvas result url, got %q", messages[0].VideoTask.ResultURL)
 	}
+	if len(messages[0].ReferenceImages) != 1 || messages[0].ReferenceImages[0] != "https://cdn.example.com/reference.png" {
+		t.Fatalf("expected attached video reference image, got %#v", messages[0].ReferenceImages)
+	}
+}
+
+func TestListCanvasMessageTimelinePaginatesAndCarriesImageReferences(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage})
+	if err != nil {
+		t.Fatalf("failed to create image session: %v", err)
+	}
+
+	referenceURL := "/api/image-generation/files/image-generation/ref/20260531/reference.png"
+	taskA := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-a",
+		Prompt:          "first result",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusSuccess,
+		Params:          `{"size":"1024x1024","reference_images":["` + referenceURL + `"]}`,
+		ImageUrl:        "/api/image-generation/files/image-generation/20260531/result-a.png",
+		ThumbnailUrl:    "/api/image-generation/files/image-generation/thumb/20260531/result-a.jpg",
+		ImageMetadata:   `{"width":1024,"height":1024}`,
+		CreatedTime:     common.GetTimestamp(),
+	}
+	if err := model.DB.Create(taskA).Error; err != nil {
+		t.Fatalf("failed to create first image task: %v", err)
+	}
+	taskB := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-b",
+		Prompt:          "second result",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusSuccess,
+		Params:          `{"size":"1536x1024"}`,
+		ImageUrl:        "/api/image-generation/files/image-generation/20260531/result-b.png",
+		ThumbnailUrl:    "/api/image-generation/files/image-generation/thumb/20260531/result-b.jpg",
+		ImageMetadata:   `{"width":1536,"height":1024}`,
+		CreatedTime:     common.GetTimestamp(),
+	}
+	if err := model.DB.Create(taskB).Error; err != nil {
+		t.Fatalf("failed to create second image task: %v", err)
+	}
+
+	for _, msg := range []*model.CanvasMessage{
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleUser, Prompt: "first prompt", CreatedTime: 1, UpdatedTime: 1},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleAssistant, Prompt: "first result", Status: model.ImageTaskStatusSuccess, TaskId: strconv.Itoa(taskA.Id), TaskType: model.CanvasTaskTypeImage, CreatedTime: 2, UpdatedTime: 2},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleUser, Prompt: "second prompt", CreatedTime: 3, UpdatedTime: 3},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleAssistant, Prompt: "second result", Status: model.ImageTaskStatusSuccess, TaskId: strconv.Itoa(taskB.Id), TaskType: model.CanvasTaskTypeImage, CreatedTime: 4, UpdatedTime: 4},
+	} {
+		if err := model.CreateCanvasMessage(msg); err != nil {
+			t.Fatalf("failed to create canvas message: %v", err)
+		}
+	}
+
+	page, err := ListCanvasMessageTimeline(1, session.Id, 3, "")
+	if err != nil {
+		t.Fatalf("ListCanvasMessageTimeline returned error: %v", err)
+	}
+	if len(page.Items) != 3 {
+		t.Fatalf("expected 3 timeline items, got %d", len(page.Items))
+	}
+	if !page.HasMore {
+		t.Fatal("expected first timeline page to report has_more")
+	}
+	if page.NextCursor != encodeCanvasMessageTimelineCursor(page.Items[0].CanvasMessage) {
+		t.Fatalf("expected next cursor %q, got %q", encodeCanvasMessageTimelineCursor(page.Items[0].CanvasMessage), page.NextCursor)
+	}
+	if len(page.Items[0].ReferenceImages) != 1 || page.Items[0].ReferenceImages[0] != referenceURL {
+		t.Fatalf("expected image references on timeline item, got %#v", page.Items[0].ReferenceImages)
+	}
+	if page.Items[0].ImageTask == nil {
+		t.Fatal("expected attached image task on timeline item")
+	}
+	if strings.Contains(page.Items[0].ImageTask.Params, "reference_image") {
+		t.Fatalf("expected sanitized image params on timeline item, got %q", page.Items[0].ImageTask.Params)
+	}
+
+	nextPage, err := ListCanvasMessageTimeline(1, session.Id, 3, page.NextCursor)
+	if err != nil {
+		t.Fatalf("failed to load second timeline page: %v", err)
+	}
+	if len(nextPage.Items) != 1 || nextPage.Items[0].Role != model.CanvasMessageRoleUser {
+		t.Fatalf("expected older single user message on second page, got %#v", nextPage.Items)
+	}
+	if nextPage.HasMore {
+		t.Fatal("expected second timeline page to be terminal")
+	}
+}
+
+func TestListCanvasMessageTimelineUsesCreatedTimeAndIDCursorOrdering(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage})
+	if err != nil {
+		t.Fatalf("failed to create image session: %v", err)
+	}
+
+	created := []*model.CanvasMessage{
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleUser, Prompt: "time-100", CreatedTime: 100, UpdatedTime: 100},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleUser, Prompt: "time-050-a", CreatedTime: 50, UpdatedTime: 50},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleUser, Prompt: "time-050-b", CreatedTime: 50, UpdatedTime: 50},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleUser, Prompt: "time-150", CreatedTime: 150, UpdatedTime: 150},
+	}
+	for _, message := range created {
+		if err := model.CreateCanvasMessage(message); err != nil {
+			t.Fatalf("failed to create canvas message: %v", err)
+		}
+	}
+
+	firstPage, err := ListCanvasMessageTimeline(1, session.Id, 2, "")
+	if err != nil {
+		t.Fatalf("failed to load first timeline page: %v", err)
+	}
+	if len(firstPage.Items) != 2 {
+		t.Fatalf("expected 2 items on first page, got %d", len(firstPage.Items))
+	}
+	if got := []string{firstPage.Items[0].Prompt, firstPage.Items[1].Prompt}; !equalStrings(got, []string{"time-100", "time-150"}) {
+		t.Fatalf("unexpected first page ordering: %#v", got)
+	}
+	if !firstPage.HasMore {
+		t.Fatal("expected more history on first page")
+	}
+
+	secondPage, err := ListCanvasMessageTimeline(1, session.Id, 2, firstPage.NextCursor)
+	if err != nil {
+		t.Fatalf("failed to load second timeline page: %v", err)
+	}
+	if len(secondPage.Items) != 2 {
+		t.Fatalf("expected 2 items on second page, got %d", len(secondPage.Items))
+	}
+	if got := []string{secondPage.Items[0].Prompt, secondPage.Items[1].Prompt}; !equalStrings(got, []string{"time-050-a", "time-050-b"}) {
+		t.Fatalf("unexpected second page ordering: %#v", got)
+	}
+	if secondPage.HasMore {
+		t.Fatal("expected second page to be terminal")
+	}
+}
+
+func TestListCanvasMessagesBatchLoadsVideoModelMappingsOnce(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeVideo})
+	if err != nil {
+		t.Fatalf("failed to create video session: %v", err)
+	}
+
+	for _, mapping := range []*model.ModelMapping{
+		{RequestModel: "video-alpha", ActualModel: "video-alpha", DisplayName: "Video Alpha", ModelType: 3, Status: 1, RequestEndpoint: "openai-video"},
+		{RequestModel: "video-beta", ActualModel: "video-beta", DisplayName: "Video Beta", ModelType: 3, Status: 1, RequestEndpoint: "openai-video-generation"},
+	} {
+		if err := db.Create(mapping).Error; err != nil {
+			t.Fatalf("failed to create model mapping: %v", err)
+		}
+	}
+
+	var createdTasks []*model.Task
+	for index, modelID := range []string{"video-alpha", "video-beta", "video-alpha"} {
+		task := &model.Task{
+			UserId:     1,
+			TaskID:     fmt.Sprintf("task_video_batch_%d", index),
+			Action:     constant.TaskActionTextGenerate,
+			Status:     model.TaskStatusSuccess,
+			Progress:   "100%",
+			SubmitTime: common.GetTimestamp(),
+			Properties: model.Properties{
+				Input:             fmt.Sprintf("video prompt %d", index),
+				OriginModelName:   modelID,
+				UpstreamModelName: modelID,
+			},
+		}
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create video task: %v", err)
+		}
+		createdTasks = append(createdTasks, task)
+		if err := model.CreateCanvasMessage(&model.CanvasMessage{
+			SessionId:   session.Id,
+			UserId:      1,
+			Mode:        model.CanvasModeVideo,
+			Role:        model.CanvasMessageRoleAssistant,
+			Prompt:      task.Properties.Input,
+			Status:      dto.VideoStatusCompleted,
+			TaskId:      strconv.FormatInt(task.ID, 10),
+			TaskType:    model.CanvasTaskTypeVideo,
+			CreatedTime: int64(index + 1),
+			UpdatedTime: int64(index + 1),
+		}); err != nil {
+			t.Fatalf("failed to create canvas message: %v", err)
+		}
+	}
+
+	callbackName := "count_canvas_video_model_mapping_queries"
+	modelMappingQueries := 0
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "model_mappings" {
+			modelMappingQueries++
+		}
+	}); err != nil {
+		t.Fatalf("failed to register query callback: %v", err)
+	}
+	defer func() {
+		_ = db.Callback().Query().Remove(callbackName)
+	}()
+
+	messages, err := ListCanvasMessages(1, session.Id)
+	if err != nil {
+		t.Fatalf("ListCanvasMessages returned error: %v", err)
+	}
+	if len(messages) != len(createdTasks) {
+		t.Fatalf("expected %d video messages, got %d", len(createdTasks), len(messages))
+	}
+	if modelMappingQueries != 1 {
+		t.Fatalf("expected one batched model mapping query, got %d", modelMappingQueries)
+	}
+	for _, message := range messages {
+		if message.VideoTask == nil || strings.TrimSpace(message.VideoTask.DisplayName) == "" {
+			t.Fatalf("expected attached video task display name, got %#v", message.VideoTask)
+		}
+	}
+}
+
+func TestListCanvasMessagesDoesNotFallbackPerVideoTaskWhenModelMappingMissing(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeVideo})
+	if err != nil {
+		t.Fatalf("failed to create video session: %v", err)
+	}
+
+	if err := db.Create(&model.ModelMapping{
+		RequestModel:    "video-alpha",
+		ActualModel:     "video-alpha",
+		DisplayName:     "Video Alpha",
+		ModelType:       3,
+		Status:          1,
+		RequestEndpoint: "openai-video",
+	}).Error; err != nil {
+		t.Fatalf("failed to create model mapping: %v", err)
+	}
+
+	taskModels := []string{"video-alpha", "video-missing", "video-missing"}
+	for index, modelID := range taskModels {
+		task := &model.Task{
+			UserId:     1,
+			TaskID:     fmt.Sprintf("task_video_missing_%d", index),
+			Action:     constant.TaskActionTextGenerate,
+			Status:     model.TaskStatusSuccess,
+			Progress:   "100%",
+			SubmitTime: common.GetTimestamp(),
+			Properties: model.Properties{
+				Input:             fmt.Sprintf("video prompt %d", index),
+				OriginModelName:   modelID,
+				UpstreamModelName: modelID,
+			},
+		}
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create video task: %v", err)
+		}
+		if err := model.CreateCanvasMessage(&model.CanvasMessage{
+			SessionId:   session.Id,
+			UserId:      1,
+			Mode:        model.CanvasModeVideo,
+			Role:        model.CanvasMessageRoleAssistant,
+			Prompt:      task.Properties.Input,
+			Status:      dto.VideoStatusCompleted,
+			TaskId:      strconv.FormatInt(task.ID, 10),
+			TaskType:    model.CanvasTaskTypeVideo,
+			CreatedTime: int64(index + 1),
+			UpdatedTime: int64(index + 1),
+		}); err != nil {
+			t.Fatalf("failed to create canvas message: %v", err)
+		}
+	}
+
+	callbackName := "count_canvas_video_missing_model_mapping_queries"
+	modelMappingQueries := 0
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "model_mappings" {
+			modelMappingQueries++
+		}
+	}); err != nil {
+		t.Fatalf("failed to register query callback: %v", err)
+	}
+	defer func() {
+		_ = db.Callback().Query().Remove(callbackName)
+	}()
+
+	messages, err := ListCanvasMessages(1, session.Id)
+	if err != nil {
+		t.Fatalf("ListCanvasMessages returned error: %v", err)
+	}
+	if modelMappingQueries != 1 {
+		t.Fatalf("expected one batched model mapping query even with missing mappings, got %d", modelMappingQueries)
+	}
+	if len(messages) != len(taskModels) {
+		t.Fatalf("expected %d video messages, got %d", len(taskModels), len(messages))
+	}
+
+	var missingCount int
+	for _, message := range messages {
+		if message.VideoTask == nil {
+			t.Fatalf("expected attached video task, got %#v", message)
+		}
+		switch message.VideoTask.ModelID {
+		case "video-alpha":
+			if message.VideoTask.DisplayName != "Video Alpha" {
+				t.Fatalf("expected mapped display name for video-alpha, got %#v", message.VideoTask)
+			}
+			if message.VideoTask.RequestEndpoint != "openai-video" {
+				t.Fatalf("expected mapped request endpoint for video-alpha, got %#v", message.VideoTask)
+			}
+		case "video-missing":
+			missingCount++
+			if message.VideoTask.DisplayName != "video-missing" {
+				t.Fatalf("expected fallback display name for missing mapping, got %#v", message.VideoTask)
+			}
+			if message.VideoTask.RequestEndpoint != "" {
+				t.Fatalf("expected empty request endpoint for missing mapping, got %#v", message.VideoTask)
+			}
+		default:
+			t.Fatalf("unexpected model id in video task summary: %#v", message.VideoTask)
+		}
+	}
+	if missingCount != 2 {
+		t.Fatalf("expected 2 missing-mapping video tasks, got %d", missingCount)
+	}
+}
+
+func equalStrings(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestCreateCanvasMessagesAllowEmptyClientRequestID(t *testing.T) {

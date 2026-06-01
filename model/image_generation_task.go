@@ -95,6 +95,16 @@ func GetImageTaskByID(id int) (*ImageGenerationTask, error) {
 	return &task, err
 }
 
+func GetImageTasksByUserAndIDs(userId int, ids []int) ([]*ImageGenerationTask, error) {
+	if userId <= 0 || len(ids) == 0 {
+		return []*ImageGenerationTask{}, nil
+	}
+	var tasks []*ImageGenerationTask
+	err := DB.Where("user_id = ? AND id IN ?", userId, ids).
+		Find(&tasks).Error
+	return tasks, err
+}
+
 // ImageTaskQueryParams 任务查询参数
 type ImageTaskQueryParams struct {
 	Status          string

@@ -108,6 +108,19 @@ func GetUserVideoTaskByIdentifier(userId int, identifier string, actions []strin
 	return &task, nil
 }
 
+func GetUserVideoTasksByIDs(userId int, ids []int64, actions []string) ([]*Task, error) {
+	if userId <= 0 || len(ids) == 0 {
+		return []*Task{}, nil
+	}
+	if len(actions) == 0 {
+		actions = DefaultVideoTaskActions()
+	}
+	var tasks []*Task
+	err := DB.Where("user_id = ? AND id IN ? AND action IN ?", userId, ids, actions).
+		Find(&tasks).Error
+	return tasks, err
+}
+
 func ExtractTaskThumbnailURL(task *Task) string {
 	if task == nil || len(task.Data) == 0 {
 		return ""

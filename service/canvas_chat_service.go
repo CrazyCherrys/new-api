@@ -1088,10 +1088,6 @@ func buildCanvasChatRelayMessages(prepared *canvasChatPreparedRequest) ([]dto.Me
 	if prepared == nil {
 		return nil, fmt.Errorf("canvas chat request is nil")
 	}
-	history, err := listCanvasSuccessfulChatMessages(prepared.UserId, prepared.Session.Id, prepared.UserMessage.Id)
-	if err != nil {
-		return nil, err
-	}
 
 	effectiveSummary, summaryCursor, err := getCanvasChatActiveSummary(prepared.Session)
 	if err != nil {
@@ -1102,21 +1098,18 @@ func buildCanvasChatRelayMessages(prepared *canvasChatPreparedRequest) ([]dto.Me
 		cutoffID = summaryCursor
 	}
 
-	filteredHistory := make([]*model.CanvasMessage, 0, len(history))
-	for _, message := range history {
-		if message == nil || message.Id <= cutoffID {
-			continue
-		}
-		filteredHistory = append(filteredHistory, message)
-	}
-
+	filteredHistory := []*model.CanvasMessage{}
 	if prepared.ContextCount > 0 {
-		maxMessages := prepared.ContextCount * 2
-		if len(filteredHistory) > maxMessages {
-			filteredHistory = filteredHistory[len(filteredHistory)-maxMessages:]
+		filteredHistory, err = listRecentCanvasSuccessfulChatMessages(
+			prepared.UserId,
+			prepared.Session.Id,
+			cutoffID,
+			prepared.UserMessage.Id,
+			prepared.ContextCount*2,
+		)
+		if err != nil {
+			return nil, err
 		}
-	} else {
-		filteredHistory = filteredHistory[:0]
 	}
 
 	systemRole := canvasChatSystemRole(prepared.FinalModel)
@@ -1152,6 +1145,58 @@ func listCanvasSuccessfulChatMessages(userId int, sessionId int, beforeMessageId
 		userId, sessionId, model.CanvasModeChat, model.CanvasMessageStatusSuccess)
 	if beforeMessageId > 0 {
 		query = query.Where("id < ?", beforeMessageId)
+	}
+	err := query.Order("created_time ASC").Order("id ASC").Find(&messages).Error
+	return messages, err
+}
+
+func listRecentCanvasSuccessfulChatMessages(userId int, sessionId int, afterMessageId int, beforeMessageId int, limit int) ([]*model.CanvasMessage, error) {
+	if limit <= 0 {
+		return []*model.CanvasMessage{}, nil
+	}
+	var messages []*model.CanvasMessage
+	query := model.DB.Where("user_id = ? AND session_id = ? AND mode = ? AND status = ? AND deleted_time = 0",
+		userId, sessionId, model.CanvasModeChat, model.CanvasMessageStatusSuccess)
+	if afterMessageId > 0 {
+		query = query.Where("id > ?", afterMessageId)
+	}
+	if beforeMessageId > 0 {
+		query = query.Where("id < ?", beforeMessageId)
+	}
+	if err := query.Order("created_time DESC").Order("id DESC").Limit(limit).Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	if len(messages) > 1 {
+		for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
+			messages[left], messages[right] = messages[right], messages[left]
+		}
+	}
+	return messages, nil
+}
+
+func countCanvasSuccessfulChatMessagesAfter(userId int, sessionId int, afterMessageId int) (int64, error) {
+	var count int64
+	query := model.DB.Model(&model.CanvasMessage{}).
+		Where("user_id = ? AND session_id = ? AND mode = ? AND status = ? AND deleted_time = 0",
+			userId, sessionId, model.CanvasModeChat, model.CanvasMessageStatusSuccess)
+	if afterMessageId > 0 {
+		query = query.Where("id > ?", afterMessageId)
+	}
+	if err := query.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func listCanvasSuccessfulChatMessagesAfter(userId int, sessionId int, afterMessageId int, limit int) ([]*model.CanvasMessage, error) {
+	var messages []*model.CanvasMessage
+	query := model.DB.Where("user_id = ? AND session_id = ? AND mode = ? AND status = ? AND deleted_time = 0",
+		userId, sessionId, model.CanvasModeChat, model.CanvasMessageStatusSuccess)
+	if afterMessageId > 0 {
+		query = query.Where("id > ?", afterMessageId)
+	}
+	if limit > 0 {
+		query = query.Limit(limit)
 	}
 	err := query.Order("created_time ASC").Order("id ASC").Find(&messages).Error
 	return messages, err
@@ -1391,10 +1436,6 @@ func summarizeCanvasChatSession(ctx context.Context, userId int, sessionId int, 
 		return err
 	}
 
-	history, err := listCanvasSuccessfulChatMessages(userId, sessionId, 0)
-	if err != nil {
-		return err
-	}
 	existingSummary, lastSummarizedMessageID, err := getCanvasChatActiveSummary(session)
 	if err != nil {
 		return err
@@ -1402,13 +1443,6 @@ func summarizeCanvasChatSession(ctx context.Context, userId int, sessionId int, 
 	startID := session.ClearContextMessageId
 	if lastSummarizedMessageID > startID {
 		startID = lastSummarizedMessageID
-	}
-	unsummarized := make([]*model.CanvasMessage, 0, len(history))
-	for _, message := range history {
-		if message == nil || message.Id <= startID {
-			continue
-		}
-		unsummarized = append(unsummarized, message)
 	}
 
 	contextCount = resolveCanvasChatContextCount(session, common.GetPointer(contextCount))
@@ -1421,14 +1455,21 @@ func summarizeCanvasChatSession(ctx context.Context, userId int, sessionId int, 
 		recentWindowMessages = contextWindowMessages
 	}
 	triggerMessages := session.SummaryTriggerMessages
-	if len(unsummarized) <= recentWindowMessages+triggerMessages {
+	totalUnsummarized, err := countCanvasSuccessfulChatMessagesAfter(userId, sessionId, startID)
+	if err != nil {
+		return err
+	}
+	if totalUnsummarized <= int64(recentWindowMessages+triggerMessages) {
 		return nil
 	}
-	summaryCount := len(unsummarized) - recentWindowMessages
+	summaryCount := int(totalUnsummarized) - recentWindowMessages
 	if summaryCount <= 0 {
 		return nil
 	}
-	toSummarize := unsummarized[:summaryCount]
+	toSummarize, err := listCanvasSuccessfulChatMessagesAfter(userId, sessionId, startID, summaryCount)
+	if err != nil {
+		return err
+	}
 	if len(toSummarize) == 0 {
 		return nil
 	}

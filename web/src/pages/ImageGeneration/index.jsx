@@ -96,6 +96,11 @@ import {
   CANVAS_RENDERABLE_IMAGE_BATCH,
   getRenderableCanvasMessages,
 } from './canvasMessageBatches';
+import {
+  mergeCanvasLatestTimelinePage,
+  mergeCanvasMessagesById,
+  sortCanvasMessagesByCreated,
+} from './canvasMessageTimeline';
 
 const { Text } = Typography;
 
@@ -120,6 +125,7 @@ const CANVAS_MODE_VIDEO = 'video';
 const CANVAS_MODES = [CANVAS_MODE_CHAT, CANVAS_MODE_IMAGE, CANVAS_MODE_VIDEO];
 const DEFAULT_CANVAS_SESSION_RECENT_PAGE_SIZE = 20;
 const MAX_CANVAS_SESSION_RECENT_PAGE_SIZE = 100;
+const DEFAULT_CANVAS_MESSAGE_PAGE_SIZE = 100;
 const DEFAULT_ASSET_PAGE_SIZE = 24;
 const DEFAULT_CHAT_TEMPERATURE = '0.7';
 const DEFAULT_CHAT_CONTEXT_COUNT = '8';
@@ -678,7 +684,11 @@ const ImageGeneration = () => {
   const [canvasMessagesSessionId, setCanvasMessagesSessionId] = useState(null);
   const [canvasMessages, setCanvasMessages] = useState([]);
   const [canvasMessagesLoading, setCanvasMessagesLoading] = useState(false);
+  const [canvasMessagesLoadingMore, setCanvasMessagesLoadingMore] =
+    useState(false);
   const [canvasMessagesError, setCanvasMessagesError] = useState('');
+  const [canvasMessagesHasMore, setCanvasMessagesHasMore] = useState(false);
+  const [canvasMessagesNextCursor, setCanvasMessagesNextCursor] = useState('');
   const [hoveredSidebarNavKey, setHoveredSidebarNavKey] = useState('');
   const [hoveredCanvasSessionId, setHoveredCanvasSessionId] = useState(null);
   const [hoveredCanvasChatMessageId, setHoveredCanvasChatMessageId] =
@@ -782,9 +792,9 @@ const ImageGeneration = () => {
   const [deletingVideoTasks, setDeletingVideoTasks] = useState(false);
   const [selectedCanvasMessageId, setSelectedCanvasMessageId] = useState(null);
   const canvasMessageViewportRef = useRef(null);
+  const canvasMessagesRef = useRef([]);
   const canvasMessageDetailCacheRef = useRef(new Map());
   const canvasMessageDetailRequestSeqRef = useRef(new Map());
-  const canvasMessageHydrationAttemptRef = useRef(new Set());
   const canvasMessageClientRequestSeqRef = useRef(0);
   const recentCanvasSessionsRequestSeqRef = useRef(0);
   const sseRef = useRef(null);
@@ -878,6 +888,7 @@ const ImageGeneration = () => {
   );
   const displayedCanvasMessages =
     canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [];
+  canvasMessagesRef.current = canvasMessages;
   const isCurrentCanvasMessageSession = (sessionId) =>
     String(canvasMessagesSessionIdRef.current || '') ===
     String(sessionId || '');
@@ -1143,70 +1154,6 @@ const ImageGeneration = () => {
       },
     );
   }, [canvasChatReasoningUiStateByMessageId]);
-
-  useEffect(() => {
-    if (
-      generationMode === CANVAS_MODE_CHAT ||
-      displayedCanvasMessages.length === 0
-    ) {
-      return;
-    }
-    displayedCanvasMessages.forEach((message) => {
-      if (message?.role === 'user' || !message?.task_id) {
-        return;
-      }
-      const taskType = getCanvasMessageTaskType(message);
-      const task = message.image_task || message.video_task || null;
-      const taskId = String(task?.id || message.task_id || '');
-      if (message?.client_request_id || taskId.startsWith('pending-')) {
-        return;
-      }
-      if (
-        (task?.params || task?.request_params) &&
-        (message.reference_images || message.reference_image)
-      ) {
-        return;
-      }
-      const cacheKey = `${taskType}:${taskId}`;
-      if (canvasMessageHydrationAttemptRef.current.has(cacheKey)) {
-        return;
-      }
-      canvasMessageHydrationAttemptRef.current.add(cacheKey);
-      loadCanvasMessageTaskDetail(message).then((detail) => {
-        if (!detail) {
-          return;
-        }
-        const mergedMessage = mergeCanvasMessageTaskDetail(message, detail);
-        if (taskType === 'video_generation') {
-          setCanvasMessages((prev) =>
-            prev.map((item) =>
-              item.id === message.id
-                ? {
-                    ...mergedMessage,
-                    canvas_aspect_ratio:
-                      mergedMessage.canvas_aspect_ratio ||
-                      getCanvasMessageAspectRatio(mergedMessage),
-                  }
-                : item,
-            ),
-          );
-          return;
-        }
-        setCanvasMessages((prev) =>
-          prev.map((item) =>
-            item.id === message.id
-              ? {
-                  ...mergedMessage,
-                  canvas_aspect_ratio:
-                    mergedMessage.canvas_aspect_ratio ||
-                    getCanvasMessageAspectRatio(mergedMessage),
-                }
-              : item,
-          ),
-        );
-      });
-    });
-  }, [displayedCanvasMessages, generationMode]);
 
   taskListStateRef.current = {
     page: taskPage,
@@ -1524,8 +1471,11 @@ const ImageGeneration = () => {
       canvasMessagesSessionIdRef.current = null;
       setCanvasMessagesSessionId(null);
       setCanvasMessages([]);
+      setCanvasMessagesHasMore(false);
+      setCanvasMessagesNextCursor('');
       setCanvasMessagesError('');
       setCanvasMessagesLoading(false);
+      setCanvasMessagesLoadingMore(false);
       return;
     }
     loadCanvasMessages(selectedCanvasSessionId);
@@ -1956,8 +1906,11 @@ const ImageGeneration = () => {
     canvasMessagesSessionIdRef.current = session.id;
     setCanvasMessagesSessionId(session.id);
     setCanvasMessages([]);
+    setCanvasMessagesHasMore(false);
+    setCanvasMessagesNextCursor('');
     setCanvasMessagesError('');
     setCanvasMessagesLoading(false);
+    setCanvasMessagesLoadingMore(false);
     setMobileTaskbarVisible(false);
     return session;
   };
@@ -1977,17 +1930,32 @@ const ImageGeneration = () => {
       canvasMessagesSessionIdRef.current = null;
       setCanvasMessagesSessionId(null);
       setCanvasMessages([]);
+      setCanvasMessagesHasMore(false);
+      setCanvasMessagesNextCursor('');
+      setCanvasMessagesLoadingMore(false);
       return [];
     }
     const requestSeq = canvasMessagesRequestSeqRef.current + 1;
+    const isSameSession = canvasMessagesSessionIdRef.current === sessionId;
     canvasMessagesRequestSeqRef.current = requestSeq;
     canvasMessagesSessionIdRef.current = sessionId;
     setCanvasMessagesSessionId(sessionId);
+    setCanvasMessagesLoadingMore(false);
+    if (!isSameSession) {
+      setCanvasMessages([]);
+      setCanvasMessagesHasMore(false);
+      setCanvasMessagesNextCursor('');
+      setCanvasMessagesError('');
+    }
     if (!options.silent) {
       setCanvasMessagesLoading(true);
     }
     try {
-      const res = await API.get(`/api/canvas/sessions/${sessionId}/messages`);
+      const res = await API.get(`/api/canvas/sessions/${sessionId}/messages`, {
+        params: {
+          limit: DEFAULT_CANVAS_MESSAGE_PAGE_SIZE,
+        },
+      });
       if (
         requestSeq !== canvasMessagesRequestSeqRef.current ||
         !isCurrentCanvasMessageSession(sessionId)
@@ -2002,11 +1970,23 @@ const ImageGeneration = () => {
         }
         return [];
       }
-      const messages = res.data.data || [];
-      setCanvasMessages(messages);
+      const page = res.data.data || {};
+      const messages = Array.isArray(page.items) ? page.items : [];
+      const mergeResult =
+        isSameSession && canvasMessagesRef.current.length > 0
+          ? mergeCanvasLatestTimelinePage(canvasMessagesRef.current, messages)
+          : {
+              messages: messages.slice().sort(sortCanvasMessagesByCreated),
+              hasOlderLoadedHistory: false,
+            };
+      setCanvasMessages(mergeResult.messages);
+      if (!mergeResult.hasOlderLoadedHistory) {
+        setCanvasMessagesHasMore(page.has_more === true);
+        setCanvasMessagesNextCursor(page.next_cursor || '');
+      }
       setCanvasMessagesError('');
-      syncSelectedTaskFromCanvasMessages(messages);
-      return messages;
+      syncSelectedTaskFromCanvasMessages(mergeResult.messages);
+      return mergeResult.messages;
     } catch (error) {
       if (
         requestSeq !== canvasMessagesRequestSeqRef.current ||
@@ -2027,6 +2007,48 @@ const ImageGeneration = () => {
         isCurrentCanvasMessageSession(sessionId)
       ) {
         setCanvasMessagesLoading(false);
+      }
+    }
+  };
+
+  const loadOlderCanvasMessages = async (sessionId) => {
+    if (
+      !sessionId ||
+      canvasMessagesLoadingMore ||
+      !canvasMessagesHasMore ||
+      !canvasMessagesNextCursor
+    ) {
+      return [];
+    }
+    setCanvasMessagesLoadingMore(true);
+    try {
+      const res = await API.get(`/api/canvas/sessions/${sessionId}/messages`, {
+        params: {
+          limit: DEFAULT_CANVAS_MESSAGE_PAGE_SIZE,
+          cursor: canvasMessagesNextCursor,
+        },
+      });
+      if (!isCurrentCanvasMessageSession(sessionId)) {
+        return [];
+      }
+      if (!res.data.success) {
+        throw new Error(res.data.message || t('加载消息失败'));
+      }
+      const page = res.data.data || {};
+      const items = Array.isArray(page.items) ? page.items : [];
+      setCanvasMessages((prev) => mergeCanvasMessagesById(prev, items));
+      setCanvasMessagesHasMore(page.has_more === true);
+      setCanvasMessagesNextCursor(page.next_cursor || '');
+      return items;
+    } catch (error) {
+      if (!isCurrentCanvasMessageSession(sessionId)) {
+        return [];
+      }
+      showError(error.message || t('加载消息失败'));
+      return [];
+    } finally {
+      if (isCurrentCanvasMessageSession(sessionId)) {
+        setCanvasMessagesLoadingMore(false);
       }
     }
   };
@@ -2070,14 +2092,7 @@ const ImageGeneration = () => {
           ...message,
         };
       });
-      return next.sort((a, b) => {
-        const createdDiff =
-          (Number(a?.created_time) || 0) - (Number(b?.created_time) || 0);
-        if (createdDiff !== 0) {
-          return createdDiff;
-        }
-        return (Number(a?.id) || 0) - (Number(b?.id) || 0);
-      });
+      return next.sort(sortCanvasMessagesByCreated);
     });
   };
 
@@ -2467,8 +2482,11 @@ const ImageGeneration = () => {
         canvasMessagesSessionIdRef.current = null;
         setCanvasMessagesSessionId(null);
         setCanvasMessages([]);
+        setCanvasMessagesHasMore(false);
+        setCanvasMessagesNextCursor('');
         setCanvasMessagesError('');
         setCanvasMessagesLoading(false);
+        setCanvasMessagesLoadingMore(false);
       }
       if (session.mode === CANVAS_MODE_IMAGE) {
         loadTasks(true, { forceRefresh: true });
@@ -8645,6 +8663,24 @@ const ImageGeneration = () => {
     }
     return (
       <div style={styles.canvasMessageList}>
+        {canvasMessagesHasMore ? (
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              marginBottom: 12,
+            }}
+          >
+            <Button
+              size='small'
+              theme='borderless'
+              loading={canvasMessagesLoadingMore}
+              onClick={() => loadOlderCanvasMessages(selectedCanvasSession.id)}
+            >
+              {t('加载更早消息')}
+            </Button>
+          </div>
+        ) : null}
         {getRenderableCanvasMessages(displayedCanvasMessages).map(
           renderCanvasMessage,
         )}

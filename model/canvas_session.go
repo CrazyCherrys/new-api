@@ -180,6 +180,44 @@ func ListCanvasMessages(userId int, sessionId int) ([]*CanvasMessage, error) {
 	return messages, err
 }
 
+func ListCanvasMessagesByModePage(userId int, sessionId int, mode string, limit int, beforeCreatedTime int64, beforeID int) ([]*CanvasMessage, bool, error) {
+	var messages []*CanvasMessage
+	query := DB.Where("user_id = ? AND session_id = ? AND deleted_time = 0", userId, sessionId)
+	if normalizedMode := NormalizeCanvasMode(mode); normalizedMode != "" {
+		query = query.Where("mode = ?", normalizedMode)
+	}
+	if beforeID > 0 {
+		query = query.Where("(created_time < ?) OR (created_time = ? AND id < ?)", beforeCreatedTime, beforeCreatedTime, beforeID)
+	}
+	query = query.Order("created_time DESC").Order("id DESC")
+	if limit <= 0 {
+		err := query.Find(&messages).Error
+		return messages, false, err
+	}
+	err := query.Limit(limit + 1).Find(&messages).Error
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := len(messages) > limit
+	if hasMore {
+		messages = messages[:limit]
+	}
+	return messages, hasMore, nil
+}
+
+func GetCanvasMessageBySessionAndID(userId int, sessionId int, id int) (*CanvasMessage, error) {
+	var message CanvasMessage
+	err := DB.Where("id = ? AND session_id = ? AND user_id = ? AND deleted_time = 0", id, sessionId, userId).
+		First(&message).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &message, nil
+}
+
 func CountCanvasMessages(userId int, sessionId int) (int64, error) {
 	var count int64
 	err := DB.Model(&CanvasMessage{}).

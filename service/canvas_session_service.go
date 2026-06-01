@@ -9,13 +9,40 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"gorm.io/gorm"
 )
 
+type CanvasImageMessageTask struct {
+	Id              int    `json:"id"`
+	ModelId         string `json:"model_id"`
+	SelectedGroup   string `json:"selected_group"`
+	Prompt          string `json:"prompt"`
+	Status          string `json:"status"`
+	RequestEndpoint string `json:"request_endpoint"`
+	Params          string `json:"params"`
+	ImageUrl        string `json:"image_url"`
+	ThumbnailUrl    string `json:"thumbnail_url"`
+	ImageMetadata   string `json:"image_metadata"`
+	ErrorMessage    string `json:"error_message"`
+	CreatedTime     int64  `json:"created_time"`
+	StartedTime     int64  `json:"started_time"`
+	CompletedTime   int64  `json:"completed_time"`
+	RequestType     string `json:"request_type"`
+	ReferenceCount  int    `json:"reference_count"`
+	HasMask         bool   `json:"has_mask"`
+}
+
+type CanvasVideoMessageTask struct {
+	dto.VideoGenerationTaskSummary
+}
+
 type CanvasMessageWithTask struct {
 	*model.CanvasMessage
-	ImageTask *model.ImageGenerationTaskSummary `json:"image_task,omitempty"`
-	VideoTask *dto.VideoGenerationTaskSummary   `json:"video_task,omitempty"`
+	ImageTask       *CanvasImageMessageTask `json:"image_task,omitempty"`
+	VideoTask       *CanvasVideoMessageTask `json:"video_task,omitempty"`
+	ReferenceImages []string                `json:"reference_images,omitempty"`
+	ReferenceImage  string                  `json:"reference_image,omitempty"`
 }
 
 type CreateCanvasSessionInput struct {
@@ -64,11 +91,24 @@ var (
 const (
 	defaultCanvasSessionListLimit = 20
 	maxCanvasSessionListLimit     = 100
+	defaultCanvasMessagePageLimit = 100
+	maxCanvasMessagePageLimit     = 200
 )
 
 type CanvasSessionListPage struct {
 	Items   []*model.CanvasSession `json:"items"`
 	HasMore bool                   `json:"has_more"`
+}
+
+type CanvasMessageTimelinePage struct {
+	Items      []*CanvasMessageWithTask `json:"items"`
+	HasMore    bool                     `json:"has_more"`
+	NextCursor string                   `json:"next_cursor,omitempty"`
+}
+
+type canvasMessageTimelineCursor struct {
+	CreatedTime int64
+	ID          int
 }
 
 func ListCanvasSessions(userId int, mode string, limit int, offset int) (*CanvasSessionListPage, error) {
@@ -266,6 +306,49 @@ func ListCanvasMessages(userId int, sessionId int) ([]*CanvasMessageWithTask, er
 		return nil, err
 	}
 	return attachCanvasMessageTasks(userId, messages), nil
+}
+
+func ListCanvasMessageTimeline(userId int, sessionId int, limit int, cursor string) (*CanvasMessageTimelinePage, error) {
+	session, err := model.GetCanvasSessionByID(userId, sessionId)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, fmt.Errorf("canvas session not found")
+	}
+
+	limit = normalizeCanvasMessagePageLimit(limit)
+	beforeCursor, err := parseCanvasMessageTimelineCursor(userId, sessionId, cursor)
+	if err != nil {
+		return nil, err
+	}
+
+	messages, hasMore, err := model.ListCanvasMessagesByModePage(
+		userId,
+		sessionId,
+		session.Mode,
+		limit,
+		beforeCursor.CreatedTime,
+		beforeCursor.ID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if len(messages) > 1 {
+		for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
+			messages[left], messages[right] = messages[right], messages[left]
+		}
+	}
+
+	nextCursor := ""
+	if hasMore && len(messages) > 0 {
+		nextCursor = encodeCanvasMessageTimelineCursor(messages[0])
+	}
+	return &CanvasMessageTimelinePage{
+		Items:      attachCanvasMessageTasks(userId, messages),
+		HasMore:    hasMore,
+		NextCursor: nextCursor,
+	}, nil
 }
 
 func CreateCanvasMessage(userId int, sessionId int, input CreateCanvasMessageInput) ([]*CanvasMessageWithTask, error) {
@@ -505,6 +588,9 @@ func SyncCanvasMessageTaskStatus(userId int, taskType string, taskId string) err
 }
 
 func attachCanvasMessageTasks(userId int, messages []*model.CanvasMessage) []*CanvasMessageWithTask {
+	imageTasksByID, imageRefsByID := loadCanvasImageTasksByID(userId, messages)
+	videoTasksByID, videoRefsByID := loadCanvasVideoTasksByID(userId, messages)
+
 	result := make([]*CanvasMessageWithTask, 0, len(messages))
 	for _, message := range messages {
 		item := &CanvasMessageWithTask{CanvasMessage: message}
@@ -516,25 +602,261 @@ func attachCanvasMessageTasks(userId int, messages []*model.CanvasMessage) []*Ca
 		case model.CanvasTaskTypeImage:
 			taskID, err := strconv.Atoi(message.TaskId)
 			if err == nil {
-				if task, taskErr := model.GetImageTaskByID(taskID); taskErr == nil && task != nil && task.UserId == userId {
-					item.ImageTask = model.BuildImageGenerationTaskSummary(task)
+				if task, ok := imageTasksByID[taskID]; ok {
+					item.ImageTask = task
 					item.Status = task.Status
 					item.ErrorMessage = task.ErrorMessage
 				}
+				setCanvasMessageReferenceImages(item, imageRefsByID[taskID])
 			}
 		case model.CanvasTaskTypeVideo:
 			taskID, err := strconv.ParseInt(message.TaskId, 10, 64)
 			if err == nil {
-				if task, taskErr := model.GetUserVideoTaskByID(userId, taskID, nil); taskErr == nil && task != nil {
-					item.VideoTask = buildVideoTaskSummary(task)
-					item.Status = item.VideoTask.Status
+				if task, ok := videoTasksByID[taskID]; ok {
+					item.VideoTask = task
+					item.Status = task.Status
 					item.ErrorMessage = task.FailReason
 				}
+				setCanvasMessageReferenceImages(item, videoRefsByID[taskID])
 			}
 		}
 		result = append(result, item)
 	}
 	return result
+}
+
+func normalizeCanvasMessagePageLimit(limit int) int {
+	if limit <= 0 {
+		return defaultCanvasMessagePageLimit
+	}
+	if limit > maxCanvasMessagePageLimit {
+		return maxCanvasMessagePageLimit
+	}
+	return limit
+}
+
+func encodeCanvasMessageTimelineCursor(message *model.CanvasMessage) string {
+	if message == nil || message.Id <= 0 || message.CreatedTime < 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", message.CreatedTime, message.Id)
+}
+
+func parseCanvasMessageTimelineCursor(userId int, sessionId int, cursor string) (*canvasMessageTimelineCursor, error) {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return &canvasMessageTimelineCursor{}, nil
+	}
+
+	parts := strings.Split(cursor, ":")
+	if len(parts) == 2 {
+		createdTime, createdErr := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+		id, idErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if createdErr == nil && idErr == nil && createdTime >= 0 && id > 0 {
+			return &canvasMessageTimelineCursor{
+				CreatedTime: createdTime,
+				ID:          id,
+			}, nil
+		}
+	}
+
+	id, err := strconv.Atoi(cursor)
+	if err != nil || id <= 0 {
+		return nil, fmt.Errorf("invalid canvas message cursor")
+	}
+	message, err := model.GetCanvasMessageBySessionAndID(userId, sessionId, id)
+	if err != nil {
+		return nil, err
+	}
+	if message == nil {
+		return nil, fmt.Errorf("invalid canvas message cursor")
+	}
+	return &canvasMessageTimelineCursor{
+		CreatedTime: message.CreatedTime,
+		ID:          message.Id,
+	}, nil
+}
+
+func loadCanvasImageTasksByID(userId int, messages []*model.CanvasMessage) (map[int]*CanvasImageMessageTask, map[int][]string) {
+	taskIDs := make([]int, 0)
+	seen := make(map[int]struct{})
+	for _, message := range messages {
+		if message == nil || message.TaskType != model.CanvasTaskTypeImage {
+			continue
+		}
+		taskID, err := strconv.Atoi(strings.TrimSpace(message.TaskId))
+		if err != nil || taskID <= 0 {
+			continue
+		}
+		if _, ok := seen[taskID]; ok {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		taskIDs = append(taskIDs, taskID)
+	}
+
+	tasksByID := make(map[int]*CanvasImageMessageTask, len(taskIDs))
+	refsByID := make(map[int][]string, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return tasksByID, refsByID
+	}
+
+	tasks, err := model.GetImageTasksByUserAndIDs(userId, taskIDs)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("Failed to batch load canvas image tasks: %v", err))
+		return tasksByID, refsByID
+	}
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		refs, refsErr := collectStoredReferenceImages(task.Params)
+		if refsErr != nil {
+			common.SysLog(fmt.Sprintf("Failed to read canvas image task %d references: %v", task.Id, refsErr))
+		}
+		modelTask := *task
+		FillImageGenerationTaskSummary(&modelTask)
+		modelTask.Params = SanitizeImageGenerationParamsForResponse(modelTask.Params)
+		tasksByID[task.Id] = buildCanvasImageMessageTask(&modelTask)
+		if len(refs) > 0 {
+			refsByID[task.Id] = refs
+		}
+	}
+	return tasksByID, refsByID
+}
+
+func buildCanvasImageMessageTask(task *model.ImageGenerationTask) *CanvasImageMessageTask {
+	if task == nil {
+		return nil
+	}
+	return &CanvasImageMessageTask{
+		Id:              task.Id,
+		ModelId:         task.ModelId,
+		SelectedGroup:   task.SelectedGroup,
+		Prompt:          task.Prompt,
+		Status:          task.Status,
+		RequestEndpoint: task.RequestEndpoint,
+		Params:          task.Params,
+		ImageUrl:        task.ImageUrl,
+		ThumbnailUrl:    task.ThumbnailUrl,
+		ImageMetadata:   task.ImageMetadata,
+		ErrorMessage:    task.ErrorMessage,
+		CreatedTime:     task.CreatedTime,
+		StartedTime:     task.EffectiveStartedTime(),
+		CompletedTime:   task.CompletedTime,
+		RequestType:     task.RequestType,
+		ReferenceCount:  task.ReferenceCount,
+		HasMask:         task.HasMask,
+	}
+}
+
+func loadCanvasVideoTasksByID(userId int, messages []*model.CanvasMessage) (map[int64]*CanvasVideoMessageTask, map[int64][]string) {
+	taskIDs := make([]int64, 0)
+	seen := make(map[int64]struct{})
+	for _, message := range messages {
+		if message == nil || message.TaskType != model.CanvasTaskTypeVideo {
+			continue
+		}
+		taskID, err := strconv.ParseInt(strings.TrimSpace(message.TaskId), 10, 64)
+		if err != nil || taskID <= 0 {
+			continue
+		}
+		if _, ok := seen[taskID]; ok {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		taskIDs = append(taskIDs, taskID)
+	}
+
+	tasksByID := make(map[int64]*CanvasVideoMessageTask, len(taskIDs))
+	refsByID := make(map[int64][]string, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return tasksByID, refsByID
+	}
+
+	tasks, err := model.GetUserVideoTasksByIDs(userId, taskIDs, nil)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("Failed to batch load canvas video tasks: %v", err))
+		return tasksByID, refsByID
+	}
+	modelIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		modelID := extractVideoTaskModelID(task)
+		if strings.TrimSpace(modelID) == "" {
+			continue
+		}
+		modelIDs = append(modelIDs, modelID)
+	}
+	mappingsByModel := make(map[string]*model.ModelMapping, len(modelIDs))
+	mappings, mappingsErr := model.GetModelMappingsByRequestModels(modelIDs)
+	mappingsResolved := mappingsErr == nil
+	if mappingsErr != nil {
+		common.SysLog(fmt.Sprintf("Failed to batch load canvas video model mappings: %v", mappingsErr))
+	} else {
+		for _, mapping := range mappings {
+			if mapping == nil || strings.TrimSpace(mapping.RequestModel) == "" {
+				continue
+			}
+			mappingsByModel[strings.TrimSpace(mapping.RequestModel)] = mapping
+		}
+	}
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		summary := buildVideoTaskSummaryWithResolvedMapping(
+			task,
+			mappingsByModel[extractVideoTaskModelID(task)],
+			mappingsResolved,
+		)
+		if summary != nil {
+			tasksByID[task.ID] = &CanvasVideoMessageTask{
+				VideoGenerationTaskSummary: *summary,
+			}
+		}
+		refsByID[task.ID] = collectCanvasVideoReferenceImages(task)
+	}
+	return tasksByID, refsByID
+}
+
+func collectCanvasVideoReferenceImages(task *model.Task) []string {
+	if task == nil || strings.TrimSpace(task.Properties.RequestParams) == "" {
+		return nil
+	}
+	var req relaycommon.TaskSubmitReq
+	if err := common.UnmarshalJsonStr(task.Properties.RequestParams, &req); err != nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, 3)
+	refs := make([]string, 0, 3)
+	appendRef := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		refs = append(refs, value)
+	}
+	appendRef(req.Image)
+	appendRef(req.InputReference)
+	for _, image := range req.Images {
+		appendRef(image)
+	}
+	return refs
+}
+
+func setCanvasMessageReferenceImages(item *CanvasMessageWithTask, refs []string) {
+	if item == nil || len(refs) == 0 {
+		return
+	}
+	item.ReferenceImages = append([]string(nil), refs...)
+	item.ReferenceImage = refs[0]
 }
 
 func maybeAutoTitleCanvasSession(userId int, session *model.CanvasSession, prompt string) error {

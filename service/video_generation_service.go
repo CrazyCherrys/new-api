@@ -515,18 +515,28 @@ func waitVideoTaskCreated(userId int, taskID string) (*model.Task, error) {
 }
 
 func buildVideoTaskSummary(task *model.Task) *dto.VideoGenerationTaskSummary {
+	return buildVideoTaskSummaryWithResolvedMapping(task, nil, false)
+}
+
+func buildVideoTaskSummaryWithMapping(task *model.Task, mapping *model.ModelMapping) *dto.VideoGenerationTaskSummary {
+	return buildVideoTaskSummaryWithResolvedMapping(task, mapping, false)
+}
+
+func buildVideoTaskSummaryWithResolvedMapping(task *model.Task, mapping *model.ModelMapping, mappingResolved bool) *dto.VideoGenerationTaskSummary {
 	if task == nil {
 		return nil
 	}
 
-	modelID := strings.TrimSpace(task.Properties.OriginModelName)
-	if modelID == "" {
-		modelID = strings.TrimSpace(task.Properties.UpstreamModelName)
-	}
+	modelID := extractVideoTaskModelID(task)
 
 	displayName := modelID
 	requestEndpoint := ""
-	if mapping, err := model.GetModelMappingByRequestModel(modelID); err == nil && mapping != nil {
+	if !mappingResolved && mapping == nil && modelID != "" {
+		if loadedMapping, err := model.GetModelMappingByRequestModel(modelID); err == nil {
+			mapping = loadedMapping
+		}
+	}
+	if mapping != nil {
 		if strings.TrimSpace(mapping.DisplayName) != "" {
 			displayName = strings.TrimSpace(mapping.DisplayName)
 		}
@@ -556,6 +566,17 @@ func buildVideoTaskSummary(task *model.Task) *dto.VideoGenerationTaskSummary {
 		ResultURL:       model.EffectiveVideoResultURL(task),
 		FailReason:      task.FailReason,
 	}
+}
+
+func extractVideoTaskModelID(task *model.Task) string {
+	if task == nil {
+		return ""
+	}
+	modelID := strings.TrimSpace(task.Properties.OriginModelName)
+	if modelID == "" {
+		modelID = strings.TrimSpace(task.Properties.UpstreamModelName)
+	}
+	return modelID
 }
 
 func buildVideoTaskDetail(task *model.Task) *dto.VideoGenerationTaskDetail {

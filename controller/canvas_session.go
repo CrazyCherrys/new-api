@@ -50,11 +50,12 @@ type createCanvasMessageRequest struct {
 }
 
 var (
-	listCanvasSessionsForController      = service.ListCanvasSessions
-	listCanvasChatModelsForController    = service.ListUserCanvasChatModelOptions
-	getCanvasSessionByIDForController    = model.GetCanvasSessionByID
-	createCanvasMessageForController     = service.CreateCanvasMessageWithContext
-	streamCanvasChatMessageForController = service.StreamCanvasChatMessage
+	listCanvasSessionsForController        = service.ListCanvasSessions
+	listCanvasChatModelsForController      = service.ListUserCanvasChatModelOptions
+	getCanvasSessionByIDForController      = model.GetCanvasSessionByID
+	listCanvasMessageTimelineForController = service.ListCanvasMessageTimeline
+	createCanvasMessageForController       = service.CreateCanvasMessageWithContext
+	streamCanvasChatMessageForController   = service.StreamCanvasChatMessage
 )
 
 func ListCanvasSessions(c *gin.Context) {
@@ -203,8 +204,8 @@ func ListCanvasMessages(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-
-	messages, err := service.ListCanvasMessages(userId, sessionId)
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	messages, err := listCanvasMessageTimelineForController(userId, sessionId, limit, c.Query("cursor"))
 	if err != nil {
 		common.ApiError(c, err)
 		return
