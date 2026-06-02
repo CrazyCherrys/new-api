@@ -1,137 +1,179 @@
-body.canvas-theme-route {
+body.canvas-theme-route,
+body.canvas-theme-route[theme-mode='dark'],
+html.dark body.canvas-theme-route {
   color-scheme: light;
-  --canvas-page-bg: #f5f7fb;
-  --canvas-sidebar-bg: #f7f8fc;
-  --canvas-card-bg: #ffffff;
+  --bg-page: #f5f7fb;
+  --bg-panel: #ffffff;
+  --bg-sidebar: #f3f5fa;
+  --primary: #6d5df6;
+  --primary-hover: #5b4bea;
+  --primary-light: #eef2ff;
+  --primary-border: #c7d2fe;
+  --text-main: #111827;
+  --text-secondary: #6b7280;
+  --text-muted: #9ca3af;
+  --text-inverse: #ffffff;
+  --border-light: #e5e7eb;
+  --shadow-soft: 0 12px 32px rgba(17, 24, 39, 0.08);
+  --canvas-page-bg: var(--bg-page);
+  --canvas-sidebar-bg: var(--bg-sidebar);
+  --canvas-card-bg: var(--bg-panel);
   --canvas-toolbar-bg: #f8fafc;
-  --canvas-hover-bg: rgba(15, 23, 42, 0.045);
-  --canvas-border: #e5e7eb;
-  --canvas-text-primary: #111827;
-  --canvas-text-secondary: #4b5563;
-  --canvas-text-muted: #9ca3af;
-  --canvas-primary: #7c5cff;
-  --canvas-primary-hover: #6d4aff;
+  --canvas-surface-subtle: #fbfcfe;
+  --canvas-hover-bg: rgba(109, 93, 246, 0.08);
+  --canvas-border: var(--border-light);
+  --canvas-text-primary: var(--text-main);
+  --canvas-text-secondary: var(--text-secondary);
+  --canvas-text-muted: var(--text-muted);
+  --canvas-primary: var(--primary);
+  --canvas-primary-hover: var(--primary-hover);
   --canvas-success: #10b981;
   --canvas-warning: #f59e0b;
   --canvas-error: #ef4444;
-  --canvas-primary-soft-bg: rgba(124, 92, 255, 0.1);
-  --canvas-primary-soft-border: rgba(124, 92, 255, 0.22);
-  --canvas-success-soft-bg: rgba(16, 185, 129, 0.1);
+  --canvas-primary-soft-bg: var(--primary-light);
+  --canvas-primary-soft-border: var(--primary-border);
+  --canvas-success-soft-bg: rgba(16, 185, 129, 0.12);
   --canvas-success-soft-border: rgba(16, 185, 129, 0.24);
-  --canvas-warning-soft-bg: rgba(245, 158, 11, 0.12);
-  --canvas-warning-soft-border: rgba(245, 158, 11, 0.28);
-  --canvas-error-soft-bg: rgba(239, 68, 68, 0.1);
-  --canvas-error-soft-border: rgba(239, 68, 68, 0.24);
-  --canvas-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
-  --canvas-shadow-md: 0 12px 30px rgba(15, 23, 42, 0.08);
-  --canvas-shadow-lg: 0 24px 72px rgba(15, 23, 42, 0.18);
-  --canvas-shadow-overlay: 0 20px 48px rgba(15, 23, 42, 0.16);
-  --canvas-overlay-bg: rgba(15, 23, 42, 0.48);
+  --canvas-warning-soft-bg: #fff7ed;
+  --canvas-warning-soft-border: #fed7aa;
+  --canvas-error-soft-bg: #fef2f2;
+  --canvas-error-soft-border: #fecaca;
+  --canvas-shadow-sm: 0 4px 14px rgba(17, 24, 39, 0.04);
+  --canvas-shadow-md: 0 14px 34px rgba(17, 24, 39, 0.08);
+  --canvas-shadow-lg: 0 24px 64px rgba(17, 24, 39, 0.14);
+  --canvas-shadow-overlay: 0 24px 64px rgba(17, 24, 39, 0.18);
+  --canvas-overlay-bg: rgba(17, 24, 39, 0.4);
   --canvas-card-shadow: var(--canvas-shadow-sm);
-  --canvas-card-shadow-hover: var(--canvas-shadow-md);
-  --canvas-selected-shadow: 0 18px 38px rgba(124, 92, 255, 0.14);
-  --canvas-input-bg: #ffffff;
-  --canvas-input-border: #e5e7eb;
-  --canvas-input-radius: 24px;
-  --canvas-input-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
-  --canvas-input-focus-border: rgba(124, 92, 255, 0.42);
-  --canvas-input-focus-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
-  --canvas-user-message-bg: var(--canvas-primary);
-  --canvas-user-message-text: #ffffff;
-  --canvas-user-message-link: #ede9fe;
-  --canvas-user-message-code-text: #111827;
-  --canvas-user-message-code-bg: rgba(255, 255, 255, 0.94);
-  --canvas-assistant-message-bg: var(--canvas-card-bg);
-  --canvas-assistant-message-border: var(--canvas-border);
-  --canvas-assistant-message-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
-  --canvas-message-selected-bg: rgba(124, 92, 255, 0.06);
-  --canvas-thought-bg: #f8fafc;
-  --canvas-thought-border: rgba(15, 23, 42, 0.08);
-  --canvas-thought-title: var(--canvas-text-secondary);
-  --canvas-thought-content: var(--canvas-text-muted);
+  --canvas-card-shadow-hover: var(--shadow-soft);
+  --canvas-selected-shadow: 0 16px 34px rgba(109, 93, 246, 0.14);
+  --canvas-input-bg: var(--bg-panel);
+  --canvas-input-border: var(--border-light);
+  --canvas-input-radius: 18px;
+  --canvas-input-shadow: var(--shadow-soft);
+  --canvas-input-focus-border: rgba(109, 93, 246, 0.52);
+  --canvas-input-focus-shadow:
+    0 0 0 4px rgba(109, 93, 246, 0.14),
+    var(--shadow-soft);
+  --canvas-user-message-bg: #eef2ff;
+  --canvas-user-message-border: var(--primary-border);
+  --canvas-user-message-text: var(--text-main);
+  --canvas-user-message-link: var(--primary-hover);
+  --canvas-user-message-code-text: #4338ca;
+  --canvas-user-message-code-bg: rgba(255, 255, 255, 0.84);
+  --canvas-assistant-message-bg: var(--bg-panel);
+  --canvas-assistant-message-border: rgba(229, 231, 235, 0.96);
+  --canvas-assistant-message-shadow: 0 12px 28px rgba(17, 24, 39, 0.06);
+  --canvas-message-selected-bg: rgba(109, 93, 246, 0.06);
+  --canvas-thought-bg: #f8f9fd;
+  --canvas-thought-border: #e7eaf4;
+  --canvas-thought-title: var(--text-secondary);
+  --canvas-thought-content: var(--text-secondary);
+  --canvas-chat-pane-bg:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.9) 0%,
+      rgba(249, 250, 252, 0.95) 100%
+    );
+  --canvas-chat-pane-border: rgba(229, 231, 235, 0.92);
+  --canvas-chat-pane-shadow: 0 18px 40px rgba(17, 24, 39, 0.05);
+  --canvas-status-info-bg: #f8faff;
+  --canvas-status-info-border: #dbe5ff;
+  --canvas-status-info-text: #4c57a6;
+  --canvas-status-neutral-bg: #f8fafc;
+  --canvas-status-neutral-border: #e5e7eb;
+  --canvas-status-neutral-text: var(--text-secondary);
+  --canvas-status-error-bg: #fef2f2;
+  --canvas-status-error-border: #fecaca;
+  --canvas-status-error-text: #b91c1c;
+  --canvas-code-bg: #111827;
+  --canvas-code-border: rgba(148, 163, 184, 0.24);
+  --canvas-code-text: #eef2ff;
+  --canvas-inline-code-bg: #f3f4f6;
+  --canvas-inline-code-border: #e5e7eb;
+  --canvas-inline-code-text: #4f46e5;
   --canvas-media-overlay:
     linear-gradient(
       180deg,
-      rgba(15, 23, 42, 0.16) 0%,
-      rgba(15, 23, 42, 0.48) 100%
+      rgba(17, 24, 39, 0.12) 0%,
+      rgba(17, 24, 39, 0.42) 100%
     );
   --canvas-media-overlay-error:
     linear-gradient(
       180deg,
-      rgba(15, 23, 42, 0.18) 0%,
-      rgba(127, 29, 29, 0.62) 100%
+      rgba(17, 24, 39, 0.14) 0%,
+      rgba(127, 29, 29, 0.56) 100%
     );
-  --canvas-media-control-bg: rgba(15, 23, 42, 0.54);
-  --canvas-media-control-border: rgba(255, 255, 255, 0.18);
+  --canvas-media-control-bg: rgba(17, 24, 39, 0.58);
+  --canvas-media-control-border: rgba(255, 255, 255, 0.16);
   --canvas-media-control-text: #ffffff;
-  --canvas-media-panel-bg: rgba(15, 23, 42, 0.74);
+  --canvas-media-panel-bg: rgba(17, 24, 39, 0.76);
   --canvas-media-panel-border: rgba(255, 255, 255, 0.14);
   --canvas-media-panel-text: #f3f4f6;
-  --canvas-empty-accent-bg: rgba(124, 92, 255, 0.12);
+  --canvas-empty-accent-bg: rgba(109, 93, 246, 0.12);
   --canvas-danger-chip-bg: rgba(239, 68, 68, 0.1);
-  --canvas-danger-chip-border: rgba(239, 68, 68, 0.24);
+  --canvas-danger-chip-border: rgba(239, 68, 68, 0.18);
   --canvas-danger-chip-text: #b91c1c;
-  --canvas-preview-surface: var(--canvas-card-bg);
-  --canvas-radius-card: 12px;
+  --canvas-preview-surface: var(--bg-panel);
+  --canvas-radius-card: 16px;
   --canvas-radius-pill: 999px;
-  --canvas-radius-overlay: 14px;
+  --canvas-radius-overlay: 16px;
   --semi-color-white: #ffffff;
   --semi-color-black: #111827;
   --semi-color-primary: var(--canvas-primary);
   --semi-color-primary-hover: var(--canvas-primary-hover);
   --semi-color-primary-active: var(--canvas-primary-hover);
-  --semi-color-primary-disabled: rgba(124, 92, 255, 0.34);
+  --semi-color-primary-disabled: rgba(109, 93, 246, 0.36);
   --semi-color-primary-light-default: var(--canvas-primary-soft-bg);
-  --semi-color-primary-light-hover: rgba(124, 92, 255, 0.14);
-  --semi-color-primary-light-active: var(--canvas-primary-soft-border);
+  --semi-color-primary-light-hover: rgba(109, 93, 246, 0.14);
+  --semi-color-primary-light-active: rgba(109, 93, 246, 0.18);
   --semi-color-secondary: var(--canvas-primary);
   --semi-color-secondary-hover: var(--canvas-primary-hover);
   --semi-color-secondary-active: var(--canvas-primary-hover);
-  --semi-color-secondary-disabled: rgba(124, 92, 255, 0.34);
+  --semi-color-secondary-disabled: rgba(109, 93, 246, 0.36);
   --semi-color-secondary-light-default: var(--canvas-primary-soft-bg);
-  --semi-color-secondary-light-hover: rgba(124, 92, 255, 0.14);
-  --semi-color-secondary-light-active: var(--canvas-primary-soft-border);
+  --semi-color-secondary-light-hover: rgba(109, 93, 246, 0.14);
+  --semi-color-secondary-light-active: rgba(109, 93, 246, 0.18);
   --semi-color-tertiary: var(--canvas-text-secondary);
   --semi-color-tertiary-hover: var(--canvas-text-primary);
   --semi-color-tertiary-active: var(--canvas-text-primary);
   --semi-color-tertiary-light-default: var(--canvas-toolbar-bg);
   --semi-color-tertiary-light-hover: var(--canvas-hover-bg);
-  --semi-color-tertiary-light-active: var(--canvas-hover-bg);
+  --semi-color-tertiary-light-active: rgba(109, 93, 246, 0.12);
   --semi-color-default: var(--canvas-text-secondary);
   --semi-color-default-hover: var(--canvas-text-primary);
   --semi-color-default-active: var(--canvas-text-primary);
   --semi-color-info: var(--canvas-primary);
   --semi-color-info-hover: var(--canvas-primary-hover);
   --semi-color-info-active: var(--canvas-primary-hover);
-  --semi-color-info-disabled: rgba(124, 92, 255, 0.34);
+  --semi-color-info-disabled: rgba(109, 93, 246, 0.36);
   --semi-color-info-light-default: var(--canvas-primary-soft-bg);
-  --semi-color-info-light-hover: rgba(124, 92, 255, 0.14);
-  --semi-color-info-light-active: var(--canvas-primary-soft-border);
+  --semi-color-info-light-hover: rgba(109, 93, 246, 0.14);
+  --semi-color-info-light-active: rgba(109, 93, 246, 0.18);
   --semi-color-success: var(--canvas-success);
   --semi-color-success-hover: var(--canvas-success);
   --semi-color-success-active: var(--canvas-success);
   --semi-color-success-disabled: rgba(16, 185, 129, 0.34);
   --semi-color-success-light-default: var(--canvas-success-soft-bg);
-  --semi-color-success-light-hover: rgba(16, 185, 129, 0.14);
-  --semi-color-success-light-active: var(--canvas-success-soft-border);
+  --semi-color-success-light-hover: rgba(16, 185, 129, 0.16);
+  --semi-color-success-light-active: rgba(16, 185, 129, 0.22);
   --semi-color-danger: var(--canvas-error);
-  --semi-color-danger-hover: var(--canvas-error);
-  --semi-color-danger-active: var(--canvas-error);
+  --semi-color-danger-hover: #dc2626;
+  --semi-color-danger-active: #b91c1c;
   --semi-color-danger-light-default: var(--canvas-error-soft-bg);
   --semi-color-danger-light-hover: rgba(239, 68, 68, 0.14);
-  --semi-color-danger-light-active: var(--canvas-error-soft-border);
+  --semi-color-danger-light-active: rgba(239, 68, 68, 0.18);
   --semi-color-warning: var(--canvas-warning);
-  --semi-color-warning-hover: var(--canvas-warning);
-  --semi-color-warning-active: var(--canvas-warning);
+  --semi-color-warning-hover: #ea580c;
+  --semi-color-warning-active: #c2410c;
   --semi-color-warning-light-default: var(--canvas-warning-soft-bg);
-  --semi-color-warning-light-hover: rgba(245, 158, 11, 0.16);
-  --semi-color-warning-light-active: var(--canvas-warning-soft-border);
+  --semi-color-warning-light-hover: rgba(245, 158, 11, 0.14);
+  --semi-color-warning-light-active: rgba(245, 158, 11, 0.18);
   --semi-color-focus-border: var(--canvas-input-focus-border);
-  --semi-color-disabled-text: rgba(156, 163, 175, 0.72);
+  --semi-color-disabled-text: rgba(156, 163, 175, 0.74);
   --semi-color-disabled-border: var(--canvas-border);
-  --semi-color-disabled-bg: var(--canvas-toolbar-bg);
-  --semi-color-disabled-fill: rgba(156, 163, 175, 0.12);
-  --semi-color-shadow: rgba(15, 23, 42, 0.12);
+  --semi-color-disabled-bg: #eef2f7;
+  --semi-color-disabled-fill: rgba(156, 163, 175, 0.14);
+  --semi-color-shadow: rgba(17, 24, 39, 0.1);
   --semi-color-link: var(--canvas-primary);
   --semi-color-link-hover: var(--canvas-primary-hover);
   --semi-color-link-active: var(--canvas-primary-hover);
@@ -139,19 +181,19 @@ body.canvas-theme-route {
   --semi-color-border: var(--canvas-border);
   --semi-color-nav-bg: var(--canvas-sidebar-bg);
   --semi-color-overlay-bg: var(--canvas-overlay-bg);
-  --semi-color-fill-0: var(--canvas-toolbar-bg);
-  --semi-color-fill-1: var(--canvas-hover-bg);
-  --semi-color-fill-2: rgba(124, 92, 255, 0.08);
+  --semi-color-fill-0: var(--canvas-surface-subtle);
+  --semi-color-fill-1: rgba(109, 93, 246, 0.06);
+  --semi-color-fill-2: rgba(109, 93, 246, 0.1);
   --semi-color-bg-0: var(--canvas-card-bg);
-  --semi-color-bg-1: var(--canvas-toolbar-bg);
+  --semi-color-bg-1: #fbfcfe;
   --semi-color-bg-2: var(--canvas-card-bg);
-  --semi-color-bg-3: var(--canvas-hover-bg);
-  --semi-color-bg-4: var(--canvas-hover-bg);
+  --semi-color-bg-3: rgba(109, 93, 246, 0.04);
+  --semi-color-bg-4: rgba(109, 93, 246, 0.08);
   --semi-color-text-0: var(--canvas-text-primary);
   --semi-color-text-1: var(--canvas-text-secondary);
   --semi-color-text-2: var(--canvas-text-muted);
   --semi-color-text-3: var(--canvas-text-muted);
-  --semi-color-highlight-bg: rgba(124, 92, 255, 0.18);
+  --semi-color-highlight-bg: rgba(109, 93, 246, 0.14);
   --semi-color-highlight: var(--canvas-text-primary);
   --semi-shadow-elevated: var(--canvas-shadow-overlay);
   --semi-border-radius-extra-small: 4px;
@@ -162,109 +204,191 @@ body.canvas-theme-route {
   --semi-border-radius-full: 999px;
 }
 
-body.canvas-theme-route[theme-mode='dark'],
-html.dark body.canvas-theme-route {
-  color-scheme: dark;
-  --canvas-page-bg: #0f1117;
-  --canvas-sidebar-bg: #131925;
-  --canvas-card-bg: #1b2233;
-  --canvas-toolbar-bg: #20283d;
-  --canvas-hover-bg: rgba(255, 255, 255, 0.05);
-  --canvas-border: rgba(255, 255, 255, 0.08);
-  --canvas-text-primary: #f3f4f6;
-  --canvas-text-secondary: #9ca3af;
-  --canvas-text-muted: #6b7280;
-  --canvas-primary: #7c5cff;
-  --canvas-primary-hover: #9277ff;
-  --canvas-success: #10b981;
-  --canvas-warning: #f59e0b;
-  --canvas-error: #ef4444;
-  --canvas-primary-soft-bg: rgba(124, 92, 255, 0.18);
-  --canvas-primary-soft-border: rgba(124, 92, 255, 0.34);
-  --canvas-success-soft-bg: rgba(16, 185, 129, 0.16);
-  --canvas-success-soft-border: rgba(16, 185, 129, 0.28);
-  --canvas-warning-soft-bg: rgba(245, 158, 11, 0.16);
-  --canvas-warning-soft-border: rgba(245, 158, 11, 0.28);
-  --canvas-error-soft-bg: rgba(239, 68, 68, 0.16);
-  --canvas-error-soft-border: rgba(239, 68, 68, 0.28);
-  --canvas-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
-  --canvas-shadow-md: 0 18px 48px rgba(0, 0, 0, 0.24);
-  --canvas-shadow-lg: 0 24px 72px rgba(0, 0, 0, 0.38);
-  --canvas-shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.42);
-  --canvas-overlay-bg: rgba(15, 17, 23, 0.72);
-  --canvas-card-shadow: var(--canvas-shadow-sm);
-  --canvas-card-shadow-hover: var(--canvas-shadow-md);
-  --canvas-selected-shadow: 0 18px 38px rgba(124, 92, 255, 0.18);
-  --canvas-input-bg: #1b2233;
-  --canvas-input-border: rgba(255, 255, 255, 0.08);
-  --canvas-input-radius: 24px;
-  --canvas-input-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  --canvas-input-focus-border: rgba(124, 92, 255, 0.56);
-  --canvas-input-focus-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  --canvas-user-message-bg: var(--canvas-primary);
-  --canvas-user-message-text: #ffffff;
-  --canvas-user-message-link: #ddd6fe;
-  --canvas-user-message-code-text: #111827;
-  --canvas-user-message-code-bg: rgba(255, 255, 255, 0.92);
-  --canvas-assistant-message-bg: var(--canvas-card-bg);
-  --canvas-assistant-message-border: var(--canvas-border);
-  --canvas-assistant-message-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
-  --canvas-message-selected-bg: rgba(124, 92, 255, 0.1);
-  --canvas-thought-bg: rgba(255, 255, 255, 0.03);
-  --canvas-thought-border: rgba(255, 255, 255, 0.06);
-  --canvas-thought-title: #d1d5db;
-  --canvas-thought-content: #9ca3af;
-  --canvas-media-overlay:
-    linear-gradient(
-      180deg,
-      rgba(15, 17, 23, 0.16) 0%,
-      rgba(15, 17, 23, 0.62) 100%
-    );
-  --canvas-media-overlay-error:
-    linear-gradient(
-      180deg,
-      rgba(15, 17, 23, 0.18) 0%,
-      rgba(127, 29, 29, 0.68) 100%
-    );
-  --canvas-media-control-bg: rgba(15, 17, 23, 0.58);
-  --canvas-media-control-border: rgba(255, 255, 255, 0.16);
-  --canvas-media-control-text: #ffffff;
-  --canvas-media-panel-bg: rgba(15, 17, 23, 0.82);
-  --canvas-media-panel-border: rgba(255, 255, 255, 0.12);
-  --canvas-media-panel-text: #f3f4f6;
-  --canvas-empty-accent-bg: rgba(124, 92, 255, 0.18);
-  --canvas-danger-chip-bg: rgba(239, 68, 68, 0.16);
-  --canvas-danger-chip-border: rgba(239, 68, 68, 0.24);
-  --canvas-danger-chip-text: #fca5a5;
-  --canvas-preview-surface: var(--canvas-card-bg);
-  --semi-color-white: #ffffff;
-  --semi-color-black: #0f1117;
-}
-
 body.canvas-theme-route {
   background: var(--canvas-page-bg);
   color: var(--canvas-text-primary);
 }
 
 body.canvas-theme-route [data-canvas-theme-scope='true'] {
-  background: var(--canvas-page-bg);
+  background:
+    radial-gradient(
+      circle at top,
+      rgba(109, 93, 246, 0.08),
+      transparent 34%
+    ),
+    linear-gradient(180deg, var(--canvas-page-bg) 0%, #f7f8fc 100%);
   color: var(--canvas-text-primary);
 }
 
+body.canvas-theme-route .canvas-workspace-body,
+body.canvas-theme-route .canvas-workspace-scroll-panel {
+  background: transparent;
+}
+
+body.canvas-theme-route .canvas-chat-stream {
+  background: var(--canvas-chat-pane-bg);
+  border: 1px solid var(--canvas-chat-pane-border);
+  border-radius: 28px;
+  box-shadow: var(--canvas-chat-pane-shadow);
+}
+
+body.canvas-theme-route .canvas-composer-dock {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(245, 247, 251, 0) 0%,
+      rgba(245, 247, 251, 0.82) 20%,
+      rgba(245, 247, 251, 0.98) 100%
+    );
+}
+
 body.canvas-theme-route [data-canvas-composer-shell='true'] {
-  border: 1px solid var(--canvas-input-border);
+  --canvas-composer-shell-border: var(--canvas-input-border);
+  --canvas-composer-shell-bg: var(--canvas-input-bg);
+  --canvas-composer-shell-shadow: var(--canvas-input-shadow);
+  border: 1px solid var(--canvas-composer-shell-border);
   border-radius: var(--canvas-input-radius);
-  background: var(--canvas-input-bg);
-  box-shadow: var(--canvas-input-shadow);
+  background: var(--canvas-composer-shell-bg);
+  box-shadow: var(--canvas-composer-shell-shadow);
   transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    background 0.16s ease;
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease,
+    background 0.18s ease;
+}
+
+body.canvas-theme-route [data-canvas-composer-shell='true']:hover {
+  --canvas-composer-shell-border: rgba(199, 210, 254, 0.96);
+  --canvas-composer-shell-shadow: 0 14px 34px rgba(17, 24, 39, 0.1);
 }
 
 body.canvas-theme-route [data-canvas-composer-shell='true']:focus-within {
-  border-color: var(--canvas-input-focus-border);
-  box-shadow: var(--canvas-input-shadow);
+  --canvas-composer-shell-border: var(--canvas-input-focus-border);
+  --canvas-composer-shell-shadow: var(--canvas-input-focus-shadow);
+}
+
+body.canvas-theme-route .canvas-composer-input-shell {
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+}
+
+body.canvas-theme-route .canvas-composer-input,
+body.canvas-theme-route .canvas-composer-input textarea,
+body.canvas-theme-route .canvas-composer-input .semi-input-textarea {
+  color: var(--canvas-text-primary);
+}
+
+body.canvas-theme-route
+  [data-canvas-composer-shell='true']
+  .semi-input-textarea-wrapper,
+body.canvas-theme-route
+  [data-canvas-composer-shell='true']
+  .semi-input-textarea-wrapper:hover,
+body.canvas-theme-route
+  [data-canvas-composer-shell='true']
+  .semi-input-textarea-wrapper-focus,
+body.canvas-theme-route
+  [data-canvas-composer-shell='true']
+  .semi-input-wrapper,
+body.canvas-theme-route
+  [data-canvas-composer-shell='true']
+  .semi-input-wrapper:hover,
+body.canvas-theme-route
+  [data-canvas-composer-shell='true']
+  .semi-input-wrapper-focus {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+body.canvas-theme-route .canvas-composer-input::placeholder,
+body.canvas-theme-route .canvas-composer-input textarea::placeholder,
+body.canvas-theme-route .canvas-composer-input .semi-input-textarea::placeholder {
+  color: var(--canvas-text-muted);
+}
+
+body.canvas-theme-route .canvas-composer-submit,
+body.canvas-theme-route .canvas-composer-upload-btn,
+body.canvas-theme-route .canvas-composer-pill,
+body.canvas-theme-route .canvas-chat-action-button {
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    opacity 0.18s ease;
+}
+
+body.canvas-theme-route .canvas-composer-submit:hover:not(:disabled),
+body.canvas-theme-route .canvas-composer-upload-btn:hover,
+body.canvas-theme-route .canvas-composer-pill:hover,
+body.canvas-theme-route .canvas-chat-action-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+body.canvas-theme-route .canvas-composer-submit:hover:not(:disabled) {
+  box-shadow: 0 16px 32px rgba(109, 93, 246, 0.24) !important;
+}
+
+body.canvas-theme-route .canvas-composer-submit:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 4px rgba(109, 93, 246, 0.14),
+    0 16px 32px rgba(109, 93, 246, 0.18) !important;
+}
+
+body.canvas-theme-route .canvas-composer-submit:disabled {
+  background: #eef1f5 !important;
+  border-color: #e5e7eb !important;
+  color: #9ca3af !important;
+  box-shadow: none !important;
+}
+
+body.canvas-theme-route .canvas-composer-upload-btn:hover,
+body.canvas-theme-route .canvas-composer-pill:hover {
+  background: var(--canvas-primary-soft-bg) !important;
+  border-color: var(--canvas-primary-soft-border) !important;
+  color: var(--canvas-primary) !important;
+  box-shadow: var(--canvas-shadow-sm) !important;
+}
+
+body.canvas-theme-route .canvas-chat-assistant-card:hover {
+  border-color: rgba(199, 210, 254, 0.92) !important;
+  box-shadow: 0 16px 34px rgba(17, 24, 39, 0.08) !important;
+}
+
+body.canvas-theme-route .canvas-chat-reasoning-card button:hover {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+body.canvas-theme-route .canvas-chat-inline-status--neutral {
+  background: var(--canvas-status-neutral-bg);
+  border-color: var(--canvas-status-neutral-border);
+  color: var(--canvas-status-neutral-text);
+}
+
+body.canvas-theme-route .canvas-chat-inline-status--error {
+  background: var(--canvas-status-error-bg);
+  border-color: var(--canvas-status-error-border);
+  color: var(--canvas-status-error-text);
+}
+
+body.canvas-theme-route .canvas-chat-inline-status--error .semi-spin-wrapper,
+body.canvas-theme-route .canvas-chat-inline-status--neutral .semi-spin-wrapper,
+body.canvas-theme-route .canvas-chat-inline-status .semi-spin-wrapper {
+  color: currentColor;
+}
+
+body.canvas-theme-route .canvas-chat-action-button:hover:not(:disabled) {
+  background: var(--canvas-primary-soft-bg) !important;
+  border-color: var(--canvas-primary-soft-border) !important;
+  color: var(--canvas-primary) !important;
+  box-shadow: var(--canvas-shadow-sm) !important;
+}
+
+body.canvas-theme-route .canvas-chat-action-button:disabled {
+  box-shadow: none;
 }
 
 body.canvas-theme-route .semi-modal-content,
@@ -299,22 +423,24 @@ body.canvas-theme-route .semi-tooltip-content {
 body.canvas-theme-route .semi-input-wrapper,
 body.canvas-theme-route .semi-input-textarea-wrapper,
 body.canvas-theme-route .semi-select-selection {
-  background: var(--canvas-toolbar-bg);
+  background: var(--canvas-card-bg);
   border-color: var(--canvas-border);
 }
 
 body.canvas-theme-route .semi-input-wrapper:hover,
 body.canvas-theme-route .semi-input-textarea-wrapper:hover,
 body.canvas-theme-route .semi-select-selection:hover {
-  background: var(--canvas-hover-bg);
-  border-color: var(--canvas-border);
+  background: var(--canvas-surface-subtle);
+  border-color: var(--canvas-primary-soft-border);
 }
 
 body.canvas-theme-route .semi-input-wrapper-focus,
 body.canvas-theme-route .semi-input-textarea-wrapper-focus,
 body.canvas-theme-route .semi-select-selection:focus-within {
   border-color: var(--canvas-input-focus-border);
-  box-shadow: var(--canvas-input-focus-shadow);
+  box-shadow:
+    0 0 0 3px rgba(109, 93, 246, 0.12),
+    0 10px 24px rgba(17, 24, 39, 0.06);
 }
 
 body.canvas-theme-route .semi-empty-title {
@@ -334,4 +460,14 @@ body.canvas-theme-route .semi-dropdown-item:hover,
 body.canvas-theme-route .semi-select-option:hover {
   background: var(--canvas-hover-bg);
   color: var(--canvas-text-primary);
+}
+
+@media (max-width: 768px) {
+  body.canvas-theme-route .canvas-chat-stream {
+    border-radius: 22px;
+  }
+
+  body.canvas-theme-route [data-canvas-composer-shell='true'] {
+    border-radius: 20px;
+  }
 }

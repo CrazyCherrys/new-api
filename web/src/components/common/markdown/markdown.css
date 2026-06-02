@@ -9,8 +9,8 @@
 }
 
 .canvas-chat-markdown {
-  color: var(--canvas-text-secondary, var(--semi-color-text-1));
-  line-height: 1.72;
+  color: var(--canvas-text-primary, var(--semi-color-text-0));
+  line-height: 1.78;
 }
 
 .canvas-chat-markdown p,
@@ -18,17 +18,68 @@
 .canvas-chat-markdown blockquote,
 .canvas-chat-markdown td,
 .canvas-chat-markdown th {
-  color: var(--canvas-text-secondary, var(--semi-color-text-1));
-  line-height: 1.72;
+  color: var(--canvas-text-primary, var(--semi-color-text-0));
+  line-height: 1.78;
 }
 
 .canvas-chat-markdown pre {
   margin: 14px 0;
-  border-radius: 12px;
+  border-radius: 16px;
 }
 
 .canvas-chat-markdown pre code {
   line-height: 1.7;
+}
+
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown {
+  color: var(--canvas-text-primary, var(--semi-color-text-0));
+}
+
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown > *:first-child,
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown > *:first-child {
+  margin-top: 0;
+}
+
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown > *:last-child,
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown p,
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown li,
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown td,
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown th {
+  color: var(--canvas-text-primary, var(--semi-color-text-0));
+  margin: 0 0 0.9em;
+}
+
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown h1,
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown h2,
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown h3,
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown h4,
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown h5,
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown h6 {
+  color: var(--canvas-text-primary, var(--semi-color-text-0));
+  line-height: 1.3;
+  margin: 1.15em 0 0.65em;
+}
+
+body.canvas-theme-route .canvas-chat-assistant-card .canvas-chat-markdown blockquote {
+  color: var(--canvas-text-secondary, var(--semi-color-text-1));
+  border-left: 3px solid var(--canvas-primary-soft-border);
+  background: rgba(238, 242, 255, 0.7);
+  border-radius: 12px;
+  margin: 1em 0;
+  padding: 12px 14px 12px 16px;
+}
+
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown,
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown p,
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown li,
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown td,
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown th,
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown blockquote {
+  color: var(--canvas-thought-content, var(--semi-color-text-1));
 }
 
 /* Playground 用户消息样式 */
@@ -50,7 +101,7 @@
 
 /* Canvas 用户消息样式 */
 body.canvas-theme-route .user-message {
-  color: var(--canvas-user-message-text, white) !important;
+  color: var(--canvas-user-message-text, var(--semi-color-text-0)) !important;
 }
 body.canvas-theme-route .user-message .markdown-body,
 body.canvas-theme-route .user-message h1,
@@ -67,13 +118,19 @@ body.canvas-theme-route .user-message ol,
 body.canvas-theme-route .user-message li,
 body.canvas-theme-route .user-message td,
 body.canvas-theme-route .user-message th {
-  color: var(--canvas-user-message-text, white) !important;
+  color: var(
+    --canvas-user-message-text,
+    var(--semi-color-text-0)
+  ) !important;
 }
 
 body.canvas-theme-route .user-message blockquote {
-  color: var(--canvas-user-message-text, white) !important;
-  border-left-color: rgba(255, 255, 255, 0.5) !important;
-  background-color: rgba(255, 255, 255, 0.1) !important;
+  color: var(
+    --canvas-user-message-text,
+    var(--semi-color-text-0)
+  ) !important;
+  border-left-color: var(--canvas-user-message-border, #c7d2fe) !important;
+  background-color: rgba(255, 255, 255, 0.58) !important;
 }
 
 body.canvas-theme-route .user-message code:not(pre code) {
@@ -85,21 +142,21 @@ body.canvas-theme-route .user-message code:not(pre code) {
 }
 
 body.canvas-theme-route .user-message a {
-  color: var(--canvas-user-message-link, #ddd6fe) !important;
+  color: var(--canvas-user-message-link, #5b4bea) !important;
 }
 
 body.canvas-theme-route .user-message a:hover {
-  color: var(--canvas-user-message-link, #ede9fe) !important;
+  color: var(--canvas-primary-hover, #5b4bea) !important;
 }
 
 body.canvas-theme-route .user-message table,
 body.canvas-theme-route .user-message td,
 body.canvas-theme-route .user-message th {
-  border-color: rgba(255, 255, 255, 0.3) !important;
+  border-color: var(--canvas-user-message-border, #c7d2fe) !important;
 }
 
 body.canvas-theme-route .user-message th {
-  background-color: rgba(255, 255, 255, 0.2) !important;
+  background-color: rgba(255, 255, 255, 0.56) !important;
 }
 
 /* 加载动画 */
@@ -120,6 +177,10 @@ body.canvas-theme-route .user-message th {
   padding: 0;
   background: transparent;
   color: var(--canvas-text-primary, var(--semi-color-text-0));
+}
+
+body.canvas-theme-route .hljs {
+  color: var(--canvas-code-text, #eef2ff);
 }
 
 .hljs-comment,
@@ -201,47 +262,69 @@ body.canvas-theme-route .user-message th {
 }
 
 /* 代码块 */
-pre {
+body.canvas-theme-route pre {
   position: relative;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  transition: all 0.2s ease;
+  background: var(--canvas-code-bg, #111827) !important;
+  color: var(--canvas-code-text, #eef2ff) !important;
+  border: 1px solid var(--canvas-code-border, rgba(148, 163, 184, 0.24))
+    !important;
+  border-radius: 16px !important;
+  padding: 16px 18px 14px !important;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.16);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 }
 
-pre:hover {
+body.canvas-theme-route pre:hover {
   border-color: var(--canvas-primary, var(--semi-color-primary)) !important;
-  box-shadow: var(--canvas-shadow-md, 0 2px 8px rgba(0, 0, 0, 0.1));
+  box-shadow: 0 20px 38px rgba(15, 23, 42, 0.18);
 }
 
-pre:hover .copy-code-button {
+body.canvas-theme-route pre:hover .copy-code-button,
+body.canvas-theme-route pre:focus-within .copy-code-button {
   opacity: 1 !important;
+  transform: translateY(0);
 }
 
-.copy-code-button {
+body.canvas-theme-route .copy-code-button {
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transform: translateY(-2px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
   z-index: 10;
   pointer-events: auto;
 }
 
-.copy-code-button:hover {
+body.canvas-theme-route .copy-code-button:hover {
   opacity: 1 !important;
 }
 
-.copy-code-button button {
+body.canvas-theme-route .copy-code-button button {
   pointer-events: auto !important;
   cursor: pointer !important;
 }
 
-.copy-code-button .semi-button {
+body.canvas-theme-route .copy-code-button .semi-button {
   pointer-events: auto !important;
   cursor: pointer !important;
-  transition: all 0.2s ease;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: #f8fafc !important;
+  box-shadow: none !important;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
 }
 
-.copy-code-button .semi-button:hover {
-  background-color: var(--canvas-hover-bg, var(--semi-color-fill-1)) !important;
-  border-color: var(--canvas-primary, var(--semi-color-primary)) !important;
-  transform: scale(1.05);
+body.canvas-theme-route .copy-code-button .semi-button:hover {
+  background-color: rgba(255, 255, 255, 0.16) !important;
+  border-color: rgba(199, 210, 254, 0.76) !important;
+  color: #ffffff !important;
+  transform: translateY(-1px);
 }
 
 /* 表格响应式 */
@@ -313,13 +396,15 @@ pre:hover .copy-code-button {
   margin: 12px 0;
 }
 
-.markdown-body code:not(pre code) {
+body.canvas-theme-route .markdown-body code:not(pre code) {
   background-color: var(--canvas-hover-bg, var(--semi-color-fill-1));
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 0.9em;
-  color: var(--canvas-primary, var(--semi-color-primary));
-  border: 1px solid var(--canvas-border, var(--semi-color-border));
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.88em;
+  color: var(--canvas-inline-code-text, var(--semi-color-primary));
+  background: var(--canvas-inline-code-bg, var(--semi-color-fill-0));
+  border: 1px solid
+    var(--canvas-inline-code-border, var(--semi-color-border));
 }
 
 .markdown-body h1:hover,
