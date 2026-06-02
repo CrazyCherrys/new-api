@@ -1,10 +1,10 @@
 body.canvas-theme-route {
   color-scheme: light;
   --canvas-page-bg: #f5f7fb;
-  --canvas-sidebar-bg: #ffffff;
+  --canvas-sidebar-bg: #f7f8fc;
   --canvas-card-bg: #ffffff;
   --canvas-toolbar-bg: #f8fafc;
-  --canvas-hover-bg: #eef2f7;
+  --canvas-hover-bg: rgba(15, 23, 42, 0.045);
   --canvas-border: #e5e7eb;
   --canvas-text-primary: #111827;
   --canvas-text-secondary: #4b5563;
@@ -33,9 +33,9 @@ body.canvas-theme-route {
   --canvas-input-bg: #ffffff;
   --canvas-input-border: #e5e7eb;
   --canvas-input-radius: 24px;
-  --canvas-input-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-  --canvas-input-focus-border: rgba(124, 92, 255, 0.38);
-  --canvas-input-focus-shadow: 0 0 0 4px rgba(124, 92, 255, 0.12);
+  --canvas-input-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  --canvas-input-focus-border: rgba(124, 92, 255, 0.42);
+  --canvas-input-focus-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
   --canvas-user-message-bg: var(--canvas-primary);
   --canvas-user-message-text: #ffffff;
   --canvas-user-message-link: #ede9fe;
@@ -43,12 +43,12 @@ body.canvas-theme-route {
   --canvas-user-message-code-bg: rgba(255, 255, 255, 0.94);
   --canvas-assistant-message-bg: var(--canvas-card-bg);
   --canvas-assistant-message-border: var(--canvas-border);
-  --canvas-assistant-message-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  --canvas-assistant-message-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
   --canvas-message-selected-bg: rgba(124, 92, 255, 0.06);
-  --canvas-thought-bg: #f3f6fb;
-  --canvas-thought-border: var(--canvas-border);
-  --canvas-thought-title: var(--canvas-text-primary);
-  --canvas-thought-content: var(--canvas-text-secondary);
+  --canvas-thought-bg: #f8fafc;
+  --canvas-thought-border: rgba(15, 23, 42, 0.08);
+  --canvas-thought-title: var(--canvas-text-secondary);
+  --canvas-thought-content: var(--canvas-text-muted);
   --canvas-media-overlay:
     linear-gradient(
       180deg,
@@ -166,10 +166,10 @@ body.canvas-theme-route[theme-mode='dark'],
 html.dark body.canvas-theme-route {
   color-scheme: dark;
   --canvas-page-bg: #0f1117;
-  --canvas-sidebar-bg: #161b26;
+  --canvas-sidebar-bg: #131925;
   --canvas-card-bg: #1b2233;
   --canvas-toolbar-bg: #20283d;
-  --canvas-hover-bg: #242d42;
+  --canvas-hover-bg: rgba(255, 255, 255, 0.05);
   --canvas-border: rgba(255, 255, 255, 0.08);
   --canvas-text-primary: #f3f4f6;
   --canvas-text-secondary: #9ca3af;
@@ -198,9 +198,9 @@ html.dark body.canvas-theme-route {
   --canvas-input-bg: #1b2233;
   --canvas-input-border: rgba(255, 255, 255, 0.08);
   --canvas-input-radius: 24px;
-  --canvas-input-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-  --canvas-input-focus-border: rgba(124, 92, 255, 0.6);
-  --canvas-input-focus-shadow: 0 0 0 4px rgba(124, 92, 255, 0.15);
+  --canvas-input-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --canvas-input-focus-border: rgba(124, 92, 255, 0.56);
+  --canvas-input-focus-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
   --canvas-user-message-bg: var(--canvas-primary);
   --canvas-user-message-text: #ffffff;
   --canvas-user-message-link: #ddd6fe;
@@ -208,12 +208,12 @@ html.dark body.canvas-theme-route {
   --canvas-user-message-code-bg: rgba(255, 255, 255, 0.92);
   --canvas-assistant-message-bg: var(--canvas-card-bg);
   --canvas-assistant-message-border: var(--canvas-border);
-  --canvas-assistant-message-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+  --canvas-assistant-message-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
   --canvas-message-selected-bg: rgba(124, 92, 255, 0.1);
-  --canvas-thought-bg: #1f2937;
-  --canvas-thought-border: rgba(255, 255, 255, 0.08);
-  --canvas-thought-title: #f3f4f6;
-  --canvas-thought-content: #d1d5db;
+  --canvas-thought-bg: rgba(255, 255, 255, 0.03);
+  --canvas-thought-border: rgba(255, 255, 255, 0.06);
+  --canvas-thought-title: #d1d5db;
+  --canvas-thought-content: #9ca3af;
   --canvas-media-overlay:
     linear-gradient(
       180deg,
@@ -257,14 +257,14 @@ body.canvas-theme-route [data-canvas-composer-shell='true'] {
   background: var(--canvas-input-bg);
   box-shadow: var(--canvas-input-shadow);
   transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
     background 0.16s ease;
 }
 
 body.canvas-theme-route [data-canvas-composer-shell='true']:focus-within {
   border-color: var(--canvas-input-focus-border);
-  box-shadow: var(--canvas-input-focus-shadow), var(--canvas-input-shadow);
+  box-shadow: var(--canvas-input-shadow);
 }
 
 body.canvas-theme-route .semi-modal-content,
