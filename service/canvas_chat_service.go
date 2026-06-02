@@ -30,6 +30,8 @@ const (
 	canvasChatSummaryTriggerMessagesDefault = 8
 	canvasChatSummaryRecentMessagesDefault  = 8
 	canvasChatMaxContextCount               = 64
+	canvasChatMaxImageAttachments           = 1
+	canvasChatMaxFileAttachments            = 1
 	canvasChatRelayScannerInitialBufferSize = 64 << 10
 	canvasChatRelayScannerMaxBufferSize     = 64 << 20
 	canvasChatDeltaFlushMinChars            = 48
@@ -39,14 +41,15 @@ const (
 )
 
 type canvasChatMessageMetadata struct {
-	ChatModel              string   `json:"chat_model,omitempty"`
-	ChatGroup              string   `json:"chat_group,omitempty"`
-	Temperature            *float64 `json:"temperature,omitempty"`
-	ContextCount           *int     `json:"context_count,omitempty"`
-	SystemPrompt           string   `json:"system_prompt,omitempty"`
-	SummaryEnabled         *bool    `json:"summary_enabled,omitempty"`
-	SummaryTriggerMessages *int     `json:"summary_trigger_messages,omitempty"`
-	SummaryRecentMessages  *int     `json:"summary_recent_messages,omitempty"`
+	ChatModel              string                     `json:"chat_model,omitempty"`
+	ChatGroup              string                     `json:"chat_group,omitempty"`
+	Temperature            *float64                   `json:"temperature,omitempty"`
+	ContextCount           *int                       `json:"context_count,omitempty"`
+	SystemPrompt           string                     `json:"system_prompt,omitempty"`
+	SummaryEnabled         *bool                      `json:"summary_enabled,omitempty"`
+	SummaryTriggerMessages *int                       `json:"summary_trigger_messages,omitempty"`
+	SummaryRecentMessages  *int                       `json:"summary_recent_messages,omitempty"`
+	Attachments            []dto.CanvasChatAttachment `json:"attachments,omitempty"`
 }
 
 type canvasChatSummaryBranch struct {
@@ -69,7 +72,6 @@ type canvasChatPreparedRequest struct {
 	FinalGroup       string
 	Temperature      *float64
 	ContextCount     int
-	Metadata         string
 	ClientRequestId  string
 	UserMessage      *model.CanvasMessage
 	AssistantMessage *model.CanvasMessage
@@ -114,6 +116,7 @@ type CanvasChatModelOption struct {
 	DisplayName       string   `json:"display_name"`
 	ModelSeries       string   `json:"model_series"`
 	RequestEndpoint   string   `json:"request_endpoint"`
+	ChatCapabilities  []string `json:"chat_capabilities"`
 	Usable            bool     `json:"usable"`
 	UnavailableReason string   `json:"unavailable_reason,omitempty"`
 	AvailableGroups   []string `json:"available_groups"`
@@ -154,6 +157,183 @@ var (
 	queueCanvasChatBackgroundTask = defaultQueueCanvasChatBackgroundTask
 	canvasChatSummaryLocks        sync.Map
 )
+
+func normalizeCanvasChatAttachmentKind(kind string) string {
+	return strings.ToLower(strings.TrimSpace(kind))
+}
+
+func normalizeCanvasChatAttachmentMimeType(mimeType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(mimeType))
+	if idx := strings.Index(normalized, ";"); idx >= 0 {
+		normalized = strings.TrimSpace(normalized[:idx])
+	}
+	return normalized
+}
+
+func normalizeCanvasChatAttachments(raw []dto.CanvasChatAttachment) ([]dto.CanvasChatAttachment, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+
+	normalized := make([]dto.CanvasChatAttachment, 0, len(raw))
+	imageCount := 0
+	fileCount := 0
+	for _, attachment := range raw {
+		kind := normalizeCanvasChatAttachmentKind(attachment.Kind)
+		name := strings.TrimSpace(attachment.Name)
+		mimeType := normalizeCanvasChatAttachmentMimeType(attachment.MimeType)
+		data := strings.TrimSpace(attachment.Data)
+		if kind == "" || name == "" || mimeType == "" || data == "" {
+			return nil, fmt.Errorf("chat attachment kind, name, mime_type and data are required")
+		}
+
+		detectedMimeType, _, err := DecodeBase64FileData(data)
+		if err != nil {
+			return nil, fmt.Errorf("invalid chat attachment data: %w", err)
+		}
+		detectedMimeType = normalizeCanvasChatAttachmentMimeType(detectedMimeType)
+		if detectedMimeType == "" {
+			return nil, fmt.Errorf("invalid chat attachment mime type")
+		}
+		if mimeType != detectedMimeType {
+			return nil, fmt.Errorf("chat attachment mime type mismatch: %s", name)
+		}
+
+		switch kind {
+		case "image":
+			if !strings.HasPrefix(detectedMimeType, "image/") {
+				return nil, fmt.Errorf("chat image attachment must use image/* mime type")
+			}
+			imageCount++
+			if imageCount > canvasChatMaxImageAttachments {
+				return nil, fmt.Errorf("each chat message supports at most %d image attachment", canvasChatMaxImageAttachments)
+			}
+		case "file":
+			switch detectedMimeType {
+			case "application/pdf", "text/plain":
+			default:
+				return nil, fmt.Errorf("chat file attachment mime type %s is not supported", detectedMimeType)
+			}
+			fileCount++
+			if fileCount > canvasChatMaxFileAttachments {
+				return nil, fmt.Errorf("each chat message supports at most %d file attachment", canvasChatMaxFileAttachments)
+			}
+		default:
+			return nil, fmt.Errorf("unsupported chat attachment kind: %s", attachment.Kind)
+		}
+
+		normalized = append(normalized, dto.CanvasChatAttachment{
+			Kind:     kind,
+			Name:     name,
+			MimeType: detectedMimeType,
+			Data:     data,
+		})
+	}
+	return normalized, nil
+}
+
+func enforceCanvasChatAttachmentCapabilities(chatMapping *model.ModelMapping, attachments []dto.CanvasChatAttachment) error {
+	if len(attachments) == 0 {
+		return nil
+	}
+	if chatMapping == nil {
+		return fmt.Errorf("chat model is required")
+	}
+
+	hasImageUpload, err := model.HasChatCapability(chatMapping.ChatCapabilities, model.ChatCapabilityImageUpload)
+	if err != nil {
+		return err
+	}
+	hasFileUpload, err := model.HasChatCapability(chatMapping.ChatCapabilities, model.ChatCapabilityFileUpload)
+	if err != nil {
+		return err
+	}
+
+	for _, attachment := range attachments {
+		switch attachment.Kind {
+		case "image":
+			if !hasImageUpload {
+				return fmt.Errorf("chat model %s does not support image upload", strings.TrimSpace(chatMapping.RequestModel))
+			}
+		case "file":
+			if !hasFileUpload {
+				return fmt.Errorf("chat model %s does not support file upload", strings.TrimSpace(chatMapping.RequestModel))
+			}
+		}
+	}
+	return nil
+}
+
+func parseCanvasChatMessageMetadata(raw string) (*canvasChatMessageMetadata, error) {
+	if strings.TrimSpace(raw) == "" {
+		return &canvasChatMessageMetadata{}, nil
+	}
+	var metadata canvasChatMessageMetadata
+	if err := common.UnmarshalJsonStr(raw, &metadata); err != nil {
+		return nil, err
+	}
+	return &metadata, nil
+}
+
+func extractCanvasChatAttachmentsFromMetadata(raw string) []dto.CanvasChatAttachment {
+	metadata, err := parseCanvasChatMessageMetadata(raw)
+	if err != nil || metadata == nil || len(metadata.Attachments) == 0 {
+		return nil
+	}
+	attachments, err := normalizeCanvasChatAttachments(metadata.Attachments)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("failed to parse canvas chat attachments from metadata: %v", err))
+		return nil
+	}
+	return attachments
+}
+
+func cloneCanvasChatCapabilities(capabilities []string) []string {
+	if len(capabilities) == 0 {
+		return []string{}
+	}
+	return append([]string(nil), capabilities...)
+}
+
+func buildCanvasChatRelayMessage(role string, prompt string, attachments []dto.CanvasChatAttachment) (dto.Message, error) {
+	message := dto.Message{
+		Role: role,
+	}
+	if len(attachments) == 0 {
+		message.Content = prompt
+		return message, nil
+	}
+
+	content := make([]any, 0, len(attachments)+1)
+	content = append(content, map[string]any{
+		"type": dto.ContentTypeText,
+		"text": prompt,
+	})
+	for _, attachment := range attachments {
+		switch attachment.Kind {
+		case "image":
+			content = append(content, map[string]any{
+				"type": dto.ContentTypeImageURL,
+				"image_url": map[string]any{
+					"url":    attachment.Data,
+					"detail": "high",
+				},
+			})
+		case "file":
+			content = append(content, map[string]any{
+				"type": dto.ContentTypeFile,
+				"file": map[string]any{
+					"filename":  attachment.Name,
+					"file_data": attachment.Data,
+				},
+			})
+		default:
+			return dto.Message{}, fmt.Errorf("unsupported chat attachment kind: %s", attachment.Kind)
+		}
+	}
+	message.Content = content
+	return message, nil
+}
 
 func createCanvasChatMessage(ctx context.Context, userId int, sessionId int, session *model.CanvasSession, input CreateCanvasMessageInput) ([]*CanvasMessageWithTask, error) {
 	prepared, err := prepareCanvasChatMessage(userId, sessionId, session, input)
@@ -247,6 +427,13 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 		return nil, err
 	}
 	finalModel := strings.TrimSpace(chatMapping.RequestModel)
+	attachments, err := normalizeCanvasChatAttachments(input.Attachments)
+	if err != nil {
+		return nil, err
+	}
+	if err := enforceCanvasChatAttachmentCapabilities(chatMapping, attachments); err != nil {
+		return nil, err
+	}
 	finalGroup, err := resolveCanvasChatGroup(userId, user.Group, session, input.Group, chatMapping)
 	if err != nil {
 		return nil, err
@@ -254,9 +441,16 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 
 	temperatureValue := resolveCanvasChatTemperature(session, input.Temperature)
 	contextCount := resolveCanvasChatContextCount(session, input.ContextCount)
-	metadata, err := buildCanvasChatMessageMetadata(session, finalModel, finalGroup, temperatureValue, contextCount)
+	assistantMetadata, err := buildCanvasChatMessageMetadata(session, finalModel, finalGroup, temperatureValue, contextCount, nil)
 	if err != nil {
 		return nil, err
+	}
+	userMetadata := assistantMetadata
+	if len(attachments) > 0 {
+		userMetadata, err = buildCanvasChatMessageMetadata(session, finalModel, finalGroup, temperatureValue, contextCount, attachments)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	now := common.GetTimestamp()
@@ -270,7 +464,6 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 		FinalGroup:      finalGroup,
 		Temperature:     temperatureValue,
 		ContextCount:    contextCount,
-		Metadata:        metadata,
 		ClientRequestId: clientRequestId,
 		UserMessage: &model.CanvasMessage{
 			SessionId:       sessionId,
@@ -280,7 +473,7 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 			Prompt:          prompt,
 			ClientRequestId: clientRequestId,
 			Status:          model.CanvasMessageStatusSuccess,
-			Metadata:        metadata,
+			Metadata:        userMetadata,
 			CreatedTime:     now,
 			UpdatedTime:     now,
 		},
@@ -292,7 +485,7 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 			Prompt:          "",
 			ClientRequestId: clientRequestId,
 			Status:          model.CanvasMessageStatusGenerating,
-			Metadata:        metadata,
+			Metadata:        assistantMetadata,
 			CreatedTime:     now,
 			UpdatedTime:     now,
 		},
@@ -608,10 +801,11 @@ func listUserCanvasChatModelCatalog(userId int) ([]*dto.CanvasChatModelCatalogIt
 			displayName = strings.TrimSpace(option.RequestModel)
 		}
 		catalog = append(catalog, &dto.CanvasChatModelCatalogItem{
-			RequestModel:    strings.TrimSpace(option.RequestModel),
-			DisplayName:     displayName,
-			ModelSeries:     strings.TrimSpace(option.ModelSeries),
-			RequestEndpoint: strings.TrimSpace(option.RequestEndpoint),
+			RequestModel:     strings.TrimSpace(option.RequestModel),
+			DisplayName:      displayName,
+			ModelSeries:      strings.TrimSpace(option.ModelSeries),
+			RequestEndpoint:  strings.TrimSpace(option.RequestEndpoint),
+			ChatCapabilities: cloneCanvasChatCapabilities(option.ChatCapabilities),
 		})
 	}
 	sort.Slice(catalog, func(i, j int) bool {
@@ -722,13 +916,18 @@ func buildCanvasChatModelOptionForUserContext(ctx *canvasChatUserModelContext, m
 		}
 	}
 
+	chatCapabilities, err := model.EffectiveChatCapabilities(mapping.ChatCapabilities)
+	if err != nil {
+		return nil, false, err
+	}
 	option := &CanvasChatModelOption{
-		RequestModel:    strings.TrimSpace(mapping.RequestModel),
-		DisplayName:     strings.TrimSpace(mapping.DisplayName),
-		ModelSeries:     strings.TrimSpace(mapping.ModelSeries),
-		RequestEndpoint: strings.TrimSpace(mapping.RequestEndpoint),
-		Usable:          len(availableGroups) > 0,
-		AvailableGroups: availableGroups,
+		RequestModel:     strings.TrimSpace(mapping.RequestModel),
+		DisplayName:      strings.TrimSpace(mapping.DisplayName),
+		ModelSeries:      strings.TrimSpace(mapping.ModelSeries),
+		RequestEndpoint:  strings.TrimSpace(mapping.RequestEndpoint),
+		ChatCapabilities: cloneCanvasChatCapabilities(chatCapabilities),
+		Usable:           len(availableGroups) > 0,
+		AvailableGroups:  availableGroups,
 	}
 	if !option.Usable {
 		option.UnavailableReason = buildCanvasChatModelUnavailableReason(userHasEnabledAbility, userHasEnabledChannel)
@@ -1046,7 +1245,7 @@ func resolveCanvasChatContextCount(session *model.CanvasSession, input *int) int
 	return normalizeCanvasChatContextCountValue(input, fallback)
 }
 
-func buildCanvasChatMessageMetadata(session *model.CanvasSession, modelId string, group string, temperature *float64, contextCount int) (string, error) {
+func buildCanvasChatMessageMetadata(session *model.CanvasSession, modelId string, group string, temperature *float64, contextCount int, attachments []dto.CanvasChatAttachment) (string, error) {
 	systemPrompt := ""
 	summaryEnabled := canvasChatSummaryEnabledDefault
 	summaryTriggerMessages := canvasChatSummaryTriggerMessagesDefault
@@ -1066,6 +1265,7 @@ func buildCanvasChatMessageMetadata(session *model.CanvasSession, modelId string
 		SummaryEnabled:         common.GetPointer(summaryEnabled),
 		SummaryTriggerMessages: common.GetPointer(summaryTriggerMessages),
 		SummaryRecentMessages:  common.GetPointer(summaryRecentMessages),
+		Attachments:            attachments,
 	})
 	if err != nil {
 		return "", err
@@ -1116,15 +1316,25 @@ func buildCanvasChatRelayMessages(prepared *canvasChatPreparedRequest) ([]dto.Me
 		})
 	}
 	for _, message := range filteredHistory {
-		relayMessages = append(relayMessages, dto.Message{
-			Role:    message.Role,
-			Content: message.Prompt,
-		})
+		historyAttachments := []dto.CanvasChatAttachment(nil)
+		if message.Role == model.CanvasMessageRoleUser {
+			historyAttachments = extractCanvasChatAttachmentsFromMetadata(message.Metadata)
+		}
+		relayMessage, relayErr := buildCanvasChatRelayMessage(message.Role, message.Prompt, historyAttachments)
+		if relayErr != nil {
+			return nil, relayErr
+		}
+		relayMessages = append(relayMessages, relayMessage)
 	}
-	relayMessages = append(relayMessages, dto.Message{
-		Role:    model.CanvasMessageRoleUser,
-		Content: prepared.Prompt,
-	})
+	currentAttachments := []dto.CanvasChatAttachment(nil)
+	if prepared.UserMessage != nil {
+		currentAttachments = extractCanvasChatAttachmentsFromMetadata(prepared.UserMessage.Metadata)
+	}
+	currentMessage, err := buildCanvasChatRelayMessage(model.CanvasMessageRoleUser, prepared.Prompt, currentAttachments)
+	if err != nil {
+		return nil, err
+	}
+	relayMessages = append(relayMessages, currentMessage)
 	return relayMessages, nil
 }
 

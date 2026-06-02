@@ -18,15 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useState, useEffect } from 'react';
-import {
-  Modal,
-  Form,
-  Button,
-  Space,
-  Switch,
-} from '@douyinfe/semi-ui';
+import { Modal, Form, Button, Space, Switch } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess, showWarning } from '../../../../helpers';
+import {
+  CHAT_CAPABILITY_FILE_UPLOAD,
+  CHAT_CAPABILITY_IMAGE_UPLOAD,
+  normalizeCanvasChatCapabilities,
+} from '../../../../helpers/canvasChat';
 import {
   canonicalizeModelSeriesValue,
   getModelSeriesOptionList,
@@ -71,12 +70,16 @@ const EditModelMappingModal = ({
   const [selectedModelType, setSelectedModelType] = useState(1);
   const [referenceImageLimitEnabled, setReferenceImageLimitEnabled] =
     useState(false);
-  const [selectedImageCapabilities, setSelectedImageCapabilities] = useState([]);
+  const [selectedImageCapabilities, setSelectedImageCapabilities] = useState(
+    [],
+  );
+  const isChatModel = Number(selectedModelType) === 1;
   const isImageModel = Number(selectedModelType) === 2;
   const isVideoModel = Number(selectedModelType) === 3;
   const isAudioModel = Number(selectedModelType) === 4;
   const canConfigureReferenceImageLimit =
-    isImageModel && selectedImageCapabilities.includes(IMAGE_CAPABILITY_EDITING);
+    isImageModel &&
+    selectedImageCapabilities.includes(IMAGE_CAPABILITY_EDITING);
   const canConfigureImageResolution = isImageModel;
   const modelSeriesOptions = getModelSeriesOptionList();
 
@@ -137,9 +140,7 @@ const EditModelMappingModal = ({
     if (options.length === 0) {
       return true;
     }
-    return options.some(
-      (option) => option.value === normalizedEndpoint,
-    );
+    return options.some((option) => option.value === normalizedEndpoint);
   };
 
   const requestEndpointOptions = getRequestEndpointOptions(selectedModelType);
@@ -167,6 +168,11 @@ const EditModelMappingModal = ({
   const imageCapabilityOptions = [
     { value: 'image_generation', label: t('图片生成') },
     { value: 'image_editing', label: t('图像编辑') },
+  ];
+
+  const chatCapabilityOptions = [
+    { value: CHAT_CAPABILITY_IMAGE_UPLOAD, label: t('图片上传') },
+    { value: CHAT_CAPABILITY_FILE_UPLOAD, label: t('文件上传') },
   ];
 
   const videoCapabilityOptions = [
@@ -239,6 +245,9 @@ const EditModelMappingModal = ({
         // 解析 JSON 字符串为数组
         const resolutions = parseJsonArray(editingMapping.resolutions);
         const aspectRatios = parseJsonArray(editingMapping.aspect_ratios);
+        const chatCapabilities = normalizeCanvasChatCapabilities(
+          editingMapping.chat_capabilities,
+        );
         let imageCapabilities = parseJsonArray(
           editingMapping.image_capabilities,
         );
@@ -246,15 +255,24 @@ const EditModelMappingModal = ({
           editingMapping.video_capabilities,
         );
         let durationValues = parseJsonArray(editingMapping.duration_options);
-        if (Number(editingMapping.model_type) === 2 && imageCapabilities.length === 0) {
+        if (
+          Number(editingMapping.model_type) === 2 &&
+          imageCapabilities.length === 0
+        ) {
           imageCapabilities = imageCapabilityOptions.map((item) => item.value);
         }
-        if (Number(editingMapping.model_type) === 3 && videoCapabilities.length === 0) {
+        if (
+          Number(editingMapping.model_type) === 3 &&
+          videoCapabilities.length === 0
+        ) {
           videoCapabilities = videoCapabilityOptions
             .filter((item) => DEFAULT_VIDEO_CAPABILITIES.includes(item.value))
             .map((item) => item.value);
         }
-        if (Number(editingMapping.model_type) === 3 && durationValues.length === 0) {
+        if (
+          Number(editingMapping.model_type) === 3 &&
+          durationValues.length === 0
+        ) {
           durationValues = DEFAULT_VIDEO_DURATIONS;
         }
 
@@ -280,12 +298,15 @@ const EditModelMappingModal = ({
 
         formApi.setValues({
           ...editingMapping,
-          model_series: canonicalizeModelSeriesValue(editingMapping.model_series),
+          model_series: canonicalizeModelSeriesValue(
+            editingMapping.model_series,
+          ),
           request_endpoint: nextEndpoint,
           actual_model:
             editingMapping.actual_model || editingMapping.request_model || '',
           resolutions: isImageMapping ? resolutions : [],
           aspect_ratios: isImageMapping ? aspectRatios : [],
+          chat_capabilities: chatCapabilities,
           image_capabilities: imageCapabilities,
           reference_image_limit:
             Number(editingMapping.reference_image_limit) > 0
@@ -312,6 +333,7 @@ const EditModelMappingModal = ({
           request_endpoint: 'openai',
           resolutions: [],
           aspect_ratios: [],
+          chat_capabilities: [],
           image_capabilities: [],
           reference_image_limit: DEFAULT_REFERENCE_IMAGE_LIMIT,
           video_capabilities: [],
@@ -409,12 +431,18 @@ const EditModelMappingModal = ({
         // 将数组转换为 JSON 字符串
         resolutions:
           shouldSubmitImageSettings && values.resolutions
-          ? JSON.stringify(values.resolutions)
-          : '',
+            ? JSON.stringify(values.resolutions)
+            : '',
         aspect_ratios:
           shouldSubmitImageSettings && values.aspect_ratios
-          ? JSON.stringify(values.aspect_ratios)
-          : '',
+            ? JSON.stringify(values.aspect_ratios)
+            : '',
+        chat_capabilities:
+          modelType === 1
+            ? JSON.stringify(
+                normalizeCanvasChatCapabilities(values.chat_capabilities),
+              )
+            : '',
         image_capabilities:
           modelType === 2 && values.image_capabilities
             ? JSON.stringify(values.image_capabilities)
@@ -430,9 +458,7 @@ const EditModelMappingModal = ({
             ? JSON.stringify(values.video_capabilities)
             : '',
         duration_options:
-          modelType === 3
-            ? JSON.stringify(normalizedDurations)
-            : '',
+          modelType === 3 ? JSON.stringify(normalizedDurations) : '',
       };
 
       if (editingMapping) {
@@ -540,13 +566,17 @@ const EditModelMappingModal = ({
             );
             if (
               !currentEndpoint ||
-              !isValidRequestEndpointForModelType(nextModelType, currentEndpoint)
+              !isValidRequestEndpointForModelType(
+                nextModelType,
+                currentEndpoint,
+              )
             ) {
               const nextEndpoint = getDefaultRequestEndpoint(nextModelType);
               formApi?.setValue('request_endpoint', nextEndpoint);
             }
 
             if (nextModelType === 2) {
+              formApi?.setValue('chat_capabilities', []);
               formApi?.setValue('video_capabilities', []);
               formApi?.setValue('duration_options', []);
               const currentCapabilities =
@@ -562,6 +592,7 @@ const EditModelMappingModal = ({
                 setSelectedImageCapabilities(DEFAULT_IMAGE_CAPABILITIES);
               }
             } else if (nextModelType === 3) {
+              formApi?.setValue('chat_capabilities', []);
               formApi?.setValue('image_capabilities', []);
               setSelectedImageCapabilities([]);
               formApi?.setValue(
@@ -592,7 +623,25 @@ const EditModelMappingModal = ({
                   formatDurationTags(DEFAULT_VIDEO_DURATIONS),
                 );
               }
+            } else if (nextModelType === 1) {
+              formApi?.setValue('image_capabilities', []);
+              setSelectedImageCapabilities([]);
+              formApi?.setValue(
+                'reference_image_limit',
+                DEFAULT_REFERENCE_IMAGE_LIMIT,
+              );
+              setReferenceImageLimitEnabled(false);
+              formApi?.setValue('video_capabilities', []);
+              formApi?.setValue('duration_options', []);
+              formApi?.setValue('resolutions', []);
+              formApi?.setValue('aspect_ratios', []);
+              const currentChatCapabilities =
+                formApi?.getValue('chat_capabilities');
+              if (!Array.isArray(currentChatCapabilities)) {
+                formApi?.setValue('chat_capabilities', []);
+              }
             } else {
+              formApi?.setValue('chat_capabilities', []);
               formApi?.setValue('image_capabilities', []);
               setSelectedImageCapabilities([]);
               formApi?.setValue(
@@ -635,6 +684,14 @@ const EditModelMappingModal = ({
           precision={0}
           style={{ width: '100%' }}
         />
+        <div hidden={!isChatModel}>
+          <Form.CheckboxGroup
+            field='chat_capabilities'
+            label={t('对话能力')}
+            options={chatCapabilityOptions}
+            direction='horizontal'
+          />
+        </div>
         <div hidden={!isImageModel}>
           <Form.CheckboxGroup
             field='image_capabilities'

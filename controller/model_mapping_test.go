@@ -3,7 +3,10 @@ package controller
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestValidateImageModelEndpointRejectsDeprecatedOpenAIMod(t *testing.T) {
@@ -59,6 +62,52 @@ func TestNormalizeVideoCapabilitiesIncludesTextToVideo(t *testing.T) {
 		if effective[i] != expected[i] {
 			t.Fatalf("expected %v, got %v", expected, effective)
 		}
+	}
+}
+
+func TestNormalizeChatCapabilitiesIncludesImageAndFileUpload(t *testing.T) {
+	normalized, err := model.NormalizeChatCapabilities(`[" image_upload ","file_upload","image_upload"]`)
+	if err != nil {
+		t.Fatalf("expected chat capabilities to normalize, got %v", err)
+	}
+	if normalized != `["image_upload","file_upload"]` {
+		t.Fatalf("expected normalized chat capabilities, got %s", normalized)
+	}
+
+	effective, err := model.EffectiveChatCapabilities(normalized)
+	if err != nil {
+		t.Fatalf("expected effective chat capabilities, got %v", err)
+	}
+	expected := []string{"image_upload", "file_upload"}
+	if len(effective) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, effective)
+	}
+	for i := range expected {
+		if effective[i] != expected[i] {
+			t.Fatalf("expected %v, got %v", expected, effective)
+		}
+	}
+
+	if _, err := model.NormalizeChatCapabilities(`["image_upload","binary_upload"]`); err == nil {
+		t.Fatal("expected unsupported chat capability to be rejected")
+	}
+}
+
+func TestValidateChatModelCapabilitiesAllowsEmptyForChatModels(t *testing.T) {
+	normalized, err := validateChatModelCapabilities(1, "")
+	if err != nil {
+		t.Fatalf("expected empty chat capabilities to be allowed, got %v", err)
+	}
+	if normalized != "" {
+		t.Fatalf("expected empty normalized chat capabilities, got %q", normalized)
+	}
+
+	normalized, err = validateChatModelCapabilities(1, `["file_upload"]`)
+	if err != nil {
+		t.Fatalf("expected file upload capability to validate, got %v", err)
+	}
+	if normalized != `["file_upload"]` {
+		t.Fatalf("unexpected normalized chat capabilities: %q", normalized)
 	}
 }
 
@@ -166,5 +215,86 @@ func TestValidateReferenceImageLimit(t *testing.T) {
 				t.Fatalf("expected limit %d, got %d", tc.wantLimit, mapping.ReferenceImageLimit)
 			}
 		})
+	}
+}
+
+func TestSanitizeModelMappingSettingsClearsChatCapabilitiesOutsideChatModels(t *testing.T) {
+	mapping := &model.ModelMapping{
+		ModelType:         2,
+		ChatCapabilities:  `["image_upload","file_upload"]`,
+		ImageCapabilities: `["image_generation"]`,
+	}
+
+	sanitizeModelMappingSettings(mapping)
+
+	if mapping.ChatCapabilities != "" {
+		t.Fatalf("expected chat capabilities to be cleared, got %q", mapping.ChatCapabilities)
+	}
+	if mapping.ImageCapabilities == "" {
+		t.Fatal("expected image capabilities to be preserved for image models")
+	}
+}
+
+func TestModelMappingInsertAndUpdatePersistChatCapabilities(t *testing.T) {
+	previousDB := model.DB
+	previousUsingSQLite := common.UsingSQLite
+	previousUsingMySQL := common.UsingMySQL
+	previousUsingPostgreSQL := common.UsingPostgreSQL
+
+	db, err := gorm.Open(
+		sqlite.Open("file:model_mapping_chat_caps?mode=memory&cache=shared"),
+		&gorm.Config{},
+	)
+	if err != nil {
+		t.Fatalf("failed to open sqlite db: %v", err)
+	}
+	model.DB = db
+	common.UsingSQLite = true
+	common.UsingMySQL = false
+	common.UsingPostgreSQL = false
+	model.InitCommonColumnNames()
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.UsingSQLite = previousUsingSQLite
+		common.UsingMySQL = previousUsingMySQL
+		common.UsingPostgreSQL = previousUsingPostgreSQL
+		sqlDB, dbErr := db.DB()
+		if dbErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	if err := db.AutoMigrate(&model.ModelMapping{}); err != nil {
+		t.Fatalf("failed to migrate model mappings: %v", err)
+	}
+
+	mapping := &model.ModelMapping{
+		RequestModel:     "gpt-chat-test",
+		ActualModel:      "gpt-chat-test",
+		DisplayName:      "GPT Chat Test",
+		ModelSeries:      "openai",
+		ModelType:        1,
+		Status:           1,
+		RequestEndpoint:  "openai",
+		ChatCapabilities: `["image_upload","file_upload"]`,
+	}
+	if err := mapping.Insert(); err != nil {
+		t.Fatalf("failed to insert model mapping: %v", err)
+	}
+	if mapping.ChatCapabilities != `["image_upload","file_upload"]` {
+		t.Fatalf("expected inserted chat capabilities to persist, got %q", mapping.ChatCapabilities)
+	}
+
+	mapping.ChatCapabilities = `["file_upload"]`
+	if err := mapping.Update(); err != nil {
+		t.Fatalf("failed to update model mapping: %v", err)
+	}
+
+	reloaded, err := model.GetModelMapping(mapping.Id)
+	if err != nil {
+		t.Fatalf("failed to reload model mapping: %v", err)
+	}
+	if reloaded.ChatCapabilities != `["file_upload"]` {
+		t.Fatalf("expected updated chat capabilities to persist, got %q", reloaded.ChatCapabilities)
 	}
 }

@@ -13,6 +13,8 @@ const (
 	ImageCapabilityEditing      = "image_editing"
 	VideoCapabilityImageToVideo = "image_to_video"
 	VideoCapabilityTextToVideo  = "text_to_video"
+	ChatCapabilityImageUpload   = "image_upload"
+	ChatCapabilityFileUpload    = "file_upload"
 )
 
 var defaultImageCapabilities = []string{
@@ -39,6 +41,7 @@ type ModelMapping struct {
 	Resolutions           string `json:"resolutions" gorm:"type:text"`               // 分辨率选项 JSON array: ["1K","2K","4K"]
 	AspectRatios          string `json:"aspect_ratios" gorm:"type:text"`             // 长宽比选项 JSON array: ["1:1","16:9",...]
 	ImageCapabilities     string `json:"image_capabilities" gorm:"type:text"`        // JSON array: ["image_generation","image_editing"]
+	ChatCapabilities      string `json:"chat_capabilities" gorm:"type:text"`         // JSON array: ["image_upload","file_upload"]
 	ReferenceImageLimit   int    `json:"reference_image_limit" gorm:"default:0"`     // Canvas reference image count limit, 0 means unlimited
 	VideoCapabilities     string `json:"video_capabilities" gorm:"type:text"`        // JSON array: ["image_to_video","text_to_video"]
 	DurationOptions       string `json:"duration_options" gorm:"type:text"`          // JSON array: [5,10]
@@ -59,6 +62,10 @@ func normalizeImageCapability(capability string) string {
 }
 
 func normalizeVideoCapability(capability string) string {
+	return strings.ToLower(strings.TrimSpace(capability))
+}
+
+func normalizeChatCapability(capability string) string {
 	return strings.ToLower(strings.TrimSpace(capability))
 }
 
@@ -127,6 +134,72 @@ func HasImageCapability(raw string, target string) (bool, error) {
 		return false, err
 	}
 	normalizedTarget := normalizeImageCapability(target)
+	for _, capability := range capabilities {
+		if capability == normalizedTarget {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func parseChatCapabilities(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+
+	var capabilities []string
+	if err := common.UnmarshalJsonStr(raw, &capabilities); err != nil {
+		return nil, fmt.Errorf("failed to parse chat capabilities: %w", err)
+	}
+
+	normalized := make([]string, 0, len(capabilities))
+	seen := make(map[string]struct{}, len(capabilities))
+	for _, capability := range capabilities {
+		value := normalizeChatCapability(capability)
+		if value == "" {
+			continue
+		}
+		switch value {
+		case ChatCapabilityImageUpload, ChatCapabilityFileUpload:
+		default:
+			return nil, fmt.Errorf("unsupported chat capability: %s", capability)
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+
+	return normalized, nil
+}
+
+func NormalizeChatCapabilities(raw string) (string, error) {
+	capabilities, err := parseChatCapabilities(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(capabilities) == 0 {
+		return "", nil
+	}
+
+	data, err := common.Marshal(capabilities)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal chat capabilities: %w", err)
+	}
+	return string(data), nil
+}
+
+func EffectiveChatCapabilities(raw string) ([]string, error) {
+	return parseChatCapabilities(raw)
+}
+
+func HasChatCapability(raw string, target string) (bool, error) {
+	capabilities, err := EffectiveChatCapabilities(raw)
+	if err != nil {
+		return false, err
+	}
+	normalizedTarget := normalizeChatCapability(target)
 	for _, capability := range capabilities {
 		if capability == normalizedTarget {
 			return true, nil
@@ -338,6 +411,7 @@ func (mm *ModelMapping) Insert() error {
 		"resolutions":           mm.Resolutions,
 		"aspect_ratios":         mm.AspectRatios,
 		"image_capabilities":    mm.ImageCapabilities,
+		"chat_capabilities":     mm.ChatCapabilities,
 		"reference_image_limit": mm.ReferenceImageLimit,
 		"video_capabilities":    mm.VideoCapabilities,
 		"duration_options":      mm.DurationOptions,
@@ -364,6 +438,7 @@ func (mm *ModelMapping) Update() error {
 		"resolutions":           mm.Resolutions,
 		"aspect_ratios":         mm.AspectRatios,
 		"image_capabilities":    mm.ImageCapabilities,
+		"chat_capabilities":     mm.ChatCapabilities,
 		"reference_image_limit": mm.ReferenceImageLimit,
 		"video_capabilities":    mm.VideoCapabilities,
 		"duration_options":      mm.DurationOptions,

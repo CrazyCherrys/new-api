@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -47,6 +48,9 @@ func TestCreateCanvasMessageStreamsChatRequests(t *testing.T) {
 		if input.Prompt != "hello stream" || input.ModelId != "gpt-chat-test" {
 			t.Fatalf("unexpected stream input: %#v", input)
 		}
+		if len(input.Attachments) != 1 || input.Attachments[0].Kind != "image" {
+			t.Fatalf("expected chat attachments to be forwarded, got %#v", input.Attachments)
+		}
 		c.Status(http.StatusOK)
 		return nil
 	}
@@ -60,10 +64,11 @@ func TestCreateCanvasMessageStreamsChatRequests(t *testing.T) {
 	c.Set("id", 1)
 	c.Params = gin.Params{{Key: "id", Value: "7"}}
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/canvas/sessions/7/messages", strings.NewReader(`{
-		"prompt":"hello stream",
-		"model_id":"gpt-chat-test",
-		"stream":true
-	}`))
+			"prompt":"hello stream",
+			"model_id":"gpt-chat-test",
+			"attachments":[{"kind":"image","name":"ref.png","mime_type":"image/png","data":"data:image/png;base64,Zm9v"}],
+			"stream":true
+		}`))
 
 	CreateCanvasMessage(c)
 
@@ -75,6 +80,56 @@ func TestCreateCanvasMessageStreamsChatRequests(t *testing.T) {
 	}
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected HTTP 200, got %d", recorder.Code)
+	}
+}
+
+func TestGetCanvasChatModelsReturnsCatalogCapabilities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("CANVAS_CHAT_SQL_DSN", "")
+	t.Setenv("CANVAS_IMAGE_SQL_DSN", "")
+	t.Setenv("CANVAS_VIDEO_SQL_DSN", "")
+	model.InitCanvasDBs()
+
+	previousGetCanvasChatModels := getCanvasChatModelsForController
+	getCanvasChatModelsForController = func(userId int) ([]*dto.CanvasChatModelCatalogItem, error) {
+		return []*dto.CanvasChatModelCatalogItem{
+			{
+				RequestModel:     "gpt-4.1",
+				DisplayName:      "GPT 4.1",
+				ModelSeries:      "openai",
+				RequestEndpoint:  "openai",
+				ChatCapabilities: []string{"image_upload", "file_upload"},
+			},
+		}, nil
+	}
+	t.Cleanup(func() {
+		getCanvasChatModelsForController = previousGetCanvasChatModels
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", 9)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/canvas/chat-models", nil)
+
+	GetCanvasChatModels(c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d", recorder.Code)
+	}
+
+	var response struct {
+		Success bool                             `json:"success"`
+		Message string                           `json:"message"`
+		Data    []dto.CanvasChatModelCatalogItem `json:"data"`
+	}
+	if err := common.DecodeJson(recorder.Body, &response); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if !response.Success || len(response.Data) != 1 {
+		t.Fatalf("unexpected response payload: %#v", response)
+	}
+	if len(response.Data[0].ChatCapabilities) != 2 {
+		t.Fatalf("expected chat capabilities to be returned, got %#v", response.Data[0])
 	}
 }
 

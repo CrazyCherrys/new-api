@@ -30,6 +30,11 @@ import { IconEdit, IconDelete } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess, showWarning } from '../../../helpers';
 import {
+  CHAT_CAPABILITY_FILE_UPLOAD,
+  CHAT_CAPABILITY_IMAGE_UPLOAD,
+  normalizeCanvasChatCapabilities,
+} from '../../../helpers/canvasChat';
+import {
   formatModelSeriesLabel,
   ModelSeriesIcon,
 } from '../../../helpers/modelSeries';
@@ -181,7 +186,9 @@ const ModelMappingTable = ({
   const sanitizeMappingPayloadForUpdate = (record) => {
     const payload = { ...record };
     const modelType = Number(payload.model_type);
-    payload.request_endpoint = normalizeRequestEndpoint(payload.request_endpoint);
+    payload.request_endpoint = normalizeRequestEndpoint(
+      payload.request_endpoint,
+    );
 
     if (
       [1, 2, 3].includes(modelType) &&
@@ -192,6 +199,9 @@ const ModelMappingTable = ({
     if (modelType !== 2) {
       payload.image_capabilities = '';
       payload.reference_image_limit = 0;
+    }
+    if (modelType !== 1) {
+      payload.chat_capabilities = '';
     }
     if (modelType !== 3) {
       payload.video_capabilities = '';
@@ -209,6 +219,11 @@ const ModelMappingTable = ({
       if (!imageCapabilities.includes(IMAGE_CAPABILITY_EDITING)) {
         payload.reference_image_limit = 0;
       }
+    }
+    if (modelType === 1) {
+      payload.chat_capabilities = JSON.stringify(
+        normalizeCanvasChatCapabilities(payload.chat_capabilities),
+      );
     }
     if (modelType === 3) {
       payload.video_capabilities = JSON.stringify(
@@ -294,6 +309,20 @@ const ModelMappingTable = ({
     const capabilityMap = {
       image_generation: t('图片生成'),
       image_editing: t('图像编辑'),
+    };
+    return capabilities
+      .map((capability) => capabilityMap[capability] || capability)
+      .join(', ');
+  };
+
+  const formatChatCapabilities = (raw) => {
+    const capabilities = normalizeCanvasChatCapabilities(raw);
+    if (capabilities.length === 0) {
+      return '-';
+    }
+    const capabilityMap = {
+      [CHAT_CAPABILITY_IMAGE_UPLOAD]: t('图片上传'),
+      [CHAT_CAPABILITY_FILE_UPLOAD]: t('文件上传'),
     };
     return capabilities
       .map((capability) => capabilityMap[capability] || capability)
@@ -430,6 +459,14 @@ const ModelMappingTable = ({
     },
   ];
 
+  const chatColumns = [
+    {
+      title: t('对话能力'),
+      dataIndex: 'chat_capabilities',
+      render: (text) => formatChatCapabilities(text),
+    },
+  ];
+
   const videoColumns = [
     {
       title: t('视频能力'),
@@ -490,11 +527,13 @@ const ModelMappingTable = ({
   ];
 
   const typeSpecificColumns =
-    Number(activeModelType) === 2
-      ? imageColumns
-      : Number(activeModelType) === 3
-        ? videoColumns
-        : [];
+    Number(activeModelType) === 1
+      ? chatColumns
+      : Number(activeModelType) === 2
+        ? imageColumns
+        : Number(activeModelType) === 3
+          ? videoColumns
+          : [];
   const columns = [...baseColumns, ...typeSpecificColumns, ...trailingColumns];
 
   return (
