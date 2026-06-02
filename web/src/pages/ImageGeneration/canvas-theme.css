@@ -226,10 +226,10 @@ body.canvas-theme-route .canvas-workspace-scroll-panel {
 }
 
 body.canvas-theme-route .canvas-chat-stream {
-  background: var(--canvas-chat-pane-bg);
-  border: 1px solid var(--canvas-chat-pane-border);
-  border-radius: 28px;
-  box-shadow: var(--canvas-chat-pane-shadow);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 body.canvas-theme-route .canvas-composer-dock {
@@ -482,10 +482,6 @@ body.canvas-theme-route .semi-select-option:hover {
 }
 
 @media (max-width: 768px) {
-  body.canvas-theme-route .canvas-chat-stream {
-    border-radius: 22px;
-  }
-
   body.canvas-theme-route [data-canvas-composer-shell='true'] {
     border-radius: 20px;
   }
