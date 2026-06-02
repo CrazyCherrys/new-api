@@ -80,9 +80,10 @@ export function Mermaid(props) {
         cursor: 'pointer',
         overflow: 'auto',
         padding: '12px',
-        border: '1px solid var(--semi-color-border)',
+        border: '1px solid var(--canvas-border, var(--semi-color-border))',
         borderRadius: '8px',
-        backgroundColor: 'var(--semi-color-bg-1)',
+        backgroundColor:
+          'var(--canvas-toolbar-bg, var(--semi-color-bg-1))',
         margin: '12px 0',
       }}
       ref={ref}
@@ -129,7 +130,7 @@ function SandboxedHtmlPreview({ code }) {
         height: `${iframeHeight}px`,
         border: 'none',
         overflow: 'auto',
-        backgroundColor: '#fff',
+        backgroundColor: 'var(--canvas-preview-surface, #fff)',
         borderRadius: '4px',
       }}
     />
@@ -192,8 +193,9 @@ export function PreCode(props) {
         ref={ref}
         style={{
           position: 'relative',
-          backgroundColor: 'var(--semi-color-fill-0)',
-          border: '1px solid var(--semi-color-border)',
+          backgroundColor:
+            'var(--canvas-toolbar-bg, var(--semi-color-fill-0))',
+          border: '1px solid var(--canvas-border, var(--semi-color-border))',
           borderRadius: '6px',
           padding: '12px',
           margin: '12px 0',
@@ -237,10 +239,12 @@ export function PreCode(props) {
               }}
               style={{
                 padding: '4px',
-                backgroundColor: 'var(--semi-color-bg-2)',
+                backgroundColor:
+                  'var(--canvas-card-bg, var(--semi-color-bg-2))',
                 borderRadius: '4px',
                 cursor: 'pointer',
-                border: '1px solid var(--semi-color-border)',
+                border:
+                  '1px solid var(--canvas-border, var(--semi-color-border))',
                 boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
               }}
             />
@@ -254,18 +258,19 @@ export function PreCode(props) {
       {htmlCode.length > 0 && (
         <div
           style={{
-            border: '1px solid var(--semi-color-border)',
+            border: '1px solid var(--canvas-border, var(--semi-color-border))',
             borderRadius: '8px',
             padding: '16px',
             margin: '12px 0',
-            backgroundColor: 'var(--semi-color-bg-1)',
+            backgroundColor:
+              'var(--canvas-toolbar-bg, var(--semi-color-bg-1))',
           }}
         >
           <div
             style={{
               marginBottom: '8px',
               fontSize: '12px',
-              color: 'var(--semi-color-text-2)',
+              color: 'var(--canvas-text-muted, var(--semi-color-text-2))',
             }}
           >
             HTML预览:
@@ -327,7 +332,8 @@ function CustomCode(props) {
           overflowY: 'hidden',
           display: 'block',
           padding: '8px 12px',
-          backgroundColor: 'var(--semi-color-fill-0)',
+          backgroundColor:
+            'var(--canvas-toolbar-bg, var(--semi-color-fill-0))',
           borderRadius: '4px',
           fontSize: '13px',
           lineHeight: '1.4',
@@ -392,6 +398,10 @@ function _MarkdownContent(props) {
 
   // 判断是否为用户消息
   const isUserMessage = className && className.includes('user-message');
+  const isCanvasThemeRoute =
+    typeof document !== 'undefined' &&
+    document.body?.classList.contains('canvas-theme-route');
+  const isCanvasUserMessage = isUserMessage && isCanvasThemeRoute;
 
   const rehypePluginsBase = useMemo(() => {
     const base = [
@@ -423,7 +433,9 @@ function _MarkdownContent(props) {
             dir='auto'
             style={{
               lineHeight: '1.6',
-              color: isUserMessage ? 'white' : 'inherit',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'inherit',
             }}
           />
         ),
@@ -453,7 +465,9 @@ function _MarkdownContent(props) {
               {...aProps}
               target={target}
               style={{
-                color: isUserMessage ? '#87CEEB' : 'var(--semi-color-primary)',
+                color: isCanvasUserMessage
+                  ? 'var(--canvas-user-message-link, #87ceeb)'
+                  : 'var(--canvas-primary, var(--semi-color-primary))',
                 textDecoration: 'none',
               }}
               onMouseEnter={(e) => {
@@ -472,7 +486,9 @@ function _MarkdownContent(props) {
               fontSize: '24px',
               fontWeight: 'bold',
               margin: '20px 0 12px 0',
-              color: isUserMessage ? 'white' : 'var(--semi-color-text-0)',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'var(--canvas-text-primary, var(--semi-color-text-0))',
             }}
           />
         ),
@@ -483,7 +499,9 @@ function _MarkdownContent(props) {
               fontSize: '20px',
               fontWeight: 'bold',
               margin: '18px 0 10px 0',
-              color: isUserMessage ? 'white' : 'var(--semi-color-text-0)',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'var(--canvas-text-primary, var(--semi-color-text-0))',
             }}
           />
         ),
@@ -494,7 +512,9 @@ function _MarkdownContent(props) {
               fontSize: '18px',
               fontWeight: 'bold',
               margin: '16px 0 8px 0',
-              color: isUserMessage ? 'white' : 'var(--semi-color-text-0)',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'var(--canvas-text-primary, var(--semi-color-text-0))',
             }}
           />
         ),
@@ -505,7 +525,9 @@ function _MarkdownContent(props) {
               fontSize: '16px',
               fontWeight: 'bold',
               margin: '14px 0 6px 0',
-              color: isUserMessage ? 'white' : 'var(--semi-color-text-0)',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'var(--canvas-text-primary, var(--semi-color-text-0))',
             }}
           />
         ),
@@ -516,7 +538,9 @@ function _MarkdownContent(props) {
               fontSize: '14px',
               fontWeight: 'bold',
               margin: '12px 0 4px 0',
-              color: isUserMessage ? 'white' : 'var(--semi-color-text-0)',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'var(--canvas-text-primary, var(--semi-color-text-0))',
             }}
           />
         ),
@@ -527,7 +551,9 @@ function _MarkdownContent(props) {
               fontSize: '13px',
               fontWeight: 'bold',
               margin: '10px 0 4px 0',
-              color: isUserMessage ? 'white' : 'var(--semi-color-text-0)',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'var(--canvas-text-primary, var(--semi-color-text-0))',
             }}
           />
         ),
@@ -535,18 +561,20 @@ function _MarkdownContent(props) {
           <blockquote
             {...props}
             style={{
-              borderLeft: isUserMessage
+              borderLeft: isCanvasUserMessage
                 ? '4px solid rgba(255, 255, 255, 0.5)'
-                : '4px solid var(--semi-color-primary)',
+                : '4px solid var(--canvas-primary, var(--semi-color-primary))',
               paddingLeft: '16px',
               margin: '12px 0',
-              backgroundColor: isUserMessage
+              backgroundColor: isCanvasUserMessage
                 ? 'rgba(255, 255, 255, 0.1)'
-                : 'var(--semi-color-fill-0)',
+                : 'var(--canvas-toolbar-bg, var(--semi-color-fill-0))',
               padding: '8px 16px',
               borderRadius: '0 4px 4px 0',
               fontStyle: 'italic',
-              color: isUserMessage ? 'white' : 'inherit',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'inherit',
             }}
           />
         ),
@@ -556,7 +584,9 @@ function _MarkdownContent(props) {
             style={{
               margin: '8px 0',
               paddingLeft: '20px',
-              color: isUserMessage ? 'white' : 'inherit',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'inherit',
             }}
           />
         ),
@@ -566,7 +596,9 @@ function _MarkdownContent(props) {
             style={{
               margin: '8px 0',
               paddingLeft: '20px',
-              color: isUserMessage ? 'white' : 'inherit',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'inherit',
             }}
           />
         ),
@@ -576,7 +608,9 @@ function _MarkdownContent(props) {
             style={{
               margin: '4px 0',
               lineHeight: '1.6',
-              color: isUserMessage ? 'white' : 'inherit',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'inherit',
             }}
           />
         ),
@@ -587,9 +621,9 @@ function _MarkdownContent(props) {
               style={{
                 width: '100%',
                 borderCollapse: 'collapse',
-                border: isUserMessage
+                border: isCanvasUserMessage
                   ? '1px solid rgba(255, 255, 255, 0.3)'
-                  : '1px solid var(--semi-color-border)',
+                  : '1px solid var(--canvas-border, var(--semi-color-border))',
                 borderRadius: '6px',
                 overflow: 'hidden',
               }}
@@ -601,15 +635,17 @@ function _MarkdownContent(props) {
             {...props}
             style={{
               padding: '8px 12px',
-              backgroundColor: isUserMessage
+              backgroundColor: isCanvasUserMessage
                 ? 'rgba(255, 255, 255, 0.2)'
-                : 'var(--semi-color-fill-1)',
-              border: isUserMessage
+                : 'var(--canvas-hover-bg, var(--semi-color-fill-1))',
+              border: isCanvasUserMessage
                 ? '1px solid rgba(255, 255, 255, 0.3)'
-                : '1px solid var(--semi-color-border)',
+                : '1px solid var(--canvas-border, var(--semi-color-border))',
               fontWeight: 'bold',
               textAlign: 'left',
-              color: isUserMessage ? 'white' : 'inherit',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'inherit',
             }}
           />
         ),
@@ -618,10 +654,12 @@ function _MarkdownContent(props) {
             {...props}
             style={{
               padding: '8px 12px',
-              border: isUserMessage
+              border: isCanvasUserMessage
                 ? '1px solid rgba(255, 255, 255, 0.3)'
-                : '1px solid var(--semi-color-border)',
-              color: isUserMessage ? 'white' : 'inherit',
+                : '1px solid var(--canvas-border, var(--semi-color-border))',
+              color: isCanvasUserMessage
+                ? 'var(--canvas-user-message-text, white)'
+                : 'inherit',
             }}
           />
         ),
@@ -654,7 +692,7 @@ export function MarkdownRenderer(props) {
         fontSize: `${fontSize}px`,
         fontFamily: fontFamily,
         lineHeight: '1.6',
-        color: 'var(--semi-color-text-0)',
+        color: 'var(--canvas-text-primary, var(--semi-color-text-0))',
         ...style,
       }}
       dir='auto'
@@ -667,15 +705,16 @@ export function MarkdownRenderer(props) {
             alignItems: 'center',
             gap: '8px',
             padding: '16px',
-            color: 'var(--semi-color-text-2)',
+            color: 'var(--canvas-text-muted, var(--semi-color-text-2))',
           }}
         >
           <div
             style={{
               width: '16px',
               height: '16px',
-              border: '2px solid var(--semi-color-border)',
-              borderTop: '2px solid var(--semi-color-primary)',
+              border: '2px solid var(--canvas-border, var(--semi-color-border))',
+              borderTop:
+                '2px solid var(--canvas-primary, var(--semi-color-primary))',
               borderRadius: '50%',
               animation: 'spin 1s linear infinite',
             }}

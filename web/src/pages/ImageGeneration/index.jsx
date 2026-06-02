@@ -114,7 +114,7 @@ import {
   updateCanvasMessagesByTask,
   upsertCanvasMessages,
 } from './canvasMessageTimeline';
-import './canvasComposer.css';
+import './canvas-theme.css';
 
 const { Text } = Typography;
 
@@ -602,6 +602,13 @@ const ImageGeneration = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
+
+  useEffect(() => {
+    document.body.classList.add('canvas-theme-route');
+    return () => {
+      document.body.classList.remove('canvas-theme-route');
+    };
+  }, []);
 
   // LocalStorage keys
   const STORAGE_KEYS = {
@@ -1348,7 +1355,7 @@ const ImageGeneration = () => {
           <span
             style={{
               fontSize: 12,
-              color: 'rgba(148, 163, 184, 0.82)',
+              color: 'var(--canvas-text-muted)',
             }}
           >
             {unavailableReason}
@@ -5631,15 +5638,15 @@ const ImageGeneration = () => {
       height: 'calc(100vh - 60px)',
       marginTop: 60,
       overflow: 'hidden',
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-page-bg)',
     },
     leftPanel: {
       width: isMobile ? '100%' : 300,
       minWidth: isMobile ? 0 : 300,
       display: 'flex',
       flexDirection: 'column',
-      borderRight: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
+      borderRight: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-sidebar-bg)',
       overflow: 'hidden',
       position: 'relative',
       transition: isMobile
@@ -5685,7 +5692,7 @@ const ImageGeneration = () => {
       border: 'none',
       borderRadius: 10,
       background: 'transparent',
-      color: 'var(--semi-color-text-1)',
+      color: 'var(--canvas-text-secondary)',
       display: 'flex',
       alignItems: 'center',
       gap: 10,
@@ -5696,15 +5703,15 @@ const ImageGeneration = () => {
       transition: 'background 0.16s, color 0.16s',
     },
     sidebarNavItemHover: {
-      background: 'var(--semi-color-fill-0)',
-      color: 'var(--semi-color-text-0)',
+      background: 'var(--canvas-hover-bg)',
+      color: 'var(--canvas-text-primary)',
     },
     sidebarNavItemActive: {
-      background: 'var(--semi-color-fill-1)',
-      color: 'var(--semi-color-text-0)',
+      background: 'var(--canvas-primary-soft-bg)',
+      color: 'var(--canvas-text-primary)',
     },
     sidebarNavItemMuted: {
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
     },
     sidebarNavIcon: {
       width: 18,
@@ -5725,7 +5732,7 @@ const ImageGeneration = () => {
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
       flexShrink: 0,
       transition: 'transform 0.16s ease',
     },
@@ -5753,10 +5760,10 @@ const ImageGeneration = () => {
       transition: 'background 0.16s, color 0.16s',
     },
     taskListItemHover: {
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-hover-bg)',
     },
     taskListItemActive: {
-      background: 'var(--semi-color-fill-1)',
+      background: 'var(--canvas-primary-soft-bg)',
     },
     taskListText: {
       minWidth: 0,
@@ -5765,7 +5772,7 @@ const ImageGeneration = () => {
     taskListTitle: {
       fontSize: 14,
       fontWeight: 600,
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
       lineHeight: 1.35,
       overflow: 'hidden',
       textOverflow: 'ellipsis',
@@ -5782,13 +5789,13 @@ const ImageGeneration = () => {
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
-      color: 'var(--semi-color-text-2)',
-      background: 'rgba(15, 23, 42, 0.06)',
+      color: 'var(--canvas-text-muted)',
+      background: 'var(--canvas-toolbar-bg)',
     },
     sessionListTitle: {
       fontSize: 14,
       fontWeight: 500,
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
       lineHeight: 1.35,
       overflow: 'hidden',
       textOverflow: 'ellipsis',
@@ -5810,7 +5817,7 @@ const ImageGeneration = () => {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      background: 'var(--semi-color-bg-0)',
+      background: 'var(--canvas-page-bg)',
       overflow: 'hidden',
       position: 'relative',
     },
@@ -5853,7 +5860,7 @@ const ImageGeneration = () => {
       gap: isMobile ? 12 : 16,
     },
     stageTitle: {
-      color: '#f5f7fa',
+      color: 'var(--canvas-text-primary)',
       textAlign: 'center',
       fontSize: isMobile ? 18 : 24,
       fontWeight: 700,
@@ -5861,7 +5868,7 @@ const ImageGeneration = () => {
       lineHeight: 1.2,
     },
     stageSubtitle: {
-      color: 'rgba(245, 247, 250, 0.6)',
+      color: 'var(--canvas-text-secondary)',
       textAlign: 'center',
       fontSize: isMobile ? 12 : 13,
       lineHeight: 1.5,
@@ -5877,18 +5884,17 @@ const ImageGeneration = () => {
       width: '100%',
       maxWidth: 900,
       borderRadius: 12,
-      border: '1px solid rgba(148, 163, 184, 0.2)',
-      background: 'rgba(8, 10, 15, 0.88)',
-      boxShadow: '0 28px 80px rgba(0, 0, 0, 0.38)',
-      backdropFilter: 'blur(18px)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-card-bg)',
+      boxShadow: 'var(--canvas-shadow-lg)',
       padding: isMobile ? '14px' : '18px',
     },
     promptArea: {
-      width: '100%',
-      maxWidth: 900,
-      minHeight: 140,
-      margin: '0 auto',
-      borderRadius: 24,
+      borderRadius: 0,
+      border: 'none',
+      background: 'transparent',
+      boxShadow: 'none',
+      padding: isMobile ? '12px' : '14px',
       display: 'flex',
       flexDirection: 'column',
       gap: 0,
@@ -5899,7 +5905,10 @@ const ImageGeneration = () => {
       alignItems: 'flex-end',
       gap: isMobile ? 12 : 16,
       minWidth: 0,
-      padding: '24px 24px 14px',
+      borderRadius: 0,
+      background: 'transparent',
+      boxShadow: 'none',
+      padding: isMobile ? '2px 2px 2px 12px' : '4px 4px 4px 14px',
     },
     promptInlineAssets: {
       display: 'flex',
@@ -5923,11 +5932,11 @@ const ImageGeneration = () => {
       background: 'transparent',
       resize: 'none',
       boxShadow: 'none',
-      color: 'rgba(255, 255, 255, 0.92)',
-      caretColor: '#7C5CFF',
-      fontSize: 16,
-      lineHeight: 1.7,
-      padding: 0,
+      color: 'var(--canvas-text-primary)',
+      caretColor: 'var(--canvas-primary)',
+      fontSize: 15,
+      lineHeight: 1.65,
+      padding: '8px 0',
     },
     promptControls: {
       display: 'flex',
@@ -5964,24 +5973,24 @@ const ImageGeneration = () => {
       width: 32,
       height: 32,
       minWidth: 32,
-      borderRadius: 10,
-      border: '1px solid rgba(255, 255, 255, 0.08)',
-      background: 'transparent',
+      borderRadius: 8,
+      border: '1px dashed var(--canvas-border)',
+      background: 'var(--canvas-toolbar-bg)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       cursor: 'pointer',
-      color: 'rgba(255, 255, 255, 0.62)',
-      transition: 'all 0.2s ease',
+      color: 'var(--canvas-text-muted)',
+      transition: 'opacity 0.2s, border-color 0.2s, background 0.2s',
     },
     pillButton: {
       height: 32,
       minHeight: 32,
-      borderRadius: 10,
-      border: '1px solid rgba(255, 255, 255, 0.08)',
-      background: 'transparent',
-      color: 'rgba(255, 255, 255, 0.78)',
-      padding: '0 12px',
+      borderRadius: 8,
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-toolbar-bg)',
+      color: 'var(--canvas-text-secondary)',
+      padding: '0 10px',
       display: 'inline-flex',
       alignItems: 'center',
       gap: 6,
@@ -5998,12 +6007,12 @@ const ImageGeneration = () => {
       gap: 0,
     },
     pillButtonActive: {
-      borderColor: 'rgba(124, 92, 255, 0.24)',
-      background: 'rgba(124, 92, 255, 0.12)',
-      color: '#efe9ff',
+      borderColor: 'var(--canvas-primary-soft-border)',
+      background: 'var(--canvas-primary-soft-bg)',
+      color: 'var(--canvas-primary)',
     },
     pillButtonMuted: {
-      color: 'rgba(255, 255, 255, 0.58)',
+      color: 'var(--canvas-text-muted)',
     },
     pillButtonIcon: {
       display: 'inline-flex',
@@ -6021,14 +6030,14 @@ const ImageGeneration = () => {
     darkMenu: {
       minWidth: 240,
       maxWidth: 340,
-      border: '1px solid var(--semi-color-border)',
+      border: '1px solid var(--canvas-border)',
       borderRadius: 10,
-      background: 'var(--semi-color-bg-0)',
-      boxShadow: '0 16px 40px rgba(15, 23, 42, 0.16)',
+      background: 'var(--canvas-card-bg)',
+      boxShadow: 'var(--canvas-shadow-overlay)',
       padding: 6,
     },
     darkMenuItem: {
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
       borderRadius: 8,
       margin: 0,
       padding: '8px 10px',
@@ -6049,20 +6058,20 @@ const ImageGeneration = () => {
     },
     dropdownOptionMeta: {
       fontSize: 12,
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
       lineHeight: 1.4,
     },
     darkMenuItemActive: {
-      background: 'var(--semi-color-primary-light-default)',
-      color: 'var(--semi-color-primary)',
+      background: 'var(--canvas-primary-soft-bg)',
+      color: 'var(--canvas-primary)',
     },
     imageParamPanel: {
       width: isMobile ? 'calc(100vw - 32px)' : 380,
       maxWidth: 'calc(100vw - 32px)',
-      border: '1px solid var(--semi-color-border)',
+      border: '1px solid var(--canvas-border)',
       borderRadius: 10,
-      background: 'var(--semi-color-bg-0)',
-      boxShadow: '0 18px 48px rgba(15, 23, 42, 0.18)',
+      background: 'var(--canvas-card-bg)',
+      boxShadow: 'var(--canvas-shadow-overlay)',
       padding: isMobile ? 12 : 14,
     },
     imageParamSection: {
@@ -6073,7 +6082,7 @@ const ImageGeneration = () => {
     imageParamSectionTitle: {
       fontSize: 13,
       fontWeight: 650,
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
       lineHeight: 1.3,
     },
     imageParamOptionRow: {
@@ -6085,9 +6094,9 @@ const ImageGeneration = () => {
     imageParamOption: {
       minHeight: 32,
       borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
-      color: 'var(--semi-color-text-1)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-toolbar-bg)',
+      color: 'var(--canvas-text-secondary)',
       padding: '0 11px',
       display: 'inline-flex',
       alignItems: 'center',
@@ -6099,14 +6108,14 @@ const ImageGeneration = () => {
       whiteSpace: 'nowrap',
     },
     imageParamOptionActive: {
-      borderColor: 'var(--semi-color-primary-light-active)',
-      background: 'var(--semi-color-primary-light-default)',
-      color: 'var(--semi-color-primary)',
+      borderColor: 'var(--canvas-primary-soft-border)',
+      background: 'var(--canvas-primary-soft-bg)',
+      color: 'var(--canvas-primary)',
       fontWeight: 650,
     },
     imageParamDivider: {
       height: 1,
-      background: 'var(--semi-color-border)',
+      background: 'var(--canvas-border)',
       margin: '12px 0',
     },
     imageParamSizeRow: {
@@ -6117,9 +6126,9 @@ const ImageGeneration = () => {
     imageParamSizeField: {
       minHeight: 34,
       borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
-      color: 'var(--semi-color-text-0)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-toolbar-bg)',
+      color: 'var(--canvas-text-primary)',
       padding: '0 10px',
       display: 'flex',
       alignItems: 'center',
@@ -6129,7 +6138,7 @@ const ImageGeneration = () => {
     },
     imageParamSizeLabel: {
       flex: '0 0 auto',
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
       fontSize: 12,
     },
     imageParamSizeValue: {
@@ -6170,7 +6179,7 @@ const ImageGeneration = () => {
     modelMenuMeta: {
       fontSize: 11,
       lineHeight: 1.4,
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
       wordBreak: 'break-all',
     },
     selectModelOption: {
@@ -6189,12 +6198,12 @@ const ImageGeneration = () => {
     selectModelOptionTitle: {
       fontSize: 14,
       lineHeight: 1.4,
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
     },
     selectModelOptionMeta: {
       fontSize: 12,
       lineHeight: 1.4,
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
       wordBreak: 'break-all',
     },
     compactField: {
@@ -6204,7 +6213,7 @@ const ImageGeneration = () => {
       display: 'block',
       fontSize: 13,
       fontWeight: 500,
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
       marginBottom: 6,
     },
     fieldGroup: {
@@ -6220,7 +6229,7 @@ const ImageGeneration = () => {
     catalogTitle: {
       fontSize: 16,
       fontWeight: 650,
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
     },
     catalogTools: {
       display: 'flex',
@@ -6241,7 +6250,7 @@ const ImageGeneration = () => {
       alignItems: 'center',
       justifyContent: 'space-between',
       cursor: 'pointer',
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
     },
     modelList: {
       display: 'flex',
@@ -6251,28 +6260,28 @@ const ImageGeneration = () => {
     modelCard: {
       width: '100%',
       borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-card-bg)',
       padding: '10px 12px',
       textAlign: 'left',
       cursor: 'pointer',
       transition: 'border-color 0.2s, background 0.2s',
     },
     modelCardActive: {
-      borderColor: 'var(--semi-color-primary)',
-      background: 'var(--semi-color-primary-light-default)',
+      borderColor: 'var(--canvas-primary)',
+      background: 'var(--canvas-primary-soft-bg)',
     },
     modelCardTitle: {
       display: 'block',
       marginBottom: 5,
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
       fontSize: 15,
       fontWeight: 650,
       lineHeight: 1.35,
     },
     modelCardMeta: {
       display: 'block',
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
       fontSize: 12,
       lineHeight: 1.4,
       wordBreak: 'break-all',
@@ -6282,7 +6291,9 @@ const ImageGeneration = () => {
       height: 36,
       minWidth: 36,
       borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-toolbar-bg)',
+      color: 'var(--canvas-text-muted)',
       cursor: 'pointer',
       display: 'flex',
       alignItems: 'center',
@@ -6294,8 +6305,10 @@ const ImageGeneration = () => {
       width: 40,
       height: 40,
       minWidth: 40,
-      borderRadius: 999,
-      border: '1px solid transparent',
+      borderRadius: 12,
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-toolbar-bg)',
+      color: 'var(--canvas-text-muted)',
       cursor: 'pointer',
       display: 'flex',
       alignItems: 'center',
@@ -6316,13 +6329,13 @@ const ImageGeneration = () => {
       width: 36,
       height: 36,
       borderRadius: 8,
-      border: '1px dashed var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
+      border: '1px dashed var(--canvas-border)',
+      background: 'var(--canvas-toolbar-bg)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       cursor: 'pointer',
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
       transition: 'border-color 0.2s',
     },
     emptyState: {
@@ -6338,7 +6351,7 @@ const ImageGeneration = () => {
       width: 64,
       height: 64,
       borderRadius: '50%',
-      background: 'rgba(232, 89, 60, 0.12)',
+      background: 'var(--canvas-empty-accent-bg)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -6352,7 +6365,7 @@ const ImageGeneration = () => {
       height: 36,
       borderRadius: 8,
       objectFit: 'cover',
-      border: '1px solid var(--semi-color-border)',
+      border: '1px solid var(--canvas-border)',
     },
     referenceImageContainer: {
       position: 'relative',
@@ -6365,8 +6378,8 @@ const ImageGeneration = () => {
       maxWidth: 220,
       minHeight: 36,
       borderRadius: 10,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-toolbar-bg)',
       padding: '0 8px 0 10px',
     },
     chatFileChipLink: {
@@ -6375,7 +6388,7 @@ const ImageGeneration = () => {
       display: 'inline-flex',
       alignItems: 'center',
       gap: 6,
-      color: 'var(--semi-color-text-1)',
+      color: 'var(--canvas-text-secondary)',
       textDecoration: 'none',
     },
     chatFileChipText: {
@@ -6393,7 +6406,7 @@ const ImageGeneration = () => {
       borderRadius: '50%',
       border: 'none',
       background: 'transparent',
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
       cursor: 'pointer',
       display: 'inline-flex',
       alignItems: 'center',
@@ -6407,13 +6420,13 @@ const ImageGeneration = () => {
       width: 18,
       height: 18,
       borderRadius: '50%',
-      background: 'var(--semi-color-danger)',
+      background: 'var(--canvas-error)',
       border: 'none',
       cursor: 'pointer',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      color: '#fff',
+      color: 'var(--canvas-user-message-text)',
       fontSize: 10,
       padding: 0,
     },
@@ -6437,7 +6450,7 @@ const ImageGeneration = () => {
     },
     filterLabel: {
       fontSize: 13,
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
     },
     tasksGrid: {
       display: 'grid',
@@ -6452,7 +6465,7 @@ const ImageGeneration = () => {
       height: isMobile ? 44 : 0,
       flexShrink: 0,
       borderBottom: 'none',
-      background: '#0F1117',
+      background: 'var(--canvas-toolbar-bg)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -6471,7 +6484,7 @@ const ImageGeneration = () => {
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      background: '#0F1117',
+      background: 'var(--canvas-page-bg)',
     },
     workspaceScrollPanel: {
       flex: 1,
@@ -6479,7 +6492,7 @@ const ImageGeneration = () => {
       overflowY: 'auto',
       display: 'flex',
       flexDirection: 'column',
-      background: '#0F1117',
+      background: 'var(--canvas-page-bg)',
     },
     mainViewport: {
       width: '100%',
@@ -6492,7 +6505,7 @@ const ImageGeneration = () => {
       zIndex: 2,
       flexShrink: 0,
       borderTop: 'none',
-      background: '#0F1117',
+      background: 'var(--canvas-page-bg)',
       padding: isMobile ? '6px 10px 10px' : '8px 18px 14px',
     },
     composerShell: {
@@ -6520,15 +6533,15 @@ const ImageGeneration = () => {
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 12,
-      border: '1px solid var(--semi-color-warning-light-default)',
-      background: 'var(--semi-color-warning-light-default)',
+      border: '1px solid var(--canvas-warning-soft-border)',
+      background: 'var(--canvas-warning-soft-bg)',
       borderRadius: 8,
       padding: isMobile ? '10px 12px' : '12px 14px',
     },
     chatContextNoticeText: {
       flex: 1,
       minWidth: 0,
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
       lineHeight: 1.5,
     },
     canvasStreamEmpty: {
@@ -6558,13 +6571,13 @@ const ImageGeneration = () => {
     canvasChatUserBubble: {
       maxWidth: isMobile ? '92%' : '72%',
       borderRadius: 18,
-      background: 'var(--semi-color-primary)',
-      color: '#fff',
+      background: 'var(--canvas-user-message-bg)',
+      color: 'var(--canvas-user-message-text)',
       padding: isMobile ? '11px 13px' : '12px 15px',
-      boxShadow: '0 10px 24px rgba(15, 23, 42, 0.12)',
+      boxShadow: 'var(--canvas-card-shadow-hover)',
     },
     canvasChatUserBubbleSelected: {
-      boxShadow: '0 14px 30px rgba(15, 23, 42, 0.18)',
+      boxShadow: 'var(--canvas-selected-shadow)',
     },
     canvasChatUserPrompt: {
       whiteSpace: 'pre-wrap',
@@ -6581,25 +6594,29 @@ const ImageGeneration = () => {
     canvasChatAssistantContent: {
       width: '100%',
       maxWidth: isMobile ? '100%' : '82%',
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
       lineHeight: 1.72,
-      padding: '4px 0',
+      padding: isMobile ? '12px 14px' : '14px 16px',
       display: 'flex',
       flexDirection: 'column',
       gap: 10,
+      borderRadius: 18,
+      border: '1px solid var(--canvas-assistant-message-border)',
+      background: 'var(--canvas-assistant-message-bg)',
+      boxShadow: 'var(--canvas-assistant-message-shadow)',
     },
     canvasChatAssistantContentSelected: {
-      background: 'rgba(15, 23, 42, 0.03)',
-      borderRadius: 14,
-      padding: isMobile ? '10px 10px 8px' : '10px 12px 8px',
+      background: 'var(--canvas-message-selected-bg)',
+      borderColor: 'var(--canvas-primary-soft-border)',
+      boxShadow: 'var(--canvas-selected-shadow)',
     },
     canvasChatReasoningWrap: {
       width: '100%',
       borderRadius: 14,
-      border: '1px solid rgba(15, 23, 42, 0.08)',
-      background: 'rgba(248, 250, 252, 0.92)',
+      border: '1px solid var(--canvas-thought-border)',
+      background: 'var(--canvas-thought-bg)',
       overflow: 'hidden',
-      boxShadow: '0 6px 18px rgba(15, 23, 42, 0.04)',
+      boxShadow: 'none',
     },
     canvasChatReasoningToggle: {
       width: '100%',
@@ -6611,7 +6628,7 @@ const ImageGeneration = () => {
       justifyContent: 'space-between',
       gap: 12,
       cursor: 'pointer',
-      color: 'var(--semi-color-text-1)',
+      color: 'var(--canvas-thought-title)',
     },
     canvasChatReasoningToggleLead: {
       display: 'flex',
@@ -6627,8 +6644,8 @@ const ImageGeneration = () => {
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
-      color: 'var(--semi-color-primary)',
-      background: 'rgba(46, 92, 255, 0.12)',
+      color: 'var(--canvas-thought-title)',
+      background: 'var(--canvas-toolbar-bg)',
       flexShrink: 0,
     },
     canvasChatReasoningToggleText: {
@@ -6640,30 +6657,30 @@ const ImageGeneration = () => {
       textOverflow: 'ellipsis',
     },
     canvasChatReasoningToggleArrow: {
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
       flexShrink: 0,
     },
     canvasChatReasoningPanel: {
-      borderTop: '1px solid rgba(15, 23, 42, 0.08)',
+      borderTop: '1px solid var(--canvas-thought-border)',
       padding: isMobile ? '10px 12px 12px' : '10px 14px 14px',
-      background: 'rgba(255, 255, 255, 0.82)',
+      background: 'var(--canvas-thought-bg)',
     },
     canvasChatReasoningMarkdown: {
       width: '100%',
-      color: 'var(--semi-color-text-1)',
+      color: 'var(--canvas-thought-content)',
       fontSize: 13,
       lineHeight: 1.7,
       whiteSpace: 'pre-wrap',
     },
     canvasChatMarkdown: {
       width: '100%',
-      color: 'var(--semi-color-text-1)',
+      color: 'var(--canvas-text-secondary)',
     },
     canvasChatInlineStatus: {
       display: 'inline-flex',
       alignItems: 'center',
       gap: 8,
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
       minHeight: 24,
       lineHeight: 1.6,
     },
@@ -6691,9 +6708,9 @@ const ImageGeneration = () => {
     canvasChatActionButton: {
       minHeight: 28,
       borderRadius: 999,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
-      color: 'var(--semi-color-text-2)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-toolbar-bg)',
+      color: 'var(--canvas-text-secondary)',
       padding: '0 10px',
       display: 'inline-flex',
       alignItems: 'center',
@@ -6711,21 +6728,21 @@ const ImageGeneration = () => {
       maxWidth: isMobile ? '92%' : '72%',
       borderRadius: 8,
       padding: '10px 12px',
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
-      color: 'var(--semi-color-text-0)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-card-bg)',
+      color: 'var(--canvas-text-primary)',
       lineHeight: 1.55,
       wordBreak: 'break-word',
-      boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+      boxShadow: 'var(--canvas-card-shadow)',
     },
     canvasMessageRowUser: {
       alignSelf: 'flex-end',
-      background: 'var(--semi-color-bg-0)',
-      borderColor: 'var(--semi-color-border)',
+      background: 'var(--canvas-toolbar-bg)',
+      borderColor: 'var(--canvas-border)',
     },
     canvasMessageRowAssistant: {
       alignSelf: 'flex-start',
-      background: 'var(--semi-color-bg-0)',
+      background: 'var(--canvas-card-bg)',
     },
     canvasGenerationRow: {
       width: '100%',
@@ -6738,9 +6755,9 @@ const ImageGeneration = () => {
       alignItems: 'flex-end',
     },
     canvasMessageRowSelected: {
-      borderColor: 'var(--semi-color-border)',
-      background: 'var(--semi-color-primary-light-default)',
-      boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
+      borderColor: 'var(--canvas-primary-soft-border)',
+      background: 'var(--canvas-message-selected-bg)',
+      boxShadow: 'var(--canvas-selected-shadow)',
     },
     canvasGenerationRowSelected: {
       filter: 'drop-shadow(0 8px 18px rgba(15, 23, 42, 0.1))',
@@ -6760,7 +6777,7 @@ const ImageGeneration = () => {
     canvasMessagePrompt: {
       maxWidth: isMobile ? '92%' : 640,
       whiteSpace: 'pre-wrap',
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary)',
     },
     canvasMessageRefs: {
       display: 'flex',
@@ -6776,8 +6793,8 @@ const ImageGeneration = () => {
       height: 96,
       objectFit: 'cover',
       borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-fill-0)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-toolbar-bg)',
     },
     canvasGenerationCardWrap: {
       display: 'flex',
@@ -6818,9 +6835,9 @@ const ImageGeneration = () => {
       position: 'relative',
       overflow: 'hidden',
       borderRadius: 8,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
-      boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-card-bg)',
+      boxShadow: 'var(--canvas-card-shadow)',
     },
     canvasMediaCardClickable: {
       cursor: 'zoom-in',
@@ -6839,23 +6856,23 @@ const ImageGeneration = () => {
       objectFit: 'cover',
       objectPosition: 'center',
       display: 'block',
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-toolbar-bg)',
     },
     canvasMediaVideoContent: {
       width: '100%',
       height: '100%',
       objectFit: 'contain',
       display: 'block',
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-toolbar-bg)',
     },
     canvasImagePreviewPanel: {
       maxWidth: isMobile ? 'calc(100vw - 24px)' : 'calc(100vw - 48px)',
       maxHeight: 'calc(100vh - 48px)',
       overflow: 'hidden',
       borderRadius: 10,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
-      boxShadow: '0 24px 72px rgba(15, 23, 42, 0.26)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-card-bg)',
+      boxShadow: 'var(--canvas-shadow-lg)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -6866,7 +6883,7 @@ const ImageGeneration = () => {
       maxWidth: '100%',
       maxHeight: 'calc(100vh - 48px)',
       objectFit: 'contain',
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-toolbar-bg)',
     },
     canvasMediaStatusBody: {
       width: '100%',
@@ -6876,7 +6893,7 @@ const ImageGeneration = () => {
       alignItems: 'center',
       justifyContent: 'center',
       gap: 8,
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted)',
       padding: 16,
     },
     canvasMediaStatusBodyOverlay: {
@@ -6887,7 +6904,7 @@ const ImageGeneration = () => {
       alignItems: 'center',
       justifyContent: 'center',
       gap: 8,
-      color: '#fff',
+      color: 'var(--canvas-media-panel-text)',
       padding: 16,
     },
     canvasMediaStatusOverlay: {
@@ -6896,19 +6913,17 @@ const ImageGeneration = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background:
-        'linear-gradient(180deg, rgba(15, 23, 42, 0.16) 0%, rgba(15, 23, 42, 0.62) 100%)',
+      background: 'var(--canvas-media-overlay)',
       pointerEvents: 'none',
     },
     canvasMediaStatusOverlayError: {
-      background:
-        'linear-gradient(180deg, rgba(15, 23, 42, 0.18) 0%, rgba(127, 29, 29, 0.68) 100%)',
+      background: 'var(--canvas-media-overlay-error)',
     },
     canvasMediaStatusOverlayInteractive: {
       pointerEvents: 'auto',
     },
     canvasMediaStatusOverlayText: {
-      color: '#fff',
+      color: 'var(--canvas-media-panel-text)',
       maxWidth: '100%',
       whiteSpace: 'pre-wrap',
       wordBreak: 'break-word',
@@ -6941,18 +6956,18 @@ const ImageGeneration = () => {
       gap: 4,
       padding: '4px 10px',
       borderRadius: 999,
-      border: '1px solid rgba(220, 38, 38, 0.2)',
-      background: 'rgba(255, 255, 255, 0.92)',
-      color: '#b91c1c',
+      border: '1px solid var(--canvas-danger-chip-border)',
+      background: 'var(--canvas-danger-chip-bg)',
+      color: 'var(--canvas-danger-chip-text)',
       cursor: 'pointer',
       fontSize: 12,
       lineHeight: 1,
-      boxShadow: '0 6px 18px rgba(15, 23, 42, 0.12)',
+      boxShadow: 'var(--canvas-shadow-md)',
     },
     canvasErrorCopyButtonOverlay: {
-      border: '1px solid rgba(255, 255, 255, 0.24)',
-      background: 'rgba(15, 23, 42, 0.44)',
-      color: '#fff',
+      border: '1px solid var(--canvas-media-control-border)',
+      background: 'var(--canvas-media-control-bg)',
+      color: 'var(--canvas-media-control-text)',
     },
     canvasMessageResult: {
       display: 'flex',
@@ -6969,7 +6984,7 @@ const ImageGeneration = () => {
       height: '100%',
       objectFit: 'cover',
       objectPosition: 'center',
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-toolbar-bg)',
     },
     messageResultVideo: {
       display: 'block',
@@ -6977,7 +6992,7 @@ const ImageGeneration = () => {
       maxWidth: isMobile ? '100%' : 560,
       maxHeight: isMobile ? 420 : 620,
       borderRadius: 8,
-      background: '#000',
+      background: 'var(--canvas-preview-surface)',
     },
     messagePending: {
       minWidth: 180,
@@ -6987,8 +7002,8 @@ const ImageGeneration = () => {
       justifyContent: 'center',
       gap: 8,
       borderRadius: 8,
-      background: 'var(--semi-color-fill-0)',
-      color: 'var(--semi-color-text-2)',
+      background: 'var(--canvas-toolbar-bg)',
+      color: 'var(--canvas-text-muted)',
     },
     assetGrid: {
       display: 'grid',
@@ -6999,10 +7014,10 @@ const ImageGeneration = () => {
     },
     assetCard: {
       position: 'relative',
-      border: '1px solid var(--semi-color-border)',
+      border: '1px solid var(--canvas-border)',
       borderRadius: 10,
       overflow: 'hidden',
-      background: 'var(--semi-color-bg-0)',
+      background: 'var(--canvas-card-bg)',
       display: 'flex',
       flexDirection: 'column',
       cursor: 'pointer',
@@ -7017,14 +7032,14 @@ const ImageGeneration = () => {
       zIndex: 1,
       padding: 3,
       borderRadius: 6,
-      background: 'rgba(0, 0, 0, 0.48)',
+      background: 'var(--canvas-media-control-bg)',
       lineHeight: 1,
     },
     assetThumb: {
       width: '100%',
       aspectRatio: '1 / 1',
       objectFit: 'cover',
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-toolbar-bg)',
       display: 'block',
     },
     assetActions: {
@@ -7032,7 +7047,7 @@ const ImageGeneration = () => {
       flexWrap: 'wrap',
       gap: 6,
       padding: 8,
-      borderTop: '1px solid var(--semi-color-border)',
+      borderTop: '1px solid var(--canvas-border)',
     },
     assetCardMeta: {
       padding: '8px',
@@ -7046,7 +7061,7 @@ const ImageGeneration = () => {
       inset: 0,
       zIndex: 1200,
       padding: isMobile ? 12 : 24,
-      background: 'rgba(15, 23, 42, 0.52)',
+      background: 'var(--canvas-overlay-bg)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -7061,14 +7076,14 @@ const ImageGeneration = () => {
       gap: 0,
       overflow: 'hidden',
       borderRadius: 10,
-      border: '1px solid var(--semi-color-border)',
-      background: 'var(--semi-color-bg-0)',
-      boxShadow: '0 24px 72px rgba(15, 23, 42, 0.26)',
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-card-bg)',
+      boxShadow: 'var(--canvas-shadow-lg)',
     },
     assetPreviewImagePane: {
       minHeight: isMobile ? 220 : 520,
       maxHeight: isMobile ? '48vh' : 'calc(100vh - 48px)',
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-toolbar-bg)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -7299,7 +7314,7 @@ const ImageGeneration = () => {
           <div
             style={{
               ...styles.darkMenuItem,
-              color: 'rgba(226, 232, 240, 0.66)',
+              color: 'var(--canvas-text-muted)',
             }}
           >
             {emptyText}
@@ -7309,7 +7324,7 @@ const ImageGeneration = () => {
           <div
             style={{
               marginTop: 6,
-              borderTop: '1px solid rgba(148, 163, 184, 0.16)',
+              borderTop: '1px solid var(--canvas-border)',
             }}
           >
             {extraContent}
@@ -7761,7 +7776,7 @@ const ImageGeneration = () => {
           <div
             style={{
               ...styles.darkMenuItem,
-              color: 'rgba(226, 232, 240, 0.66)',
+              color: 'var(--canvas-text-muted)',
             }}
           >
             {isVideoMode
@@ -7922,7 +7937,7 @@ const ImageGeneration = () => {
         </Dropdown.Item>
       ) : null}
       <Dropdown.Item
-        style={{ ...styles.darkMenuItem, color: '#fca5a5' }}
+        style={{ ...styles.darkMenuItem, color: 'var(--canvas-danger-chip-text)' }}
         onClick={(event) => {
           event?.domEvent?.stopPropagation?.();
           if (window.confirm(t('确认删除该会话？'))) {
@@ -8158,7 +8173,7 @@ const ImageGeneration = () => {
   const renderWeakDetails = (title, children) => (
     <details
       style={{
-        borderTop: '1px solid var(--semi-color-border)',
+        borderTop: '1px solid var(--canvas-border)',
         paddingTop: 10,
         marginTop: 2,
       }}
@@ -8166,7 +8181,7 @@ const ImageGeneration = () => {
       <summary
         style={{
           cursor: 'pointer',
-          color: 'var(--semi-color-text-2)',
+          color: 'var(--canvas-text-muted)',
           fontSize: 12,
           lineHeight: 1.5,
         }}
@@ -9348,6 +9363,7 @@ const ImageGeneration = () => {
           style={styles.composerShell}
           className='canvas-composer-shell'
           data-canvas-composer={generationMode}
+          data-canvas-composer-shell='true'
         >
           <div style={styles.promptArea} className='canvas-composer-card'>
             <div
@@ -9506,6 +9522,18 @@ const ImageGeneration = () => {
                   ...styles.generateIconBtnEmbedded,
                   opacity: submitDisabled ? 0.55 : 1,
                   pointerEvents: submitDisabled ? 'none' : 'auto',
+                  background:
+                    promptHasContent || (isChatMode && chatStreaming)
+                      ? 'var(--canvas-primary)'
+                      : 'var(--canvas-toolbar-bg)',
+                  borderColor:
+                    promptHasContent || (isChatMode && chatStreaming)
+                      ? 'var(--canvas-primary)'
+                      : 'var(--canvas-border)',
+                  color:
+                    promptHasContent || (isChatMode && chatStreaming)
+                      ? 'var(--canvas-user-message-text)'
+                      : 'var(--canvas-text-muted)',
                 }}
                 data-submit-emphasis={submitEmphasis}
                 onClick={handleComposerSubmit}
@@ -9545,7 +9573,7 @@ const ImageGeneration = () => {
             composerAdvancedVisible ? (
               <div
                 style={{
-                  borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                  borderTop: '1px solid var(--canvas-border)',
                   paddingTop: 10,
                   marginTop: 8,
                 }}
@@ -9555,7 +9583,7 @@ const ImageGeneration = () => {
                   style={{
                     display: 'block',
                     marginBottom: 8,
-                    color: 'rgba(255, 255, 255, 0.56)',
+                    color: 'var(--canvas-text-muted)',
                   }}
                 >
                   {t('遮罩会与第一张参考图一起作为标准编辑请求提交')}
@@ -9819,7 +9847,10 @@ const ImageGeneration = () => {
       title={t('资产库')}
       width={isMobile ? '100%' : 560}
       onCancel={() => setAssetLibraryVisible(false)}
-      bodyStyle={{ padding: isMobile ? 12 : 16 }}
+      bodyStyle={{
+        padding: isMobile ? 12 : 16,
+        background: 'var(--canvas-sidebar-bg)',
+      }}
       data-canvas-asset-drawer='true'
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -10041,7 +10072,10 @@ const ImageGeneration = () => {
         title={t('会话设置')}
         width={isMobile ? '100%' : 520}
         onCancel={closeCanvasChatSessionSettings}
-        bodyStyle={{ padding: isMobile ? 12 : 16 }}
+        bodyStyle={{
+          padding: isMobile ? 12 : 16,
+          background: 'var(--canvas-sidebar-bg)',
+        }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -10232,7 +10266,11 @@ const ImageGeneration = () => {
   );
 
   return (
-    <div style={styles.container}>
+    <div
+      style={styles.container}
+      className='canvas-theme-scope'
+      data-canvas-theme-scope='true'
+    >
       {!isMobile
         ? renderTaskSidebar({ collapsed: desktopSidebarCollapsed })
         : null}
@@ -10243,7 +10281,7 @@ const ImageGeneration = () => {
           title={t('导航')}
           width='100%'
           onCancel={() => setMobileTaskbarVisible(false)}
-          bodyStyle={{ padding: 0 }}
+          bodyStyle={{ padding: 0, background: 'var(--canvas-sidebar-bg)' }}
         >
           {renderTaskSidebar()}
         </SideSheet>

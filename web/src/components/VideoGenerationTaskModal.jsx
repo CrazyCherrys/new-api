@@ -174,7 +174,7 @@ const VideoGenerationTaskModal = ({
     previewPanel: {
       minHeight: isMobile ? 240 : 420,
       borderRadius: 10,
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-toolbar-bg, var(--semi-color-fill-0))',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -196,10 +196,10 @@ const VideoGenerationTaskModal = ({
       fontSize: 13,
     },
     label: {
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted, var(--semi-color-text-2))',
     },
     value: {
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary, var(--semi-color-text-0))',
       textAlign: 'right',
       wordBreak: 'break-word',
     },
@@ -217,7 +217,7 @@ const VideoGenerationTaskModal = ({
       flexWrap: 'wrap',
       marginTop: 0,
       paddingTop: 12,
-      borderTop: '1px solid var(--semi-color-border)',
+      borderTop: '1px solid var(--canvas-border, var(--semi-color-border))',
     },
     actions: {
       display: 'flex',
@@ -264,7 +264,10 @@ const VideoGenerationTaskModal = ({
               ) : (
                 <IconVideo
                   size='extra-large'
-                  style={{ color: 'rgba(255,255,255,0.55)' }}
+                  style={{
+                    color:
+                      'var(--canvas-media-panel-text, rgba(255,255,255,0.72))',
+                  }}
                 />
               )}
               <Text
@@ -310,11 +313,17 @@ const VideoGenerationTaskModal = ({
             <span style={styles.label}>{t('任务 ID')}</span>
             <span style={styles.value}>{task.id}</span>
           </div>
-          <details style={{ borderTop: '1px solid var(--semi-color-border)', paddingTop: 10 }}>
+          <details
+            style={{
+              borderTop:
+                '1px solid var(--canvas-border, var(--semi-color-border))',
+              paddingTop: 10,
+            }}
+          >
             <summary
               style={{
                 cursor: 'pointer',
-                color: 'var(--semi-color-text-2)',
+                color: 'var(--canvas-text-muted, var(--semi-color-text-2))',
                 fontSize: 12,
                 lineHeight: 1.5,
               }}

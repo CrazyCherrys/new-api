@@ -1,15 +1,15 @@
-/* 基础markdown样式 */
+/* 基础 markdown 样式 */
 .markdown-body {
   font-family: inherit;
   line-height: 1.6;
-  color: var(--semi-color-text-0);
+  color: var(--canvas-text-primary, var(--semi-color-text-0));
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: break-word;
 }
 
 .canvas-chat-markdown {
-  color: var(--semi-color-text-1);
+  color: var(--canvas-text-secondary, var(--semi-color-text-1));
   line-height: 1.72;
 }
 
@@ -18,7 +18,7 @@
 .canvas-chat-markdown blockquote,
 .canvas-chat-markdown td,
 .canvas-chat-markdown th {
-  color: var(--semi-color-text-1);
+  color: var(--canvas-text-secondary, var(--semi-color-text-1));
   line-height: 1.72;
 }
 
@@ -48,56 +48,58 @@
   color: var(--semi-color-text-0) !important;
 }
 
-.user-message,
-.user-message .markdown-body,
-.user-message h1,
-.user-message h2,
-.user-message h3,
-.user-message h4,
-.user-message h5,
-.user-message h6,
-.user-message p,
-.user-message span,
-.user-message div,
-.user-message ul,
-.user-message ol,
-.user-message li,
-.user-message td,
-.user-message th {
-  color: var(--semi-color-text-0) !important;
+/* Canvas 用户消息样式 */
+body.canvas-theme-route .user-message {
+  color: var(--canvas-user-message-text, white) !important;
+}
+body.canvas-theme-route .user-message .markdown-body,
+body.canvas-theme-route .user-message h1,
+body.canvas-theme-route .user-message h2,
+body.canvas-theme-route .user-message h3,
+body.canvas-theme-route .user-message h4,
+body.canvas-theme-route .user-message h5,
+body.canvas-theme-route .user-message h6,
+body.canvas-theme-route .user-message p,
+body.canvas-theme-route .user-message span,
+body.canvas-theme-route .user-message div,
+body.canvas-theme-route .user-message ul,
+body.canvas-theme-route .user-message ol,
+body.canvas-theme-route .user-message li,
+body.canvas-theme-route .user-message td,
+body.canvas-theme-route .user-message th {
+  color: var(--canvas-user-message-text, white) !important;
 }
 
-.user-message blockquote {
-  color: var(--semi-color-text-0) !important;
-  border-left-color: rgba(var(--semi-grey-8), 0.18) !important;
-  background-color: rgba(var(--semi-grey-1), 1) !important;
+body.canvas-theme-route .user-message blockquote {
+  color: var(--canvas-user-message-text, white) !important;
+  border-left-color: rgba(255, 255, 255, 0.5) !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
 }
 
-.user-message code:not(pre code) {
-  color: var(--semi-color-text-0) !important;
-  background-color: var(--semi-color-fill-1) !important;
+body.canvas-theme-route .user-message code:not(pre code) {
+  color: var(--canvas-user-message-code-text, #111827) !important;
+  background-color: var(
+    --canvas-user-message-code-bg,
+    rgba(255, 255, 255, 0.92)
+  ) !important;
 }
 
-.user-message a {
-  color: var(--semi-color-link) !important;
+body.canvas-theme-route .user-message a {
+  color: var(--canvas-user-message-link, #ddd6fe) !important;
 }
 
-.user-message a:hover {
-  color: var(--semi-color-link-hover) !important;
+body.canvas-theme-route .user-message a:hover {
+  color: var(--canvas-user-message-link, #ede9fe) !important;
 }
 
-/* 表格在用户消息中的样式 */
-.user-message table {
-  border-color: var(--semi-color-border) !important;
+body.canvas-theme-route .user-message table,
+body.canvas-theme-route .user-message td,
+body.canvas-theme-route .user-message th {
+  border-color: rgba(255, 255, 255, 0.3) !important;
 }
 
-.user-message th {
-  background-color: var(--semi-color-fill-1) !important;
-  border-color: var(--semi-color-border) !important;
-}
-
-.user-message td {
-  border-color: var(--semi-color-border) !important;
+body.canvas-theme-route .user-message th {
+  background-color: rgba(255, 255, 255, 0.2) !important;
 }
 
 /* 加载动画 */
@@ -111,90 +113,73 @@
   }
 }
 
-/* 代码高亮主题 - 适配Semi Design */
+/* 代码高亮 */
 .hljs {
   display: block;
   overflow-x: auto;
   padding: 0;
   background: transparent;
-  color: var(--semi-color-text-0);
+  color: var(--canvas-text-primary, var(--semi-color-text-0));
 }
 
 .hljs-comment,
-.hljs-quote {
-  color: var(--semi-color-text-2);
+.hljs-quote,
+.hljs-meta {
+  color: var(--canvas-text-muted, var(--semi-color-text-2));
   font-style: italic;
 }
 
 .hljs-keyword,
 .hljs-selector-tag,
-.hljs-subst {
-  color: var(--semi-color-primary);
-  font-weight: bold;
+.hljs-subst,
+.hljs-title,
+.hljs-section,
+.hljs-selector-id,
+.hljs-tag,
+.hljs-name,
+.hljs-attribute {
+  color: var(--canvas-primary, var(--semi-color-primary));
 }
 
 .hljs-number,
 .hljs-literal,
 .hljs-variable,
 .hljs-template-variable,
-.hljs-tag .hljs-attr {
-  color: var(--semi-color-warning);
+.hljs-tag .hljs-attr,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--canvas-warning, var(--semi-color-warning));
 }
 
 .hljs-string,
 .hljs-doctag {
-  color: var(--semi-color-success);
-}
-
-.hljs-title,
-.hljs-section,
-.hljs-selector-id {
-  color: var(--semi-color-primary);
-  font-weight: bold;
-}
-
-.hljs-subst {
-  font-weight: normal;
+  color: var(--canvas-success, var(--semi-color-success));
 }
 
 .hljs-type,
-.hljs-class .hljs-title {
-  color: var(--semi-color-info);
-  font-weight: bold;
-}
-
-.hljs-tag,
-.hljs-name,
-.hljs-attribute {
-  color: var(--semi-color-primary);
-  font-weight: normal;
+.hljs-class .hljs-title,
+.hljs-built_in,
+.hljs-builtin-name {
+  color: var(--canvas-primary, var(--semi-color-info));
 }
 
 .hljs-regexp,
 .hljs-link {
-  color: var(--semi-color-tertiary);
-}
-
-.hljs-symbol,
-.hljs-bullet {
-  color: var(--semi-color-warning);
-}
-
-.hljs-built_in,
-.hljs-builtin-name {
-  color: var(--semi-color-info);
-}
-
-.hljs-meta {
-  color: var(--semi-color-text-2);
+  color: var(--canvas-text-secondary, var(--semi-color-tertiary));
 }
 
 .hljs-deletion {
-  background: var(--semi-color-danger-light-default);
+  background: var(
+    --canvas-danger-chip-bg,
+    var(--semi-color-danger-light-default)
+  );
 }
 
 .hljs-addition {
-  background: var(--semi-color-success-light-default);
+  background: var(
+    --canvas-success-soft-bg,
+    var(--semi-color-success-light-default)
+  );
 }
 
 .hljs-emphasis {
@@ -205,17 +190,17 @@
   font-weight: bold;
 }
 
-/* Mermaid容器样式 */
+/* Mermaid */
 .mermaid-container {
   transition: all 0.2s ease;
 }
 
 .mermaid-container:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--canvas-shadow-md, 0 2px 8px rgba(0, 0, 0, 0.1));
   transform: translateY(-1px);
 }
 
-/* 代码块样式增强 */
+/* 代码块 */
 pre {
   position: relative;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
@@ -223,8 +208,8 @@ pre {
 }
 
 pre:hover {
-  border-color: var(--semi-color-primary) !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-color: var(--canvas-primary, var(--semi-color-primary)) !important;
+  box-shadow: var(--canvas-shadow-md, 0 2px 8px rgba(0, 0, 0, 0.1));
 }
 
 pre:hover .copy-code-button {
@@ -247,7 +232,6 @@ pre:hover .copy-code-button {
   cursor: pointer !important;
 }
 
-/* 确保按钮可点击 */
 .copy-code-button .semi-button {
   pointer-events: auto !important;
   cursor: pointer !important;
@@ -255,8 +239,8 @@ pre:hover .copy-code-button {
 }
 
 .copy-code-button .semi-button:hover {
-  background-color: var(--semi-color-fill-1) !important;
-  border-color: var(--semi-color-primary) !important;
+  background-color: var(--canvas-hover-bg, var(--semi-color-fill-1)) !important;
+  border-color: var(--canvas-primary, var(--semi-color-primary)) !important;
   transform: scale(1.05);
 }
 
@@ -272,7 +256,7 @@ pre:hover .copy-code-button {
   }
 }
 
-/* 数学公式样式 */
+/* 数学公式 */
 .katex {
   font-size: 1em;
 }
@@ -282,12 +266,10 @@ pre:hover .copy-code-button {
   text-align: center;
 }
 
-/* 链接hover效果 */
 .markdown-body a {
   transition: all 0.2s ease;
 }
 
-/* 引用块样式增强 */
 .markdown-body blockquote {
   position: relative;
 }
@@ -298,53 +280,48 @@ pre:hover .copy-code-button {
   left: -8px;
   top: -8px;
   font-size: 24px;
-  color: var(--semi-color-primary);
+  color: var(--canvas-primary, var(--semi-color-primary));
   opacity: 0.3;
 }
 
-/* 列表样式增强 */
-.markdown-body ul li::marker {
-  color: var(--semi-color-primary);
+.markdown-body ul li::marker,
+.markdown-body ol li::marker {
+  color: var(--canvas-primary, var(--semi-color-primary));
 }
 
 .markdown-body ol li::marker {
-  color: var(--semi-color-primary);
   font-weight: bold;
 }
 
-/* 分隔线样式 */
 .markdown-body hr {
   border: none;
   height: 1px;
   background: linear-gradient(
     to right,
     transparent,
-    var(--semi-color-border),
+    var(--canvas-border, var(--semi-color-border)),
     transparent
   );
   margin: 24px 0;
 }
 
-/* 图片样式 */
 .markdown-body img {
   max-width: 100%;
   height: auto;
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--canvas-shadow-md, 0 2px 8px rgba(0, 0, 0, 0.1));
   margin: 12px 0;
 }
 
-/* 内联代码样式 */
 .markdown-body code:not(pre code) {
-  background-color: var(--semi-color-fill-1);
+  background-color: var(--canvas-hover-bg, var(--semi-color-fill-1));
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.9em;
-  color: var(--semi-color-primary);
-  border: 1px solid var(--semi-color-border);
+  color: var(--canvas-primary, var(--semi-color-primary));
+  border: 1px solid var(--canvas-border, var(--semi-color-border));
 }
 
-/* 标题锚点样式 */
 .markdown-body h1:hover,
 .markdown-body h2:hover,
 .markdown-body h3:hover,
@@ -354,7 +331,6 @@ pre:hover .copy-code-button {
   position: relative;
 }
 
-/* 任务列表样式 */
 .markdown-body input[type='checkbox'] {
   margin-right: 8px;
   transform: scale(1.1);
@@ -365,13 +341,12 @@ pre:hover .copy-code-button {
   margin-left: -20px;
 }
 
-/* 键盘按键样式 */
 .markdown-body kbd {
-  background-color: var(--semi-color-fill-0);
-  border: 1px solid var(--semi-color-border);
+  background-color: var(--canvas-toolbar-bg, var(--semi-color-fill-0));
+  border: 1px solid var(--canvas-border, var(--semi-color-border));
   border-radius: 3px;
-  box-shadow: 0 1px 0 var(--semi-color-border);
-  color: var(--semi-color-text-0);
+  box-shadow: 0 1px 0 var(--canvas-border, var(--semi-color-border));
+  color: var(--canvas-text-primary, var(--semi-color-text-0));
   display: inline-block;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 0.85em;
@@ -381,9 +356,8 @@ pre:hover .copy-code-button {
   white-space: nowrap;
 }
 
-/* 详情折叠样式 */
 .markdown-body details {
-  border: 1px solid var(--semi-color-border);
+  border: 1px solid var(--canvas-border, var(--semi-color-border));
   border-radius: 6px;
   padding: 12px;
   margin: 12px 0;
@@ -392,17 +366,16 @@ pre:hover .copy-code-button {
 .markdown-body summary {
   cursor: pointer;
   font-weight: bold;
-  color: var(--semi-color-primary);
+  color: var(--canvas-primary, var(--semi-color-primary));
   margin-bottom: 8px;
 }
 
 .markdown-body summary:hover {
-  color: var(--semi-color-primary-hover);
+  color: var(--canvas-primary-hover, var(--semi-color-primary-hover));
 }
 
-/* 脚注样式 */
 .markdown-body .footnote-ref {
-  color: var(--semi-color-primary);
+  color: var(--canvas-primary, var(--semi-color-primary));
   text-decoration: none;
   font-weight: bold;
 }
@@ -411,37 +384,45 @@ pre:hover .copy-code-button {
   text-decoration: underline;
 }
 
-/* 警告块样式 */
-.markdown-body .warning {
-  background-color: var(--semi-color-warning-light-default);
-  border-left: 4px solid var(--semi-color-warning);
+.markdown-body .warning,
+.markdown-body .info,
+.markdown-body .success,
+.markdown-body .danger {
   padding: 12px 16px;
   margin: 12px 0;
   border-radius: 0 6px 6px 0;
+}
+
+.markdown-body .warning {
+  background-color: var(
+    --canvas-warning-soft-bg,
+    var(--semi-color-warning-light-default)
+  );
+  border-left: 4px solid var(--canvas-warning, var(--semi-color-warning));
 }
 
 .markdown-body .info {
-  background-color: var(--semi-color-info-light-default);
-  border-left: 4px solid var(--semi-color-info);
-  padding: 12px 16px;
-  margin: 12px 0;
-  border-radius: 0 6px 6px 0;
+  background-color: var(
+    --canvas-primary-soft-bg,
+    var(--semi-color-info-light-default)
+  );
+  border-left: 4px solid var(--canvas-primary, var(--semi-color-info));
 }
 
 .markdown-body .success {
-  background-color: var(--semi-color-success-light-default);
-  border-left: 4px solid var(--semi-color-success);
-  padding: 12px 16px;
-  margin: 12px 0;
-  border-radius: 0 6px 6px 0;
+  background-color: var(
+    --canvas-success-soft-bg,
+    var(--semi-color-success-light-default)
+  );
+  border-left: 4px solid var(--canvas-success, var(--semi-color-success));
 }
 
 .markdown-body .danger {
-  background-color: var(--semi-color-danger-light-default);
-  border-left: 4px solid var(--semi-color-danger);
-  padding: 12px 16px;
-  margin: 12px 0;
-  border-radius: 0 6px 6px 0;
+  background-color: var(
+    --canvas-danger-chip-bg,
+    var(--semi-color-danger-light-default)
+  );
+  border-left: 4px solid var(--canvas-error, var(--semi-color-danger));
 }
 
 @keyframes fade-in {
@@ -450,10 +431,12 @@ pre:hover .copy-code-button {
     transform: translateY(6px) scale(0.98);
     filter: blur(3px);
   }
+
   60% {
     opacity: 0.85;
     filter: blur(0.5px);
   }
+
   100% {
     opacity: 1;
     transform: translateY(0) scale(1);

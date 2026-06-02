@@ -56,15 +56,27 @@ const VideoGenerationTaskCard = ({
 
   const statusMeta = (() => {
     if (isSuccess) {
-      return { color: '#18a058', text: t('已完成') };
+      return {
+        color: 'var(--canvas-success, var(--semi-color-success))',
+        text: t('已完成'),
+      };
     }
     if (isFailed) {
-      return { color: '#d92d20', text: t('失败') };
+      return {
+        color: 'var(--canvas-error, var(--semi-color-danger))',
+        text: t('失败'),
+      };
     }
     if (isGenerating) {
-      return { color: '#2563eb', text: t('生成中') };
+      return {
+        color: 'var(--canvas-primary, var(--semi-color-primary))',
+        text: t('生成中'),
+      };
     }
-    return { color: '#b7791f', text: t('等待中') };
+    return {
+      color: 'var(--canvas-warning, var(--semi-color-warning))',
+      text: t('等待中'),
+    };
   })();
 
   const styles = {
@@ -75,13 +87,13 @@ const VideoGenerationTaskCard = ({
       borderRadius: 10,
       overflow: 'hidden',
       cursor: 'pointer',
-      background: 'var(--semi-color-bg-0)',
+      background: 'var(--canvas-card-bg, var(--semi-color-bg-0))',
       border: selected
-        ? '1px solid var(--semi-color-primary)'
-        : '1px solid var(--semi-color-border)',
+        ? '1px solid var(--canvas-primary, var(--semi-color-primary))'
+        : '1px solid var(--canvas-border, var(--semi-color-border))',
       boxShadow: hovered
-        ? '0 10px 24px rgba(15, 23, 42, 0.12)'
-        : '0 1px 2px rgba(15, 23, 42, 0.04)',
+        ? 'var(--canvas-card-shadow-hover, 0 10px 24px rgba(15, 23, 42, 0.12))'
+        : 'var(--canvas-card-shadow, 0 1px 2px rgba(15, 23, 42, 0.04))',
       transition: 'border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease',
       transform: hovered ? 'translateY(-1px)' : 'translateY(0)',
     },
@@ -92,13 +104,13 @@ const VideoGenerationTaskCard = ({
       height: '100%',
       objectFit: 'cover',
       opacity: isSuccess ? 1 : 0.56,
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-toolbar-bg, var(--semi-color-fill-0))',
     },
     overlay: {
       position: 'absolute',
       inset: 0,
       background:
-        'linear-gradient(180deg, rgba(0,0,0,0.28), transparent 34%, transparent 58%, rgba(0,0,0,0.72))',
+        'var(--canvas-media-overlay, linear-gradient(180deg, rgba(0,0,0,0.28), transparent 34%, transparent 58%, rgba(0,0,0,0.72)))',
     },
     checkboxWrap: {
       position: 'absolute',
@@ -108,7 +120,10 @@ const VideoGenerationTaskCard = ({
       width: 28,
       height: 28,
       borderRadius: 8,
-      background: hovered || selected ? 'rgba(0,0,0,0.42)' : 'rgba(0,0,0,0.24)',
+      background:
+        hovered || selected
+          ? 'var(--canvas-media-control-bg, rgba(15, 23, 42, 0.54))'
+          : 'rgba(15, 23, 42, 0.36)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -125,8 +140,8 @@ const VideoGenerationTaskCard = ({
       maxWidth: 'calc(100% - 52px)',
       padding: '3px 8px',
       borderRadius: 999,
-      background: 'rgba(0,0,0,0.48)',
-      color: '#fff',
+      background: 'var(--canvas-media-control-bg, rgba(15, 23, 42, 0.54))',
+      color: 'var(--canvas-media-control-text, #fff)',
       fontSize: 11,
       fontWeight: 600,
       lineHeight: 1.2,
@@ -146,16 +161,19 @@ const VideoGenerationTaskCard = ({
       alignItems: 'center',
       justifyContent: 'center',
       zIndex: 2,
-      color: '#fff',
+      color: 'var(--canvas-media-panel-text, #fff)',
     },
     errorWrap: {
       width: '86%',
       minWidth: 148,
       padding: '12px 14px',
       borderRadius: 10,
-      background: 'rgba(255,255,255,0.88)',
-      border: '1px solid rgba(255,255,255,0.72)',
-      boxShadow: '0 8px 24px rgba(15, 23, 42, 0.10)',
+      background:
+        'var(--canvas-media-panel-bg, rgba(15, 23, 42, 0.74))',
+      border:
+        '1px solid var(--canvas-media-panel-border, rgba(255, 255, 255, 0.14))',
+      boxShadow:
+        'var(--canvas-shadow-md, 0 8px 24px rgba(15, 23, 42, 0.10))',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -163,7 +181,7 @@ const VideoGenerationTaskCard = ({
     },
     errorText: {
       maxWidth: '100%',
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-media-panel-text, var(--semi-color-text-2))',
       whiteSpace: 'pre-wrap',
       wordBreak: 'break-word',
       overflowWrap: 'anywhere',
@@ -182,7 +200,7 @@ const VideoGenerationTaskCard = ({
       gap: 3,
     },
     prompt: {
-      color: '#fff',
+      color: 'var(--canvas-media-panel-text, #fff)',
       fontSize: 13,
       fontWeight: 600,
       lineHeight: 1.35,
@@ -196,7 +214,7 @@ const VideoGenerationTaskCard = ({
       justifyContent: 'space-between',
       gap: 8,
       fontSize: 12,
-      color: 'rgba(255,255,255,0.78)',
+      color: 'var(--canvas-text-secondary, rgba(255,255,255,0.78))',
       overflow: 'hidden',
       whiteSpace: 'nowrap',
     },
@@ -210,9 +228,12 @@ const VideoGenerationTaskCard = ({
       minWidth: 148,
       padding: '12px 14px',
       borderRadius: 10,
-      background: 'rgba(255,255,255,0.88)',
-      border: '1px solid rgba(255,255,255,0.72)',
-      boxShadow: '0 8px 24px rgba(15, 23, 42, 0.10)',
+      background:
+        'var(--canvas-media-panel-bg, rgba(15, 23, 42, 0.74))',
+      border:
+        '1px solid var(--canvas-media-panel-border, rgba(255, 255, 255, 0.14))',
+      boxShadow:
+        'var(--canvas-shadow-md, 0 8px 24px rgba(15, 23, 42, 0.10))',
     },
   };
 
@@ -234,7 +255,12 @@ const VideoGenerationTaskCard = ({
         />
       ) : (
         <div style={{ ...styles.poster, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <IconVideo size='extra-large' style={{ color: 'var(--semi-color-text-3)' }} />
+          <IconVideo
+            size='extra-large'
+            style={{
+              color: 'var(--canvas-text-muted, var(--semi-color-text-3))',
+            }}
+          />
         </div>
       )}
       <div style={styles.overlay} />
@@ -273,7 +299,11 @@ const VideoGenerationTaskCard = ({
             <Text
               type='tertiary'
               size='small'
-              style={{ color: 'var(--semi-color-text-2)', marginTop: 8, display: 'block' }}
+              style={{
+                color: 'var(--canvas-text-muted, var(--semi-color-text-2))',
+                marginTop: 8,
+                display: 'block',
+              }}
             >
               {formatWaitTime(waitTime)}
             </Text>

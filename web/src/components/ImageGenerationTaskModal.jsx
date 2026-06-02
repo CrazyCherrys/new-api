@@ -156,12 +156,24 @@ const ImageGenerationTaskModal = ({
 
   const statusMeta = (() => {
     if (isSuccess)
-      return { color: '#3ecf8e', text: t('生成成功') };
+      return {
+        color: 'var(--canvas-success, var(--semi-color-success))',
+        text: t('生成成功'),
+      };
     if (isFailed)
-      return { color: '#ef4444', text: t('生成失败') };
+      return {
+        color: 'var(--canvas-error, var(--semi-color-danger))',
+        text: t('生成失败'),
+      };
     if (isGenerating)
-      return { color: '#22d3ee', text: t('生成中') };
-    return { color: '#f59e0b', text: t('等待中') };
+      return {
+        color: 'var(--canvas-primary, var(--semi-color-primary))',
+        text: t('生成中'),
+      };
+    return {
+      color: 'var(--canvas-warning, var(--semi-color-warning))',
+      text: t('等待中'),
+    };
   })();
 
   const handleDownload = () => {
@@ -238,12 +250,12 @@ const ImageGenerationTaskModal = ({
       alignItems: 'center',
       justifyContent: 'space-between',
       padding: isMobile ? '12px 14px' : '14px 20px',
-      borderBottom: '1px solid var(--semi-color-border)',
+      borderBottom: '1px solid var(--canvas-border, var(--semi-color-border))',
     },
     headerTitle: {
       fontSize: 16,
       fontWeight: 600,
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary, var(--semi-color-text-0))',
     },
     closeBtn: {
       width: 28,
@@ -251,7 +263,7 @@ const ImageGenerationTaskModal = ({
       borderRadius: 6,
       border: 'none',
       background: 'transparent',
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted, var(--semi-color-text-2))',
       cursor: 'pointer',
       display: 'inline-flex',
       alignItems: 'center',
@@ -276,7 +288,7 @@ const ImageGenerationTaskModal = ({
       padding: 0,
       borderRadius: 10,
       border: 'none',
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-toolbar-bg, var(--semi-color-fill-0))',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -290,7 +302,7 @@ const ImageGenerationTaskModal = ({
       minHeight: isMobile ? 220 : 280,
       aspectRatio: isSuccess && task.image_url ? normalizedPreviewRatio : undefined,
       borderRadius: 10,
-      background: 'var(--semi-color-fill-0)',
+      background: 'var(--canvas-toolbar-bg, var(--semi-color-fill-0))',
       overflow: 'hidden',
       display: 'flex',
       alignItems: 'center',
@@ -309,9 +321,10 @@ const ImageGenerationTaskModal = ({
       width: 28,
       height: 28,
       borderRadius: 8,
-      border: '1px solid rgba(255,255,255,0.28)',
-      background: 'rgba(0,0,0,0.48)',
-      color: '#fff',
+      border:
+        '1px solid var(--canvas-media-control-border, rgba(255, 255, 255, 0.24))',
+      background: 'var(--canvas-media-control-bg, rgba(15, 23, 42, 0.54))',
+      color: 'var(--canvas-media-control-text, #fff)',
       cursor: 'pointer',
       display: 'inline-flex',
       alignItems: 'center',
@@ -353,12 +366,12 @@ const ImageGenerationTaskModal = ({
     },
     infoLabel: {
       fontSize: 12,
-      color: 'var(--semi-color-text-2)',
+      color: 'var(--canvas-text-muted, var(--semi-color-text-2))',
     },
     infoValue: {
       fontSize: 13,
       fontWeight: 500,
-      color: 'var(--semi-color-text-0)',
+      color: 'var(--canvas-text-primary, var(--semi-color-text-0))',
       wordBreak: 'break-all',
       lineHeight: 1.5,
     },
@@ -366,9 +379,11 @@ const ImageGenerationTaskModal = ({
       marginTop: 2,
       padding: '10px 12px',
       borderRadius: 8,
-      border: '1px solid rgba(239, 68, 68, 0.35)',
-      background: 'rgba(239, 68, 68, 0.08)',
-      color: '#ef4444',
+      border:
+        '1px solid var(--canvas-danger-chip-border, rgba(239, 68, 68, 0.24))',
+      background:
+        'var(--canvas-danger-chip-bg, rgba(239, 68, 68, 0.08))',
+      color: 'var(--canvas-danger-chip-text, var(--canvas-error, #ef4444))',
       fontSize: 12,
       lineHeight: 1.55,
       whiteSpace: 'pre-wrap',
@@ -381,7 +396,7 @@ const ImageGenerationTaskModal = ({
       gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
       gap: 8,
       paddingTop: 10,
-      borderTop: '1px solid var(--semi-color-border)',
+      borderTop: '1px solid var(--canvas-border, var(--semi-color-border))',
     },
     sideActionBtn: {
       width: '100%',
@@ -420,11 +435,12 @@ const ImageGenerationTaskModal = ({
             width: 64,
             height: 64,
             borderRadius: '50%',
-            border: '1.5px solid #ef4444',
+            border:
+              '1.5px solid var(--canvas-error, var(--semi-color-danger))',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#ef4444',
+            color: 'var(--canvas-error, var(--semi-color-danger))',
           }}
         >
           <IconAlertTriangle size='extra-large' />
@@ -439,7 +455,7 @@ const ImageGenerationTaskModal = ({
             flexDirection: 'column',
             alignItems: 'center',
             gap: 12,
-            color: 'var(--semi-color-text-2)',
+            color: 'var(--canvas-text-muted, var(--semi-color-text-2))',
           }}
         >
           {isGenerating ? <Spin size='large' /> : <IconClock size='extra-large' />}
@@ -451,7 +467,7 @@ const ImageGenerationTaskModal = ({
               <Progress
                 percent={task.progress || 0}
                 showInfo
-                stroke='var(--semi-color-primary)'
+                stroke='var(--canvas-primary, var(--semi-color-primary))'
               />
             </div>
           )}
@@ -461,7 +477,7 @@ const ImageGenerationTaskModal = ({
     return (
       <div
         style={{
-          color: 'var(--semi-color-text-3)',
+          color: 'var(--canvas-text-muted, var(--semi-color-text-3))',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -480,7 +496,8 @@ const ImageGenerationTaskModal = ({
         style={styles.closeBtn}
         onClick={onClose}
         onMouseEnter={(e) =>
-          (e.currentTarget.style.background = 'var(--semi-color-fill-0)')
+          (e.currentTarget.style.background =
+            'var(--canvas-toolbar-bg, var(--semi-color-fill-0))')
         }
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         aria-label={t('关闭')}
@@ -629,11 +646,17 @@ const ImageGenerationTaskModal = ({
                 <span style={styles.infoValue}>{task.id}</span>
               </div>
             </div>
-            <details style={{ borderTop: '1px solid var(--semi-color-border)', paddingTop: 10 }}>
+            <details
+              style={{
+                borderTop:
+                  '1px solid var(--canvas-border, var(--semi-color-border))',
+                paddingTop: 10,
+              }}
+            >
               <summary
                 style={{
                   cursor: 'pointer',
-                  color: 'var(--semi-color-text-2)',
+                  color: 'var(--canvas-text-muted, var(--semi-color-text-2))',
                   fontSize: 12,
                   lineHeight: 1.5,
                 }}
