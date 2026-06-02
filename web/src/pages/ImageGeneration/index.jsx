@@ -66,6 +66,11 @@ import {
   showError,
   showSuccess,
 } from '../../helpers';
+import {
+  extractCanvasChatAttachments,
+  getCanvasChatUploadVisibility,
+  normalizeCanvasChatCapabilities,
+} from '../../helpers/canvasChat';
 import { CanvasModelSeriesIcon } from '../../helpers/modelSeries';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
@@ -141,6 +146,10 @@ const DEFAULT_CHAT_CONTEXT_COUNT = '8';
 const DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES = '8';
 const DEFAULT_CHAT_SUMMARY_RECENT_MESSAGES = '8';
 const CHAT_SUMMARY_STRATEGY_OPTIONS = ['0', '4', '8', '12', '16', '24', '32'];
+const CANVAS_CHAT_SUPPORTED_FILE_MIME_TYPES = new Set([
+  'application/pdf',
+  'text/plain',
+]);
 
 const sortCanvasSessionsByRecent = (a, b) => {
   if (!!a?.pinned !== !!b?.pinned) {
@@ -671,6 +680,8 @@ const ImageGeneration = () => {
     getStoredValue(STORAGE_KEYS.CHAT_MODEL, ''),
   );
   const [chatPrompt, setChatPrompt] = useState('');
+  const [chatImageAttachment, setChatImageAttachment] = useState(null);
+  const [chatFileAttachment, setChatFileAttachment] = useState(null);
   const [chatTemperature, setChatTemperature] = useState(() =>
     getStoredValue(STORAGE_KEYS.CHAT_TEMPERATURE, DEFAULT_CHAT_TEMPERATURE),
   );
@@ -1320,6 +1331,7 @@ const ImageGeneration = () => {
     display_name: String(requestModel || '').trim(),
     model_series: '',
     request_endpoint: '',
+    chat_capabilities: [],
     usable: false,
     unavailable_reason: reasonText || t('当前会话模型，现不可用'),
     available_groups: [],
@@ -1381,6 +1393,18 @@ const ImageGeneration = () => {
         : t('当前选择的模型，现不可用'),
     );
   }, [chatModel, chatModelOptionMap, selectedCanvasSession?.current_model, t]);
+
+  useEffect(() => {
+    const uploadVisibility = getCanvasChatUploadVisibility(
+      activeChatModelOption,
+    );
+    if (!uploadVisibility.showImageUpload) {
+      setChatImageAttachment(null);
+    }
+    if (!uploadVisibility.showFileUpload) {
+      setChatFileAttachment(null);
+    }
+  }, [activeChatModelOption]);
 
   const buildRemoteReferenceFile = (imageUrl) => {
     if (!imageUrl) {
@@ -2583,6 +2607,9 @@ const ImageGeneration = () => {
       display_name: getModelDisplayName(item) || requestModel,
       model_series: String(item?.model_series || '').trim(),
       request_endpoint: String(item?.request_endpoint || '').trim(),
+      chat_capabilities: normalizeCanvasChatCapabilities(
+        item?.chat_capabilities,
+      ),
     };
   }
 
@@ -4238,6 +4265,18 @@ const ImageGeneration = () => {
     }
   }, [referenceImages]);
 
+  const readUploadFileAsDataURL = (file) =>
+    new Promise((resolve, reject) => {
+      if (!file?.fileInstance) {
+        resolve(String(file?.url || ''));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => resolve(String(event?.target?.result || ''));
+      reader.onerror = reject;
+      reader.readAsDataURL(file.fileInstance);
+    });
+
   const handleImageUpload = ({ fileList }) => {
     const limit = getReferenceImageLimit(selectedModelData);
     if (limit > 0 && fileList.length > limit) {
@@ -4283,6 +4322,86 @@ const ImageGeneration = () => {
 
   const handleVideoReferenceRemove = () => {
     setVideoReferenceImage(null);
+  };
+
+  const inferCanvasChatFileMimeType = (file) => {
+    const explicitType = String(file?.type || file?.fileInstance?.type || '')
+      .trim()
+      .toLowerCase();
+    if (explicitType) {
+      return explicitType;
+    }
+    const name = String(file?.name || '')
+      .trim()
+      .toLowerCase();
+    if (name.endsWith('.pdf')) {
+      return 'application/pdf';
+    }
+    if (name.endsWith('.txt')) {
+      return 'text/plain';
+    }
+    return '';
+  };
+
+  const handleChatImageUpload = async ({ fileList }) => {
+    const selectedFile = fileList[0] || null;
+    if (!selectedFile) {
+      setChatImageAttachment(null);
+      return;
+    }
+    try {
+      const dataUrl = await readUploadFileAsDataURL(selectedFile);
+      setChatImageAttachment({
+        kind: 'image',
+        uid: selectedFile.uid || `chat-image-${Date.now()}`,
+        name: selectedFile.name || t('图片'),
+        mime_type:
+          selectedFile.fileInstance?.type ||
+          String(dataUrl).slice(5, String(dataUrl).indexOf(';')) ||
+          'image/*',
+        data: dataUrl,
+        url: dataUrl,
+      });
+    } catch (error) {
+      showError(error.message || t('读取图片失败'));
+    }
+  };
+
+  const validateCanvasChatFileUpload = (file) => {
+    const mimeType = inferCanvasChatFileMimeType(file);
+    if (!CANVAS_CHAT_SUPPORTED_FILE_MIME_TYPES.has(mimeType)) {
+      showError(t('当前仅支持上传 PDF 或 TXT 文件'));
+      return false;
+    }
+    return true;
+  };
+
+  const handleChatFileUpload = async ({ fileList }) => {
+    const selectedFile = fileList[0] || null;
+    if (!selectedFile) {
+      setChatFileAttachment(null);
+      return;
+    }
+    try {
+      const dataUrl = await readUploadFileAsDataURL(selectedFile);
+      setChatFileAttachment({
+        kind: 'file',
+        uid: selectedFile.uid || `chat-file-${Date.now()}`,
+        name: selectedFile.name || t('文件'),
+        mime_type: inferCanvasChatFileMimeType(selectedFile),
+        data: dataUrl,
+      });
+    } catch (error) {
+      showError(error.message || t('读取文件失败'));
+    }
+  };
+
+  const handleRemoveChatImageAttachment = () => {
+    setChatImageAttachment(null);
+  };
+
+  const handleRemoveChatFileAttachment = () => {
+    setChatFileAttachment(null);
   };
 
   const normalizeTaskCount = (value) => {
@@ -5156,6 +5275,31 @@ const ImageGeneration = () => {
       return;
     }
 
+    const chatUploadVisibility = getCanvasChatUploadVisibility(
+      activeChatModelOption,
+    );
+    if (chatImageAttachment && !chatUploadVisibility.showImageUpload) {
+      showError(t('当前模型不支持图片上传'));
+      return;
+    }
+    if (chatFileAttachment && !chatUploadVisibility.showFileUpload) {
+      showError(t('当前模型不支持文件上传'));
+      return;
+    }
+
+    const attachments = (
+      promptOverride ? [] : [chatImageAttachment, chatFileAttachment]
+    )
+      .filter(Boolean)
+      .map((attachment) => ({
+        kind:
+          attachment.kind ||
+          (attachment === chatImageAttachment ? 'image' : 'file'),
+        name: attachment.name,
+        mime_type: attachment.mime_type,
+        data: attachment.data,
+      }));
+
     const temperatureValue = Number(chatTemperature);
     const contextCountValue = Number(chatContext);
     let activeSessionId = null;
@@ -5184,6 +5328,7 @@ const ImageGeneration = () => {
         body: JSON.stringify({
           prompt,
           model_id: chatModel,
+          attachments,
           stream: true,
           temperature: Number.isFinite(temperatureValue)
             ? temperatureValue
@@ -5220,6 +5365,10 @@ const ImageGeneration = () => {
 
       refreshRecentCanvasSessions({ silent: true });
       setChatPrompt('');
+      if (!promptOverride) {
+        setChatImageAttachment(null);
+        setChatFileAttachment(null);
+      }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -6212,6 +6361,48 @@ const ImageGeneration = () => {
       position: 'relative',
       display: 'inline-block',
     },
+    chatFileChip: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      maxWidth: 220,
+      minHeight: 36,
+      borderRadius: 10,
+      border: '1px solid var(--semi-color-border)',
+      background: 'var(--semi-color-fill-0)',
+      padding: '0 8px 0 10px',
+    },
+    chatFileChipLink: {
+      minWidth: 0,
+      flex: 1,
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      color: 'var(--semi-color-text-1)',
+      textDecoration: 'none',
+    },
+    chatFileChipText: {
+      minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      fontSize: 12,
+      lineHeight: 1.4,
+    },
+    chatFileChipRemove: {
+      width: 20,
+      height: 20,
+      minWidth: 20,
+      borderRadius: '50%',
+      border: 'none',
+      background: 'transparent',
+      color: 'var(--semi-color-text-2)',
+      cursor: 'pointer',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 0,
+    },
     removeImageBtn: {
       position: 'absolute',
       top: -6,
@@ -6383,6 +6574,12 @@ const ImageGeneration = () => {
       color: 'inherit',
       lineHeight: 1.6,
       wordBreak: 'break-word',
+    },
+    canvasChatAttachmentList: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 10,
     },
     canvasChatAssistantContent: {
       width: '100%',
@@ -6982,6 +7179,50 @@ const ImageGeneration = () => {
       </button>
     </div>
   );
+
+  const renderChatFileAttachmentChip = (file, onRemove = null) => (
+    <div key={file.uid || file.name} style={styles.chatFileChip}>
+      <a
+        href={file.data || file.url || '#'}
+        target='_blank'
+        rel='noreferrer'
+        style={styles.chatFileChipLink}
+      >
+        <IconArchive size='small' />
+        <span style={styles.chatFileChipText}>{file.name}</span>
+      </a>
+      {onRemove ? (
+        <button
+          type='button'
+          aria-label={t('移除文件')}
+          style={styles.chatFileChipRemove}
+          onClick={onRemove}
+        >
+          <IconDelete size='extra-small' />
+        </button>
+      ) : null}
+    </div>
+  );
+
+  const renderCanvasChatAttachment = (attachment) => {
+    if (!attachment) {
+      return null;
+    }
+    if (attachment.kind === 'image') {
+      return renderCanvasReferenceThumb(
+        {
+          uid: `${attachment.kind}-${attachment.name}`,
+          url: attachment.data,
+        },
+        attachment.name || t('图片附件'),
+      );
+    }
+    return renderChatFileAttachmentChip({
+      uid: `${attachment.kind}-${attachment.name}`,
+      name: attachment.name || t('文件附件'),
+      data: attachment.data,
+    });
+  };
 
   const renderPillDropdown = ({
     key,
@@ -8501,6 +8742,9 @@ const ImageGeneration = () => {
     const showMessageReferences = generationMode !== CANVAS_MODE_IMAGE;
     const isSelected = selectedCanvasMessageId === message.id;
     const isChatMode = generationMode === CANVAS_MODE_CHAT;
+    const chatAttachments = isChatMode
+      ? extractCanvasChatAttachments(message)
+      : [];
     const handleMessageClick = async () => {
       setSelectedCanvasMessageId(message.id);
       if (isUser || references.length > 0 || isChatMode) {
@@ -8595,6 +8839,13 @@ const ImageGeneration = () => {
               <div style={styles.canvasChatUserPrompt}>
                 {message.prompt || t('请输入消息')}
               </div>
+              {chatAttachments.length > 0 ? (
+                <div style={styles.canvasChatAttachmentList}>
+                  {chatAttachments.map((attachment) =>
+                    renderCanvasChatAttachment(attachment),
+                  )}
+                </div>
+              ) : null}
               {showMessageReferences && references.length > 0 ? (
                 <div style={styles.canvasMessageRefs}>
                   {references.map((file) =>
@@ -8917,6 +9168,15 @@ const ImageGeneration = () => {
       : isVideoMode
         ? videoPrompt
         : inspiration;
+    const chatUploadVisibility = getCanvasChatUploadVisibility(
+      activeChatModelOption,
+    );
+    const showChatImageUpload =
+      isChatMode && chatUploadVisibility.showImageUpload;
+    const showChatFileUpload =
+      isChatMode && chatUploadVisibility.showFileUpload;
+    const hasChatInlineAttachments =
+      isChatMode && (!!chatImageAttachment || !!chatFileAttachment);
     const promptHasContent = activePrompt.trim().length > 0;
     const submitLoading = isChatMode
       ? chatStreaming
@@ -8971,6 +9231,7 @@ const ImageGeneration = () => {
     const renderUploadIconButton = ({
       disabled = false,
       title = t('上传图片'),
+      icon = <IconPlus size='small' />,
     } = {}) => (
       <div
         className='canvas-composer-upload-btn'
@@ -8984,7 +9245,7 @@ const ImageGeneration = () => {
           cursor: disabled ? 'not-allowed' : 'pointer',
         }}
       >
-        <IconPlus size='small' />
+        {icon}
       </div>
     );
     const chatDropdownModels = getChatModelsWithPreservedCurrent(
@@ -9014,10 +9275,7 @@ const ImageGeneration = () => {
           value: model.request_model,
           label: buildChatModelOptionLabel(model),
           icon: (
-            <CanvasModelSeriesIcon
-              series={model.model_series}
-              size='small'
-            />
+            <CanvasModelSeriesIcon series={model.model_series} size='small' />
           ),
           disabled: model.usable === false,
         })),
@@ -9079,9 +9337,12 @@ const ImageGeneration = () => {
         ? videoComposerParameters
         : imageComposerParameters;
     const showPromptUploadEntry =
+      showChatImageUpload ||
+      showChatFileUpload ||
       (isVideoMode && videoSelectedModelSupportsImageToVideo) ||
       (isImageMode && selectedModelSupportsEditing);
     const hasInlineReferenceThumbs =
+      hasChatInlineAttachments ||
       (isImageMode && referenceImages.length > 0) ||
       (isVideoMode &&
         videoSelectedModelSupportsImageToVideo &&
@@ -9104,6 +9365,40 @@ const ImageGeneration = () => {
                   style={styles.promptLeadingSlot}
                   className='canvas-composer-leading-slot'
                 >
+                  {showChatImageUpload ? (
+                    <Upload
+                      action=''
+                      accept='image/*'
+                      multiple={false}
+                      fileList={
+                        chatImageAttachment ? [chatImageAttachment] : []
+                      }
+                      onChange={handleChatImageUpload}
+                      showUploadList={false}
+                      beforeUpload={validateImageSize}
+                    >
+                      {renderUploadIconButton({
+                        title: t('上传图片'),
+                        icon: <IconImage size='small' />,
+                      })}
+                    </Upload>
+                  ) : null}
+                  {showChatFileUpload ? (
+                    <Upload
+                      action=''
+                      accept='.pdf,.txt,text/plain,application/pdf'
+                      multiple={false}
+                      fileList={chatFileAttachment ? [chatFileAttachment] : []}
+                      onChange={handleChatFileUpload}
+                      showUploadList={false}
+                      beforeUpload={validateCanvasChatFileUpload}
+                    >
+                      {renderUploadIconButton({
+                        title: t('上传文件'),
+                        icon: <IconArchive size='small' />,
+                      })}
+                    </Upload>
+                  ) : null}
                   {isImageMode && selectedModelSupportsEditing ? (
                     <Upload
                       action=''
@@ -9139,6 +9434,7 @@ const ImageGeneration = () => {
                     </Upload>
                   ) : null}
                   {(isImageMode && referenceImages.length > 0) ||
+                  hasChatInlineAttachments ||
                   (isVideoMode &&
                     videoSelectedModelSupportsImageToVideo &&
                     videoReferenceImage) ? (
@@ -9146,6 +9442,17 @@ const ImageGeneration = () => {
                       style={styles.promptInlineAssets}
                       className='canvas-composer-inline-assets'
                     >
+                      {isChatMode && chatImageAttachment
+                        ? renderReferenceThumb(chatImageAttachment, () =>
+                            handleRemoveChatImageAttachment(),
+                          )
+                        : null}
+                      {isChatMode && chatFileAttachment
+                        ? renderChatFileAttachmentChip(
+                            chatFileAttachment,
+                            handleRemoveChatFileAttachment,
+                          )
+                        : null}
                       {isImageMode
                         ? referenceImages.map((file) =>
                             renderReferenceThumb(file, () =>

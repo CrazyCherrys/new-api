@@ -77,6 +77,7 @@ type CreateCanvasMessageInput struct {
 	Group           string
 	RequestEndpoint string
 	Params          string
+	Attachments     []dto.CanvasChatAttachment
 	Stream          *bool
 	Temperature     *float64
 	ContextCount    *int

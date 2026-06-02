@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -39,20 +40,22 @@ type updateCanvasSessionRequest struct {
 }
 
 type createCanvasMessageRequest struct {
-	Prompt          string   `json:"prompt"`
-	ModelId         string   `json:"model_id"`
-	Group           string   `json:"group"`
-	RequestEndpoint string   `json:"request_endpoint"`
-	Params          string   `json:"params"`
-	Stream          *bool    `json:"stream"`
-	Temperature     *float64 `json:"temperature"`
-	ContextCount    *int     `json:"context_count"`
-	ClientRequestId string   `json:"client_request_id"`
+	Prompt          string                     `json:"prompt"`
+	ModelId         string                     `json:"model_id"`
+	Group           string                     `json:"group"`
+	RequestEndpoint string                     `json:"request_endpoint"`
+	Params          string                     `json:"params"`
+	Attachments     []dto.CanvasChatAttachment `json:"attachments"`
+	Stream          *bool                      `json:"stream"`
+	Temperature     *float64                   `json:"temperature"`
+	ContextCount    *int                       `json:"context_count"`
+	ClientRequestId string                     `json:"client_request_id"`
 }
 
 var (
 	listCanvasSessionsForController        = service.ListCanvasSessions
 	listCanvasChatModelsForController      = service.ListUserCanvasChatModelOptions
+	getCanvasChatModelsForController       = service.ListUserCanvasChatModelCatalog
 	getCanvasSessionByIDForController      = model.GetCanvasSessionByID
 	listCanvasMessageTimelineForController = service.ListCanvasMessageTimeline
 	createCanvasMessageForController       = service.CreateCanvasMessageWithContext
@@ -123,7 +126,7 @@ func GetCanvasChatModels(c *gin.Context) {
 		return
 	}
 
-	models, err := service.ListUserCanvasChatModelCatalog(userId)
+	models, err := getCanvasChatModelsForController(userId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -278,6 +281,7 @@ func CreateCanvasMessage(c *gin.Context) {
 		Group:           req.Group,
 		RequestEndpoint: req.RequestEndpoint,
 		Params:          req.Params,
+		Attachments:     req.Attachments,
 		Stream:          req.Stream,
 		Temperature:     req.Temperature,
 		ContextCount:    req.ContextCount,

@@ -81,8 +81,9 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 	if err := db.Model(&model.ModelMapping{}).
 		Where("request_model = ?", chatModel).
 		Updates(map[string]any{
-			"display_name": "Chat Model",
-			"model_series": "openai",
+			"display_name":      "Chat Model",
+			"model_series":      "openai",
+			"chat_capabilities": `["image_upload","file_upload"]`,
 		}).Error; err != nil {
 		t.Fatalf("failed to update seeded chat model mapping: %v", err)
 	}
@@ -160,6 +161,9 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 	}
 	if catalog[0].ModelSeries != "openai" || catalog[0].RequestEndpoint != "openai" {
 		t.Fatalf("expected catalog metadata to be preserved, got %#v", catalog[0])
+	}
+	if len(catalog[0].ChatCapabilities) != 2 || catalog[0].ChatCapabilities[0] != "image_upload" || catalog[0].ChatCapabilities[1] != "file_upload" {
+		t.Fatalf("expected catalog chat capabilities to be preserved, got %#v", catalog[0])
 	}
 
 	resolved, err := resolveCanvasChatModel(userID, &model.CanvasSession{}, "")
@@ -262,8 +266,9 @@ func TestListUserCanvasChatModelOptionsReturnsStructuredData(t *testing.T) {
 	if err := db.Model(&model.ModelMapping{}).
 		Where("request_model = ?", usableModel).
 		Updates(map[string]any{
-			"display_name": displayName,
-			"model_series": "openai",
+			"display_name":      displayName,
+			"model_series":      "openai",
+			"chat_capabilities": `["image_upload"]`,
 		}).Error; err != nil {
 		t.Fatalf("failed to update seeded structured model mapping: %v", err)
 	}
@@ -300,6 +305,9 @@ func TestListUserCanvasChatModelOptionsReturnsStructuredData(t *testing.T) {
 	}
 	if options[0].RequestEndpoint != requestEndpoint {
 		t.Fatalf("expected request endpoint %q, got %#v", requestEndpoint, options[0])
+	}
+	if len(options[0].ChatCapabilities) != 1 || options[0].ChatCapabilities[0] != "image_upload" {
+		t.Fatalf("expected chat capabilities to be preserved, got %#v", options[0])
 	}
 }
 

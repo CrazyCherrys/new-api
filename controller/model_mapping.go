@@ -69,6 +69,9 @@ func validateModelMappingEndpoint(modelType int, endpoint string) error {
 }
 
 func sanitizeModelMappingSettings(mm *model.ModelMapping) {
+	if mm.ModelType != 1 {
+		mm.ChatCapabilities = ""
+	}
 	if mm.ModelType != 2 {
 		mm.ImageCapabilities = ""
 		mm.ReferenceImageLimit = 0
@@ -120,6 +123,13 @@ func validateImageModelCapabilities(modelType int, raw string) (string, error) {
 		return "", errors.New("绘画模型必须至少选择一个模型能力")
 	}
 	return normalized, nil
+}
+
+func validateChatModelCapabilities(modelType int, raw string) (string, error) {
+	if modelType != 1 {
+		return "", nil
+	}
+	return model.NormalizeChatCapabilities(raw)
 }
 
 func validateVideoModelCapabilities(modelType int, raw string) (string, error) {
@@ -248,6 +258,12 @@ func CreateModelMapping(c *gin.Context) {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
+	normalizedChatCapabilities, err := validateChatModelCapabilities(mm.ModelType, mm.ChatCapabilities)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	mm.ChatCapabilities = normalizedChatCapabilities
 	normalizedCapabilities, err := validateImageModelCapabilities(mm.ModelType, mm.ImageCapabilities)
 	if err != nil {
 		common.ApiErrorMsg(c, err.Error())
@@ -325,6 +341,12 @@ func UpdateModelMapping(c *gin.Context) {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
+	normalizedChatCapabilities, err := validateChatModelCapabilities(mm.ModelType, mm.ChatCapabilities)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	mm.ChatCapabilities = normalizedChatCapabilities
 	normalizedCapabilities, err := validateImageModelCapabilities(mm.ModelType, mm.ImageCapabilities)
 	if err != nil {
 		common.ApiErrorMsg(c, err.Error())

@@ -863,6 +863,213 @@ func TestCreateCanvasChatMessageUsesSessionConfigFallbacks(t *testing.T) {
 	}
 }
 
+func TestCreateCanvasChatMessagePersistsAttachmentsAndReusesThemInRelayHistory(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+	if err := db.Model(&model.ModelMapping{}).
+		Where("request_model = ?", "gpt-chat-test").
+		Update("chat_capabilities", `["image_upload","file_upload"]`).Error; err != nil {
+		t.Fatalf("failed to enable chat capabilities: %v", err)
+	}
+
+	capturedRequests := make([][]dto.Message, 0, 2)
+	replyIndex := 0
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
+		cloned := make([]dto.Message, len(request.Messages))
+		copy(cloned, request.Messages)
+		capturedRequests = append(capturedRequests, cloned)
+		replyIndex++
+		reply := fmt.Sprintf("assistant-%d", replyIndex)
+		if onDelta != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: reply}); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: reply}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	attachments := []dto.CanvasChatAttachment{
+		{
+			Kind:     "image",
+			Name:     "reference.png",
+			MimeType: "image/png",
+			Data:     "data:image/png;base64,Zm9v",
+		},
+		{
+			Kind:     "file",
+			Name:     "notes.txt",
+			MimeType: "text/plain",
+			Data:     "data:text/plain;base64,YWxwaGE=",
+		},
+	}
+	first, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:      "look at these",
+		ModelId:     "gpt-chat-test",
+		Attachments: attachments,
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat message with attachments: %v", err)
+	}
+	if len(first) != 2 {
+		t.Fatalf("expected user and assistant messages, got %#v", first)
+	}
+
+	var metadata canvasChatMessageMetadata
+	if err := common.UnmarshalJsonStr(first[0].Metadata, &metadata); err != nil {
+		t.Fatalf("failed to decode user metadata: %v", err)
+	}
+	if len(metadata.Attachments) != 2 {
+		t.Fatalf("expected persisted attachments in user metadata, got %#v", metadata)
+	}
+
+	var assistantMetadata canvasChatMessageMetadata
+	if err := common.UnmarshalJsonStr(first[1].Metadata, &assistantMetadata); err != nil {
+		t.Fatalf("failed to decode assistant metadata: %v", err)
+	}
+	if len(assistantMetadata.Attachments) != 0 {
+		t.Fatalf("expected assistant metadata to exclude user attachments, got %#v", assistantMetadata)
+	}
+
+	if len(capturedRequests) != 1 || len(capturedRequests[0]) != 1 {
+		t.Fatalf("expected first relay call to include one user message, got %#v", capturedRequests)
+	}
+	firstParts := capturedRequests[0][0].ParseContent()
+	if len(firstParts) != 3 {
+		t.Fatalf("expected text + image + file relay parts, got %#v", firstParts)
+	}
+	if firstParts[0].Type != dto.ContentTypeText || firstParts[0].Text != "look at these" {
+		t.Fatalf("unexpected first relay text part: %#v", firstParts[0])
+	}
+	if firstParts[1].Type != dto.ContentTypeImageURL {
+		t.Fatalf("expected second relay part to be image, got %#v", firstParts[1])
+	}
+	if firstParts[2].Type != dto.ContentTypeFile || firstParts[2].GetFile() == nil || firstParts[2].GetFile().FileName != "notes.txt" {
+		t.Fatalf("expected third relay part to be file, got %#v", firstParts[2])
+	}
+
+	second, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "follow up",
+		ModelId: "gpt-chat-test",
+	})
+	if err != nil {
+		t.Fatalf("failed to create follow-up chat message: %v", err)
+	}
+	if len(second) != 2 {
+		t.Fatalf("expected user and assistant follow-up messages, got %#v", second)
+	}
+	if len(capturedRequests) != 2 {
+		t.Fatalf("expected two relay calls, got %d", len(capturedRequests))
+	}
+	if len(capturedRequests[1]) != 3 {
+		t.Fatalf("expected history + assistant + current user relay messages, got %#v", capturedRequests[1])
+	}
+	historyParts := capturedRequests[1][0].ParseContent()
+	if len(historyParts) != 3 || historyParts[2].Type != dto.ContentTypeFile {
+		t.Fatalf("expected historical user attachments to be replayed, got %#v", historyParts)
+	}
+
+	timeline, err := ListCanvasMessageTimeline(1, session.Id, 20, "")
+	if err != nil {
+		t.Fatalf("failed to load message timeline: %v", err)
+	}
+	if len(timeline.Items) != 4 {
+		t.Fatalf("expected 4 timeline messages, got %#v", timeline.Items)
+	}
+	var timelineMetadata canvasChatMessageMetadata
+	if err := common.UnmarshalJsonStr(timeline.Items[0].Metadata, &timelineMetadata); err != nil {
+		t.Fatalf("failed to decode timeline metadata: %v", err)
+	}
+	if len(timelineMetadata.Attachments) != 2 {
+		t.Fatalf("expected timeline to preserve attachments, got %#v", timelineMetadata)
+	}
+}
+
+func TestCreateCanvasChatMessageRejectsAttachmentCapabilityAndValidationErrors(t *testing.T) {
+	t.Run("rejects unsupported image upload capability", func(t *testing.T) {
+		db := setupCanvasSessionServiceTestDB(t)
+		seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+		session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+		if err != nil {
+			t.Fatalf("failed to create chat session: %v", err)
+		}
+
+		_, err = CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+			Prompt:  "look at this",
+			ModelId: "gpt-chat-test",
+			Attachments: []dto.CanvasChatAttachment{
+				{
+					Kind:     "image",
+					Name:     "reference.png",
+					MimeType: "image/png",
+					Data:     "data:image/png;base64,Zm9v",
+				},
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "does not support image upload") {
+			t.Fatalf("expected image capability error, got %v", err)
+		}
+	})
+
+	t.Run("rejects invalid mime type and attachment limits", func(t *testing.T) {
+		db := setupCanvasSessionServiceTestDB(t)
+		seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+		if err := db.Model(&model.ModelMapping{}).
+			Where("request_model = ?", "gpt-chat-test").
+			Update("chat_capabilities", `["image_upload","file_upload"]`).Error; err != nil {
+			t.Fatalf("failed to enable chat capabilities: %v", err)
+		}
+
+		session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+		if err != nil {
+			t.Fatalf("failed to create chat session: %v", err)
+		}
+
+		_, err = CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+			Prompt:  "bad file",
+			ModelId: "gpt-chat-test",
+			Attachments: []dto.CanvasChatAttachment{
+				{
+					Kind:     "file",
+					Name:     "payload.json",
+					MimeType: "application/json",
+					Data:     "data:application/json;base64,e30=",
+				},
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "not supported") {
+			t.Fatalf("expected invalid mime error, got %v", err)
+		}
+
+		_, err = CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+			Prompt:  "too many images",
+			ModelId: "gpt-chat-test",
+			Attachments: []dto.CanvasChatAttachment{
+				{
+					Kind:     "image",
+					Name:     "one.png",
+					MimeType: "image/png",
+					Data:     "data:image/png;base64,Zm9v",
+				},
+				{
+					Kind:     "image",
+					Name:     "two.png",
+					MimeType: "image/png",
+					Data:     "data:image/png;base64,YmFy",
+				},
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "at most 1 image attachment") {
+			t.Fatalf("expected image limit error, got %v", err)
+		}
+	})
+}
+
 func TestCreateCanvasChatMessagePersistsReasoningContentFromMixedDeltas(t *testing.T) {
 	db := setupCanvasSessionServiceTestDB(t)
 	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
