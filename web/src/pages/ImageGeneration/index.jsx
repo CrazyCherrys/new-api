@@ -1314,17 +1314,15 @@ const ImageGeneration = () => {
     return nextMap;
   }, [chatModels]);
 
-  const getChatModelDisplayText = (item) => {
-    const requestModel = String(item?.request_model || '').trim();
+  function getCanvasModelDisplayName(item) {
     const displayName = String(item?.display_name || '').trim();
-    if (!displayName) {
-      return requestModel;
-    }
-    if (!requestModel || displayName === requestModel) {
+    if (displayName) {
       return displayName;
     }
-    return `${displayName} / ${requestModel}`;
-  };
+    return String(item?.request_model || '').trim();
+  }
+
+  const getChatModelDisplayText = (item) => getCanvasModelDisplayName(item);
 
   const buildUnavailableChatModelOption = (requestModel, reasonText) => ({
     request_model: String(requestModel || '').trim(),
@@ -2594,8 +2592,7 @@ const ImageGeneration = () => {
     }
   }, [videoSelectedModelData]);
 
-  const getModelDisplayName = (model) =>
-    model?.display_name || model?.request_model || '';
+  const getModelDisplayName = (model) => getCanvasModelDisplayName(model);
 
   function normalizeCanvasChatModelRecord(item) {
     const requestModel = String(item?.request_model || '').trim();
@@ -7755,9 +7752,6 @@ const ImageGeneration = () => {
                     <span style={styles.modelMenuTitle}>
                       {getModelDisplayName(model)}
                     </span>
-                    <span style={styles.modelMenuMeta}>
-                      {model.request_model}
-                    </span>
                   </div>
                 </div>
               </Dropdown.Item>
@@ -9968,7 +9962,6 @@ const ImageGeneration = () => {
     const availableChatModelOptions = availableChatModels.map((item) => ({
       value: item.request_model,
       label: getModelDisplayName(item),
-      meta: item.request_model,
       disabled: item.usable === false,
       model: item,
     }));
@@ -10001,9 +9994,8 @@ const ImageGeneration = () => {
             <CanvasModelSeriesIcon series={modelItem?.model_series} />
             <div style={styles.selectModelOptionText}>
               <span style={styles.selectModelOptionTitle}>
-                {label || value}
+                {label || getChatModelDisplayText(modelItem) || value}
               </span>
-              <span style={styles.selectModelOptionMeta}>{value}</span>
               {unavailableReason ? (
                 <span style={styles.selectModelOptionMeta}>
                   {unavailableReason}
@@ -10019,16 +10011,23 @@ const ImageGeneration = () => {
       const modelItem = availableChatModels.find(
         (item) => item?.request_model === optionNode?.value,
       );
+      const unavailableReason =
+        modelItem?.usable === false
+          ? String(modelItem?.unavailable_reason || t('当前不可用'))
+          : '';
       return (
         <div style={styles.selectModelOption}>
           <CanvasModelSeriesIcon series={modelItem?.model_series} />
           <div style={styles.selectModelOptionText}>
             <span style={styles.selectModelOptionTitle}>
-              {optionNode?.label || optionNode?.value || t('请选择模型')}
+              {optionNode?.label ||
+                getChatModelDisplayText(modelItem) ||
+                optionNode?.value ||
+                t('请选择模型')}
             </span>
-            {optionNode?.value ? (
+            {unavailableReason ? (
               <span style={styles.selectModelOptionMeta}>
-                {optionNode.value}
+                {unavailableReason}
               </span>
             ) : null}
           </div>
