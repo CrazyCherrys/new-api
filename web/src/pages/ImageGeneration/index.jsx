@@ -6603,13 +6603,13 @@ const ImageGeneration = () => {
     },
     canvasChatUserBubble: {
       width: 'fit-content',
-      maxWidth: isMobile ? '92%' : '70%',
-      borderRadius: isMobile ? '22px 22px 12px 22px' : '24px 24px 12px 24px',
+      maxWidth: isMobile ? '84%' : '70%',
+      borderRadius: '16px 16px 4px 16px',
       border: '1px solid var(--canvas-user-message-border)',
       background: 'var(--canvas-user-message-bg)',
       color: 'var(--canvas-user-message-text)',
-      padding: isMobile ? '12px 14px' : '14px 16px',
-      boxShadow: '0 10px 24px rgba(109, 93, 246, 0.08)',
+      padding: isMobile ? '12px 14px' : '13px 16px',
+      boxShadow: '0 4px 14px rgba(109, 93, 246, 0.08)',
     },
     canvasChatUserBubbleSelected: {
       boxShadow: 'var(--canvas-selected-shadow)',
@@ -6631,75 +6631,79 @@ const ImageGeneration = () => {
       maxWidth: isMobile ? '100%' : '82%',
       color: 'var(--canvas-text-primary)',
       lineHeight: 1.74,
-      padding: isMobile ? '14px 14px' : '16px 18px',
+      padding: 0,
       display: 'flex',
       flexDirection: 'column',
-      gap: 10,
-      borderRadius: 20,
-      border: '1px solid var(--canvas-assistant-message-border)',
-      background: 'var(--canvas-assistant-message-bg)',
-      boxShadow: 'var(--canvas-assistant-message-shadow)',
+      gap: isMobile ? 8 : 10,
+      borderRadius: 0,
+      border: 'none',
+      background: 'transparent',
+      boxShadow: 'none',
     },
     canvasChatAssistantContentSelected: {
-      background: 'var(--canvas-message-selected-bg)',
-      borderColor: 'var(--canvas-primary-soft-border)',
-      boxShadow: 'var(--canvas-selected-shadow)',
+      background: 'transparent',
+      borderColor: 'transparent',
+      boxShadow: 'none',
     },
     canvasChatReasoningWrap: {
       width: '100%',
-      borderRadius: 14,
-      border: '1px solid var(--canvas-thought-border)',
-      background: 'var(--canvas-thought-bg)',
-      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4,
+      borderRadius: 0,
+      border: 'none',
+      background: 'transparent',
+      overflow: 'visible',
       boxShadow: 'none',
     },
     canvasChatReasoningToggle: {
-      width: '100%',
+      width: 'fit-content',
+      maxWidth: '100%',
       border: 'none',
       background: 'transparent',
-      padding: isMobile ? '10px 12px' : '10px 14px',
-      display: 'flex',
+      padding: 0,
+      display: 'inline-flex',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 10,
+      justifyContent: 'flex-start',
+      gap: 8,
       cursor: 'pointer',
       color: 'var(--canvas-thought-title)',
+      textAlign: 'left',
     },
     canvasChatReasoningToggleLead: {
-      display: 'flex',
+      display: 'inline-flex',
       alignItems: 'center',
-      gap: 10,
+      gap: 8,
       minWidth: 0,
-      flex: 1,
+      flex: '0 1 auto',
     },
     canvasChatReasoningIcon: {
-      width: 20,
-      height: 20,
-      borderRadius: 999,
+      width: 16,
+      height: 16,
+      borderRadius: 0,
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
       color: 'var(--canvas-thought-title)',
-      background: 'rgba(255, 255, 255, 0.76)',
-      border: '1px solid var(--canvas-thought-border)',
+      background: 'transparent',
+      border: 'none',
       flexShrink: 0,
     },
     canvasChatReasoningToggleText: {
       fontSize: 13,
-      fontWeight: 600,
+      fontWeight: 500,
       color: 'inherit',
-      whiteSpace: 'nowrap',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
+      lineHeight: 1.6,
+      whiteSpace: 'normal',
     },
     canvasChatReasoningToggleArrow: {
       color: 'var(--canvas-text-muted)',
       flexShrink: 0,
     },
     canvasChatReasoningPanel: {
-      borderTop: '1px solid var(--canvas-thought-border)',
-      padding: isMobile ? '10px 12px 14px' : '10px 14px 14px',
-      background: 'var(--canvas-thought-bg)',
+      borderTop: 'none',
+      padding: 0,
+      background: 'transparent',
     },
     canvasChatReasoningMarkdown: {
       width: '100%',
@@ -6711,6 +6715,27 @@ const ImageGeneration = () => {
     canvasChatMarkdown: {
       width: '100%',
       color: 'var(--canvas-text-primary)',
+    },
+    canvasChatTextStatus: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 8,
+      width: 'fit-content',
+      maxWidth: '100%',
+      minHeight: 0,
+      padding: 0,
+      border: 'none',
+      background: 'transparent',
+      boxShadow: 'none',
+      color: 'var(--canvas-text-secondary)',
+      fontSize: 13,
+      lineHeight: 1.6,
+    },
+    canvasChatTextStatusNeutral: {
+      color: 'var(--canvas-text-muted)',
+    },
+    canvasChatTextStatusError: {
+      color: 'var(--canvas-status-error-text)',
     },
     canvasChatInlineStatus: {
       display: 'inline-flex',
@@ -9002,7 +9027,7 @@ const ImageGeneration = () => {
                     <div style={styles.canvasChatReasoningPanel}>
                       <MarkdownRenderer
                         content={assistantReasoning}
-                        className='canvas-chat-markdown'
+                        className='canvas-chat-markdown canvas-chat-markdown--reasoning'
                         style={styles.canvasChatReasoningMarkdown}
                       />
                     </div>
@@ -9012,13 +9037,13 @@ const ImageGeneration = () => {
               {displayAssistantText ? (
                 <MarkdownRenderer
                   content={displayAssistantText}
-                  className='canvas-chat-markdown'
+                  className='canvas-chat-markdown canvas-chat-markdown--assistant'
                   style={styles.canvasChatMarkdown}
                 />
               ) : chatStatus === 'generating' && !hasAssistantReasoning ? (
                 <div
-                  style={styles.canvasChatInlineStatus}
-                  className='canvas-chat-inline-status'
+                  style={styles.canvasChatTextStatus}
+                  className='canvas-chat-text-status'
                 >
                   <Spin size='small' />
                   <span>{t('生成中')}</span>
@@ -9026,21 +9051,21 @@ const ImageGeneration = () => {
               ) : chatStatus === 'stopped' ? (
                 <div
                   style={{
-                    ...styles.canvasChatInlineStatus,
-                    ...styles.canvasChatInlineStatusNeutral,
+                    ...styles.canvasChatTextStatus,
+                    ...styles.canvasChatTextStatusNeutral,
                   }}
-                  className='canvas-chat-inline-status canvas-chat-inline-status--neutral'
+                  className='canvas-chat-text-status canvas-chat-text-status--neutral'
                 >
                   <span>{t('已停止')}</span>
                 </div>
               ) : chatStatus === 'failed' ? (
                 <div
                   style={{
-                    ...styles.canvasChatInlineStatus,
-                    ...styles.canvasChatInlineStatusError,
+                    ...styles.canvasChatTextStatus,
+                    ...styles.canvasChatTextStatusError,
                     ...styles.canvasChatErrorText,
                   }}
-                  className='canvas-chat-inline-status canvas-chat-inline-status--error'
+                  className='canvas-chat-text-status canvas-chat-text-status--error'
                 >
                   <span>{message.error_message || t('发送失败')}</span>
                 </div>
@@ -9054,8 +9079,8 @@ const ImageGeneration = () => {
               ) : null}
               {displayAssistantText && chatStatus === 'generating' ? (
                 <div
-                  style={styles.canvasChatInlineStatus}
-                  className='canvas-chat-inline-status'
+                  style={styles.canvasChatTextStatus}
+                  className='canvas-chat-text-status'
                 >
                   <Spin size='small' />
                   <span>{t('生成中')}</span>
@@ -9064,10 +9089,10 @@ const ImageGeneration = () => {
               {displayAssistantText && chatStatus === 'stopped' ? (
                 <div
                   style={{
-                    ...styles.canvasChatInlineStatus,
-                    ...styles.canvasChatInlineStatusNeutral,
+                    ...styles.canvasChatTextStatus,
+                    ...styles.canvasChatTextStatusNeutral,
                   }}
-                  className='canvas-chat-inline-status canvas-chat-inline-status--neutral'
+                  className='canvas-chat-text-status canvas-chat-text-status--neutral'
                 >
                   <span>{t('已停止')}</span>
                 </div>
@@ -9075,13 +9100,13 @@ const ImageGeneration = () => {
               {displayAssistantText && chatStatus === 'failed' ? (
                 <div
                   style={{
-                    ...styles.canvasChatInlineStatus,
-                    ...styles.canvasChatInlineStatusError,
+                    ...styles.canvasChatTextStatus,
+                    ...styles.canvasChatTextStatusError,
                     ...styles.canvasChatErrorText,
                   }}
-                  className='canvas-chat-inline-status canvas-chat-inline-status--error'
+                  className='canvas-chat-text-status canvas-chat-text-status--error'
                 >
-                  <span>{message.error_message}</span>
+                  <span>{message.error_message || t('发送失败')}</span>
                 </div>
               ) : null}
               <div

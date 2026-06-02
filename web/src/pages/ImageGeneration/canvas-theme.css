@@ -354,12 +354,13 @@ body.canvas-theme-route .canvas-composer-pill:hover {
 }
 
 body.canvas-theme-route .canvas-chat-assistant-card:hover {
-  border-color: rgba(199, 210, 254, 0.92) !important;
-  box-shadow: 0 16px 34px rgba(17, 24, 39, 0.08) !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 body.canvas-theme-route .canvas-chat-reasoning-card button:hover {
-  background: rgba(255, 255, 255, 0.72);
+  background: transparent;
 }
 
 body.canvas-theme-route .canvas-chat-inline-status--neutral {
@@ -377,6 +378,24 @@ body.canvas-theme-route .canvas-chat-inline-status--error {
 body.canvas-theme-route .canvas-chat-inline-status--error .semi-spin-wrapper,
 body.canvas-theme-route .canvas-chat-inline-status--neutral .semi-spin-wrapper,
 body.canvas-theme-route .canvas-chat-inline-status .semi-spin-wrapper {
+  color: currentColor;
+}
+
+body.canvas-theme-route .canvas-chat-text-status {
+  color: var(--canvas-text-secondary);
+}
+
+body.canvas-theme-route .canvas-chat-text-status--neutral {
+  color: var(--canvas-text-muted);
+}
+
+body.canvas-theme-route .canvas-chat-text-status--error {
+  color: var(--canvas-status-error-text);
+}
+
+body.canvas-theme-route .canvas-chat-text-status--error .semi-spin-wrapper,
+body.canvas-theme-route .canvas-chat-text-status--neutral .semi-spin-wrapper,
+body.canvas-theme-route .canvas-chat-text-status .semi-spin-wrapper {
   color: currentColor;
 }
 
