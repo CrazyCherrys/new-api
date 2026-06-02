@@ -85,12 +85,12 @@ html.dark body.canvas-theme-route {
   --canvas-status-error-bg: #fef2f2;
   --canvas-status-error-border: #fecaca;
   --canvas-status-error-text: #b91c1c;
-  --canvas-code-bg: #111827;
-  --canvas-code-border: rgba(148, 163, 184, 0.24);
-  --canvas-code-text: #eef2ff;
-  --canvas-inline-code-bg: #f3f4f6;
-  --canvas-inline-code-border: #e5e7eb;
-  --canvas-inline-code-text: #4f46e5;
+  --canvas-code-bg: #f8fafc;
+  --canvas-code-border: rgba(148, 163, 184, 0.18);
+  --canvas-code-text: #0f172a;
+  --canvas-inline-code-bg: rgba(15, 23, 42, 0.04);
+  --canvas-inline-code-border: rgba(148, 163, 184, 0.18);
+  --canvas-inline-code-text: #334155;
   --canvas-media-overlay:
     linear-gradient(
       180deg,

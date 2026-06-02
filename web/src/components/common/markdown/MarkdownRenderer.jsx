@@ -42,6 +42,8 @@ mermaid.initialize({
   securityLevel: 'loose',
 });
 
+const COLLAPSED_CODE_BLOCK_HEIGHT = 280;
+
 export function Mermaid(props) {
   const ref = useRef(null);
   const [hasError, setHasError] = useState(false);
@@ -190,6 +192,7 @@ export function PreCode(props) {
   return (
     <>
       <pre
+        className={clsx(props?.className, 'markdown-code-pre')}
         ref={ref}
         style={{
           position: 'relative',
@@ -282,7 +285,7 @@ export function PreCode(props) {
   );
 }
 
-function CustomCode(props) {
+function LegacyCode(props) {
   const ref = useRef(null);
   const [collapsed, setCollapsed] = useState(true);
   const [showToggle, setShowToggle] = useState(false);
@@ -342,6 +345,55 @@ function CustomCode(props) {
         {props.children}
       </code>
       {renderShowMoreButton()}
+    </div>
+  );
+}
+
+function CanvasCodeBlock(props) {
+  const ref = useRef(null);
+  const [collapsed, setCollapsed] = useState(true);
+  const [showToggle, setShowToggle] = useState(false);
+  const { t } = useTranslation();
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const codeHeight = ref.current.scrollHeight;
+    setShowToggle(codeHeight > COLLAPSED_CODE_BLOCK_HEIGHT);
+    setCollapsed(true);
+  }, [props.children, props.className]);
+
+  return (
+    <div
+      className='markdown-code-block'
+      data-collapsed={collapsed ? 'true' : 'false'}
+      data-toggle-visible={showToggle ? 'true' : 'false'}
+      style={{
+        '--markdown-code-toggle-offset': showToggle ? '38px' : '0px',
+        paddingBottom: showToggle ? '38px' : '0px',
+      }}
+    >
+      <code
+        className={clsx(props?.className, 'markdown-code-block__content')}
+        ref={ref}
+        style={{
+          maxHeight: collapsed ? `${COLLAPSED_CODE_BLOCK_HEIGHT}px` : 'none',
+          overflowY: collapsed ? 'hidden' : 'visible',
+        }}
+      >
+        {props.children}
+      </code>
+      {showToggle && collapsed ? (
+        <div className='markdown-code-block__fade' aria-hidden='true' />
+      ) : null}
+      {showToggle ? (
+        <button
+          type='button'
+          className='markdown-code-toggle'
+          onClick={() => setCollapsed((previous) => !previous)}
+        >
+          {collapsed ? t('显示更多') : t('收起代码')}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -426,7 +478,38 @@ function _MarkdownContent(props) {
       rehypePlugins={rehypePluginsBase}
       components={{
         pre: PreCode,
-        code: CustomCode,
+        code: ({ inline, className: codeClassName, children, ...codeProps }) => {
+          const codeText = String(children ?? '');
+          const isBlockCode =
+            inline === false ||
+            /language-/.test(codeClassName || '') ||
+            codeText.includes('\n');
+
+          if (!isCanvasThemeRoute) {
+            return (
+              <LegacyCode className={codeClassName} {...codeProps}>
+                {children}
+              </LegacyCode>
+            );
+          }
+
+          if (!isBlockCode) {
+            return (
+              <code
+                {...codeProps}
+                className={clsx(codeClassName, 'markdown-inline-code')}
+              >
+                {children}
+              </code>
+            );
+          }
+
+          return (
+            <CanvasCodeBlock className={codeClassName} {...codeProps}>
+              {children}
+            </CanvasCodeBlock>
+          );
+        },
         p: (pProps) => (
           <p
             {...pProps}

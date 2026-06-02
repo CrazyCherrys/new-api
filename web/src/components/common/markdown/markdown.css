@@ -22,12 +22,13 @@
   line-height: 1.78;
 }
 
-.canvas-chat-markdown pre {
+.canvas-chat-markdown .markdown-code-pre {
   margin: 14px 0;
   border-radius: 16px;
 }
 
-.canvas-chat-markdown pre code {
+.canvas-chat-markdown .markdown-code-block__content,
+.canvas-chat-markdown .markdown-code-pre > code {
   line-height: 1.7;
 }
 
@@ -209,7 +210,7 @@ body.canvas-theme-route .user-message th {
   color: var(--canvas-text-primary, var(--semi-color-text-0));
 }
 
-body.canvas-theme-route .hljs {
+body.canvas-theme-route .markdown-code-pre .hljs {
   color: var(--canvas-code-text, #eef2ff);
 }
 
@@ -291,35 +292,59 @@ body.canvas-theme-route .hljs {
   transform: translateY(-1px);
 }
 
-/* 代码块 */
-body.canvas-theme-route pre {
+/* Canvas assistant/reasoning code blocks */
+body.canvas-theme-route .canvas-chat-markdown--assistant .markdown-code-pre,
+body.canvas-theme-route .canvas-chat-markdown--reasoning .markdown-code-pre {
   position: relative;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  background: var(--canvas-code-bg, #111827) !important;
-  color: var(--canvas-code-text, #eef2ff) !important;
-  border: 1px solid var(--canvas-code-border, rgba(148, 163, 184, 0.24))
+  background: var(--canvas-code-bg, #f8fafc) !important;
+  color: var(--canvas-code-text, #0f172a) !important;
+  border: 1px solid
+    var(--canvas-code-border, rgba(148, 163, 184, 0.18))
     !important;
   border-radius: 16px !important;
-  padding: 16px 18px 14px !important;
-  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.16);
+  padding: 14px 16px !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease,
-    transform 0.18s ease;
+    background-color 0.18s ease;
 }
 
-body.canvas-theme-route pre:hover {
-  border-color: var(--canvas-primary, var(--semi-color-primary)) !important;
-  box-shadow: 0 20px 38px rgba(15, 23, 42, 0.18);
+body.canvas-theme-route .canvas-chat-markdown--assistant .markdown-code-pre:hover,
+body.canvas-theme-route .canvas-chat-markdown--reasoning .markdown-code-pre:hover {
+  border-color: rgba(148, 163, 184, 0.26) !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
 }
 
-body.canvas-theme-route pre:hover .copy-code-button,
-body.canvas-theme-route pre:focus-within .copy-code-button {
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-pre:hover
+  .copy-code-button,
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-pre:focus-within
+  .copy-code-button,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-pre:hover
+  .copy-code-button,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-pre:focus-within
+  .copy-code-button {
   opacity: 1 !important;
   transform: translateY(0);
 }
 
-body.canvas-theme-route .copy-code-button {
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-pre
+  .copy-code-button,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-pre
+  .copy-code-button {
   opacity: 0;
   transform: translateY(-2px);
   transition: opacity 0.18s ease, transform 0.18s ease;
@@ -327,34 +352,134 @@ body.canvas-theme-route .copy-code-button {
   pointer-events: auto;
 }
 
-body.canvas-theme-route .copy-code-button:hover {
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-pre
+  .copy-code-button:hover,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-pre
+  .copy-code-button:hover {
   opacity: 1 !important;
 }
 
-body.canvas-theme-route .copy-code-button button {
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-pre
+  .copy-code-button
+  button,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-pre
+  .copy-code-button
+  button {
   pointer-events: auto !important;
   cursor: pointer !important;
 }
 
-body.canvas-theme-route .copy-code-button .semi-button {
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-pre
+  .copy-code-button
+  .semi-button,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-pre
+  .copy-code-button
+  .semi-button {
   pointer-events: auto !important;
   cursor: pointer !important;
-  background: rgba(255, 255, 255, 0.08) !important;
-  border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  color: #f8fafc !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  color: var(--canvas-text-secondary, var(--semi-color-text-1)) !important;
   box-shadow: none !important;
   transition:
     background 0.18s ease,
     border-color 0.18s ease,
-    color 0.18s ease,
-    transform 0.18s ease;
+    color 0.18s ease;
 }
 
-body.canvas-theme-route .copy-code-button .semi-button:hover {
-  background-color: rgba(255, 255, 255, 0.16) !important;
-  border-color: rgba(199, 210, 254, 0.76) !important;
-  color: #ffffff !important;
-  transform: translateY(-1px);
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-pre
+  .copy-code-button
+  .semi-button:hover,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-pre
+  .copy-code-button
+  .semi-button:hover {
+  background-color: #ffffff !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  color: var(--canvas-text-primary, var(--semi-color-text-0)) !important;
+}
+
+body.canvas-theme-route .canvas-chat-markdown--assistant .markdown-code-block,
+body.canvas-theme-route .canvas-chat-markdown--reasoning .markdown-code-block {
+  position: relative;
+}
+
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-block__content,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-block__content {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent !important;
+  border-radius: 0;
+  color: var(--canvas-code-text, #0f172a) !important;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+body.canvas-theme-route .canvas-chat-markdown--assistant .markdown-code-block__fade,
+body.canvas-theme-route .canvas-chat-markdown--reasoning .markdown-code-block__fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--markdown-code-toggle-offset, 0px);
+  height: 52px;
+  border-radius: 0 0 14px 14px;
+  background: linear-gradient(
+    180deg,
+    rgba(248, 250, 252, 0) 0%,
+    rgba(248, 250, 252, 0.76) 55%,
+    rgba(248, 250, 252, 0.98) 100%
+  );
+  pointer-events: none;
+}
+
+body.canvas-theme-route .canvas-chat-markdown--assistant .markdown-code-toggle,
+body.canvas-theme-route .canvas-chat-markdown--reasoning .markdown-code-toggle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--canvas-text-secondary, var(--semi-color-text-1));
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.18s ease, opacity 0.18s ease;
+}
+
+body.canvas-theme-route .canvas-chat-markdown--assistant .markdown-code-toggle:hover,
+body.canvas-theme-route .canvas-chat-markdown--assistant .markdown-code-toggle:focus-visible,
+body.canvas-theme-route .canvas-chat-markdown--reasoning .markdown-code-toggle:hover,
+body.canvas-theme-route .canvas-chat-markdown--reasoning .markdown-code-toggle:focus-visible {
+  color: var(--canvas-text-primary, var(--semi-color-text-0));
+  opacity: 1;
+  outline: none;
 }
 
 /* 表格响应式 */
@@ -426,15 +551,17 @@ body.canvas-theme-route .copy-code-button .semi-button:hover {
   margin: 12px 0;
 }
 
-body.canvas-theme-route .markdown-body code:not(pre code) {
-  background-color: var(--canvas-hover-bg, var(--semi-color-fill-1));
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 0.88em;
-  color: var(--canvas-inline-code-text, var(--semi-color-primary));
-  background: var(--canvas-inline-code-bg, var(--semi-color-fill-0));
+body.canvas-theme-route .canvas-chat-markdown--assistant .markdown-inline-code,
+body.canvas-theme-route .canvas-chat-markdown--reasoning .markdown-inline-code {
+  display: inline;
+  padding: 0.12em 0.4em;
+  border-radius: 6px;
+  font-size: 0.9em;
+  font-weight: 500;
+  color: var(--canvas-inline-code-text, #334155);
+  background: var(--canvas-inline-code-bg, rgba(15, 23, 42, 0.04));
   border: 1px solid
-    var(--canvas-inline-code-border, var(--semi-color-border));
+    var(--canvas-inline-code-border, rgba(148, 163, 184, 0.18));
 }
 
 .markdown-body h1:hover,
