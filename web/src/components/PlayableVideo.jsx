@@ -30,7 +30,12 @@ const PlayableVideo = ({
   onError,
   statusStyle,
   statusTextStyle,
-  emptyIcon = <IconVideo size='extra-large' style={{ color: 'var(--semi-color-text-3)' }} />,
+  emptyIcon = (
+    <IconVideo
+      size='extra-large'
+      style={{ color: 'var(--canvas-text-muted, var(--semi-color-text-3))' }}
+    />
+  ),
   videoProps = {},
 }) => {
   const { t } = useTranslation();

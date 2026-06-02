@@ -134,7 +134,38 @@ export default {
       'semi-color-data-19': 'var(--semi-color-data-19)',
     },
     extend: {
+      colors: {
+        canvas: {
+          page: 'var(--canvas-page-bg)',
+          sidebar: 'var(--canvas-sidebar-bg)',
+          card: 'var(--canvas-card-bg)',
+          toolbar: 'var(--canvas-toolbar-bg)',
+          hover: 'var(--canvas-hover-bg)',
+          border: 'var(--canvas-border)',
+          primary: 'var(--canvas-primary)',
+          'primary-hover': 'var(--canvas-primary-hover)',
+          success: 'var(--canvas-success)',
+          warning: 'var(--canvas-warning)',
+          error: 'var(--canvas-error)',
+          text: {
+            primary: 'var(--canvas-text-primary)',
+            secondary: 'var(--canvas-text-secondary)',
+            muted: 'var(--canvas-text-muted)',
+          },
+        },
+      },
+      boxShadow: {
+        'canvas-sm': 'var(--canvas-shadow-sm)',
+        'canvas-md': 'var(--canvas-shadow-md)',
+        'canvas-lg': 'var(--canvas-shadow-lg)',
+        'canvas-overlay': 'var(--canvas-shadow-overlay)',
+        'canvas-input': 'var(--canvas-input-shadow)',
+      },
       borderRadius: {
+        'canvas-card': 'var(--canvas-radius-card)',
+        'canvas-overlay': 'var(--canvas-radius-overlay)',
+        'canvas-pill': 'var(--canvas-radius-pill)',
+        'canvas-input': 'var(--canvas-input-radius)',
         'semi-border-radius-extra-small':
           'var(--semi-border-radius-extra-small)',
         'semi-border-radius-small': 'var(--semi-border-radius-small)',
