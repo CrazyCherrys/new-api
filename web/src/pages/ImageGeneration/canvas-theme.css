@@ -88,6 +88,10 @@ html.dark body.canvas-theme-route {
   --canvas-code-bg: #f8fafc;
   --canvas-code-border: rgba(148, 163, 184, 0.18);
   --canvas-code-text: #0f172a;
+  --canvas-action-muted-opacity: 0.58;
+  --canvas-action-icon-size: 14px;
+  --canvas-action-hover-bg: rgba(109, 93, 246, 0.1);
+  --canvas-action-hover-border: rgba(109, 93, 246, 0.18);
   --canvas-inline-code-bg: rgba(15, 23, 42, 0.04);
   --canvas-inline-code-border: rgba(148, 163, 184, 0.18);
   --canvas-inline-code-text: #334155;
@@ -359,6 +363,19 @@ body.canvas-theme-route .canvas-chat-assistant-card:hover {
   box-shadow: none !important;
 }
 
+body.canvas-theme-route .canvas-chat-actions {
+  opacity: var(--canvas-action-muted-opacity);
+}
+
+body.canvas-theme-route
+  .canvas-chat-message-row--assistant:hover
+  .canvas-chat-actions,
+body.canvas-theme-route
+  .canvas-chat-message-row--assistant:focus-within
+  .canvas-chat-actions {
+  opacity: 1;
+}
+
 body.canvas-theme-route .canvas-chat-reasoning-card button:hover {
   background: transparent;
 }
@@ -400,14 +417,41 @@ body.canvas-theme-route .canvas-chat-text-status .semi-spin-wrapper {
 }
 
 body.canvas-theme-route .canvas-chat-action-button:hover:not(:disabled) {
-  background: var(--canvas-primary-soft-bg) !important;
-  border-color: var(--canvas-primary-soft-border) !important;
+  background: var(--canvas-action-hover-bg) !important;
+  border-color: var(--canvas-action-hover-border) !important;
   color: var(--canvas-primary) !important;
-  box-shadow: var(--canvas-shadow-sm) !important;
+  box-shadow: none !important;
 }
 
 body.canvas-theme-route .canvas-chat-action-button:disabled {
   box-shadow: none;
+}
+
+body.canvas-theme-route .canvas-chat-action-button:focus-visible {
+  outline: none;
+  background: var(--canvas-action-hover-bg) !important;
+  border-color: var(--canvas-action-hover-border) !important;
+  color: var(--canvas-primary) !important;
+  box-shadow: 0 0 0 3px rgba(109, 93, 246, 0.12) !important;
+}
+
+body.canvas-theme-route .canvas-chat-action-button:active:not(:disabled) {
+  background: rgba(109, 93, 246, 0.14) !important;
+  border-color: rgba(109, 93, 246, 0.22) !important;
+  color: var(--canvas-primary-hover) !important;
+  transform: translateY(0);
+}
+
+body.canvas-theme-route .canvas-chat-action-button .semi-icon,
+body.canvas-theme-route .canvas-chat-action-button svg {
+  width: var(--canvas-action-icon-size);
+  height: var(--canvas-action-icon-size);
+}
+
+@media (max-width: 767px) {
+  body.canvas-theme-route .canvas-chat-actions {
+    opacity: 0.72;
+  }
 }
 
 body.canvas-theme-route .semi-modal-content,

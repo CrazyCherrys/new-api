@@ -366,13 +366,11 @@ body.canvas-theme-route
 body.canvas-theme-route
   .canvas-chat-markdown--assistant
   .markdown-code-pre
-  .copy-code-button
-  button,
+  .markdown-copy-button,
 body.canvas-theme-route
   .canvas-chat-markdown--reasoning
   .markdown-code-pre
-  .copy-code-button
-  button {
+  .markdown-copy-button {
   pointer-events: auto !important;
   cursor: pointer !important;
 }
@@ -380,38 +378,95 @@ body.canvas-theme-route
 body.canvas-theme-route
   .canvas-chat-markdown--assistant
   .markdown-code-pre
-  .copy-code-button
-  .semi-button,
+  .markdown-copy-button,
 body.canvas-theme-route
   .canvas-chat-markdown--reasoning
   .markdown-code-pre
-  .copy-code-button
-  .semi-button {
+  .markdown-copy-button {
   pointer-events: auto !important;
   cursor: pointer !important;
-  background: rgba(255, 255, 255, 0.88) !important;
-  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px;
   color: var(--canvas-text-secondary, var(--semi-color-text-1)) !important;
   box-shadow: none !important;
+  outline: none;
   transition:
     background 0.18s ease,
     border-color 0.18s ease,
-    color 0.18s ease;
+    color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 body.canvas-theme-route
   .canvas-chat-markdown--assistant
   .markdown-code-pre
-  .copy-code-button
-  .semi-button:hover,
+  .markdown-copy-button:hover,
 body.canvas-theme-route
   .canvas-chat-markdown--reasoning
   .markdown-code-pre
-  .copy-code-button
-  .semi-button:hover {
-  background-color: #ffffff !important;
-  border-color: rgba(148, 163, 184, 0.28) !important;
-  color: var(--canvas-text-primary, var(--semi-color-text-0)) !important;
+  .markdown-copy-button:hover {
+  background: rgba(109, 93, 246, 0.1) !important;
+  border-color: rgba(109, 93, 246, 0.18) !important;
+  color: var(--canvas-primary, var(--semi-color-primary)) !important;
+}
+
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-pre
+  .markdown-copy-button:focus-visible,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-pre
+  .markdown-copy-button:focus-visible {
+  background: rgba(109, 93, 246, 0.1) !important;
+  border-color: rgba(109, 93, 246, 0.18) !important;
+  color: var(--canvas-primary, var(--semi-color-primary)) !important;
+  box-shadow: 0 0 0 3px rgba(109, 93, 246, 0.12) !important;
+}
+
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-pre
+  .markdown-copy-button:active,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-pre
+  .markdown-copy-button:active {
+  background: rgba(109, 93, 246, 0.14) !important;
+  border-color: rgba(109, 93, 246, 0.22) !important;
+  color: var(--canvas-primary-hover, var(--semi-color-primary-hover)) !important;
+}
+
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-pre
+  .markdown-copy-button
+  .semi-icon,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-pre
+  .markdown-copy-button
+  .semi-icon,
+body.canvas-theme-route
+  .canvas-chat-markdown--assistant
+  .markdown-code-pre
+  .markdown-copy-button
+  svg,
+body.canvas-theme-route
+  .canvas-chat-markdown--reasoning
+  .markdown-code-pre
+  .markdown-copy-button
+  svg {
+  width: 14px;
+  height: 14px;
 }
 
 body.canvas-theme-route .canvas-chat-markdown--assistant .markdown-code-block,

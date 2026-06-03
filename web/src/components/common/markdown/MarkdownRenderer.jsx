@@ -143,7 +143,12 @@ export function PreCode(props) {
   const ref = useRef(null);
   const [mermaidCode, setMermaidCode] = useState('');
   const [htmlCode, setHtmlCode] = useState('');
+  const [codeCopied, setCodeCopied] = useState(false);
   const { t } = useTranslation();
+  const copiedTimerRef = useRef(null);
+  const isCanvasThemeRoute =
+    typeof document !== 'undefined' &&
+    document.body?.classList.contains('canvas-theme-route');
 
   const renderArtifacts = useDebouncedCallback(() => {
     if (!ref.current) return;
@@ -189,6 +194,43 @@ export function PreCode(props) {
     }
   }, []);
 
+  useEffect(
+    () => () => {
+      if (copiedTimerRef.current) {
+        window.clearTimeout(copiedTimerRef.current);
+        copiedTimerRef.current = null;
+      }
+    },
+    [],
+  );
+
+  const handleCopyCode = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!ref.current) {
+      return;
+    }
+    const codeElement = ref.current.querySelector('code');
+    const code = codeElement?.textContent ?? '';
+    copy(code).then((success) => {
+      if (success) {
+        if (isCanvasThemeRoute) {
+          if (copiedTimerRef.current) {
+            window.clearTimeout(copiedTimerRef.current);
+          }
+          setCodeCopied(true);
+          copiedTimerRef.current = window.setTimeout(() => {
+            setCodeCopied(false);
+            copiedTimerRef.current = null;
+          }, 1200);
+        }
+        Toast.success(t('代码已复制到剪贴板'));
+      } else {
+        Toast.error(t('复制失败，请手动复制'));
+      }
+    });
+  };
+
   return (
     <>
       <pre
@@ -220,37 +262,40 @@ export function PreCode(props) {
             transition: 'opacity 0.2s ease',
           }}
         >
-          <Tooltip content={t('复制代码')}>
-            <Button
-              size='small'
-              theme='borderless'
-              icon={<IconCopy />}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (ref.current) {
-                  const codeElement = ref.current.querySelector('code');
-                  const code = codeElement?.textContent ?? '';
-                  copy(code).then((success) => {
-                    if (success) {
-                      Toast.success(t('代码已复制到剪贴板'));
-                    } else {
-                      Toast.error(t('复制失败，请手动复制'));
-                    }
-                  });
-                }
-              }}
-              style={{
-                padding: '4px',
-                backgroundColor:
-                  'var(--canvas-card-bg, var(--semi-color-bg-2))',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                border:
-                  '1px solid var(--canvas-border, var(--semi-color-border))',
-                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
-              }}
-            />
+          <Tooltip
+            content={codeCopied && isCanvasThemeRoute ? t('已复制') : t('复制代码')}
+            position='top'
+            trigger={codeCopied && isCanvasThemeRoute ? 'custom' : 'hover'}
+            visible={codeCopied && isCanvasThemeRoute ? true : undefined}
+          >
+            {isCanvasThemeRoute ? (
+              <button
+                type='button'
+                className='markdown-copy-button'
+                aria-label={t('复制代码')}
+                onClick={handleCopyCode}
+              >
+                <IconCopy size='small' />
+              </button>
+            ) : (
+              <Button
+                size='small'
+                theme='borderless'
+                icon={<IconCopy />}
+                aria-label={t('复制代码')}
+                onClick={handleCopyCode}
+                style={{
+                  padding: '4px',
+                  backgroundColor:
+                    'var(--canvas-card-bg, var(--semi-color-bg-2))',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  border:
+                    '1px solid var(--canvas-border, var(--semi-color-border))',
+                  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+                }}
+              />
+            )}
           </Tooltip>
         </div>
         {props.children}

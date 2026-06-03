@@ -740,6 +740,10 @@ const ImageGeneration = () => {
   const [hoveredCanvasSessionId, setHoveredCanvasSessionId] = useState(null);
   const [hoveredCanvasChatMessageId, setHoveredCanvasChatMessageId] =
     useState(null);
+  const [activeCanvasChatActionTooltipKey, setActiveCanvasChatActionTooltipKey] =
+    useState('');
+  const [canvasChatCopiedMessageId, setCanvasChatCopiedMessageId] =
+    useState(null);
   const [
     canvasChatReasoningUiStateByMessageId,
     setCanvasChatReasoningUiStateByMessageId,
@@ -874,6 +878,7 @@ const ImageGeneration = () => {
   const chatStreamAbortRef = useRef(null);
   const chatStreamingMessageIdRef = useRef(null);
   const chatStreamingSessionIdRef = useRef(null);
+  const canvasChatCopiedMessageTimerRef = useRef(null);
   const canvasChatReasoningAutoCollapseTimersRef = useRef(new Map());
   const generationModeRef = useRef(generationMode);
   const selectedCanvasSessionIdsRef = useRef(selectedCanvasSessionIds);
@@ -1074,6 +1079,10 @@ const ImageGeneration = () => {
 
   useEffect(
     () => () => {
+      if (canvasChatCopiedMessageTimerRef.current) {
+        window.clearTimeout(canvasChatCopiedMessageTimerRef.current);
+        canvasChatCopiedMessageTimerRef.current = null;
+      }
       canvasChatReasoningAutoCollapseTimersRef.current.forEach((timerId) => {
         window.clearTimeout(timerId);
       });
@@ -1103,6 +1112,12 @@ const ImageGeneration = () => {
     setSelectedCanvasMessageId(null);
     setHoveredCanvasChatMessageId(null);
     setHoveredCanvasSessionId(null);
+    setActiveCanvasChatActionTooltipKey('');
+    setCanvasChatCopiedMessageId(null);
+    if (canvasChatCopiedMessageTimerRef.current) {
+      window.clearTimeout(canvasChatCopiedMessageTimerRef.current);
+      canvasChatCopiedMessageTimerRef.current = null;
+    }
     canvasChatReasoningAutoCollapseTimersRef.current.forEach((timerId) => {
       window.clearTimeout(timerId);
     });
@@ -6773,10 +6788,10 @@ const ImageGeneration = () => {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
-      opacity: isMobile ? 1 : 0,
-      transform: isMobile ? 'translateY(0)' : 'translateY(-2px)',
+      opacity: isMobile ? 0.72 : 0.58,
+      transform: 'translateY(0)',
       transition: 'opacity 0.16s ease, transform 0.16s ease',
-      pointerEvents: isMobile ? 'auto' : 'none',
+      pointerEvents: 'auto',
     },
     canvasChatActionsVisible: {
       opacity: 1,
@@ -6784,20 +6799,22 @@ const ImageGeneration = () => {
       pointerEvents: 'auto',
     },
     canvasChatActionButton: {
-      '--canvas-action-button-bg': 'var(--canvas-card-bg)',
-      '--canvas-action-button-border': 'var(--canvas-border)',
+      '--canvas-action-button-bg': 'transparent',
+      '--canvas-action-button-border': 'transparent',
       '--canvas-action-button-text': 'var(--canvas-text-secondary)',
       '--canvas-action-button-shadow': 'none',
+      width: 28,
+      minWidth: 28,
+      height: 28,
       minHeight: 28,
-      borderRadius: 999,
+      borderRadius: 10,
       border: '1px solid var(--canvas-action-button-border)',
       background: 'var(--canvas-action-button-bg)',
       color: 'var(--canvas-action-button-text)',
-      padding: '0 10px',
+      padding: 0,
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 6,
       cursor: 'pointer',
       boxShadow: 'var(--canvas-action-button-shadow)',
       transition:
@@ -8454,6 +8471,18 @@ const ImageGeneration = () => {
     return canvasChatRetryPromptByMessageId[String(message?.id || '')] || '';
   };
 
+  const getCanvasChatCopyTooltipText = (message) =>
+    canvasChatCopiedMessageId === message?.id ? t('已复制') : t('复制');
+
+  const resetCanvasChatCopiedTooltip = () => {
+    if (canvasChatCopiedMessageTimerRef.current) {
+      window.clearTimeout(canvasChatCopiedMessageTimerRef.current);
+      canvasChatCopiedMessageTimerRef.current = null;
+    }
+    setActiveCanvasChatActionTooltipKey('');
+    setCanvasChatCopiedMessageId(null);
+  };
+
   const handleCopyCanvasChatMessage = async (event, message) => {
     event?.stopPropagation?.();
     const text = getCanvasChatMessageText(message);
@@ -8462,6 +8491,18 @@ const ImageGeneration = () => {
     }
     const ok = await copy(text);
     if (ok) {
+      resetCanvasChatCopiedTooltip();
+      setCanvasChatCopiedMessageId(message?.id ?? null);
+      setActiveCanvasChatActionTooltipKey(`copy-${message?.id ?? ''}`);
+      canvasChatCopiedMessageTimerRef.current = window.setTimeout(() => {
+        setCanvasChatCopiedMessageId((current) =>
+          current === (message?.id ?? null) ? null : current,
+        );
+        setActiveCanvasChatActionTooltipKey((current) =>
+          current === `copy-${message?.id ?? ''}` ? '' : current,
+        );
+        canvasChatCopiedMessageTimerRef.current = null;
+      }, 1200);
       showSuccess(t('已复制到剪贴板'));
     } else {
       showError(t('复制失败'));
@@ -8925,7 +8966,7 @@ const ImageGeneration = () => {
       const retryPrompt = isUser ? '' : getCanvasChatRetryPrompt(message);
       const actionVisible =
         !isUser &&
-        (isMobile || hoveredCanvasChatMessageId === message.id || isSelected);
+        (hoveredCanvasChatMessageId === message.id || isSelected);
       return (
         <div
           key={message.id}
@@ -9114,40 +9155,92 @@ const ImageGeneration = () => {
                   ...styles.canvasChatActions,
                   ...(actionVisible ? styles.canvasChatActionsVisible : null),
                 }}
+                className='canvas-chat-actions'
               >
                 {displayAssistantText ? (
-                  <button
-                    type='button'
-                    aria-label={t('复制')}
-                    className='canvas-chat-action-button'
-                    style={styles.canvasChatActionButton}
-                    onClick={(event) =>
-                      handleCopyCanvasChatMessage(event, message)
+                  <Tooltip
+                    content={getCanvasChatCopyTooltipText(message)}
+                    position='top'
+                    trigger='custom'
+                    visible={
+                      activeCanvasChatActionTooltipKey === `copy-${message.id}` ||
+                      canvasChatCopiedMessageId === message.id
                     }
                   >
-                    <IconCopy size='small' />
-                    <span>{t('复制')}</span>
-                  </button>
+                    <button
+                      type='button'
+                      aria-label={t('复制')}
+                      className='canvas-chat-action-button'
+                      style={styles.canvasChatActionButton}
+                      onMouseEnter={() =>
+                        setActiveCanvasChatActionTooltipKey(`copy-${message.id}`)
+                      }
+                      onFocus={() =>
+                        setActiveCanvasChatActionTooltipKey(`copy-${message.id}`)
+                      }
+                      onMouseLeave={() => {
+                        setActiveCanvasChatActionTooltipKey((current) =>
+                          current === `copy-${message.id}` ? '' : current,
+                        );
+                      }}
+                      onBlur={() => {
+                        setActiveCanvasChatActionTooltipKey((current) =>
+                          current === `copy-${message.id}` ? '' : current,
+                        );
+                      }}
+                      onClick={(event) =>
+                        handleCopyCanvasChatMessage(event, message)
+                      }
+                    >
+                      <IconCopy size='small' />
+                    </button>
+                  </Tooltip>
                 ) : null}
                 {retryPrompt ? (
-                  <button
-                    type='button'
-                    aria-label={t('重发')}
-                    className='canvas-chat-action-button'
-                    style={{
-                      ...styles.canvasChatActionButton,
-                      ...(chatStreaming
-                        ? styles.canvasChatActionButtonDisabled
-                        : null),
-                    }}
-                    onClick={(event) =>
-                      handleRetryCanvasChatMessage(event, message)
+                  <Tooltip
+                    content={t('重发')}
+                    position='top'
+                    trigger='custom'
+                    visible={
+                      activeCanvasChatActionTooltipKey === `retry-${message.id}`
                     }
-                    disabled={chatStreaming}
                   >
-                    <IconRefresh size='small' />
-                    <span>{t('重发')}</span>
-                  </button>
+                    <button
+                      type='button'
+                      aria-label={t('重发')}
+                      className='canvas-chat-action-button'
+                      style={{
+                        ...styles.canvasChatActionButton,
+                        ...(chatStreaming
+                          ? styles.canvasChatActionButtonDisabled
+                          : null),
+                      }}
+                      onMouseEnter={() => {
+                        resetCanvasChatCopiedTooltip();
+                        setActiveCanvasChatActionTooltipKey(`retry-${message.id}`);
+                      }}
+                      onFocus={() => {
+                        resetCanvasChatCopiedTooltip();
+                        setActiveCanvasChatActionTooltipKey(`retry-${message.id}`);
+                      }}
+                      onMouseLeave={() => {
+                        setActiveCanvasChatActionTooltipKey((current) =>
+                          current === `retry-${message.id}` ? '' : current,
+                        );
+                      }}
+                      onBlur={() => {
+                        setActiveCanvasChatActionTooltipKey((current) =>
+                          current === `retry-${message.id}` ? '' : current,
+                        );
+                      }}
+                      onClick={(event) =>
+                        handleRetryCanvasChatMessage(event, message)
+                      }
+                      disabled={chatStreaming}
+                    >
+                      <IconRefresh size='small' />
+                    </button>
+                  </Tooltip>
                 ) : null}
               </div>
             </div>
