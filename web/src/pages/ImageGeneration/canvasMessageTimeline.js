@@ -8,6 +8,10 @@ const normalizeCanvasMessageId = (value) => {
 };
 
 const normalizeCanvasMessageRequestId = (value) => String(value || '').trim();
+const normalizeCanvasMessageRole = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase();
 
 const inferCanvasMessageTaskType = (message) =>
   message?.task_type ||
@@ -223,6 +227,28 @@ export const upsertCanvasMessages = (
       index = nextItems.findIndex(
         (item) => normalizeCanvasMessageId(item?.id) === messageId,
       );
+    }
+
+    if (index < 0) {
+      const requestId = normalizeCanvasMessageRequestId(
+        message?.client_request_id,
+      );
+      const role = normalizeCanvasMessageRole(message?.role);
+      if (requestId && role) {
+        const requestMatchIndices = nextItems.reduce((result, item, itemIndex) => {
+          if (
+            normalizeCanvasMessageRequestId(item?.client_request_id) ===
+              requestId &&
+            normalizeCanvasMessageRole(item?.role) === role
+          ) {
+            result.push(itemIndex);
+          }
+          return result;
+        }, []);
+        if (requestMatchIndices.length === 1) {
+          index = requestMatchIndices[0];
+        }
+      }
     }
 
     if (index < 0) {
@@ -566,15 +592,35 @@ export const mergeCanvasLatestTimelinePage = (
     ? latestPageMessages
     : [];
   const existingItems = Array.isArray(existingMessages) ? existingMessages : [];
+  const latestRequestIds = new Set(
+    latestItems
+      .map((message) =>
+        normalizeCanvasMessageRequestId(message?.client_request_id),
+      )
+      .filter(Boolean),
+  );
+  const reconciledExistingItems =
+    latestRequestIds.size === 0
+      ? existingItems
+      : existingItems.filter(
+          (message) =>
+            !latestRequestIds.has(
+              normalizeCanvasMessageRequestId(message?.client_request_id),
+            ),
+        );
   const latestIds = new Set(
-    latestItems.map((message) => message?.id).filter(Boolean),
+    latestItems
+      .map((message) => normalizeCanvasMessageId(message?.id))
+      .filter(Boolean),
   );
   const hasOlderLoadedHistory =
-    existingItems.length > latestItems.length &&
-    existingItems.some((message) => message?.id && !latestIds.has(message.id));
+    reconciledExistingItems.some((message) => {
+      const messageId = normalizeCanvasMessageId(message?.id);
+      return messageId && !latestIds.has(messageId);
+    });
   return {
     messages: hasOlderLoadedHistory
-      ? mergeCanvasMessagesById(existingItems, latestItems)
+      ? mergeCanvasMessagesById(reconciledExistingItems, latestItems)
       : latestItems.slice().sort(sortCanvasMessagesByCreated),
     hasOlderLoadedHistory,
   };

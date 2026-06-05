@@ -147,6 +147,7 @@ const DEFAULT_CHAT_CONTEXT_COUNT = '8';
 const DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES = '8';
 const DEFAULT_CHAT_SUMMARY_RECENT_MESSAGES = '8';
 const CHAT_SUMMARY_STRATEGY_OPTIONS = ['0', '4', '8', '12', '16', '24', '32'];
+const CANVAS_AUTO_FOLLOW_BOTTOM_THRESHOLD = 96;
 const CANVAS_CHAT_SUPPORTED_FILE_MIME_TYPES = new Set([
   'application/pdf',
   'text/plain',
@@ -731,6 +732,7 @@ const ImageGeneration = () => {
   const [deletingCanvasSession, setDeletingCanvasSession] = useState(false);
   const [canvasMessagesSessionId, setCanvasMessagesSessionId] = useState(null);
   const [canvasMessages, setCanvasMessages] = useState([]);
+  const [canvasAutoFollowEnabled, setCanvasAutoFollowEnabled] = useState(true);
   const [canvasMessagesLoading, setCanvasMessagesLoading] = useState(false);
   const [canvasMessagesLoadingMore, setCanvasMessagesLoadingMore] =
     useState(false);
@@ -846,6 +848,7 @@ const ImageGeneration = () => {
   const [deletingVideoTasks, setDeletingVideoTasks] = useState(false);
   const [selectedCanvasMessageId, setSelectedCanvasMessageId] = useState(null);
   const canvasMessageViewportRef = useRef(null);
+  const canvasAutoFollowEnabledRef = useRef(true);
   const canvasMessagesRef = useRef([]);
   const canvasMessageDetailCacheRef = useRef(new Map());
   const canvasMessageDetailRequestSeqRef = useRef(new Map());
@@ -982,6 +985,29 @@ const ImageGeneration = () => {
   const isCurrentCanvasMessageSession = (sessionId) =>
     String(canvasMessagesSessionIdRef.current || '') ===
     String(sessionId || '');
+  const setCanvasAutoFollowEnabledState = (nextValue) => {
+    canvasAutoFollowEnabledRef.current = nextValue;
+    setCanvasAutoFollowEnabled((current) =>
+      current === nextValue ? current : nextValue,
+    );
+  };
+  const isCanvasViewportNearBottom = (container) => {
+    if (!container) {
+      return true;
+    }
+    const remainingDistance = Math.max(
+      0,
+      container.scrollHeight - container.scrollTop - container.clientHeight,
+    );
+    return remainingDistance <= CANVAS_AUTO_FOLLOW_BOTTOM_THRESHOLD;
+  };
+  const syncCanvasAutoFollowState = (container) => {
+    const nextValue = isCanvasViewportNearBottom(container);
+    if (canvasAutoFollowEnabledRef.current !== nextValue) {
+      setCanvasAutoFollowEnabledState(nextValue);
+    }
+    return nextValue;
+  };
   const updateCurrentCanvasSessionModel = async (mode, modelId) => {
     const normalizedMode = CANVAS_MODES.includes(mode) ? mode : generationMode;
     const sessionId = selectedCanvasSessionIds[normalizedMode];
@@ -1064,12 +1090,17 @@ const ImageGeneration = () => {
   ]);
 
   useEffect(() => {
+    setCanvasAutoFollowEnabledState(true);
+  }, [generationMode, selectedCanvasSessionId]);
+
+  useEffect(() => {
     const container = canvasMessageViewportRef.current;
-    if (!container) {
+    if (!container || !canvasAutoFollowEnabledRef.current) {
       return;
     }
     container.scrollTop = container.scrollHeight;
   }, [
+    canvasAutoFollowEnabled,
     canvasMessagesSessionId,
     displayedCanvasMessages.length,
     chatStreamRenderVersion,
@@ -2266,6 +2297,41 @@ const ImageGeneration = () => {
       removeCanvasMessagesByRequestId(prev, requestId),
     );
   };
+
+  const buildCanvasChatOptimisticMetadata = (attachments) => {
+    if (!Array.isArray(attachments) || attachments.length === 0) {
+      return '';
+    }
+    return JSON.stringify({
+      attachments,
+    });
+  };
+
+  const buildOptimisticCanvasChatMessages = ({
+    prompt,
+    attachments,
+    requestId,
+    submittedAt,
+  }) => [
+    {
+      id: `${requestId}-user`,
+      role: 'user',
+      prompt,
+      created_time: submittedAt,
+      client_request_id: requestId,
+      metadata: buildCanvasChatOptimisticMetadata(attachments),
+    },
+    {
+      id: `${requestId}-assistant`,
+      role: 'assistant',
+      prompt: '',
+      status: 'generating',
+      created_time: submittedAt,
+      client_request_id: requestId,
+      reasoning_content: '',
+      error_message: '',
+    },
+  ];
 
   const updateCanvasSessionInState = (session) => {
     upsertCanvasSessionInCollections(session);
@@ -5326,11 +5392,34 @@ const ImageGeneration = () => {
 
     const temperatureValue = Number(chatTemperature);
     const contextCountValue = Number(chatContext);
+    const previousChatPrompt = promptOverride ? '' : chatPrompt;
+    const previousChatImageAttachment = promptOverride
+      ? null
+      : chatImageAttachment;
+    const previousChatFileAttachment = promptOverride ? null : chatFileAttachment;
     let activeSessionId = null;
+    let clientRequestId = '';
+    let hasServerSnapshot = false;
 
     try {
       const canvasSession = await ensureCanvasSession(CANVAS_MODE_CHAT);
       activeSessionId = canvasSession.id;
+      clientRequestId = generateCanvasClientRequestId();
+      replaceCanvasMessagesForSession(
+        activeSessionId,
+        clientRequestId,
+        buildOptimisticCanvasChatMessages({
+          prompt,
+          attachments,
+          requestId: clientRequestId,
+          submittedAt: Math.floor(Date.now() / 1000),
+        }),
+      );
+      setChatPrompt('');
+      if (!promptOverride) {
+        setChatImageAttachment(null);
+        setChatFileAttachment(null);
+      }
       const requestURL = buildCanvasStreamRequestUrl(
         `/api/canvas/sessions/${activeSessionId}/messages`,
       );
@@ -5354,6 +5443,7 @@ const ImageGeneration = () => {
           model_id: chatModel,
           attachments,
           stream: true,
+          client_request_id: clientRequestId,
           temperature: Number.isFinite(temperatureValue)
             ? temperatureValue
             : undefined,
@@ -5388,11 +5478,6 @@ const ImageGeneration = () => {
       }
 
       refreshRecentCanvasSessions({ silent: true });
-      setChatPrompt('');
-      if (!promptOverride) {
-        setChatImageAttachment(null);
-        setChatFileAttachment(null);
-      }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -5425,12 +5510,22 @@ const ImageGeneration = () => {
           if (assistantMessage?.id) {
             chatStreamingMessageIdRef.current = assistantMessage.id;
           }
-          upsertCanvasMessagesForSession(activeSessionId, messages);
+          if (messages.length > 0) {
+            hasServerSnapshot = true;
+            replaceCanvasMessagesForSession(
+              activeSessionId,
+              clientRequestId,
+              messages,
+            );
+          }
           bumpChatStreamRenderVersion();
           return;
         }
 
         if (payload?.message) {
+          if (payload.message?.id) {
+            hasServerSnapshot = true;
+          }
           upsertCanvasMessagesForSession(activeSessionId, [payload.message]);
           if (payload.message?.id) {
             chatStreamingMessageIdRef.current = payload.message.id;
@@ -5483,6 +5578,14 @@ const ImageGeneration = () => {
         showError(streamErrorMessage);
       }
     } catch (error) {
+      if (activeSessionId && clientRequestId && !hasServerSnapshot) {
+        removeCanvasMessagesForRequest(activeSessionId, clientRequestId);
+        if (!promptOverride) {
+          setChatPrompt(previousChatPrompt);
+          setChatImageAttachment(previousChatImageAttachment);
+          setChatFileAttachment(previousChatFileAttachment);
+        }
+      }
       if (error?.name === 'AbortError') {
         return;
       }
@@ -8144,6 +8247,10 @@ const ImageGeneration = () => {
     }
   };
 
+  const handleCanvasWorkspaceScroll = (event) => {
+    syncCanvasAutoFollowState(event.currentTarget);
+  };
+
   const renderCanvasSessionList = () => (
     <Spin
       spinning={recentCanvasSessions.initialLoading || deletingCanvasSession}
@@ -10560,6 +10667,7 @@ const ImageGeneration = () => {
           ref={canvasMessageViewportRef}
           style={styles.workspaceScrollPanel}
           className='canvas-workspace-scroll-panel'
+          onScroll={handleCanvasWorkspaceScroll}
         >
           <div style={styles.mainViewport}>
             {generationMode === CANVAS_MODE_CHAT

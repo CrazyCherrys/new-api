@@ -6,6 +6,7 @@ import {
   buildCanvasChatRetryPromptMap,
   mergeCanvasLatestTimelinePage,
   mergeCanvasMessagesById,
+  replaceCanvasMessagesByRequestId,
   updateCanvasMessageById,
   updateCanvasMessagesByTask,
   upsertCanvasMessages,
@@ -48,6 +49,51 @@ describe('canvasMessageTimeline', () => {
     expect(result.messages[1].prompt).toBe('newer-a updated');
   });
 
+  test('mergeCanvasLatestTimelinePage clears optimistic placeholders when latest page has real request messages', () => {
+    const existingMessages = [
+      { id: 1, role: 'user', prompt: 'older', created_time: 10 },
+      {
+        id: 'req-1-user',
+        role: 'user',
+        prompt: 'hello',
+        client_request_id: 'req-1',
+        created_time: 20,
+      },
+      {
+        id: 'req-1-assistant',
+        role: 'assistant',
+        prompt: '',
+        status: 'generating',
+        client_request_id: 'req-1',
+        created_time: 20,
+      },
+    ];
+    const latestPageMessages = [
+      {
+        id: 2,
+        role: 'user',
+        prompt: 'hello',
+        client_request_id: 'req-1',
+        created_time: 20,
+      },
+      {
+        id: 3,
+        role: 'assistant',
+        prompt: 'world',
+        client_request_id: 'req-1',
+        created_time: 21,
+      },
+    ];
+
+    const result = mergeCanvasLatestTimelinePage(
+      existingMessages,
+      latestPageMessages,
+    );
+
+    expect(result.hasOlderLoadedHistory).toBe(true);
+    expect(result.messages.map((message) => message.id)).toEqual([1, 2, 3]);
+  });
+
   test('upsertCanvasMessages updates reasoning content without reordering', () => {
     const existingMessages = [
       { id: 10, role: 'user', prompt: 'hello', created_time: 10 },
@@ -74,6 +120,43 @@ describe('canvasMessageTimeline', () => {
     expect(updatedMessages.map((message) => message.id)).toEqual([10, 11, 12]);
     expect(updatedMessages[1].prompt).toBe('world!');
     expect(updatedMessages[1].reasoning_content).toBe('thinking...');
+  });
+
+  test('upsertCanvasMessages replaces a lone optimistic assistant placeholder by request id', () => {
+    const existingMessages = [
+      {
+        id: 'req-1-user',
+        role: 'user',
+        prompt: 'hello',
+        client_request_id: 'req-1',
+        created_time: 10,
+      },
+      {
+        id: 'req-1-assistant',
+        role: 'assistant',
+        prompt: '',
+        status: 'generating',
+        client_request_id: 'req-1',
+        created_time: 10,
+      },
+    ];
+
+    const updatedMessages = upsertCanvasMessages(existingMessages, [
+      {
+        id: 22,
+        role: 'assistant',
+        prompt: 'partial',
+        status: 'generating',
+        client_request_id: 'req-1',
+        created_time: 11,
+      },
+    ]);
+
+    expect(updatedMessages.map((message) => message.id)).toEqual([
+      'req-1-user',
+      22,
+    ]);
+    expect(updatedMessages[1].prompt).toBe('partial');
   });
 
   test('updateCanvasMessageById changes only the targeted message', () => {
@@ -341,5 +424,45 @@ describe('canvasMessageTimeline', () => {
     expect(retryPromptMap['2']).toBe('first prompt');
     expect(retryPromptMap['3']).toBe('first prompt');
     expect(retryPromptMap['5']).toBe('second prompt');
+  });
+
+  test('replaceCanvasMessagesByRequestId swaps optimistic chat placeholders with a server snapshot', () => {
+    const messages = [
+      { id: 1, role: 'user', prompt: 'older', created_time: 1 },
+      {
+        id: 'req-1-user',
+        role: 'user',
+        prompt: 'hello',
+        client_request_id: 'req-1',
+        created_time: 10,
+      },
+      {
+        id: 'req-1-assistant',
+        role: 'assistant',
+        prompt: '',
+        status: 'generating',
+        client_request_id: 'req-1',
+        created_time: 10,
+      },
+    ];
+
+    const replaced = replaceCanvasMessagesByRequestId(messages, 'req-1', [
+      {
+        id: 2,
+        role: 'user',
+        prompt: 'hello',
+        client_request_id: 'req-1',
+        created_time: 10,
+      },
+      {
+        id: 3,
+        role: 'assistant',
+        prompt: 'world',
+        client_request_id: 'req-1',
+        created_time: 11,
+      },
+    ]);
+
+    expect(replaced.map((message) => message.id)).toEqual([1, 2, 3]);
   });
 });
