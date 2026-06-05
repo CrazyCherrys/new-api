@@ -66,11 +66,11 @@ func TestNormalizeVideoCapabilitiesIncludesTextToVideo(t *testing.T) {
 }
 
 func TestNormalizeChatCapabilitiesIncludesImageAndFileUpload(t *testing.T) {
-	normalized, err := model.NormalizeChatCapabilities(`[" image_upload ","file_upload","image_upload"]`)
+	normalized, err := model.NormalizeChatCapabilities(`[" image_upload ","file_upload","web_search","image_upload"]`)
 	if err != nil {
 		t.Fatalf("expected chat capabilities to normalize, got %v", err)
 	}
-	if normalized != `["image_upload","file_upload"]` {
+	if normalized != `["image_upload","file_upload","web_search"]` {
 		t.Fatalf("expected normalized chat capabilities, got %s", normalized)
 	}
 
@@ -78,7 +78,7 @@ func TestNormalizeChatCapabilitiesIncludesImageAndFileUpload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected effective chat capabilities, got %v", err)
 	}
-	expected := []string{"image_upload", "file_upload"}
+	expected := []string{"image_upload", "file_upload", "web_search"}
 	if len(effective) != len(expected) {
 		t.Fatalf("expected %v, got %v", expected, effective)
 	}
@@ -90,6 +90,19 @@ func TestNormalizeChatCapabilitiesIncludesImageAndFileUpload(t *testing.T) {
 
 	if _, err := model.NormalizeChatCapabilities(`["image_upload","binary_upload"]`); err == nil {
 		t.Fatal("expected unsupported chat capability to be rejected")
+	}
+}
+
+func TestSanitizeModelMappingSettingsClearsChatCapabilitiesForNonChatModels(t *testing.T) {
+	mapping := &model.ModelMapping{
+		ModelType:        2,
+		ChatCapabilities: `["web_search"]`,
+	}
+
+	sanitizeModelMappingSettings(mapping)
+
+	if mapping.ChatCapabilities != "" {
+		t.Fatalf("expected non-chat model chat capabilities to be cleared, got %q", mapping.ChatCapabilities)
 	}
 }
 

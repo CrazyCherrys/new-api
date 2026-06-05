@@ -16,3 +16,7 @@ type CanvasChatModelCatalogItem struct {
 	VendorIcon       string   `json:"vendor_icon,omitempty"`
 	ChatCapabilities []string `json:"chat_capabilities"`
 }
+
+type CanvasChatRequestSettings struct {
+	WebSearchEnabled *bool `json:"web_search_enabled,omitempty"`
+}

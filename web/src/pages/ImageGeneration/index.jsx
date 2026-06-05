@@ -71,6 +71,7 @@ import {
 import {
   extractCanvasChatAttachments,
   getCanvasChatUploadVisibility,
+  getCanvasChatWebSearchVisibility,
   normalizeCanvasChatCapabilities,
 } from '../../helpers/canvasChat';
 import { getLobeHubIcon } from '../../helpers/render';
@@ -148,6 +149,7 @@ const DEFAULT_CHAT_TEMPERATURE = '0.7';
 const DEFAULT_CHAT_CONTEXT_COUNT = '8';
 const DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES = '8';
 const DEFAULT_CHAT_SUMMARY_RECENT_MESSAGES = '8';
+const DEFAULT_CHAT_WEB_SEARCH_ENABLED = false;
 const CHAT_SUMMARY_STRATEGY_OPTIONS = ['0', '4', '8', '12', '16', '24', '32'];
 const CANVAS_AUTO_FOLLOW_BOTTOM_THRESHOLD = 96;
 const CANVAS_HISTORY_AUTOLOAD_TOP_THRESHOLD = 72;
@@ -182,6 +184,7 @@ const normalizeCanvasSessionRecord = (
   return {
     ...session,
     mode: normalizedMode,
+    web_search_enabled: !!session?.web_search_enabled,
   };
 };
 
@@ -623,7 +626,7 @@ const ImageGeneration = () => {
     CHAT_MODEL: 'canvas_chat_model',
     CHAT_TEMPERATURE: 'canvas_chat_temperature',
     CHAT_CONTEXT: 'canvas_chat_context',
-    CHAT_TOOLS: 'canvas_chat_tools',
+    CHAT_WEB_SEARCH: 'canvas_chat_web_search',
     SERIES: 'imageGen_selectedSeries',
     MODEL: 'imageGen_selectedModel',
     ASPECT_RATIO: 'imageGen_aspectRatio',
@@ -701,8 +704,12 @@ const ImageGeneration = () => {
   const [chatContext, setChatContext] = useState(() =>
     getStoredValue(STORAGE_KEYS.CHAT_CONTEXT, DEFAULT_CHAT_CONTEXT_COUNT),
   );
-  const [chatToolsEnabled, setChatToolsEnabled] = useState(
-    () => getStoredValue(STORAGE_KEYS.CHAT_TOOLS, 'false') === 'true',
+  const [chatWebSearchEnabled, setChatWebSearchEnabled] = useState(
+    () =>
+      getStoredValue(
+        STORAGE_KEYS.CHAT_WEB_SEARCH,
+        DEFAULT_CHAT_WEB_SEARCH_ENABLED ? 'true' : 'false',
+      ) === 'true',
   );
   const [chatStreaming, setChatStreaming] = useState(false);
   const [chatStreamRenderVersion, setChatStreamRenderVersion] = useState(0);
@@ -1536,6 +1543,9 @@ const ImageGeneration = () => {
     if (!uploadVisibility.showFileUpload) {
       setChatFileAttachment(null);
     }
+    if (!getCanvasChatWebSearchVisibility(activeChatModelOption)) {
+      setChatWebSearchEnabled(false);
+    }
   }, [activeChatModelOption]);
 
   const buildRemoteReferenceFile = (imageUrl) => {
@@ -2118,6 +2128,9 @@ const ImageGeneration = () => {
       if (Number.isFinite(chatContextValue)) {
         payload.chat_context_count = chatContextValue;
       }
+      payload.web_search_enabled =
+        !!chatWebSearchEnabled &&
+        getCanvasChatWebSearchVisibility(activeChatModelOption);
     }
     const res = await API.post('/api/canvas/sessions', payload);
     if (!res.data.success) {
@@ -2446,6 +2459,10 @@ const ImageGeneration = () => {
       session?.chat_context_count === 0 || Number(session?.chat_context_count)
         ? String(session?.chat_context_count)
         : DEFAULT_CHAT_CONTEXT_COUNT,
+    webSearchEnabled:
+      typeof session?.web_search_enabled === 'boolean'
+        ? session.web_search_enabled
+        : DEFAULT_CHAT_WEB_SEARCH_ENABLED,
     systemPrompt: String(session?.system_prompt || ''),
     summaryEnabled:
       typeof session?.summary_enabled === 'boolean'
@@ -2499,11 +2516,23 @@ const ImageGeneration = () => {
       showError(t('会话不存在'));
       return;
     }
+    const selectedDraftModelOption =
+      getChatModelsWithPreservedCurrent(
+        chatSessionSettingsDraft.model,
+        t('当前会话模型，现不可用'),
+      ).find((item) => item?.request_model === chatSessionSettingsDraft.model) ||
+      null;
+    const webSearchVisible = getCanvasChatWebSearchVisibility(
+      selectedDraftModelOption,
+    );
 
     const payload = {
       current_model: chatSessionSettingsDraft.model,
       chat_temperature: Number(chatSessionSettingsDraft.temperature),
       chat_context_count: Number(chatSessionSettingsDraft.contextCount),
+      web_search_enabled: webSearchVisible
+        ? !!chatSessionSettingsDraft.webSearchEnabled
+        : false,
       system_prompt: chatSessionSettingsDraft.systemPrompt,
       summary_enabled: !!chatSessionSettingsDraft.summaryEnabled,
       summary_trigger_messages: Number(
@@ -2552,6 +2581,7 @@ const ImageGeneration = () => {
             res.data.data.chat_context_count ?? DEFAULT_CHAT_CONTEXT_COUNT,
           ),
         );
+        setChatWebSearchEnabled(!!res.data.data.web_search_enabled);
       }
       showSuccess(t('会话设置已更新'));
       closeCanvasChatSessionSettings();
@@ -4266,13 +4296,13 @@ const ImageGeneration = () => {
   useEffect(() => {
     try {
       localStorage.setItem(
-        STORAGE_KEYS.CHAT_TOOLS,
-        chatToolsEnabled ? 'true' : 'false',
+        STORAGE_KEYS.CHAT_WEB_SEARCH,
+        chatWebSearchEnabled ? 'true' : 'false',
       );
     } catch (e) {
-      console.error('Failed to save chatToolsEnabled:', e);
+      console.error('Failed to save chatWebSearchEnabled:', e);
     }
-  }, [chatToolsEnabled]);
+  }, [chatWebSearchEnabled]);
 
   useEffect(() => {
     if (aspectRatio) {
@@ -5463,11 +5493,13 @@ const ImageGeneration = () => {
     if (Number.isFinite(Number(selectedCanvasSession.chat_context_count))) {
       setChatContext(String(selectedCanvasSession.chat_context_count));
     }
+    setChatWebSearchEnabled(!!selectedCanvasSession.web_search_enabled);
   }, [
     chatModels,
     generationMode,
     selectedCanvasSession?.chat_context_count,
     selectedCanvasSession?.chat_temperature,
+    selectedCanvasSession?.web_search_enabled,
     selectedCanvasSession?.id,
     selectedCanvasSession?.current_model,
     selectedCanvasSession?.mode,
@@ -5513,6 +5545,8 @@ const ImageGeneration = () => {
     const chatUploadVisibility = getCanvasChatUploadVisibility(
       activeChatModelOption,
     );
+    const webSearchVisible =
+      getCanvasChatWebSearchVisibility(activeChatModelOption);
     if (chatImageAttachment && !chatUploadVisibility.showImageUpload) {
       showError(t('当前模型不支持图片上传'));
       return;
@@ -5587,6 +5621,9 @@ const ImageGeneration = () => {
           prompt,
           model_id: chatModel,
           attachments,
+          web_search_enabled: webSearchVisible
+            ? !!chatWebSearchEnabled
+            : undefined,
           stream: true,
           client_request_id: clientRequestId,
           temperature: Number.isFinite(temperatureValue)
@@ -7876,6 +7913,9 @@ const ImageGeneration = () => {
   const renderChatSettingsDropdown = () => {
     const dropdownKey = 'chat-settings';
     const iconOnly = isMobile;
+    const showWebSearchToggle = getCanvasChatWebSearchVisibility(
+      activeChatModelOption,
+    );
     const panel = (
       <div
         style={styles.imageParamPanel}
@@ -7928,6 +7968,27 @@ const ImageGeneration = () => {
             )}
           </div>
         </div>
+        {showWebSearchToggle ? (
+          <>
+            <div style={styles.imageParamDivider} />
+            <div style={styles.imageParamSection}>
+              <div style={styles.imageParamSectionTitle}>{t('联网搜索')}</div>
+              <Checkbox
+                checked={chatWebSearchEnabled}
+                onChange={(event) => {
+                  const nextValue = !!event.target.checked;
+                  setChatWebSearchEnabled(nextValue);
+                  updateCurrentCanvasChatSessionConfig(
+                    { web_search_enabled: nextValue },
+                    t('更新联网搜索设置失败'),
+                  );
+                }}
+              >
+                {t('当前会话启用联网搜索')}
+              </Checkbox>
+            </div>
+          </>
+        ) : null}
       </div>
     );
 
@@ -10854,6 +10915,12 @@ const ImageGeneration = () => {
       disabled: item.usable === false,
       model: item,
     }));
+    const draftModelOption =
+      availableChatModels.find((item) => item?.request_model === draft.model) ||
+      null;
+    const showWebSearchToggle = getCanvasChatWebSearchVisibility(
+      draftModelOption,
+    );
     const renderChatModelOption = (renderProps) => {
       const {
         disabled,
@@ -10941,12 +11008,20 @@ const ImageGeneration = () => {
             <Select
               value={draft.model}
               optionList={availableChatModelOptions}
-              onChange={(value) =>
-                handleCanvasChatSessionSettingsField(
-                  'model',
-                  String(value || ''),
-                )
-              }
+              onChange={(value) => {
+                const nextModel = String(value || '');
+                const nextModelOption =
+                  availableChatModels.find(
+                    (item) => item?.request_model === nextModel,
+                  ) || null;
+                handleCanvasChatSessionSettingsField('model', nextModel);
+                if (!getCanvasChatWebSearchVisibility(nextModelOption)) {
+                  handleCanvasChatSessionSettingsField(
+                    'webSearchEnabled',
+                    false,
+                  );
+                }
+              }}
               placeholder={t('请选择模型')}
               renderOptionItem={renderChatModelOption}
               renderSelectedItem={renderChatModelSelectedItem}
@@ -10992,6 +11067,21 @@ const ImageGeneration = () => {
               />
             </div>
           </div>
+          {showWebSearchToggle ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <Checkbox
+                checked={draft.webSearchEnabled}
+                onChange={(event) =>
+                  handleCanvasChatSessionSettingsField(
+                    'webSearchEnabled',
+                    !!event.target.checked,
+                  )
+                }
+              >
+                {t('启用联网搜索')}
+              </Checkbox>
+            </div>
+          ) : null}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <Text strong>{t('系统提示词')}</Text>
             <TextArea

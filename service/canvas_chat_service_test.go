@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 )
 
@@ -83,7 +84,7 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 		Updates(map[string]any{
 			"display_name":      "Chat Model",
 			"model_series":      "openai",
-			"chat_capabilities": `["image_upload","file_upload"]`,
+			"chat_capabilities": `["image_upload","file_upload","web_search"]`,
 		}).Error; err != nil {
 		t.Fatalf("failed to update seeded chat model mapping: %v", err)
 	}
@@ -180,7 +181,7 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 	if catalog[0].ModelSeries != "openai" || catalog[0].RequestEndpoint != "openai" {
 		t.Fatalf("expected catalog metadata to be preserved, got %#v", catalog[0])
 	}
-	if len(catalog[0].ChatCapabilities) != 2 || catalog[0].ChatCapabilities[0] != "image_upload" || catalog[0].ChatCapabilities[1] != "file_upload" {
+	if len(catalog[0].ChatCapabilities) != 3 || catalog[0].ChatCapabilities[0] != "image_upload" || catalog[0].ChatCapabilities[1] != "file_upload" || catalog[0].ChatCapabilities[2] != "web_search" {
 		t.Fatalf("expected catalog chat capabilities to be preserved, got %#v", catalog[0])
 	}
 	if catalog[0].Description != "Chat model catalog description" || catalog[0].VendorIcon != "OpenAI" {
@@ -193,6 +194,39 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 	}
 	if resolved != chatModel {
 		t.Fatalf("expected chat model fallback %q, got %q", chatModel, resolved)
+	}
+}
+
+func TestApplyCanvasChatRelayWebSearchByRequestEndpoint(t *testing.T) {
+	tests := []struct {
+		name            string
+		requestEndpoint string
+		enabled         bool
+		expectInjected  bool
+	}{
+		{name: "openai enabled", requestEndpoint: "openai", enabled: true, expectInjected: true},
+		{name: "anthropic enabled", requestEndpoint: "anthropic", enabled: true, expectInjected: true},
+		{name: "openai disabled", requestEndpoint: "openai", enabled: false, expectInjected: false},
+		{name: "gemini safe downgrade", requestEndpoint: "gemini", enabled: true, expectInjected: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			request := &dto.GeneralOpenAIRequest{}
+			applyCanvasChatRelayWebSearch(request, tc.requestEndpoint, tc.enabled)
+			if tc.expectInjected {
+				if request.WebSearchOptions == nil {
+					t.Fatalf("expected web search options to be injected for %q", tc.requestEndpoint)
+				}
+				if request.WebSearchOptions.SearchContextSize != "medium" {
+					t.Fatalf("expected medium search context size, got %#v", request.WebSearchOptions)
+				}
+				return
+			}
+			if request.WebSearchOptions != nil {
+				t.Fatalf("expected web search options to stay nil, got %#v", request.WebSearchOptions)
+			}
+		})
 	}
 }
 

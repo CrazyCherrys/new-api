@@ -51,6 +51,7 @@ type CreateCanvasSessionInput struct {
 	CurrentModel           string
 	ChatTemperature        *float64
 	ChatContextCount       *int
+	WebSearchEnabled       *bool
 	SystemPrompt           *string
 	SummaryEnabled         *bool
 	SummaryTriggerMessages *int
@@ -63,6 +64,7 @@ type UpdateCanvasSessionInput struct {
 	CurrentModel           *string
 	ChatTemperature        *float64
 	ChatContextCount       *int
+	WebSearchEnabled       *bool
 	SystemPrompt           *string
 	SummaryEnabled         *bool
 	SummaryTriggerMessages *int
@@ -72,16 +74,17 @@ type UpdateCanvasSessionInput struct {
 }
 
 type CreateCanvasMessageInput struct {
-	Prompt          string
-	ModelId         string
-	Group           string
-	RequestEndpoint string
-	Params          string
-	Attachments     []dto.CanvasChatAttachment
-	Stream          *bool
-	Temperature     *float64
-	ContextCount    *int
-	ClientRequestId string
+	Prompt           string
+	ModelId          string
+	Group            string
+	RequestEndpoint  string
+	Params           string
+	Attachments      []dto.CanvasChatAttachment
+	WebSearchEnabled *bool
+	Stream           *bool
+	Temperature      *float64
+	ContextCount     *int
+	ClientRequestId  string
 }
 
 var (
@@ -159,15 +162,18 @@ func CreateCanvasSession(userId int, input CreateCanvasSessionInput) (*model.Can
 	summaryEnabled := canvasChatSummaryEnabledDefault
 	summaryTriggerMessages := canvasChatSummaryTriggerMessagesDefault
 	summaryRecentMessages := canvasChatSummaryRecentMessagesDefault
+	webSearchEnabled := false
 	if mode == model.CanvasModeChat {
 		chatTemperature = normalizeCanvasChatTemperatureValue(input.ChatTemperature, canvasChatDefaultTemperature)
 		chatContextCount = normalizeCanvasChatContextCountValue(input.ChatContextCount, canvasChatDefaultContextCount)
+		webSearchEnabled = normalizeCanvasChatWebSearchEnabledValue(input.WebSearchEnabled, false)
 		systemPrompt = normalizeCanvasChatSystemPromptValue(input.SystemPrompt)
 		summaryEnabled = normalizeCanvasChatSummaryEnabledValue(input.SummaryEnabled, canvasChatSummaryEnabledDefault)
 		summaryTriggerMessages = normalizeCanvasChatSummaryTriggerMessagesValue(input.SummaryTriggerMessages, canvasChatSummaryTriggerMessagesDefault)
 		summaryRecentMessages = normalizeCanvasChatSummaryRecentMessagesValue(input.SummaryRecentMessages, canvasChatSummaryRecentMessagesDefault)
 		session.ChatTemperature = chatTemperature
 		session.ChatContextCount = chatContextCount
+		session.WebSearchEnabled = webSearchEnabled
 		session.SystemPrompt = systemPrompt
 		session.SummaryEnabled = summaryEnabled
 		session.SummaryTriggerMessages = summaryTriggerMessages
@@ -182,10 +188,11 @@ func CreateCanvasSession(userId int, input CreateCanvasSessionInput) (*model.Can
 		}
 		return tx.Exec(
 			`UPDATE canvas_sessions
-			 SET chat_temperature = ?, chat_context_count = ?, system_prompt = ?, summary_enabled = ?, summary_trigger_messages = ?, summary_recent_messages = ?
+			 SET chat_temperature = ?, chat_context_count = ?, web_search_enabled = ?, system_prompt = ?, summary_enabled = ?, summary_trigger_messages = ?, summary_recent_messages = ?
 			 WHERE id = ? AND user_id = ? AND deleted_time = 0`,
 			chatTemperature,
 			chatContextCount,
+			canvasChatSummaryEnabledDBValue(webSearchEnabled),
 			systemPrompt,
 			canvasChatSummaryEnabledDBValue(summaryEnabled),
 			summaryTriggerMessages,
@@ -235,6 +242,12 @@ func UpdateCanvasSession(userId int, id int, input UpdateCanvasSessionInput) (*m
 			return nil, fmt.Errorf("chat configuration is only supported for chat sessions")
 		}
 		updates["chat_context_count"] = normalizeCanvasChatContextCountValue(input.ChatContextCount, session.ChatContextCount)
+	}
+	if input.WebSearchEnabled != nil {
+		if session.Mode != model.CanvasModeChat {
+			return nil, fmt.Errorf("chat configuration is only supported for chat sessions")
+		}
+		updates["web_search_enabled"] = normalizeCanvasChatWebSearchEnabledValue(input.WebSearchEnabled, session.WebSearchEnabled)
 	}
 	if input.SystemPrompt != nil {
 		if session.Mode != model.CanvasModeChat {
@@ -1059,6 +1072,13 @@ func normalizeCanvasChatSystemPromptValue(input *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*input)
+}
+
+func normalizeCanvasChatWebSearchEnabledValue(input *bool, fallback bool) bool {
+	if input == nil {
+		return fallback
+	}
+	return *input
 }
 
 func normalizeCanvasChatSummaryEnabledValue(input *bool, fallback bool) bool {

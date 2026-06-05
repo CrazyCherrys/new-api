@@ -45,6 +45,7 @@ type canvasChatMessageMetadata struct {
 	ChatGroup              string                     `json:"chat_group,omitempty"`
 	Temperature            *float64                   `json:"temperature,omitempty"`
 	ContextCount           *int                       `json:"context_count,omitempty"`
+	WebSearchEnabled       *bool                      `json:"web_search_enabled,omitempty"`
 	SystemPrompt           string                     `json:"system_prompt,omitempty"`
 	SummaryEnabled         *bool                      `json:"summary_enabled,omitempty"`
 	SummaryTriggerMessages *int                       `json:"summary_trigger_messages,omitempty"`
@@ -69,21 +70,25 @@ type canvasChatPreparedRequest struct {
 	Session          *model.CanvasSession
 	Prompt           string
 	FinalModel       string
+	RequestEndpoint  string
 	FinalGroup       string
 	Temperature      *float64
 	ContextCount     int
+	WebSearchEnabled bool
 	ClientRequestId  string
 	UserMessage      *model.CanvasMessage
 	AssistantMessage *model.CanvasMessage
 }
 
 type canvasChatRelayRequest struct {
-	UserId      int
-	UserGroup   string
-	ModelId     string
-	Group       string
-	Temperature *float64
-	Messages    []dto.Message
+	UserId           int
+	UserGroup        string
+	ModelId          string
+	RequestEndpoint  string
+	Group            string
+	Temperature      *float64
+	WebSearchEnabled bool
+	Messages         []dto.Message
 }
 
 type canvasChatRelayDelta struct {
@@ -297,6 +302,13 @@ func cloneCanvasChatCapabilities(capabilities []string) []string {
 	return append([]string(nil), capabilities...)
 }
 
+func modelSupportsCanvasChatWebSearch(chatMapping *model.ModelMapping) (bool, error) {
+	if chatMapping == nil {
+		return false, nil
+	}
+	return model.HasChatCapability(chatMapping.ChatCapabilities, model.ChatCapabilityWebSearch)
+}
+
 func buildCanvasChatRelayMessage(role string, prompt string, attachments []dto.CanvasChatAttachment) (dto.Message, error) {
 	message := dto.Message{
 		Role: role,
@@ -443,13 +455,17 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 
 	temperatureValue := resolveCanvasChatTemperature(session, input.Temperature)
 	contextCount := resolveCanvasChatContextCount(session, input.ContextCount)
-	assistantMetadata, err := buildCanvasChatMessageMetadata(session, finalModel, finalGroup, temperatureValue, contextCount, nil)
+	webSearchEnabled, err := resolveCanvasChatWebSearchEnabled(chatMapping, session, input.WebSearchEnabled)
+	if err != nil {
+		return nil, err
+	}
+	assistantMetadata, err := buildCanvasChatMessageMetadata(session, finalModel, finalGroup, temperatureValue, contextCount, webSearchEnabled, nil)
 	if err != nil {
 		return nil, err
 	}
 	userMetadata := assistantMetadata
 	if len(attachments) > 0 {
-		userMetadata, err = buildCanvasChatMessageMetadata(session, finalModel, finalGroup, temperatureValue, contextCount, attachments)
+		userMetadata, err = buildCanvasChatMessageMetadata(session, finalModel, finalGroup, temperatureValue, contextCount, webSearchEnabled, attachments)
 		if err != nil {
 			return nil, err
 		}
@@ -458,15 +474,17 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 	now := common.GetTimestamp()
 	clientRequestId := strings.TrimSpace(input.ClientRequestId)
 	prepared := &canvasChatPreparedRequest{
-		UserId:          userId,
-		UserGroup:       user.Group,
-		Session:         session,
-		Prompt:          prompt,
-		FinalModel:      finalModel,
-		FinalGroup:      finalGroup,
-		Temperature:     temperatureValue,
-		ContextCount:    contextCount,
-		ClientRequestId: clientRequestId,
+		UserId:           userId,
+		UserGroup:        user.Group,
+		Session:          session,
+		Prompt:           prompt,
+		FinalModel:       finalModel,
+		RequestEndpoint:  strings.TrimSpace(chatMapping.RequestEndpoint),
+		FinalGroup:       finalGroup,
+		Temperature:      temperatureValue,
+		ContextCount:     contextCount,
+		WebSearchEnabled: webSearchEnabled,
+		ClientRequestId:  clientRequestId,
 		UserMessage: &model.CanvasMessage{
 			SessionId:       sessionId,
 			UserId:          userId,
@@ -509,6 +527,7 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 		"current_group":      finalGroup,
 		"chat_temperature":   normalizeCanvasChatTemperatureValue(temperatureValue, session.ChatTemperature),
 		"chat_context_count": normalizeCanvasChatContextCountValue(common.GetPointer(contextCount), session.ChatContextCount),
+		"web_search_enabled": webSearchEnabled,
 		"updated_time":       now,
 	}
 	if !session.TitleManuallySet && messageCount == 0 {
@@ -524,6 +543,7 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 
 	prepared.Session.CurrentModel = finalModel
 	prepared.Session.CurrentGroup = finalGroup
+	prepared.Session.WebSearchEnabled = webSearchEnabled
 	if !prepared.Session.TitleManuallySet && messageCount == 0 {
 		prepared.Session.Title = truncateCanvasTitle(prompt)
 	}
@@ -589,12 +609,14 @@ func executeCanvasChatRun(ctx context.Context, prepared *canvasChatPreparedReque
 	}
 
 	_, err = callCanvasChatRelay(ctx, canvasChatRelayRequest{
-		UserId:      prepared.UserId,
-		UserGroup:   prepared.UserGroup,
-		ModelId:     prepared.FinalModel,
-		Group:       prepared.FinalGroup,
-		Temperature: prepared.Temperature,
-		Messages:    relayMessages,
+		UserId:           prepared.UserId,
+		UserGroup:        prepared.UserGroup,
+		ModelId:          prepared.FinalModel,
+		RequestEndpoint:  prepared.RequestEndpoint,
+		Group:            prepared.FinalGroup,
+		Temperature:      prepared.Temperature,
+		WebSearchEnabled: prepared.WebSearchEnabled,
+		Messages:         relayMessages,
 	}, func(delta canvasChatRelayDelta) error {
 		if delta.Content == "" && delta.ReasoningContent == "" {
 			return nil
@@ -1257,7 +1279,22 @@ func resolveCanvasChatContextCount(session *model.CanvasSession, input *int) int
 	return normalizeCanvasChatContextCountValue(input, fallback)
 }
 
-func buildCanvasChatMessageMetadata(session *model.CanvasSession, modelId string, group string, temperature *float64, contextCount int, attachments []dto.CanvasChatAttachment) (string, error) {
+func resolveCanvasChatWebSearchEnabled(chatMapping *model.ModelMapping, session *model.CanvasSession, input *bool) (bool, error) {
+	supported, err := modelSupportsCanvasChatWebSearch(chatMapping)
+	if err != nil {
+		return false, err
+	}
+	if !supported {
+		return false, nil
+	}
+	fallback := false
+	if session != nil {
+		fallback = session.WebSearchEnabled
+	}
+	return normalizeCanvasChatWebSearchEnabledValue(input, fallback), nil
+}
+
+func buildCanvasChatMessageMetadata(session *model.CanvasSession, modelId string, group string, temperature *float64, contextCount int, webSearchEnabled bool, attachments []dto.CanvasChatAttachment) (string, error) {
 	systemPrompt := ""
 	summaryEnabled := canvasChatSummaryEnabledDefault
 	summaryTriggerMessages := canvasChatSummaryTriggerMessagesDefault
@@ -1273,6 +1310,7 @@ func buildCanvasChatMessageMetadata(session *model.CanvasSession, modelId string
 		ChatGroup:              strings.TrimSpace(group),
 		Temperature:            temperature,
 		ContextCount:           common.GetPointer(contextCount),
+		WebSearchEnabled:       common.GetPointer(webSearchEnabled),
 		SystemPrompt:           systemPrompt,
 		SummaryEnabled:         common.GetPointer(summaryEnabled),
 		SummaryTriggerMessages: common.GetPointer(summaryTriggerMessages),
@@ -1376,6 +1414,7 @@ func defaultCallCanvasChatRelay(ctx context.Context, request canvasChatRelayRequ
 			IncludeUsage: true,
 		},
 	}
+	applyCanvasChatRelayWebSearch(&relayRequest, request.RequestEndpoint, request.WebSearchEnabled)
 	jsonData, err := common.Marshal(relayRequest)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal chat relay request: %w", err)
@@ -1479,6 +1518,18 @@ func defaultCallCanvasChatRelay(ctx context.Context, request canvasChatRelayRequ
 		Text:             fullText.String(),
 		ReasoningContent: fullReasoning.String(),
 	}, nil
+}
+
+func applyCanvasChatRelayWebSearch(relayRequest *dto.GeneralOpenAIRequest, requestEndpoint string, enabled bool) {
+	if relayRequest == nil || !enabled {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(requestEndpoint)) {
+	case "openai", "anthropic":
+		relayRequest.WebSearchOptions = &dto.WebSearchOptions{
+			SearchContextSize: "medium",
+		}
+	}
 }
 
 func extractCanvasChatDelta(chunk *dto.ChatCompletionsStreamResponse) canvasChatRelayDelta {

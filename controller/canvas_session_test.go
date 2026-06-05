@@ -48,6 +48,9 @@ func TestCreateCanvasMessageStreamsChatRequests(t *testing.T) {
 		if input.Prompt != "hello stream" || input.ModelId != "gpt-chat-test" {
 			t.Fatalf("unexpected stream input: %#v", input)
 		}
+		if input.WebSearchEnabled == nil || !*input.WebSearchEnabled {
+			t.Fatalf("expected web search flag to be forwarded, got %#v", input.WebSearchEnabled)
+		}
 		if len(input.Attachments) != 1 || input.Attachments[0].Kind != "image" {
 			t.Fatalf("expected chat attachments to be forwarded, got %#v", input.Attachments)
 		}
@@ -66,6 +69,7 @@ func TestCreateCanvasMessageStreamsChatRequests(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/canvas/sessions/7/messages", strings.NewReader(`{
 			"prompt":"hello stream",
 			"model_id":"gpt-chat-test",
+			"web_search_enabled":true,
 			"attachments":[{"kind":"image","name":"ref.png","mime_type":"image/png","data":"data:image/png;base64,Zm9v"}],
 			"stream":true
 		}`))
@@ -100,7 +104,7 @@ func TestGetCanvasChatModelsReturnsCatalogCapabilities(t *testing.T) {
 				RequestEndpoint:  "openai",
 				Description:      "Canvas chat description",
 				VendorIcon:       "OpenAI",
-				ChatCapabilities: []string{"image_upload", "file_upload"},
+				ChatCapabilities: []string{"image_upload", "file_upload", "web_search"},
 			},
 		}, nil
 	}
@@ -130,8 +134,11 @@ func TestGetCanvasChatModelsReturnsCatalogCapabilities(t *testing.T) {
 	if !response.Success || len(response.Data) != 1 {
 		t.Fatalf("unexpected response payload: %#v", response)
 	}
-	if len(response.Data[0].ChatCapabilities) != 2 {
+	if len(response.Data[0].ChatCapabilities) != 3 {
 		t.Fatalf("expected chat capabilities to be returned, got %#v", response.Data[0])
+	}
+	if response.Data[0].ChatCapabilities[2] != "web_search" {
+		t.Fatalf("expected web_search capability to be returned, got %#v", response.Data[0].ChatCapabilities)
 	}
 	if response.Data[0].Description != "Canvas chat description" || response.Data[0].VendorIcon != "OpenAI" {
 		t.Fatalf("expected catalog display metadata to be returned, got %#v", response.Data[0])
