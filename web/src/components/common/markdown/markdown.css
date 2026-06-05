@@ -105,11 +105,28 @@ body.canvas-theme-route .canvas-chat-markdown--reasoning blockquote {
   color: var(--canvas-thought-content, var(--semi-color-text-1));
 }
 
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown p,
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown li,
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown td,
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown th,
+body.canvas-theme-route .canvas-chat-markdown--reasoning p,
+body.canvas-theme-route .canvas-chat-markdown--reasoning li,
+body.canvas-theme-route .canvas-chat-markdown--reasoning td,
+body.canvas-theme-route .canvas-chat-markdown--reasoning th {
+  line-height: 1.72;
+  margin: 0 0 0.55em;
+}
+
+body.canvas-theme-route .canvas-chat-reasoning-card .canvas-chat-markdown hr,
+body.canvas-theme-route .canvas-chat-markdown--reasoning hr {
+  margin: 12px 0;
+}
+
 body.canvas-theme-route .canvas-chat-markdown--reasoning blockquote {
   border-left: 3px solid rgba(229, 231, 235, 0.96);
   background: transparent;
   border-radius: 0;
-  margin: 0.95em 0;
+  margin: 0.75em 0;
   padding: 0 0 0 14px;
 }
 

@@ -6883,7 +6883,6 @@ const ImageGeneration = () => {
       color: 'var(--canvas-thought-content)',
       fontSize: 13,
       lineHeight: 1.78,
-      whiteSpace: 'pre-wrap',
     },
     canvasChatMarkdown: {
       width: '100%',
