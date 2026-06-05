@@ -31,6 +31,14 @@ type imageTaskDetailResponse struct {
 	Quantity       int    `json:"quantity"`
 }
 
+type imageGenerationModelResponse struct {
+	RequestModel    string `json:"request_model"`
+	DisplayName     string `json:"display_name"`
+	RequestEndpoint string `json:"request_endpoint"`
+	Description     string `json:"description"`
+	VendorIcon      string `json:"vendor_icon"`
+}
+
 func setupImageGenerationControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -39,6 +47,7 @@ func setupImageGenerationControllerTestDB(t *testing.T) *gorm.DB {
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
 	common.RedisEnabled = false
+	model.InitCommonColumnNames()
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
@@ -48,7 +57,14 @@ func setupImageGenerationControllerTestDB(t *testing.T) *gorm.DB {
 	model.DB = db
 	model.LOG_DB = db
 
-	if err := db.AutoMigrate(&model.User{}, &model.Ability{}, &model.ImageGenerationTask{}, &model.ModelMapping{}); err != nil {
+	if err := db.AutoMigrate(
+		&model.User{},
+		&model.Ability{},
+		&model.Vendor{},
+		&model.Model{},
+		&model.ImageGenerationTask{},
+		&model.ModelMapping{},
+	); err != nil {
 		t.Fatalf("failed to migrate image generation tables: %v", err)
 	}
 
@@ -90,7 +106,7 @@ func TestBuildImageGenerationModelResponseKeepsOpenAIConfiguredResolutions(t *te
 		},
 	}
 	for _, mapping := range mappings {
-		response := buildImageGenerationModelResponse(mapping)
+		response := buildImageGenerationModelResponse(mapping, model.CatalogDisplayMetadata{})
 		if response["request_endpoint"] != mapping.RequestEndpoint {
 			t.Fatalf("expected endpoint %q, got %#v", mapping.RequestEndpoint, response["request_endpoint"])
 		}
@@ -100,6 +116,78 @@ func TestBuildImageGenerationModelResponseKeepsOpenAIConfiguredResolutions(t *te
 		if response["aspect_ratios"] != mapping.AspectRatios {
 			t.Fatalf("expected aspect ratios %q, got %#v", mapping.AspectRatios, response["aspect_ratios"])
 		}
+	}
+}
+
+func TestGetImageGenerationModelsIncludesCatalogMetadata(t *testing.T) {
+	db := setupImageGenerationControllerTestDB(t)
+
+	user := &model.User{
+		Id:       18,
+		Username: "image-model-user",
+		Password: "password123",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	if err := db.Create(&model.Ability{
+		Group:   "default",
+		Model:   "gpt-image-1",
+		Enabled: true,
+	}).Error; err != nil {
+		t.Fatalf("failed to create ability: %v", err)
+	}
+	if err := db.Create(&model.ModelMapping{
+		RequestModel:      "gpt-image-1",
+		ActualModel:       "gpt-image-1",
+		DisplayName:       "GPT Image 1",
+		ModelSeries:       "openai",
+		ModelType:         2,
+		Status:            1,
+		RequestEndpoint:   "openai",
+		ImageCapabilities: `["image_generation"]`,
+	}).Error; err != nil {
+		t.Fatalf("failed to create image mapping: %v", err)
+	}
+	vendor := &model.Vendor{
+		Name:   "OpenAI",
+		Icon:   "OpenAI",
+		Status: 1,
+	}
+	if err := db.Create(vendor).Error; err != nil {
+		t.Fatalf("failed to create vendor: %v", err)
+	}
+	if err := db.Create(&model.Model{
+		ModelName:    "gpt-image-",
+		Description:  "Image catalog description",
+		VendorID:     vendor.Id,
+		NameRule:     model.NameRulePrefix,
+		Status:       1,
+		SyncOfficial: 1,
+	}).Error; err != nil {
+		t.Fatalf("failed to create image model metadata: %v", err)
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/image-generation/models", nil, user.Id)
+	GetImageGenerationModels(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected success response, got message: %s", response.Message)
+	}
+
+	var items []imageGenerationModelResponse
+	if err := common.Unmarshal(response.Data, &items); err != nil {
+		t.Fatalf("failed to decode image model response: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one image model, got %#v", items)
+	}
+	if items[0].Description != "Image catalog description" || items[0].VendorIcon != "OpenAI" {
+		t.Fatalf("expected catalog metadata in image model response, got %#v", items[0])
 	}
 }
 

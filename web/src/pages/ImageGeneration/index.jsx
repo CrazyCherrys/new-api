@@ -71,6 +71,7 @@ import {
   getCanvasChatUploadVisibility,
   normalizeCanvasChatCapabilities,
 } from '../../helpers/canvasChat';
+import { getLobeHubIcon } from '../../helpers/render';
 import { CanvasModelSeriesIcon } from '../../helpers/modelSeries';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import ImageGenerationTaskCard from '../../components/ImageGenerationTaskCard';
@@ -1351,6 +1352,8 @@ const ImageGeneration = () => {
     display_name: String(requestModel || '').trim(),
     model_series: '',
     request_endpoint: '',
+    description: '',
+    vendor_icon: '',
     chat_capabilities: [],
     usable: false,
     unavailable_reason: reasonText || t('当前会话模型，现不可用'),
@@ -2626,6 +2629,8 @@ const ImageGeneration = () => {
       display_name: getModelDisplayName(item) || requestModel,
       model_series: String(item?.model_series || '').trim(),
       request_endpoint: String(item?.request_endpoint || '').trim(),
+      description: String(item?.description || '').trim(),
+      vendor_icon: String(item?.vendor_icon || '').trim(),
       chat_capabilities: normalizeCanvasChatCapabilities(
         item?.chat_capabilities,
       ),
@@ -7955,6 +7960,56 @@ const ImageGeneration = () => {
     </div>
   );
 
+  const renderCanvasBlankSessionDescription = () => {
+    const activeModel =
+      generationMode === CANVAS_MODE_CHAT
+        ? activeChatModelOption
+        : generationMode === CANVAS_MODE_VIDEO
+          ? videoSelectedModelData
+          : selectedModelData;
+    const description = String(activeModel?.description || '').trim();
+    const vendorIcon = String(activeModel?.vendor_icon || '').trim();
+    const modelSeries = String(activeModel?.model_series || '').trim();
+    const useCatalogDescription = description && vendorIcon;
+    const text = useCatalogDescription ? description : t('准备好开始了吗？');
+    let iconNode = null;
+    if (useCatalogDescription) {
+      iconNode = (
+        <span
+          aria-hidden='true'
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            lineHeight: 1,
+            flex: '0 0 auto',
+          }}
+        >
+          {getLobeHubIcon(vendorIcon, 18)}
+        </span>
+      );
+    } else if (modelSeries) {
+      iconNode = <CanvasModelSeriesIcon series={modelSeries} size='small' />;
+    }
+    if (!iconNode) {
+      return text;
+    }
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+        }}
+      >
+        {iconNode}
+        <span>{text}</span>
+      </span>
+    );
+  };
+
   const renderSidebarNavItem = ({
     key,
     label,
@@ -9305,7 +9360,10 @@ const ImageGeneration = () => {
     if (!selectedCanvasSession) {
       return (
         <div style={styles.canvasStreamEmpty}>
-          {renderSidebarEmpty(t('空白会话'), t('准备好开始了吗？'))}
+          {renderSidebarEmpty(
+            t('空白会话'),
+            renderCanvasBlankSessionDescription(),
+          )}
         </div>
       );
     }
@@ -9339,7 +9397,10 @@ const ImageGeneration = () => {
     if (displayedCanvasMessages.length === 0) {
       return (
         <div style={styles.canvasStreamEmpty}>
-          {renderSidebarEmpty(t('空白会话'), t('准备好开始了吗？'))}
+          {renderSidebarEmpty(
+            t('空白会话'),
+            renderCanvasBlankSessionDescription(),
+          )}
         </div>
       );
     }

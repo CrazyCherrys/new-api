@@ -58,6 +58,8 @@ func setupCanvasSessionServiceTestDB(t *testing.T) *gorm.DB {
 		&model.Token{},
 		&model.Channel{},
 		&model.Ability{},
+		&model.Vendor{},
+		&model.Model{},
 		&model.ModelMapping{},
 		&model.CanvasSession{},
 		&model.CanvasMessage{},

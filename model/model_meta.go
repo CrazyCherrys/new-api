@@ -2,6 +2,7 @@ package model
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -18,6 +19,11 @@ const (
 type BoundChannel struct {
 	Name string `json:"name"`
 	Type int    `json:"type"`
+}
+
+type CatalogDisplayMetadata struct {
+	Description string `json:"description,omitempty"`
+	VendorIcon  string `json:"vendor_icon,omitempty"`
 }
 
 type Model struct {
@@ -107,6 +113,139 @@ func GetAllModels(offset int, limit int) ([]*Model, error) {
 	var models []*Model
 	err := DB.Order("id DESC").Offset(offset).Limit(limit).Find(&models).Error
 	return models, err
+}
+
+func modelNameRuleMatches(rule int, configuredModelName string, targetModelName string) bool {
+	configuredModelName = strings.TrimSpace(configuredModelName)
+	targetModelName = strings.TrimSpace(targetModelName)
+	if configuredModelName == "" || targetModelName == "" {
+		return false
+	}
+	switch rule {
+	case NameRuleExact:
+		return targetModelName == configuredModelName
+	case NameRulePrefix:
+		return strings.HasPrefix(targetModelName, configuredModelName)
+	case NameRuleContains:
+		return strings.Contains(targetModelName, configuredModelName)
+	case NameRuleSuffix:
+		return strings.HasSuffix(targetModelName, configuredModelName)
+	default:
+		return false
+	}
+}
+
+func buildModelMetaMatchMap(models []Model, modelNames []string) map[string]*Model {
+	normalizedNames := make([]string, 0, len(modelNames))
+	seenNames := make(map[string]struct{}, len(modelNames))
+	for _, modelName := range modelNames {
+		trimmed := strings.TrimSpace(modelName)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seenNames[trimmed]; ok {
+			continue
+		}
+		seenNames[trimmed] = struct{}{}
+		normalizedNames = append(normalizedNames, trimmed)
+	}
+
+	matched := make(map[string]*Model, len(normalizedNames))
+	ruleOrder := []int{
+		NameRuleExact,
+		NameRulePrefix,
+		NameRuleSuffix,
+		NameRuleContains,
+	}
+	for _, rule := range ruleOrder {
+		for i := range models {
+			meta := &models[i]
+			if meta.NameRule != rule {
+				continue
+			}
+			for _, modelName := range normalizedNames {
+				if _, ok := matched[modelName]; ok {
+					continue
+				}
+				if modelNameRuleMatches(meta.NameRule, meta.ModelName, modelName) {
+					matched[modelName] = meta
+				}
+			}
+		}
+	}
+	return matched
+}
+
+func GetCatalogDisplayMetadataByModelNames(modelNames []string) (map[string]CatalogDisplayMetadata, error) {
+	metadataByModel := make(map[string]CatalogDisplayMetadata)
+
+	normalizedNames := make([]string, 0, len(modelNames))
+	seenNames := make(map[string]struct{}, len(modelNames))
+	for _, modelName := range modelNames {
+		trimmed := strings.TrimSpace(modelName)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seenNames[trimmed]; ok {
+			continue
+		}
+		seenNames[trimmed] = struct{}{}
+		normalizedNames = append(normalizedNames, trimmed)
+	}
+	if len(normalizedNames) == 0 {
+		return metadataByModel, nil
+	}
+
+	var models []Model
+	if err := DB.
+		Where("status = ?", 1).
+		Order("id ASC").
+		Find(&models).Error; err != nil {
+		return nil, err
+	}
+
+	matchedModelMeta := buildModelMetaMatchMap(models, normalizedNames)
+	vendorIDs := make([]int, 0, len(matchedModelMeta))
+	seenVendorIDs := make(map[int]struct{}, len(matchedModelMeta))
+	for _, meta := range matchedModelMeta {
+		if meta == nil || meta.VendorID <= 0 {
+			continue
+		}
+		if _, ok := seenVendorIDs[meta.VendorID]; ok {
+			continue
+		}
+		seenVendorIDs[meta.VendorID] = struct{}{}
+		vendorIDs = append(vendorIDs, meta.VendorID)
+	}
+
+	vendorsByID := make(map[int]*Vendor, len(vendorIDs))
+	if len(vendorIDs) > 0 {
+		var vendors []Vendor
+		if err := DB.
+			Where("status = ?", 1).
+			Where("id IN ?", vendorIDs).
+			Find(&vendors).Error; err != nil {
+			return nil, err
+		}
+		for i := range vendors {
+			vendor := &vendors[i]
+			vendorsByID[vendor.Id] = vendor
+		}
+	}
+
+	for modelName, meta := range matchedModelMeta {
+		if meta == nil {
+			continue
+		}
+		item := CatalogDisplayMetadata{
+			Description: strings.TrimSpace(meta.Description),
+		}
+		if vendor, ok := vendorsByID[meta.VendorID]; ok {
+			item.VendorIcon = strings.TrimSpace(vendor.Icon)
+		}
+		metadataByModel[modelName] = item
+	}
+	return metadataByModel, nil
 }
 
 func GetBoundChannelsByModelsMap(modelNames []string) (map[string][]BoundChannel, error) {

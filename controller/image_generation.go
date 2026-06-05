@@ -1027,7 +1027,7 @@ func DeleteImageGenerationTask(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"message": "删除成功"})
 }
 
-func buildImageGenerationModelResponse(mapping *model.ModelMapping) gin.H {
+func buildImageGenerationModelResponse(mapping *model.ModelMapping, metadata model.CatalogDisplayMetadata) gin.H {
 	if mapping == nil {
 		return nil
 	}
@@ -1040,6 +1040,8 @@ func buildImageGenerationModelResponse(mapping *model.ModelMapping) gin.H {
 		"display_name":          mapping.DisplayName,
 		"model_series":          mapping.ModelSeries,
 		"request_endpoint":      mapping.RequestEndpoint,
+		"description":           metadata.Description,
+		"vendor_icon":           metadata.VendorIcon,
 		"resolutions":           mapping.Resolutions,
 		"aspect_ratios":         mapping.AspectRatios,
 		"image_capabilities":    imageCapabilities,
@@ -1116,12 +1118,34 @@ func GetImageGenerationModels(c *gin.Context) {
 		}
 	}
 
-	var models []gin.H
+	visibleRequestModels := make([]string, 0, len(mappings))
 	for _, mapping := range mappings {
+		if mapping == nil {
+			continue
+		}
 		if _, ok := allowedModels[mapping.RequestModel]; !ok {
 			continue
 		}
-		models = append(models, buildImageGenerationModelResponse(mapping))
+		visibleRequestModels = append(visibleRequestModels, mapping.RequestModel)
+	}
+
+	metadataByModel, err := model.GetCatalogDisplayMetadataByModelNames(visibleRequestModels)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var models []gin.H
+	for _, mapping := range mappings {
+		if mapping == nil {
+			continue
+		}
+		if _, ok := allowedModels[mapping.RequestModel]; !ok {
+			continue
+		}
+		models = append(models, buildImageGenerationModelResponse(
+			mapping,
+			metadataByModel[strings.TrimSpace(mapping.RequestModel)],
+		))
 	}
 
 	common.ApiSuccess(c, models)

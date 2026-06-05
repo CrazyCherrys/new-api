@@ -12,5 +12,7 @@ type CanvasChatModelCatalogItem struct {
 	DisplayName      string   `json:"display_name"`
 	ModelSeries      string   `json:"model_series"`
 	RequestEndpoint  string   `json:"request_endpoint"`
+	Description      string   `json:"description,omitempty"`
+	VendorIcon       string   `json:"vendor_icon,omitempty"`
 	ChatCapabilities []string `json:"chat_capabilities"`
 }

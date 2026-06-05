@@ -98,6 +98,8 @@ func TestGetCanvasChatModelsReturnsCatalogCapabilities(t *testing.T) {
 				DisplayName:      "GPT 4.1",
 				ModelSeries:      "openai",
 				RequestEndpoint:  "openai",
+				Description:      "Canvas chat description",
+				VendorIcon:       "OpenAI",
 				ChatCapabilities: []string{"image_upload", "file_upload"},
 			},
 		}, nil
@@ -130,6 +132,9 @@ func TestGetCanvasChatModelsReturnsCatalogCapabilities(t *testing.T) {
 	}
 	if len(response.Data[0].ChatCapabilities) != 2 {
 		t.Fatalf("expected chat capabilities to be returned, got %#v", response.Data[0])
+	}
+	if response.Data[0].Description != "Canvas chat description" || response.Data[0].VendorIcon != "OpenAI" {
+		t.Fatalf("expected catalog display metadata to be returned, got %#v", response.Data[0])
 	}
 }
 
@@ -217,6 +222,8 @@ func TestListCanvasChatModelsReturnsStructuredOptions(t *testing.T) {
 				DisplayName:     "GPT 4.1",
 				ModelSeries:     "openai",
 				RequestEndpoint: "openai",
+				Description:     "Canvas option description",
+				VendorIcon:      "OpenAI",
 				Usable:          true,
 				AvailableGroups: []string{"default"},
 			},
@@ -250,6 +257,9 @@ func TestListCanvasChatModelsReturnsStructuredOptions(t *testing.T) {
 	}
 	if response.Data[0].RequestModel != "gpt-4.1" || response.Data[0].DisplayName != "GPT 4.1" {
 		t.Fatalf("unexpected model option: %#v", response.Data[0])
+	}
+	if response.Data[0].Description != "Canvas option description" || response.Data[0].VendorIcon != "OpenAI" {
+		t.Fatalf("expected option display metadata, got %#v", response.Data[0])
 	}
 }
 

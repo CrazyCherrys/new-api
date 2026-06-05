@@ -48,6 +48,17 @@ func ListVideoGenerationModels() ([]*dto.VideoGenerationModel, error) {
 	if err != nil {
 		return nil, err
 	}
+	requestModels := make([]string, 0, len(mappings))
+	for _, mapping := range mappings {
+		if mapping == nil {
+			continue
+		}
+		requestModels = append(requestModels, mapping.RequestModel)
+	}
+	metadataByModel, err := model.GetCatalogDisplayMetadataByModelNames(requestModels)
+	if err != nil {
+		return nil, err
+	}
 	items := make([]*dto.VideoGenerationModel, 0, len(mappings))
 	for _, mapping := range mappings {
 		capabilities, err := model.EffectiveVideoCapabilities(mapping.VideoCapabilities)
@@ -59,11 +70,14 @@ func ListVideoGenerationModels() ([]*dto.VideoGenerationModel, error) {
 			return nil, err
 		}
 		requestEndpoint := normalizeVideoEndpoint(mapping.RequestEndpoint)
+		metadata := metadataByModel[strings.TrimSpace(mapping.RequestModel)]
 		items = append(items, &dto.VideoGenerationModel{
 			RequestModel:      mapping.RequestModel,
 			DisplayName:       mapping.DisplayName,
 			ModelSeries:       mapping.ModelSeries,
 			RequestEndpoint:   requestEndpoint,
+			Description:       strings.TrimSpace(metadata.Description),
+			VendorIcon:        strings.TrimSpace(metadata.VendorIcon),
 			VideoCapabilities: capabilities,
 			DurationOptions:   durations,
 			Resolutions:       defaultVideoModelResolutions(requestEndpoint),

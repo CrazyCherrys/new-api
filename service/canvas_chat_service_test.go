@@ -87,6 +87,24 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 		}).Error; err != nil {
 		t.Fatalf("failed to update seeded chat model mapping: %v", err)
 	}
+	vendor := &model.Vendor{
+		Name:   "OpenAI",
+		Icon:   "OpenAI",
+		Status: 1,
+	}
+	if err := db.Create(vendor).Error; err != nil {
+		t.Fatalf("failed to create chat model vendor: %v", err)
+	}
+	if err := db.Create(&model.Model{
+		ModelName:    chatModel,
+		Description:  "Chat model catalog description",
+		VendorID:     vendor.Id,
+		NameRule:     model.NameRuleExact,
+		Status:       1,
+		SyncOfficial: 1,
+	}).Error; err != nil {
+		t.Fatalf("failed to create chat model metadata: %v", err)
+	}
 
 	mappings := []*model.ModelMapping{
 		{
@@ -164,6 +182,9 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 	}
 	if len(catalog[0].ChatCapabilities) != 2 || catalog[0].ChatCapabilities[0] != "image_upload" || catalog[0].ChatCapabilities[1] != "file_upload" {
 		t.Fatalf("expected catalog chat capabilities to be preserved, got %#v", catalog[0])
+	}
+	if catalog[0].Description != "Chat model catalog description" || catalog[0].VendorIcon != "OpenAI" {
+		t.Fatalf("expected catalog display metadata to be preserved, got %#v", catalog[0])
 	}
 
 	resolved, err := resolveCanvasChatModel(userID, &model.CanvasSession{}, "")
@@ -272,6 +293,24 @@ func TestListUserCanvasChatModelOptionsReturnsStructuredData(t *testing.T) {
 		}).Error; err != nil {
 		t.Fatalf("failed to update seeded structured model mapping: %v", err)
 	}
+	vendor := &model.Vendor{
+		Name:   "OpenAI",
+		Icon:   "OpenAI",
+		Status: 1,
+	}
+	if err := db.Create(vendor).Error; err != nil {
+		t.Fatalf("failed to create structured model vendor: %v", err)
+	}
+	if err := db.Create(&model.Model{
+		ModelName:    usableModel,
+		Description:  "Structured catalog description",
+		VendorID:     vendor.Id,
+		NameRule:     model.NameRuleExact,
+		Status:       1,
+		SyncOfficial: 1,
+	}).Error; err != nil {
+		t.Fatalf("failed to create structured model metadata: %v", err)
+	}
 
 	mappings := []*model.ModelMapping{
 		{
@@ -308,6 +347,9 @@ func TestListUserCanvasChatModelOptionsReturnsStructuredData(t *testing.T) {
 	}
 	if len(options[0].ChatCapabilities) != 1 || options[0].ChatCapabilities[0] != "image_upload" {
 		t.Fatalf("expected chat capabilities to be preserved, got %#v", options[0])
+	}
+	if options[0].Description != "Structured catalog description" || options[0].VendorIcon != "OpenAI" {
+		t.Fatalf("expected display metadata to be preserved, got %#v", options[0])
 	}
 }
 

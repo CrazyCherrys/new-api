@@ -5,6 +5,8 @@ type VideoGenerationModel struct {
 	DisplayName       string   `json:"display_name"`
 	ModelSeries       string   `json:"model_series"`
 	RequestEndpoint   string   `json:"request_endpoint"`
+	Description       string   `json:"description,omitempty"`
+	VendorIcon        string   `json:"vendor_icon,omitempty"`
 	VideoCapabilities []string `json:"video_capabilities"`
 	DurationOptions   []int    `json:"duration_options"`
 	Resolutions       []string `json:"resolutions"`

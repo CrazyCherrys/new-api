@@ -116,6 +116,8 @@ type CanvasChatModelOption struct {
 	DisplayName       string   `json:"display_name"`
 	ModelSeries       string   `json:"model_series"`
 	RequestEndpoint   string   `json:"request_endpoint"`
+	Description       string   `json:"description,omitempty"`
+	VendorIcon        string   `json:"vendor_icon,omitempty"`
 	ChatCapabilities  []string `json:"chat_capabilities"`
 	Usable            bool     `json:"usable"`
 	UnavailableReason string   `json:"unavailable_reason,omitempty"`
@@ -805,6 +807,8 @@ func listUserCanvasChatModelCatalog(userId int) ([]*dto.CanvasChatModelCatalogIt
 			DisplayName:      displayName,
 			ModelSeries:      strings.TrimSpace(option.ModelSeries),
 			RequestEndpoint:  strings.TrimSpace(option.RequestEndpoint),
+			Description:      strings.TrimSpace(option.Description),
+			VendorIcon:       strings.TrimSpace(option.VendorIcon),
 			ChatCapabilities: cloneCanvasChatCapabilities(option.ChatCapabilities),
 		})
 	}
@@ -839,6 +843,10 @@ func listUserCanvasChatModelOptions(userId int) ([]CanvasChatModelOption, error)
 	if err != nil {
 		return nil, err
 	}
+	metadataByModel, err := model.GetCatalogDisplayMetadataByModelNames(requestModels)
+	if err != nil {
+		return nil, err
+	}
 
 	options := make([]CanvasChatModelOption, 0, len(activeMappings))
 	for _, mapping := range activeMappings {
@@ -855,6 +863,10 @@ func listUserCanvasChatModelOptions(userId int) ([]CanvasChatModelOption, error)
 		}
 		if !visibleInCanvas {
 			continue
+		}
+		if metadata, ok := metadataByModel[strings.TrimSpace(mapping.RequestModel)]; ok {
+			option.Description = strings.TrimSpace(metadata.Description)
+			option.VendorIcon = strings.TrimSpace(metadata.VendorIcon)
 		}
 		options = append(options, *option)
 	}
