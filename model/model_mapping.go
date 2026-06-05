@@ -38,7 +38,7 @@ type ModelMapping struct {
 	DeprecatedDescription string `json:"-" gorm:"column:description;type:text"` // Deprecated: kept only for existing DB schemas; model mapping settings no longer expose or update description.
 	Status                int    `json:"status" gorm:"default:1;index"`
 	Priority              int    `json:"priority" gorm:"default:0"`
-	RequestEndpoint       string `json:"request_endpoint" gorm:"size:32;default:''"` // chat: openai, anthropic, gemini; image: openai, openai-response, gemini; video: openai-video-generation, openai-video
+	RequestEndpoint       string `json:"request_endpoint" gorm:"size:32;default:''"` // chat: openai, openai-response, anthropic, gemini; image: openai, openai-response, gemini; video: openai-video-generation, openai-video
 	Resolutions           string `json:"resolutions" gorm:"type:text"`               // 分辨率选项 JSON array: ["1K","2K","4K"]
 	AspectRatios          string `json:"aspect_ratios" gorm:"type:text"`             // 长宽比选项 JSON array: ["1:1","16:9",...]
 	ImageCapabilities     string `json:"image_capabilities" gorm:"type:text"`        // JSON array: ["image_generation","image_editing"]

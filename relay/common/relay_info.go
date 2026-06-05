@@ -372,13 +372,26 @@ func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) 
 	info := genBaseRelayInfo(c, request)
 	info.RelayMode = relayconstant.RelayModeResponses
 	info.RelayFormat = types.RelayFormatOpenAIResponses
+	info.InitResponsesUsageInfoFromRequest(request)
+	return info
+}
 
+func (info *RelayInfo) InitResponsesUsageInfoFromRequest(request *dto.OpenAIResponsesRequest) {
+	if info == nil {
+		return
+	}
 	info.ResponsesUsageInfo = &ResponsesUsageInfo{
 		BuiltInTools: make(map[string]*BuildInToolInfo),
+	}
+	if request == nil {
+		return
 	}
 	if len(request.Tools) > 0 {
 		for _, tool := range request.GetToolsMap() {
 			toolType := common.Interface2String(tool["type"])
+			if toolType == "" {
+				continue
+			}
 			info.ResponsesUsageInfo.BuiltInTools[toolType] = &BuildInToolInfo{
 				ToolName:  toolType,
 				CallCount: 0,
@@ -393,7 +406,6 @@ func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) 
 			}
 		}
 	}
-	return info
 }
 
 func GenRelayInfoGemini(c *gin.Context, request dto.Request) *RelayInfo {
@@ -507,6 +519,9 @@ func cloneRequestHeaders(c *gin.Context) map[string]string {
 	}
 	headers := make(map[string]string, len(c.Request.Header))
 	for key := range c.Request.Header {
+		if strings.EqualFold(key, constant.HeaderCanvasChatResponsesCompat) {
+			continue
+		}
 		value := strings.TrimSpace(c.Request.Header.Get(key))
 		if value == "" {
 			continue

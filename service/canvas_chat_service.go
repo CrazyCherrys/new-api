@@ -1437,6 +1437,9 @@ func defaultCallCanvasChatRelay(ctx context.Context, request canvasChatRelayRequ
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Authorization", "Bearer "+tokenKey)
+	if strings.EqualFold(strings.TrimSpace(request.RequestEndpoint), "openai-response") {
+		SetCanvasChatResponsesCompatHeader(httpReq.Header)
+	}
 
 	client := &http.Client{}
 	resp, err := client.Do(httpReq)
@@ -1525,7 +1528,7 @@ func applyCanvasChatRelayWebSearch(relayRequest *dto.GeneralOpenAIRequest, reque
 		return
 	}
 	switch strings.ToLower(strings.TrimSpace(requestEndpoint)) {
-	case "openai", "anthropic":
+	case "openai", "openai-response", "anthropic":
 		relayRequest.WebSearchOptions = &dto.WebSearchOptions{
 			SearchContextSize: "medium",
 		}

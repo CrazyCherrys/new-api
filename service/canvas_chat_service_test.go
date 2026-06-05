@@ -71,6 +71,7 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 		unmappedModel     = "legacy-freeform-model"
 		disabledChatModel = "gpt-disabled-chat"
 		noTokenChatModel  = "gpt-no-token-chat"
+		chatEndpoint      = "openai-response"
 	)
 
 	seedCanvasChatCapability(t, db, userID, userGroup, userGroup, userGroup, chatModel)
@@ -84,6 +85,7 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 		Updates(map[string]any{
 			"display_name":      "Chat Model",
 			"model_series":      "openai",
+			"request_endpoint":  chatEndpoint,
 			"chat_capabilities": `["image_upload","file_upload","web_search"]`,
 		}).Error; err != nil {
 		t.Fatalf("failed to update seeded chat model mapping: %v", err)
@@ -178,7 +180,7 @@ func TestListUserCanvasChatModelsFiltersNonChatMappings(t *testing.T) {
 	if catalog[0].DisplayName != "Chat Model" {
 		t.Fatalf("expected catalog display name to be preserved, got %#v", catalog[0])
 	}
-	if catalog[0].ModelSeries != "openai" || catalog[0].RequestEndpoint != "openai" {
+	if catalog[0].ModelSeries != "openai" || catalog[0].RequestEndpoint != chatEndpoint {
 		t.Fatalf("expected catalog metadata to be preserved, got %#v", catalog[0])
 	}
 	if len(catalog[0].ChatCapabilities) != 3 || catalog[0].ChatCapabilities[0] != "image_upload" || catalog[0].ChatCapabilities[1] != "file_upload" || catalog[0].ChatCapabilities[2] != "web_search" {
@@ -205,6 +207,7 @@ func TestApplyCanvasChatRelayWebSearchByRequestEndpoint(t *testing.T) {
 		expectInjected  bool
 	}{
 		{name: "openai enabled", requestEndpoint: "openai", enabled: true, expectInjected: true},
+		{name: "openai-response enabled", requestEndpoint: "openai-response", enabled: true, expectInjected: true},
 		{name: "anthropic enabled", requestEndpoint: "anthropic", enabled: true, expectInjected: true},
 		{name: "openai disabled", requestEndpoint: "openai", enabled: false, expectInjected: false},
 		{name: "gemini safe downgrade", requestEndpoint: "gemini", enabled: true, expectInjected: false},

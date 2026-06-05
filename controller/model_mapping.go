@@ -33,13 +33,13 @@ func validateModelMappingEndpoint(modelType int, endpoint string) error {
 		if endpoint == "" {
 			return errors.New("对话模型必须指定请求端点")
 		}
-		validEndpoints := []string{"openai", "anthropic", "gemini"}
+		validEndpoints := []string{"openai", "openai-response", "anthropic", "gemini"}
 		for _, valid := range validEndpoints {
 			if endpoint == valid {
 				return nil
 			}
 		}
-		return errors.New("对话模型请求端点必须是 openai、anthropic 或 gemini 之一")
+		return errors.New("对话模型请求端点必须是 openai、openai-response、anthropic 或 gemini 之一")
 	}
 	if modelType == 2 {
 		if endpoint == "" {
