@@ -882,6 +882,8 @@ const ImageGeneration = () => {
   const chatStreamAbortRef = useRef(null);
   const chatStreamingMessageIdRef = useRef(null);
   const chatStreamingSessionIdRef = useRef(null);
+  const chatImageUploadInputRef = useRef(null);
+  const chatFileUploadInputRef = useRef(null);
   const canvasChatCopiedMessageTimerRef = useRef(null);
   const canvasChatReasoningAutoCollapseTimersRef = useRef(new Map());
   const generationModeRef = useRef(generationMode);
@@ -4414,6 +4416,19 @@ const ImageGeneration = () => {
     setVideoReferenceImage(null);
   };
 
+  const buildCanvasChatUploadFile = (file, kind) => {
+    if (!file) {
+      return null;
+    }
+    return {
+      uid: `chat-${kind}-${Date.now()}`,
+      name: file.name || '',
+      size: file.size || 0,
+      type: file.type || '',
+      fileInstance: file,
+    };
+  };
+
   const inferCanvasChatFileMimeType = (file) => {
     const explicitType = String(file?.type || file?.fileInstance?.type || '')
       .trim()
@@ -4464,6 +4479,41 @@ const ImageGeneration = () => {
       return false;
     }
     return true;
+  };
+
+  const triggerHiddenChatUploadInput = (inputRef) => {
+    const input = inputRef?.current;
+    if (!input) {
+      return;
+    }
+    input.value = '';
+    input.click();
+  };
+
+  const handleChatImageInputChange = (event) => {
+    const selectedFile = event.target.files?.[0] || null;
+    event.target.value = '';
+    if (!selectedFile) {
+      return;
+    }
+    const uploadFile = buildCanvasChatUploadFile(selectedFile, 'image');
+    if (!uploadFile || !validateImageSize(uploadFile)) {
+      return;
+    }
+    void handleChatImageUpload({ fileList: [uploadFile] });
+  };
+
+  const handleChatFileInputChange = (event) => {
+    const selectedFile = event.target.files?.[0] || null;
+    event.target.value = '';
+    if (!selectedFile) {
+      return;
+    }
+    const uploadFile = buildCanvasChatUploadFile(selectedFile, 'file');
+    if (!uploadFile || !validateCanvasChatFileUpload(uploadFile)) {
+      return;
+    }
+    void handleChatFileUpload({ fileList: [uploadFile] });
   };
 
   const handleChatFileUpload = async ({ fileList }) => {
@@ -9667,6 +9717,107 @@ const ImageGeneration = () => {
         {icon}
       </div>
     );
+    const renderChatUploadDropdown = () => {
+      if (!showChatImageUpload && !showChatFileUpload) {
+        return null;
+      }
+      const dropdownKey = 'chat-upload';
+      const buttonText = `📎 ${t('上传')}`;
+      const closeDropdown = () => {
+        setActiveDropdownKey((current) =>
+          current === dropdownKey ? '' : current,
+        );
+      };
+      const openChatUploadInput = (inputRef) => {
+        closeDropdown();
+        triggerHiddenChatUploadInput(inputRef);
+      };
+      const menu = (
+        <Dropdown.Menu style={styles.darkMenu}>
+          {showChatImageUpload ? (
+            <Dropdown.Item
+              style={styles.darkMenuItem}
+              onClick={() => openChatUploadInput(chatImageUploadInputRef)}
+            >
+              <span style={styles.darkMenuItemContent}>
+                <span style={styles.pillButtonIcon}>
+                  <IconImage size='small' />
+                </span>
+                <span>{t('上传图片')}</span>
+              </span>
+            </Dropdown.Item>
+          ) : null}
+          {showChatFileUpload ? (
+            <Dropdown.Item
+              style={styles.darkMenuItem}
+              onClick={() => openChatUploadInput(chatFileUploadInputRef)}
+            >
+              <span style={styles.darkMenuItemContent}>
+                <span style={styles.pillButtonIcon}>
+                  <IconArchive size='small' />
+                </span>
+                <span>{t('上传文件')}</span>
+              </span>
+            </Dropdown.Item>
+          ) : null}
+        </Dropdown.Menu>
+      );
+
+      return (
+        <>
+          {showChatImageUpload ? (
+            <input
+              ref={chatImageUploadInputRef}
+              type='file'
+              accept='image/*'
+              style={{ display: 'none' }}
+              onChange={handleChatImageInputChange}
+            />
+          ) : null}
+          {showChatFileUpload ? (
+            <input
+              ref={chatFileUploadInputRef}
+              type='file'
+              accept='.pdf,.txt,text/plain,application/pdf'
+              style={{ display: 'none' }}
+              onChange={handleChatFileInputChange}
+            />
+          ) : null}
+          <Dropdown
+            trigger='click'
+            position='bottomLeft'
+            render={menu}
+            visible={activeDropdownKey === dropdownKey}
+            onVisibleChange={(visible) => {
+              setActiveDropdownKey((current) =>
+                visible ? dropdownKey : current === dropdownKey ? '' : current,
+              );
+            }}
+          >
+            <button
+              className='canvas-composer-pill'
+              type='button'
+              aria-label={buttonText}
+              title={buttonText}
+              data-composer-control-kind='upload'
+              data-composer-control-active={
+                activeDropdownKey === dropdownKey ? 'true' : 'false'
+              }
+              style={{
+                ...styles.pillButton,
+                ...(activeDropdownKey === dropdownKey
+                  ? styles.pillButtonActive
+                  : styles.pillButtonMuted),
+                cursor: 'pointer',
+              }}
+            >
+              <span style={styles.pillButtonLabel}>{buttonText}</span>
+              <IconChevronDown size='small' />
+            </button>
+          </Dropdown>
+        </>
+      );
+    };
     const chatDropdownModels = getChatModelsWithPreservedCurrent(
       chatModel,
       String(chatModel || '').trim() ===
@@ -9785,40 +9936,7 @@ const ImageGeneration = () => {
                   style={styles.promptLeadingSlot}
                   className='canvas-composer-leading-slot'
                 >
-                  {showChatImageUpload ? (
-                    <Upload
-                      action=''
-                      accept='image/*'
-                      multiple={false}
-                      fileList={
-                        chatImageAttachment ? [chatImageAttachment] : []
-                      }
-                      onChange={handleChatImageUpload}
-                      showUploadList={false}
-                      beforeUpload={validateImageSize}
-                    >
-                      {renderUploadIconButton({
-                        title: t('上传图片'),
-                        icon: <IconImage size='small' />,
-                      })}
-                    </Upload>
-                  ) : null}
-                  {showChatFileUpload ? (
-                    <Upload
-                      action=''
-                      accept='.pdf,.txt,text/plain,application/pdf'
-                      multiple={false}
-                      fileList={chatFileAttachment ? [chatFileAttachment] : []}
-                      onChange={handleChatFileUpload}
-                      showUploadList={false}
-                      beforeUpload={validateCanvasChatFileUpload}
-                    >
-                      {renderUploadIconButton({
-                        title: t('上传文件'),
-                        icon: <IconArchive size='small' />,
-                      })}
-                    </Upload>
-                  ) : null}
+                  {isChatMode ? renderChatUploadDropdown() : null}
                   {isImageMode && selectedModelSupportsEditing ? (
                     <Upload
                       action=''
