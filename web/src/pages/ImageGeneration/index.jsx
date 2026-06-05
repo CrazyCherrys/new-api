@@ -57,6 +57,7 @@ import {
   IconSidebar,
   IconCopy,
   IconPlus,
+  IconEdit,
 } from '@douyinfe/semi-icons';
 import {
   API,
@@ -64,6 +65,7 @@ import {
   authHeader,
   getUserIdFromLocalStorage,
   showError,
+  showInfo,
   showSuccess,
 } from '../../helpers';
 import {
@@ -93,7 +95,7 @@ import {
   createCanvasChatReasoningUiState,
   extractCanvasChatReasoning,
   getCanvasChatReasoningAutoCollapseRemainingMs,
-  getCanvasChatReasoningTriggerText,
+  getCanvasChatReasoningDurationMs,
   shouldAutoCollapseCanvasChatReasoning,
   shouldHideCanvasChatAssistantText,
   syncCanvasChatReasoningUiState,
@@ -148,6 +150,8 @@ const DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES = '8';
 const DEFAULT_CHAT_SUMMARY_RECENT_MESSAGES = '8';
 const CHAT_SUMMARY_STRATEGY_OPTIONS = ['0', '4', '8', '12', '16', '24', '32'];
 const CANVAS_AUTO_FOLLOW_BOTTOM_THRESHOLD = 96;
+const CANVAS_HISTORY_AUTOLOAD_TOP_THRESHOLD = 72;
+const CANVAS_CHAT_STREAMING_NOTICE_THROTTLE_MS = 1200;
 const CANVAS_CHAT_SUPPORTED_FILE_MIME_TYPES = new Set([
   'application/pdf',
   'text/plain',
@@ -886,6 +890,7 @@ const ImageGeneration = () => {
   const chatFileUploadInputRef = useRef(null);
   const canvasChatCopiedMessageTimerRef = useRef(null);
   const canvasChatReasoningAutoCollapseTimersRef = useRef(new Map());
+  const chatStreamingNoticeAtRef = useRef(0);
   const generationModeRef = useRef(generationMode);
   const selectedCanvasSessionIdsRef = useRef(selectedCanvasSessionIds);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
@@ -962,6 +967,34 @@ const ImageGeneration = () => {
     () => getRenderableCanvasMessages(displayedCanvasMessages),
     [displayedCanvasMessages],
   );
+  const chatContextDividerIndex = useMemo(() => {
+    if (generationMode !== CANVAS_MODE_CHAT || renderableCanvasMessages.length === 0) {
+      return -1;
+    }
+    const clearContextMessageId = Number(
+      selectedCanvasSession?.clear_context_message_id,
+    );
+    if (
+      !Number.isFinite(clearContextMessageId) ||
+      clearContextMessageId <= 0
+    ) {
+      return -1;
+    }
+    const firstPostClearIndex = renderableCanvasMessages.findIndex((message) => {
+      const numericMessageId = Number(message?.id);
+      return (
+        !Number.isFinite(numericMessageId) ||
+        numericMessageId > clearContextMessageId
+      );
+    });
+    return firstPostClearIndex >= 0
+      ? firstPostClearIndex
+      : renderableCanvasMessages.length;
+  }, [
+    generationMode,
+    renderableCanvasMessages,
+    selectedCanvasSession?.clear_context_message_id,
+  ]);
   const canvasChatRetryPromptByMessageId = useMemo(
     () => buildCanvasChatRetryPromptMap(displayedCanvasMessages),
     [displayedCanvasMessages],
@@ -1009,6 +1042,49 @@ const ImageGeneration = () => {
       setCanvasAutoFollowEnabledState(nextValue);
     }
     return nextValue;
+  };
+  const scrollCanvasViewportToBottom = ({
+    behavior = 'smooth',
+    enableAutoFollow = true,
+  } = {}) => {
+    const container = canvasMessageViewportRef.current;
+    if (!container) {
+      return;
+    }
+    if (enableAutoFollow) {
+      setCanvasAutoFollowEnabledState(true);
+    }
+    const nextTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    if (typeof container.scrollTo === 'function') {
+      container.scrollTo({ top: nextTop, behavior });
+      return;
+    }
+    container.scrollTop = nextTop;
+  };
+  const focusCanvasChatComposerInput = () => {
+    window.requestAnimationFrame(() => {
+      const textarea =
+        document.querySelector("[data-canvas-prompt-input='chat'] textarea") ||
+        document.querySelector("[data-canvas-prompt-input='chat']");
+      if (!textarea?.focus) {
+        return;
+      }
+      textarea.focus();
+      const selectionLength =
+        typeof textarea.value === 'string' ? textarea.value.length : 0;
+      textarea.setSelectionRange?.(selectionLength, selectionLength);
+    });
+  };
+  const showChatStreamingNotice = () => {
+    const now = Date.now();
+    if (
+      now - chatStreamingNoticeAtRef.current <
+      CANVAS_CHAT_STREAMING_NOTICE_THROTTLE_MS
+    ) {
+      return;
+    }
+    chatStreamingNoticeAtRef.current = now;
+    showInfo(t('当前回复仍在生成，请先停止后再发送下一条消息'));
   };
   const updateCurrentCanvasSessionModel = async (mode, modelId) => {
     const normalizedMode = CANVAS_MODES.includes(mode) ? mode : generationMode;
@@ -2172,6 +2248,9 @@ const ImageGeneration = () => {
     ) {
       return [];
     }
+    const container = canvasMessageViewportRef.current;
+    const previousScrollTop = container?.scrollTop || 0;
+    const previousScrollHeight = container?.scrollHeight || 0;
     setCanvasMessagesLoadingMore(true);
     try {
       const res = await API.get(`/api/canvas/sessions/${sessionId}/messages`, {
@@ -2191,6 +2270,24 @@ const ImageGeneration = () => {
       setCanvasMessages((prev) => mergeCanvasMessagesById(prev, items));
       setCanvasMessagesHasMore(page.has_more === true);
       setCanvasMessagesNextCursor(page.next_cursor || '');
+      if (
+        generationMode === CANVAS_MODE_CHAT &&
+        container &&
+        items.length > 0
+      ) {
+        window.requestAnimationFrame(() => {
+          const activeContainer = canvasMessageViewportRef.current;
+          if (!activeContainer || !isCurrentCanvasMessageSession(sessionId)) {
+            return;
+          }
+          activeContainer.scrollTop = Math.max(
+            0,
+            activeContainer.scrollHeight -
+              previousScrollHeight +
+              previousScrollTop,
+          );
+        });
+      }
       return items;
     } catch (error) {
       if (!isCurrentCanvasMessageSession(sessionId)) {
@@ -5393,9 +5490,7 @@ const ImageGeneration = () => {
 
   const handleSendChatMessage = async (promptOverride = '') => {
     if (chatStreaming) {
-      if (!promptOverride) {
-        stopChatStream();
-      }
+      showChatStreamingNotice();
       return;
     }
 
@@ -5476,7 +5571,7 @@ const ImageGeneration = () => {
       const controller = new AbortController();
       chatStreamAbortRef.current = controller;
       chatStreamingSessionIdRef.current = activeSessionId;
-      chatStreamingMessageIdRef.current = null;
+      chatStreamingMessageIdRef.current = `${clientRequestId}-assistant`;
       setChatStreaming(true);
       setCanvasMessagesError('');
 
@@ -6170,6 +6265,12 @@ const ImageGeneration = () => {
       transition:
         'transform 0.18s ease, opacity 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease',
     },
+    uploadIconBtnActive: {
+      '--canvas-control-border': 'var(--canvas-primary-soft-border)',
+      '--canvas-control-bg': 'var(--canvas-primary-soft-bg)',
+      '--canvas-control-text': 'var(--canvas-primary)',
+      '--canvas-control-shadow': 'var(--canvas-shadow-sm)',
+    },
     pillButton: {
       '--canvas-pill-border': 'var(--canvas-border)',
       '--canvas-pill-bg': 'var(--canvas-card-bg)',
@@ -6517,6 +6618,24 @@ const ImageGeneration = () => {
       transition:
         'transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease',
     },
+    generateStopBtnEmbedded: {
+      width: 40,
+      height: 40,
+      minWidth: 40,
+      borderRadius: 14,
+      border: '1px solid var(--canvas-status-neutral-border)',
+      background: 'var(--canvas-card-bg)',
+      color: 'var(--canvas-text-secondary)',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+      marginBottom: 2,
+      boxShadow: 'none',
+      transition:
+        'transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease',
+    },
     generateStopIcon: {
       width: 12,
       height: 12,
@@ -6647,6 +6766,13 @@ const ImageGeneration = () => {
       flexWrap: 'wrap',
       minWidth: 0,
     },
+    composerActionGroup: {
+      display: 'flex',
+      alignItems: 'flex-end',
+      gap: 8,
+      flexShrink: 0,
+      paddingBottom: 2,
+    },
     filterLabel: {
       fontSize: 13,
       color: 'var(--canvas-text-muted)',
@@ -6708,6 +6834,31 @@ const ImageGeneration = () => {
         'linear-gradient(180deg, rgba(245, 247, 251, 0) 0%, rgba(245, 247, 251, 0.82) 22%, rgba(245, 247, 251, 0.98) 100%)',
       padding: isMobile ? '10px 10px 12px' : '8px 24px 16px',
     },
+    chatAutoFollowDock: {
+      width: '100%',
+      maxWidth: isMobile ? '100%' : 1040,
+      margin: '0 auto 10px',
+      display: 'flex',
+      justifyContent: 'flex-end',
+      padding: isMobile ? '0 2px' : '0 4px',
+    },
+    chatAutoFollowButton: {
+      height: 32,
+      borderRadius: 999,
+      border: '1px solid var(--canvas-primary-soft-border)',
+      background: 'rgba(255, 255, 255, 0.94)',
+      color: 'var(--canvas-primary)',
+      padding: '0 12px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      fontSize: 13,
+      fontWeight: 600,
+      boxShadow: 'var(--canvas-shadow-sm)',
+      cursor: 'pointer',
+      transition:
+        'transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease',
+    },
     composerShell: {
       width: '100%',
       maxWidth: isMobile ? '100%' : 1040,
@@ -6761,6 +6912,17 @@ const ImageGeneration = () => {
       flexDirection: 'column',
       gap: isMobile ? 8 : 10,
       width: '100%',
+    },
+    canvasMessageHistoryHint: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      width: '100%',
+      color: 'var(--canvas-text-muted)',
+      fontSize: 12,
+      lineHeight: 1.5,
+      padding: '2px 0 4px',
     },
     canvasChatMessageRow: {
       width: '100%',
@@ -6909,6 +7071,12 @@ const ImageGeneration = () => {
     canvasChatTextStatusError: {
       color: 'var(--canvas-status-error-text)',
     },
+    canvasChatStatusDetail: {
+      maxWidth: '100%',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      overflowWrap: 'anywhere',
+    },
     canvasChatInlineStatus: {
       display: 'inline-flex',
       alignItems: 'center',
@@ -6941,11 +7109,32 @@ const ImageGeneration = () => {
       overflowWrap: 'anywhere',
       lineHeight: 1.55,
     },
+    canvasChatMetaRow: {
+      width: '100%',
+      display: 'flex',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 12,
+      minHeight: 28,
+    },
+    canvasChatMetaRowUser: {
+      justifyContent: 'flex-end',
+    },
+    canvasChatStatusSlot: {
+      flex: 1,
+      minWidth: 0,
+      display: 'flex',
+      alignItems: 'center',
+      minHeight: 28,
+    },
+    canvasChatStatusSlotEmpty: {
+      visibility: 'hidden',
+    },
     canvasChatActions: {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
-      opacity: isMobile ? 0.72 : 0.58,
+      opacity: isMobile ? 0.72 : 0.18,
       transform: 'translateY(0)',
       transition: 'opacity 0.16s ease, transform 0.16s ease',
       pointerEvents: 'auto',
@@ -8297,7 +8486,19 @@ const ImageGeneration = () => {
   };
 
   const handleCanvasWorkspaceScroll = (event) => {
-    syncCanvasAutoFollowState(event.currentTarget);
+    const container = event.currentTarget;
+    syncCanvasAutoFollowState(container);
+    if (
+      generationMode !== CANVAS_MODE_CHAT ||
+      !selectedCanvasSession?.id ||
+      canvasMessagesLoadingMore ||
+      !canvasMessagesHasMore
+    ) {
+      return;
+    }
+    if (container.scrollTop <= CANVAS_HISTORY_AUTOLOAD_TOP_THRESHOLD) {
+      void loadOlderCanvasMessages(selectedCanvasSession.id);
+    }
   };
 
   const renderCanvasSessionList = () => (
@@ -8567,34 +8768,11 @@ const ImageGeneration = () => {
     );
   };
 
-  const renderChatWorkspace = () => {
-    const contextCleared =
-      Number(selectedCanvasSession?.clear_context_message_id) > 0;
-    return (
-      <div style={styles.chatStream} className='canvas-chat-stream'>
-        {contextCleared ? (
-          <div
-            style={styles.chatContextNotice}
-            className='canvas-chat-context-notice'
-          >
-            <div style={styles.chatContextNoticeText}>
-              <Text size='small' style={{ color: 'inherit' }}>
-                {t('当前会话已从新话题继续，较早消息仅展示不再参与后续上下文')}
-              </Text>
-            </div>
-            <Button
-              size='small'
-              type='tertiary'
-              onClick={() => toggleCanvasSessionContext(selectedCanvasSession)}
-            >
-              {t('恢复上下文')}
-            </Button>
-          </div>
-        ) : null}
-        {renderCanvasMessageStream()}
-      </div>
-    );
-  };
+  const renderChatWorkspace = () => (
+    <div style={styles.chatStream} className='canvas-chat-stream'>
+      {renderCanvasMessageStream()}
+    </div>
+  );
 
   const renderCanvasReferenceThumb = (file, fallbackLabel) => (
     <div
@@ -8683,7 +8861,27 @@ const ImageGeneration = () => {
   };
 
   const getCanvasChatCopyTooltipText = (message) =>
-    canvasChatCopiedMessageId === message?.id ? t('已复制') : t('复制');
+    canvasChatCopiedMessageId === message?.id
+      ? t('已复制')
+      : message?.role === 'user'
+        ? t('复制问题')
+        : t('复制回答');
+
+  const getCanvasChatReasoningToggleText = (uiState) => {
+    if (uiState?.isReasoningStreaming) {
+      return t('思考过程');
+    }
+    const durationMs = getCanvasChatReasoningDurationMs(uiState);
+    if (durationMs <= 0) {
+      return t('思考过程');
+    }
+    if (durationMs < 2000) {
+      return t('思考了几秒');
+    }
+    return t('思考了 {{count}} 秒', {
+      count: Math.max(1, Math.round(durationMs / 1000)),
+    });
+  };
 
   const resetCanvasChatCopiedTooltip = () => {
     if (canvasChatCopiedMessageTimerRef.current) {
@@ -8732,6 +8930,148 @@ const ImageGeneration = () => {
     }
     await handleSendChatMessage(prompt);
   };
+
+  const handleReuseCanvasChatPrompt = (event, message) => {
+    event?.stopPropagation?.();
+    const prompt = String(message?.prompt || '').trim();
+    if (!prompt) {
+      showInfo(t('该问题暂无可编辑内容'));
+      return;
+    }
+    setChatPrompt(prompt);
+    scrollCanvasViewportToBottom();
+    focusCanvasChatComposerInput();
+  };
+
+  const handleResumeCanvasAutoFollow = () => {
+    scrollCanvasViewportToBottom({
+      behavior: 'smooth',
+      enableAutoFollow: true,
+    });
+  };
+
+  const renderCanvasChatActionButton = ({
+    actionKey,
+    tooltip,
+    ariaLabel,
+    message,
+    onClick,
+    icon,
+    disabled = false,
+  }) => {
+    const tooltipKey = `${actionKey}-${message?.id ?? ''}`;
+    const isCopyAction = actionKey === 'copy';
+    const tooltipVisible =
+      activeCanvasChatActionTooltipKey === tooltipKey ||
+      (isCopyAction && canvasChatCopiedMessageId === message?.id);
+    return (
+      <Tooltip
+        content={tooltip}
+        position='top'
+        trigger='custom'
+        visible={tooltipVisible}
+      >
+        <button
+          type='button'
+          aria-label={ariaLabel}
+          title={ariaLabel}
+          className='canvas-chat-action-button'
+          style={{
+            ...styles.canvasChatActionButton,
+            ...(disabled ? styles.canvasChatActionButtonDisabled : null),
+          }}
+          onMouseEnter={() => {
+            if (!isCopyAction) {
+              resetCanvasChatCopiedTooltip();
+            }
+            setActiveCanvasChatActionTooltipKey(tooltipKey);
+          }}
+          onFocus={() => {
+            if (!isCopyAction) {
+              resetCanvasChatCopiedTooltip();
+            }
+            setActiveCanvasChatActionTooltipKey(tooltipKey);
+          }}
+          onMouseLeave={() => {
+            setActiveCanvasChatActionTooltipKey((current) =>
+              current === tooltipKey ? '' : current,
+            );
+          }}
+          onBlur={() => {
+            setActiveCanvasChatActionTooltipKey((current) =>
+              current === tooltipKey ? '' : current,
+            );
+          }}
+          onClick={(event) => onClick(event, message)}
+          disabled={disabled}
+        >
+          {icon}
+        </button>
+      </Tooltip>
+    );
+  };
+
+  const renderCanvasChatStatus = (statusInfo) => {
+    if (!statusInfo) {
+      return null;
+    }
+    const toneClassName =
+      statusInfo.tone === 'error'
+        ? 'canvas-chat-text-status canvas-chat-text-status--error'
+        : statusInfo.tone === 'neutral'
+          ? 'canvas-chat-text-status canvas-chat-text-status--neutral'
+          : 'canvas-chat-text-status';
+    return (
+      <div
+        style={{
+          ...styles.canvasChatTextStatus,
+          ...(statusInfo.tone === 'error'
+            ? styles.canvasChatTextStatusError
+            : null),
+          ...(statusInfo.tone === 'neutral'
+            ? styles.canvasChatTextStatusNeutral
+            : null),
+          ...(statusInfo.tone === 'error' ? styles.canvasChatErrorText : null),
+        }}
+        className={toneClassName}
+        role='status'
+        aria-live='polite'
+      >
+        {statusInfo.pending ? <Spin size='small' /> : null}
+        <span>{statusInfo.label}</span>
+        {statusInfo.detail ? (
+          <span style={styles.canvasChatStatusDetail}>{`· ${statusInfo.detail}`}</span>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderCanvasChatContextDivider = ({
+    key,
+    hasFollowingMessages = true,
+  } = {}) => (
+    <div
+      key={key}
+      style={styles.chatContextNotice}
+      className='canvas-chat-context-divider'
+      data-canvas-chat-context-divider='true'
+    >
+      <div style={styles.chatContextNoticeText}>
+        <Text size='small' style={{ color: 'inherit' }}>
+          {hasFollowingMessages
+            ? t('以下消息从新话题继续，以上内容仅作展示，不再参与后续上下文')
+            : t('新的话题将从这里开始，以上内容仅作展示，不再参与后续上下文')}
+        </Text>
+      </div>
+      <Button
+        size='small'
+        type='tertiary'
+        onClick={() => toggleCanvasSessionContext(selectedCanvasSession)}
+      >
+        {t('恢复上下文')}
+      </Button>
+    </div>
+  );
 
   const handleCopyCanvasError = async (event, errorText) => {
     event?.stopPropagation?.();
@@ -9163,7 +9503,7 @@ const ImageGeneration = () => {
           : null);
       const reasoningExpanded = !!reasoningUiState?.isExpanded;
       const reasoningTriggerText = hasAssistantReasoning
-        ? getCanvasChatReasoningTriggerText(reasoningUiState)
+        ? getCanvasChatReasoningToggleText(reasoningUiState)
         : '';
       const hideAssistantTextWhileReasoning = shouldHideCanvasChatAssistantText(
         {
@@ -9176,8 +9516,36 @@ const ImageGeneration = () => {
         : assistantText;
       const retryPrompt = isUser ? '' : getCanvasChatRetryPrompt(message);
       const actionVisible =
-        !isUser &&
-        (hoveredCanvasChatMessageId === message.id || isSelected);
+        hoveredCanvasChatMessageId === message.id || isSelected;
+      const assistantStatusInfo = !isUser
+        ? chatStatus === 'failed'
+          ? {
+              tone: 'error',
+              label: t('失败'),
+              detail: String(message.error_message || '').trim(),
+              pending: false,
+            }
+          : chatStatus === 'stopped'
+            ? {
+                tone: 'neutral',
+                label: t('已停止'),
+                detail: '',
+                pending: false,
+              }
+            : chatStatus === 'generating'
+              ? {
+                  tone: 'default',
+                  label:
+                    hasAssistantReasoning &&
+                    reasoningUiState?.isReasoningStreaming &&
+                    !displayAssistantText
+                      ? t('思考中')
+                      : t('回答中'),
+                  detail: '',
+                  pending: true,
+                }
+              : null
+        : null;
       return (
         <div
           key={message.id}
@@ -9195,12 +9563,12 @@ const ImageGeneration = () => {
           }}
           onClick={handleMessageClick}
           onMouseEnter={() => {
-            if (!isMobile && !isUser) {
+            if (!isMobile) {
               setHoveredCanvasChatMessageId(message.id);
             }
           }}
           onMouseLeave={() => {
-            if (!isMobile && !isUser) {
+            if (!isMobile) {
               setHoveredCanvasChatMessageId((current) =>
                 current === message.id ? null : current,
               );
@@ -9208,31 +9576,65 @@ const ImageGeneration = () => {
           }}
         >
           {isUser ? (
-            <div
-              className='canvas-chat-user-bubble'
-              style={{
-                ...styles.canvasChatUserBubble,
-                ...(isSelected ? styles.canvasChatUserBubbleSelected : null),
-              }}
-            >
-              <div style={styles.canvasChatUserPrompt}>
-                {message.prompt || t('请输入消息')}
+            <>
+              <div
+                className='canvas-chat-user-bubble'
+                style={{
+                  ...styles.canvasChatUserBubble,
+                  ...(isSelected ? styles.canvasChatUserBubbleSelected : null),
+                }}
+              >
+                <div style={styles.canvasChatUserPrompt}>
+                  {message.prompt || t('请输入消息')}
+                </div>
+                {chatAttachments.length > 0 ? (
+                  <div style={styles.canvasChatAttachmentList}>
+                    {chatAttachments.map((attachment) =>
+                      renderCanvasChatAttachment(attachment),
+                    )}
+                  </div>
+                ) : null}
+                {showMessageReferences && references.length > 0 ? (
+                  <div style={styles.canvasMessageRefs}>
+                    {references.map((file) =>
+                      renderCanvasReferenceThumb(file, t('参考图')),
+                    )}
+                  </div>
+                ) : null}
               </div>
-              {chatAttachments.length > 0 ? (
-                <div style={styles.canvasChatAttachmentList}>
-                  {chatAttachments.map((attachment) =>
-                    renderCanvasChatAttachment(attachment),
-                  )}
+              <div
+                style={{
+                  ...styles.canvasChatMetaRow,
+                  ...styles.canvasChatMetaRowUser,
+                }}
+                className='canvas-chat-message-meta-row canvas-chat-message-meta-row--user'
+              >
+                <div
+                  style={{
+                    ...styles.canvasChatActions,
+                    ...(actionVisible ? styles.canvasChatActionsVisible : null),
+                  }}
+                  className='canvas-chat-actions'
+                >
+                  {renderCanvasChatActionButton({
+                    actionKey: 'copy',
+                    tooltip: getCanvasChatCopyTooltipText(message),
+                    ariaLabel: t('复制问题'),
+                    message,
+                    onClick: handleCopyCanvasChatMessage,
+                    icon: <IconCopy size='small' />,
+                  })}
+                  {renderCanvasChatActionButton({
+                    actionKey: 'reuse',
+                    tooltip: t('放回输入框编辑'),
+                    ariaLabel: t('放回输入框编辑后发送'),
+                    message,
+                    onClick: handleReuseCanvasChatPrompt,
+                    icon: <IconEdit size='small' />,
+                  })}
                 </div>
-              ) : null}
-              {showMessageReferences && references.length > 0 ? (
-                <div style={styles.canvasMessageRefs}>
-                  {references.map((file) =>
-                    renderCanvasReferenceThumb(file, t('参考图')),
-                  )}
-                </div>
-              ) : null}
-            </div>
+              </div>
+            </>
           ) : (
             <div
               className='canvas-chat-assistant-card'
@@ -9292,35 +9694,6 @@ const ImageGeneration = () => {
                   className='canvas-chat-markdown canvas-chat-markdown--assistant'
                   style={styles.canvasChatMarkdown}
                 />
-              ) : chatStatus === 'generating' && !hasAssistantReasoning ? (
-                <div
-                  style={styles.canvasChatTextStatus}
-                  className='canvas-chat-text-status'
-                >
-                  <Spin size='small' />
-                  <span>{t('生成中')}</span>
-                </div>
-              ) : chatStatus === 'stopped' ? (
-                <div
-                  style={{
-                    ...styles.canvasChatTextStatus,
-                    ...styles.canvasChatTextStatusNeutral,
-                  }}
-                  className='canvas-chat-text-status canvas-chat-text-status--neutral'
-                >
-                  <span>{t('已停止')}</span>
-                </div>
-              ) : chatStatus === 'failed' ? (
-                <div
-                  style={{
-                    ...styles.canvasChatTextStatus,
-                    ...styles.canvasChatTextStatusError,
-                    ...styles.canvasChatErrorText,
-                  }}
-                  className='canvas-chat-text-status canvas-chat-text-status--error'
-                >
-                  <span>{message.error_message || t('发送失败')}</span>
-                </div>
               ) : null}
               {showMessageReferences && references.length > 0 ? (
                 <div style={styles.canvasMessageRefs}>
@@ -9329,130 +9702,50 @@ const ImageGeneration = () => {
                   )}
                 </div>
               ) : null}
-              {displayAssistantText && chatStatus === 'generating' ? (
-                <div
-                  style={styles.canvasChatTextStatus}
-                  className='canvas-chat-text-status'
-                >
-                  <Spin size='small' />
-                  <span>{t('生成中')}</span>
-                </div>
-              ) : null}
-              {displayAssistantText && chatStatus === 'stopped' ? (
-                <div
-                  style={{
-                    ...styles.canvasChatTextStatus,
-                    ...styles.canvasChatTextStatusNeutral,
-                  }}
-                  className='canvas-chat-text-status canvas-chat-text-status--neutral'
-                >
-                  <span>{t('已停止')}</span>
-                </div>
-              ) : null}
-              {displayAssistantText && chatStatus === 'failed' ? (
-                <div
-                  style={{
-                    ...styles.canvasChatTextStatus,
-                    ...styles.canvasChatTextStatusError,
-                    ...styles.canvasChatErrorText,
-                  }}
-                  className='canvas-chat-text-status canvas-chat-text-status--error'
-                >
-                  <span>{message.error_message || t('发送失败')}</span>
-                </div>
-              ) : null}
               <div
-                style={{
-                  ...styles.canvasChatActions,
-                  ...(actionVisible ? styles.canvasChatActionsVisible : null),
-                }}
-                className='canvas-chat-actions'
+                style={styles.canvasChatMetaRow}
+                className='canvas-chat-message-meta-row canvas-chat-message-meta-row--assistant'
               >
-                {displayAssistantText ? (
-                  <Tooltip
-                    content={getCanvasChatCopyTooltipText(message)}
-                    position='top'
-                    trigger='custom'
-                    visible={
-                      activeCanvasChatActionTooltipKey === `copy-${message.id}` ||
-                      canvasChatCopiedMessageId === message.id
-                    }
-                  >
-                    <button
-                      type='button'
-                      aria-label={t('复制')}
-                      className='canvas-chat-action-button'
-                      style={styles.canvasChatActionButton}
-                      onMouseEnter={() =>
-                        setActiveCanvasChatActionTooltipKey(`copy-${message.id}`)
-                      }
-                      onFocus={() =>
-                        setActiveCanvasChatActionTooltipKey(`copy-${message.id}`)
-                      }
-                      onMouseLeave={() => {
-                        setActiveCanvasChatActionTooltipKey((current) =>
-                          current === `copy-${message.id}` ? '' : current,
-                        );
-                      }}
-                      onBlur={() => {
-                        setActiveCanvasChatActionTooltipKey((current) =>
-                          current === `copy-${message.id}` ? '' : current,
-                        );
-                      }}
-                      onClick={(event) =>
-                        handleCopyCanvasChatMessage(event, message)
-                      }
-                    >
-                      <IconCopy size='small' />
-                    </button>
-                  </Tooltip>
-                ) : null}
-                {retryPrompt ? (
-                  <Tooltip
-                    content={t('重发')}
-                    position='top'
-                    trigger='custom'
-                    visible={
-                      activeCanvasChatActionTooltipKey === `retry-${message.id}`
-                    }
-                  >
-                    <button
-                      type='button'
-                      aria-label={t('重发')}
-                      className='canvas-chat-action-button'
-                      style={{
-                        ...styles.canvasChatActionButton,
-                        ...(chatStreaming
-                          ? styles.canvasChatActionButtonDisabled
-                          : null),
-                      }}
-                      onMouseEnter={() => {
-                        resetCanvasChatCopiedTooltip();
-                        setActiveCanvasChatActionTooltipKey(`retry-${message.id}`);
-                      }}
-                      onFocus={() => {
-                        resetCanvasChatCopiedTooltip();
-                        setActiveCanvasChatActionTooltipKey(`retry-${message.id}`);
-                      }}
-                      onMouseLeave={() => {
-                        setActiveCanvasChatActionTooltipKey((current) =>
-                          current === `retry-${message.id}` ? '' : current,
-                        );
-                      }}
-                      onBlur={() => {
-                        setActiveCanvasChatActionTooltipKey((current) =>
-                          current === `retry-${message.id}` ? '' : current,
-                        );
-                      }}
-                      onClick={(event) =>
-                        handleRetryCanvasChatMessage(event, message)
-                      }
-                      disabled={chatStreaming}
-                    >
-                      <IconRefresh size='small' />
-                    </button>
-                  </Tooltip>
-                ) : null}
+                <div
+                  style={{
+                    ...styles.canvasChatStatusSlot,
+                    ...(assistantStatusInfo
+                      ? null
+                      : styles.canvasChatStatusSlotEmpty),
+                  }}
+                >
+                  {renderCanvasChatStatus(assistantStatusInfo)}
+                </div>
+                <div
+                  style={{
+                    ...styles.canvasChatActions,
+                    ...(actionVisible ? styles.canvasChatActionsVisible : null),
+                    marginLeft: 'auto',
+                  }}
+                  className='canvas-chat-actions'
+                >
+                  {displayAssistantText
+                    ? renderCanvasChatActionButton({
+                        actionKey: 'copy',
+                        tooltip: getCanvasChatCopyTooltipText(message),
+                        ariaLabel: t('复制回答'),
+                        message,
+                        onClick: handleCopyCanvasChatMessage,
+                        icon: <IconCopy size='small' />,
+                      })
+                    : null}
+                  {retryPrompt
+                    ? renderCanvasChatActionButton({
+                        actionKey: 'retry',
+                        tooltip: t('重发'),
+                        ariaLabel: t('重发'),
+                        message,
+                        onClick: handleRetryCanvasChatMessage,
+                        icon: <IconRefresh size='small' />,
+                        disabled: chatStreaming,
+                      })
+                    : null}
+                </div>
               </div>
             </div>
           )}
@@ -9562,25 +9855,39 @@ const ImageGeneration = () => {
     }
     return (
       <div style={styles.canvasMessageList} className='canvas-message-list'>
-        {canvasMessagesHasMore ? (
+        {generationMode === CANVAS_MODE_CHAT &&
+        (canvasMessagesHasMore || canvasMessagesLoadingMore) ? (
           <div
-            style={{
-              display: 'flex',
-              justifyContent: 'center',
-              marginBottom: 12,
-            }}
+            style={styles.canvasMessageHistoryHint}
+            className='canvas-chat-history-hint'
           >
-            <Button
-              size='small'
-              theme='borderless'
-              loading={canvasMessagesLoadingMore}
-              onClick={() => loadOlderCanvasMessages(selectedCanvasSession.id)}
-            >
-              {t('加载更早消息')}
-            </Button>
+            {canvasMessagesLoadingMore ? <Spin size='small' /> : null}
+            <span>
+              {canvasMessagesLoadingMore
+                ? t('加载更早消息中')
+                : t('上滚加载更早消息')}
+            </span>
           </div>
         ) : null}
-        {renderableCanvasMessages.map(renderCanvasMessage)}
+        {renderableCanvasMessages.map((message, index) => (
+          <React.Fragment key={message.id}>
+            {generationMode === CANVAS_MODE_CHAT &&
+            chatContextDividerIndex === index
+              ? renderCanvasChatContextDivider({
+                  key: `chat-context-divider-${message.id}`,
+                  hasFollowingMessages: true,
+                })
+              : null}
+            {renderCanvasMessage(message)}
+          </React.Fragment>
+        ))}
+        {generationMode === CANVAS_MODE_CHAT &&
+        chatContextDividerIndex === renderableCanvasMessages.length
+          ? renderCanvasChatContextDivider({
+              key: 'chat-context-divider-tail',
+              hasFollowingMessages: false,
+            })
+          : null}
       </div>
     );
   };
@@ -9647,21 +9954,19 @@ const ImageGeneration = () => {
       isChatMode && (!!chatImageAttachment || !!chatFileAttachment);
     const promptHasContent = activePrompt.trim().length > 0;
     const submitLoading = isChatMode
-      ? chatStreaming
+      ? false
       : isVideoMode
         ? videoGenerating
         : isImageMode
           ? generating
           : false;
     const submitDisabled = isChatMode
-      ? chatStreaming
-        ? false
-        : !promptHasContent
+      ? !promptHasContent
       : isVideoMode
         ? videoGenerating || !canGenerateVideo
         : generating || !canGenerate;
     const submitEmphasis =
-      promptHasContent || (isChatMode && chatStreaming) ? 'primary' : 'idle';
+      promptHasContent ? 'primary' : 'idle';
     const placeholder = isChatMode
       ? t('输入消息...')
       : isVideoMode
@@ -9721,7 +10026,7 @@ const ImageGeneration = () => {
         return null;
       }
       const dropdownKey = 'chat-upload';
-      const buttonText = `📎 ${t('上传')}`;
+      const buttonLabel = t('添加附件');
       const closeDropdown = () => {
         setActiveDropdownKey((current) =>
           current === dropdownKey ? '' : current,
@@ -9794,24 +10099,25 @@ const ImageGeneration = () => {
             }}
           >
             <button
-              className='canvas-composer-pill'
+              className='canvas-composer-upload-btn'
               type='button'
-              aria-label={buttonText}
-              title={buttonText}
+              aria-label={buttonLabel}
+              title={buttonLabel}
+              aria-haspopup='menu'
+              aria-expanded={activeDropdownKey === dropdownKey}
               data-composer-control-kind='upload'
               data-composer-control-active={
                 activeDropdownKey === dropdownKey ? 'true' : 'false'
               }
               style={{
-                ...styles.pillButton,
+                ...styles.uploadIconBtn,
                 ...(activeDropdownKey === dropdownKey
-                  ? styles.pillButtonActive
-                  : styles.pillButtonMuted),
+                  ? styles.uploadIconBtnActive
+                  : null),
                 cursor: 'pointer',
               }}
             >
-              <span style={styles.pillButtonLabel}>{buttonText}</span>
-              <IconChevronDown size='small' />
+              <IconPlus size='small' />
             </button>
           </Dropdown>
         </>
@@ -9919,6 +10225,25 @@ const ImageGeneration = () => {
 
     return (
       <div style={styles.composerDock} className='canvas-composer-dock'>
+        {isChatMode &&
+        displayedCanvasMessages.length > 0 &&
+        !canvasAutoFollowEnabled ? (
+          <div style={styles.chatAutoFollowDock}>
+            <button
+              type='button'
+              className='canvas-chat-follow-resume'
+              style={styles.chatAutoFollowButton}
+              onClick={handleResumeCanvasAutoFollow}
+            >
+              <IconChevronDown size='small' />
+              <span>
+                {chatStreaming
+                  ? t('回到底部并继续跟随')
+                  : t('回到底部')}
+              </span>
+            </button>
+          </div>
+        ) : null}
         <div
           style={styles.composerShell}
           className='canvas-composer-shell'
@@ -10034,51 +10359,53 @@ const ImageGeneration = () => {
                 autosize={{ minRows: 1, maxRows: 12 }}
                 style={styles.promptInput}
               />
-              <button
-                className='canvas-composer-submit'
-                aria-label={
-                  isChatMode
-                    ? chatStreaming
-                      ? t('停止生成')
-                      : t('发送消息')
-                    : isVideoMode
-                      ? t('生成视频')
-                      : t('生成图片')
-                }
-                style={{
-                  ...styles.generateIconBtnEmbedded,
-                  opacity: submitDisabled ? 0.55 : 1,
-                  pointerEvents: submitDisabled ? 'none' : 'auto',
-                  '--canvas-submit-bg':
-                    promptHasContent || (isChatMode && chatStreaming)
+              <div style={styles.composerActionGroup}>
+                {isChatMode && chatStreaming ? (
+                  <button
+                    className='canvas-composer-stop'
+                    aria-label={t('停止回复')}
+                    title={t('停止回复')}
+                    style={styles.generateStopBtnEmbedded}
+                    onClick={() => stopChatStream()}
+                    type='button'
+                  >
+                    <span style={styles.generateStopIcon} />
+                  </button>
+                ) : null}
+                <button
+                  className='canvas-composer-submit'
+                  aria-label={
+                    isChatMode
+                      ? t('发送消息')
+                      : isVideoMode
+                        ? t('生成视频')
+                        : t('生成图片')
+                  }
+                  style={{
+                    ...styles.generateIconBtnEmbedded,
+                    opacity: submitDisabled ? 0.55 : 1,
+                    pointerEvents: submitDisabled ? 'none' : 'auto',
+                    '--canvas-submit-bg': promptHasContent
                       ? 'var(--canvas-primary)'
                       : 'var(--canvas-toolbar-bg)',
-                  '--canvas-submit-border':
-                    promptHasContent || (isChatMode && chatStreaming)
+                    '--canvas-submit-border': promptHasContent
                       ? 'var(--canvas-primary)'
                       : 'var(--canvas-border)',
-                  '--canvas-submit-color':
-                    promptHasContent || (isChatMode && chatStreaming)
+                    '--canvas-submit-color': promptHasContent
                       ? 'var(--text-inverse)'
                       : 'var(--canvas-text-muted)',
-                  '--canvas-submit-shadow':
-                    promptHasContent || (isChatMode && chatStreaming)
+                    '--canvas-submit-shadow': promptHasContent
                       ? '0 14px 30px rgba(109, 93, 246, 0.22)'
                       : 'none',
-                }}
-                data-submit-emphasis={submitEmphasis}
-                onClick={handleComposerSubmit}
-                disabled={submitDisabled}
-                type='button'
-              >
-                {isChatMode && chatStreaming ? (
-                  <span style={styles.generateStopIcon} />
-                ) : submitLoading ? (
-                  <Spin size='small' />
-                ) : (
-                  <IconSend size='small' />
-                )}
-              </button>
+                  }}
+                  data-submit-emphasis={submitEmphasis}
+                  onClick={handleComposerSubmit}
+                  disabled={submitDisabled}
+                  type='button'
+                >
+                  {submitLoading ? <Spin size='small' /> : <IconSend size='small' />}
+                </button>
+              </div>
             </div>
             <div
               style={styles.promptControls}
