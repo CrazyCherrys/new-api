@@ -747,8 +747,10 @@ const ImageGeneration = () => {
   const [hoveredCanvasSessionId, setHoveredCanvasSessionId] = useState(null);
   const [hoveredCanvasChatMessageId, setHoveredCanvasChatMessageId] =
     useState(null);
-  const [activeCanvasChatActionTooltipKey, setActiveCanvasChatActionTooltipKey] =
-    useState('');
+  const [
+    activeCanvasChatActionTooltipKey,
+    setActiveCanvasChatActionTooltipKey,
+  ] = useState('');
   const [canvasChatCopiedMessageId, setCanvasChatCopiedMessageId] =
     useState(null);
   const [
@@ -968,25 +970,27 @@ const ImageGeneration = () => {
     [displayedCanvasMessages],
   );
   const chatContextDividerIndex = useMemo(() => {
-    if (generationMode !== CANVAS_MODE_CHAT || renderableCanvasMessages.length === 0) {
+    if (
+      generationMode !== CANVAS_MODE_CHAT ||
+      renderableCanvasMessages.length === 0
+    ) {
       return -1;
     }
     const clearContextMessageId = Number(
       selectedCanvasSession?.clear_context_message_id,
     );
-    if (
-      !Number.isFinite(clearContextMessageId) ||
-      clearContextMessageId <= 0
-    ) {
+    if (!Number.isFinite(clearContextMessageId) || clearContextMessageId <= 0) {
       return -1;
     }
-    const firstPostClearIndex = renderableCanvasMessages.findIndex((message) => {
-      const numericMessageId = Number(message?.id);
-      return (
-        !Number.isFinite(numericMessageId) ||
-        numericMessageId > clearContextMessageId
-      );
-    });
+    const firstPostClearIndex = renderableCanvasMessages.findIndex(
+      (message) => {
+        const numericMessageId = Number(message?.id);
+        return (
+          !Number.isFinite(numericMessageId) ||
+          numericMessageId > clearContextMessageId
+        );
+      },
+    );
     return firstPostClearIndex >= 0
       ? firstPostClearIndex
       : renderableCanvasMessages.length;
@@ -1054,7 +1058,10 @@ const ImageGeneration = () => {
     if (enableAutoFollow) {
       setCanvasAutoFollowEnabledState(true);
     }
-    const nextTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const nextTop = Math.max(
+      0,
+      container.scrollHeight - container.clientHeight,
+    );
     if (typeof container.scrollTo === 'function') {
       container.scrollTo({ top: nextTop, behavior });
       return;
@@ -5541,7 +5548,9 @@ const ImageGeneration = () => {
     const previousChatImageAttachment = promptOverride
       ? null
       : chatImageAttachment;
-    const previousChatFileAttachment = promptOverride ? null : chatFileAttachment;
+    const previousChatFileAttachment = promptOverride
+      ? null
+      : chatFileAttachment;
     let activeSessionId = null;
     let clientRequestId = '';
     let hasServerSnapshot = false;
@@ -6026,7 +6035,8 @@ const ImageGeneration = () => {
       textAlign: 'left',
       cursor: 'pointer',
       opacity: 0.82,
-      transition: 'background 0.16s, color 0.16s, opacity 0.16s, box-shadow 0.16s',
+      transition:
+        'background 0.16s, color 0.16s, opacity 0.16s, box-shadow 0.16s',
     },
     taskListItemHover: {
       background: 'var(--canvas-hover-bg)',
@@ -6166,43 +6176,44 @@ const ImageGeneration = () => {
       border: 'none',
       background: 'transparent',
       boxShadow: 'none',
-      minHeight: isMobile ? 136 : 164,
-      padding: isMobile ? '10px 12px 10px' : '12px 16px 12px',
+      minHeight: isMobile ? 110 : 118,
+      padding: isMobile ? '8px 10px 9px' : '9px 12px 10px',
       display: 'flex',
       flexDirection: 'column',
-      gap: 6,
+      gap: 0,
       overflow: 'hidden',
     },
     promptInputShell: {
       display: 'flex',
-      alignItems: 'flex-end',
-      gap: isMobile ? 10 : 14,
+      flexDirection: 'column',
+      alignItems: 'stretch',
+      gap: 8,
       minWidth: 0,
-      minHeight: isMobile ? 78 : 96,
-      borderRadius: 14,
+      minHeight: isMobile ? 88 : 96,
+      borderRadius: 16,
       background: 'var(--canvas-surface-subtle)',
       boxShadow: 'none',
-      padding: isMobile ? '8px 8px 8px 12px' : '10px 10px 10px 16px',
+      padding: isMobile ? '8px 9px' : 9,
     },
     promptInlineAssets: {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
       flexWrap: 'wrap',
-      minHeight: 36,
+      minHeight: 0,
     },
     promptLeadingSlot: {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
       flexWrap: 'wrap',
-      flexShrink: 0,
-      maxWidth: isMobile ? '45%' : '50%',
+      minWidth: 0,
     },
     promptInput: {
       flex: 1,
       minWidth: 0,
-      minHeight: isMobile ? 62 : 80,
+      minHeight: isMobile ? 46 : 48,
+      maxHeight: 220,
       alignSelf: 'stretch',
       border: 'none',
       background: 'transparent',
@@ -6210,32 +6221,39 @@ const ImageGeneration = () => {
       boxShadow: 'none',
       color: 'var(--canvas-text-primary)',
       caretColor: 'var(--canvas-primary)',
-      fontSize: isMobile ? 15 : 16,
-      lineHeight: 1.72,
-      padding: isMobile ? '10px 2px 8px 0' : '12px 4px 10px 0',
+      fontSize: isMobile ? 14 : 16,
+      lineHeight: isMobile ? 1.55 : 1.6,
+      padding: 0,
+      overflowY: 'auto',
     },
     promptControls: {
       display: 'flex',
       justifyContent: 'space-between',
-      gap: 10,
+      gap: isMobile ? 8 : 12,
       alignItems: 'center',
-      flexWrap: 'wrap',
-      minHeight: 48,
-      padding: isMobile ? '2px 12px 14px' : '4px 16px 16px',
+      flexWrap: isMobile ? 'nowrap' : 'wrap',
+      minHeight: 40,
+      padding: isMobile ? '6px 0 0' : '8px 0 0',
+      borderTop: '1px solid rgba(229, 231, 235, 0.72)',
     },
     promptControlsLeft: {
       display: 'flex',
       alignItems: 'center',
-      gap: 12,
-      flexWrap: 'wrap',
+      gap: 7,
+      flexWrap: isMobile ? 'nowrap' : 'wrap',
       minWidth: 0,
       flex: 1,
+      overflowX: isMobile ? 'auto' : 'visible',
+      overflowY: 'hidden',
+      paddingBottom: isMobile ? 2 : 0,
     },
     promptControlsRight: {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'flex-end',
-      minWidth: 36,
+      gap: 7,
+      minWidth: isMobile ? 40 : 0,
+      flexShrink: 0,
       marginLeft: 'auto',
     },
     promptAssetBar: {
@@ -6247,13 +6265,13 @@ const ImageGeneration = () => {
     },
     uploadIconBtn: {
       '--canvas-control-border': 'var(--canvas-border)',
-      '--canvas-control-bg': 'var(--canvas-card-bg)',
+      '--canvas-control-bg': 'var(--canvas-toolbar-bg)',
       '--canvas-control-text': 'var(--canvas-text-secondary)',
       '--canvas-control-shadow': 'none',
-      width: 32,
-      height: 32,
-      minWidth: 32,
-      borderRadius: 10,
+      width: 36,
+      height: 36,
+      minWidth: 36,
+      borderRadius: 12,
       border: '1px solid var(--canvas-control-border)',
       background: 'var(--canvas-control-bg)',
       display: 'flex',
@@ -6269,23 +6287,23 @@ const ImageGeneration = () => {
       '--canvas-control-border': 'var(--canvas-primary-soft-border)',
       '--canvas-control-bg': 'var(--canvas-primary-soft-bg)',
       '--canvas-control-text': 'var(--canvas-primary)',
-      '--canvas-control-shadow': 'var(--canvas-shadow-sm)',
+      '--canvas-control-shadow': '0 8px 18px rgba(109, 93, 246, 0.08)',
     },
     pillButton: {
-      '--canvas-pill-border': 'var(--canvas-border)',
-      '--canvas-pill-bg': 'var(--canvas-card-bg)',
+      '--canvas-pill-border': 'rgba(226, 232, 240, 0.96)',
+      '--canvas-pill-bg': 'rgba(248, 250, 252, 0.96)',
       '--canvas-pill-text': 'var(--canvas-text-secondary)',
       '--canvas-pill-shadow': 'none',
-      height: 32,
-      minHeight: 32,
-      borderRadius: 10,
+      height: 36,
+      minHeight: 36,
+      borderRadius: 12,
       border: '1px solid var(--canvas-pill-border)',
       background: 'var(--canvas-pill-bg)',
       color: 'var(--canvas-pill-text)',
-      padding: '0 10px',
+      padding: '0 12px',
       display: 'inline-flex',
       alignItems: 'center',
-      gap: 6,
+      gap: 7,
       fontSize: 13,
       fontWeight: 500,
       lineHeight: 1,
@@ -6294,17 +6312,22 @@ const ImageGeneration = () => {
         'transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease',
     },
     pillButtonIconOnly: {
-      width: 32,
-      minWidth: 32,
+      width: 36,
+      minWidth: 36,
       padding: 0,
       justifyContent: 'center',
       gap: 0,
     },
-    pillButtonActive: {
+    pillButtonSelected: {
+      '--canvas-pill-border': 'rgba(209, 213, 219, 0.96)',
+      '--canvas-pill-bg': 'rgba(255, 255, 255, 0.96)',
+      '--canvas-pill-text': 'var(--canvas-text-primary)',
+    },
+    pillButtonOpen: {
       '--canvas-pill-border': 'var(--canvas-primary-soft-border)',
       '--canvas-pill-bg': 'var(--canvas-primary-soft-bg)',
       '--canvas-pill-text': 'var(--canvas-primary)',
-      '--canvas-pill-shadow': 'var(--canvas-shadow-sm)',
+      '--canvas-pill-shadow': '0 8px 18px rgba(109, 93, 246, 0.08)',
     },
     pillButtonMuted: {
       '--canvas-pill-text': 'var(--canvas-text-secondary)',
@@ -6317,7 +6340,7 @@ const ImageGeneration = () => {
       color: 'currentColor',
     },
     pillButtonLabel: {
-      maxWidth: isMobile ? 126 : 170,
+      maxWidth: isMobile ? 120 : 170,
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
@@ -6382,7 +6405,7 @@ const ImageGeneration = () => {
     },
     imageParamOptionRow: {
       display: 'flex',
-      gap: 8,
+      gap: 7,
       flexWrap: 'wrap',
       minWidth: 0,
     },
@@ -6613,7 +6636,6 @@ const ImageGeneration = () => {
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
-      marginBottom: 2,
       boxShadow: 'var(--canvas-submit-shadow)',
       transition:
         'transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease',
@@ -6624,14 +6646,13 @@ const ImageGeneration = () => {
       minWidth: 40,
       borderRadius: 14,
       border: '1px solid var(--canvas-status-neutral-border)',
-      background: 'var(--canvas-card-bg)',
+      background: 'var(--canvas-toolbar-bg)',
       color: 'var(--canvas-text-secondary)',
       cursor: 'pointer',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
-      marginBottom: 2,
       boxShadow: 'none',
       transition:
         'transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease',
@@ -6762,16 +6783,16 @@ const ImageGeneration = () => {
     composerParameterRow: {
       display: 'flex',
       alignItems: 'center',
-      gap: 12,
-      flexWrap: 'wrap',
+      gap: 7,
+      flexWrap: isMobile ? 'nowrap' : 'wrap',
       minWidth: 0,
+      flexShrink: 0,
     },
     composerActionGroup: {
       display: 'flex',
-      alignItems: 'flex-end',
+      alignItems: 'center',
       gap: 8,
       flexShrink: 0,
-      paddingBottom: 2,
     },
     filterLabel: {
       fontSize: 13,
@@ -6831,12 +6852,12 @@ const ImageGeneration = () => {
       flexShrink: 0,
       borderTop: 'none',
       background:
-        'linear-gradient(180deg, rgba(245, 247, 251, 0) 0%, rgba(245, 247, 251, 0.82) 22%, rgba(245, 247, 251, 0.98) 100%)',
-      padding: isMobile ? '10px 10px 12px' : '8px 24px 16px',
+        'linear-gradient(180deg, rgba(245, 247, 251, 0) 0%, rgba(245, 247, 251, 0.26) 42%, rgba(245, 247, 251, 0.88) 100%)',
+      padding: isMobile ? '6px 12px 10px' : '4px 24px 10px',
     },
     chatAutoFollowDock: {
       width: '100%',
-      maxWidth: isMobile ? '100%' : 1040,
+      maxWidth: isMobile ? '100%' : 872,
       margin: '0 auto 10px',
       display: 'flex',
       justifyContent: 'flex-end',
@@ -6861,7 +6882,7 @@ const ImageGeneration = () => {
     },
     composerShell: {
       width: '100%',
-      maxWidth: isMobile ? '100%' : 1040,
+      maxWidth: isMobile ? '100%' : 860,
       margin: '0 auto',
       border: '1px solid var(--canvas-composer-shell-border)',
       borderRadius: 'var(--canvas-input-radius)',
@@ -7803,6 +7824,8 @@ const ImageGeneration = () => {
           type='button'
           aria-label={buttonText}
           title={buttonText}
+          aria-haspopup='menu'
+          aria-expanded={!disabled && activeDropdownKey === dropdownKey}
           data-composer-control-kind={controlKind}
           data-composer-control-active={
             value !== '' && value !== null && value !== undefined
@@ -7813,8 +7836,11 @@ const ImageGeneration = () => {
             ...styles.pillButton,
             ...(iconOnly ? styles.pillButtonIconOnly : null),
             ...(value !== '' && value !== null && value !== undefined
-              ? styles.pillButtonActive
+              ? styles.pillButtonSelected
               : styles.pillButtonMuted),
+            ...(!disabled && activeDropdownKey === dropdownKey
+              ? styles.pillButtonOpen
+              : null),
             opacity: disabled ? 0.55 : 1,
             cursor: disabled ? 'not-allowed' : 'pointer',
           }}
@@ -7949,6 +7975,8 @@ const ImageGeneration = () => {
           type='button'
           aria-label={t('聊天设置')}
           title={t('聊天设置')}
+          aria-haspopup='dialog'
+          aria-expanded={activeDropdownKey === dropdownKey}
           data-composer-control-kind='parameter'
           data-composer-control-active={
             activeDropdownKey === dropdownKey ? 'true' : 'false'
@@ -7957,8 +7985,8 @@ const ImageGeneration = () => {
             ...styles.pillButton,
             ...(iconOnly ? styles.pillButtonIconOnly : null),
             ...(activeDropdownKey === dropdownKey
-              ? styles.pillButtonActive
-              : styles.pillButtonMuted),
+              ? styles.pillButtonOpen
+              : styles.pillButtonSelected),
           }}
         >
           <IconSetting size='small' />
@@ -8111,6 +8139,8 @@ const ImageGeneration = () => {
           type='button'
           aria-label={buttonLabel}
           title={buttonLabel}
+          aria-haspopup='dialog'
+          aria-expanded={activeDropdownKey === dropdownKey}
           data-composer-control-kind='parameter'
           data-composer-control-active={
             displayParts.length > 0 ? 'true' : 'false'
@@ -8118,7 +8148,12 @@ const ImageGeneration = () => {
           style={{
             ...styles.pillButton,
             ...(iconOnly ? styles.pillButtonIconOnly : null),
-            ...styles.pillButtonActive,
+            ...(displayParts.length > 0
+              ? styles.pillButtonSelected
+              : styles.pillButtonMuted),
+            ...(activeDropdownKey === dropdownKey
+              ? styles.pillButtonOpen
+              : null),
             maxWidth: isMobile ? '100%' : 260,
           }}
         >
@@ -8257,6 +8292,10 @@ const ImageGeneration = () => {
           type='button'
           aria-label={buttonLabel}
           title={buttonLabel}
+          aria-haspopup='menu'
+          aria-expanded={
+            modelOptions.length > 0 && activeDropdownKey === dropdownKey
+          }
           data-canvas-model-selector={
             isVideoMode ? CANVAS_MODE_VIDEO : CANVAS_MODE_IMAGE
           }
@@ -8265,6 +8304,12 @@ const ImageGeneration = () => {
           style={{
             ...styles.pillButton,
             ...(iconOnly ? styles.pillButtonIconOnly : null),
+            ...(selectedModelItem
+              ? styles.pillButtonSelected
+              : styles.pillButtonMuted),
+            ...(modelOptions.length > 0 && activeDropdownKey === dropdownKey
+              ? styles.pillButtonOpen
+              : null),
           }}
           disabled={modelOptions.length === 0}
         >
@@ -8439,7 +8484,10 @@ const ImageGeneration = () => {
         </Dropdown.Item>
       ) : null}
       <Dropdown.Item
-        style={{ ...styles.darkMenuItem, color: 'var(--canvas-danger-chip-text)' }}
+        style={{
+          ...styles.darkMenuItem,
+          color: 'var(--canvas-danger-chip-text)',
+        }}
         onClick={(event) => {
           event?.domEvent?.stopPropagation?.();
           if (window.confirm(t('确认删除该会话？'))) {
@@ -9040,7 +9088,9 @@ const ImageGeneration = () => {
         {statusInfo.pending ? <Spin size='small' /> : null}
         <span>{statusInfo.label}</span>
         {statusInfo.detail ? (
-          <span style={styles.canvasChatStatusDetail}>{`· ${statusInfo.detail}`}</span>
+          <span
+            style={styles.canvasChatStatusDetail}
+          >{`· ${statusInfo.detail}`}</span>
         ) : null}
       </div>
     );
@@ -9965,8 +10015,7 @@ const ImageGeneration = () => {
       : isVideoMode
         ? videoGenerating || !canGenerateVideo
         : generating || !canGenerate;
-    const submitEmphasis =
-      promptHasContent ? 'primary' : 'idle';
+    const submitEmphasis = promptHasContent ? 'primary' : 'idle';
     const placeholder = isChatMode
       ? t('输入消息...')
       : isVideoMode
@@ -10176,8 +10225,8 @@ const ImageGeneration = () => {
             ...styles.pillButton,
             ...(isMobile ? styles.pillButtonIconOnly : null),
             ...(composerAdvancedVisible
-              ? styles.pillButtonActive
-              : styles.pillButtonMuted),
+              ? styles.pillButtonOpen
+              : styles.pillButtonSelected),
             cursor: 'pointer',
           }}
           onClick={() => setComposerAdvancedVisible((current) => !current)}
@@ -10222,6 +10271,39 @@ const ImageGeneration = () => {
       (isVideoMode &&
         videoSelectedModelSupportsImageToVideo &&
         !!videoReferenceImage);
+    const promptUploadControl = !showPromptUploadEntry ? null : isChatMode ? (
+      renderChatUploadDropdown()
+    ) : isImageMode && selectedModelSupportsEditing ? (
+      <Upload
+        action=''
+        accept='image/*'
+        multiple
+        fileList={referenceImages}
+        onChange={handleImageUpload}
+        showUploadList={false}
+        beforeUpload={validateImageSize}
+        disabled={referenceImageLimitReached}
+      >
+        {renderUploadIconButton({
+          disabled: referenceImageLimitReached,
+          title: referenceImageLimitReached
+            ? t('已达到当前模型参考图上限')
+            : t('上传图片'),
+        })}
+      </Upload>
+    ) : isVideoMode && videoSelectedModelSupportsImageToVideo ? (
+      <Upload
+        action=''
+        accept='image/*'
+        multiple={false}
+        fileList={videoReferenceImage ? [videoReferenceImage] : []}
+        onChange={handleVideoReferenceUpload}
+        showUploadList={false}
+        beforeUpload={validateImageSize}
+      >
+        {renderUploadIconButton({ title: t('上传图片') })}
+      </Upload>
+    ) : null;
 
     return (
       <div style={styles.composerDock} className='canvas-composer-dock'>
@@ -10237,9 +10319,7 @@ const ImageGeneration = () => {
             >
               <IconChevronDown size='small' />
               <span>
-                {chatStreaming
-                  ? t('回到底部并继续跟随')
-                  : t('回到底部')}
+                {chatStreaming ? t('回到底部并继续跟随') : t('回到底部')}
               </span>
             </button>
           </div>
@@ -10255,83 +10335,42 @@ const ImageGeneration = () => {
               style={styles.promptInputShell}
               className='canvas-composer-input-shell'
             >
-              {showPromptUploadEntry || hasInlineReferenceThumbs ? (
+              {hasInlineReferenceThumbs ? (
                 <div
                   style={styles.promptLeadingSlot}
                   className='canvas-composer-leading-slot'
                 >
-                  {isChatMode ? renderChatUploadDropdown() : null}
-                  {isImageMode && selectedModelSupportsEditing ? (
-                    <Upload
-                      action=''
-                      accept='image/*'
-                      multiple
-                      fileList={referenceImages}
-                      onChange={handleImageUpload}
-                      showUploadList={false}
-                      beforeUpload={validateImageSize}
-                      disabled={referenceImageLimitReached}
-                    >
-                      {renderUploadIconButton({
-                        disabled: referenceImageLimitReached,
-                        title: referenceImageLimitReached
-                          ? t('已达到当前模型参考图上限')
-                          : t('上传图片'),
-                      })}
-                    </Upload>
-                  ) : null}
-                  {isVideoMode && videoSelectedModelSupportsImageToVideo ? (
-                    <Upload
-                      action=''
-                      accept='image/*'
-                      multiple={false}
-                      fileList={
-                        videoReferenceImage ? [videoReferenceImage] : []
-                      }
-                      onChange={handleVideoReferenceUpload}
-                      showUploadList={false}
-                      beforeUpload={validateImageSize}
-                    >
-                      {renderUploadIconButton({ title: t('上传图片') })}
-                    </Upload>
-                  ) : null}
-                  {(isImageMode && referenceImages.length > 0) ||
-                  hasChatInlineAttachments ||
-                  (isVideoMode &&
+                  <div
+                    style={styles.promptInlineAssets}
+                    className='canvas-composer-inline-assets'
+                  >
+                    {isChatMode && chatImageAttachment
+                      ? renderReferenceThumb(chatImageAttachment, () =>
+                          handleRemoveChatImageAttachment(),
+                        )
+                      : null}
+                    {isChatMode && chatFileAttachment
+                      ? renderChatFileAttachmentChip(
+                          chatFileAttachment,
+                          handleRemoveChatFileAttachment,
+                        )
+                      : null}
+                    {isImageMode
+                      ? referenceImages.map((file) =>
+                          renderReferenceThumb(file, () =>
+                            handleImageRemove(file),
+                          ),
+                        )
+                      : null}
+                    {isVideoMode &&
                     videoSelectedModelSupportsImageToVideo &&
-                    videoReferenceImage) ? (
-                    <div
-                      style={styles.promptInlineAssets}
-                      className='canvas-composer-inline-assets'
-                    >
-                      {isChatMode && chatImageAttachment
-                        ? renderReferenceThumb(chatImageAttachment, () =>
-                            handleRemoveChatImageAttachment(),
-                          )
-                        : null}
-                      {isChatMode && chatFileAttachment
-                        ? renderChatFileAttachmentChip(
-                            chatFileAttachment,
-                            handleRemoveChatFileAttachment,
-                          )
-                        : null}
-                      {isImageMode
-                        ? referenceImages.map((file) =>
-                            renderReferenceThumb(file, () =>
-                              handleImageRemove(file),
-                            ),
-                          )
-                        : null}
-                      {isVideoMode &&
-                      videoSelectedModelSupportsImageToVideo &&
-                      videoReferenceImage
-                        ? renderReferenceThumb(
-                            videoReferenceImage,
-                            handleVideoReferenceRemove,
-                          )
-                        : null}
-                    </div>
-                  ) : null}
+                    videoReferenceImage
+                      ? renderReferenceThumb(
+                          videoReferenceImage,
+                          handleVideoReferenceRemove,
+                        )
+                      : null}
+                  </div>
                 </div>
               ) : null}
               <TextArea
@@ -10356,71 +10395,86 @@ const ImageGeneration = () => {
                 }}
                 maxLength={5000}
                 borderless
-                autosize={{ minRows: 1, maxRows: 12 }}
+                autosize={{ minRows: 2, maxRows: 8 }}
                 style={styles.promptInput}
               />
-              <div style={styles.composerActionGroup}>
-                {isChatMode && chatStreaming ? (
-                  <button
-                    className='canvas-composer-stop'
-                    aria-label={t('停止回复')}
-                    title={t('停止回复')}
-                    style={styles.generateStopBtnEmbedded}
-                    onClick={() => stopChatStream()}
-                    type='button'
-                  >
-                    <span style={styles.generateStopIcon} />
-                  </button>
-                ) : null}
-                <button
-                  className='canvas-composer-submit'
-                  aria-label={
-                    isChatMode
-                      ? t('发送消息')
-                      : isVideoMode
-                        ? t('生成视频')
-                        : t('生成图片')
-                  }
-                  style={{
-                    ...styles.generateIconBtnEmbedded,
-                    opacity: submitDisabled ? 0.55 : 1,
-                    pointerEvents: submitDisabled ? 'none' : 'auto',
-                    '--canvas-submit-bg': promptHasContent
-                      ? 'var(--canvas-primary)'
-                      : 'var(--canvas-toolbar-bg)',
-                    '--canvas-submit-border': promptHasContent
-                      ? 'var(--canvas-primary)'
-                      : 'var(--canvas-border)',
-                    '--canvas-submit-color': promptHasContent
-                      ? 'var(--text-inverse)'
-                      : 'var(--canvas-text-muted)',
-                    '--canvas-submit-shadow': promptHasContent
-                      ? '0 14px 30px rgba(109, 93, 246, 0.22)'
-                      : 'none',
-                  }}
-                  data-submit-emphasis={submitEmphasis}
-                  onClick={handleComposerSubmit}
-                  disabled={submitDisabled}
-                  type='button'
-                >
-                  {submitLoading ? <Spin size='small' /> : <IconSend size='small' />}
-                </button>
-              </div>
-            </div>
-            <div
-              style={styles.promptControls}
-              className='canvas-composer-controls'
-            >
               <div
-                style={styles.promptControlsLeft}
-                className='canvas-composer-controls-left'
+                style={styles.promptControls}
+                className='canvas-composer-controls'
               >
-                {renderComposerModeSwitch()}
                 <div
-                  style={styles.composerParameterRow}
-                  className='canvas-composer-parameter-row'
+                  style={styles.promptControlsLeft}
+                  className='canvas-composer-controls-left'
                 >
-                  {activeParameters}
+                  {promptUploadControl}
+                  {renderComposerModeSwitch()}
+                  <div
+                    style={styles.composerParameterRow}
+                    className='canvas-composer-parameter-row'
+                  >
+                    {activeParameters}
+                  </div>
+                </div>
+                <div
+                  style={styles.promptControlsRight}
+                  className='canvas-composer-controls-right'
+                >
+                  <div style={styles.composerActionGroup}>
+                    {isChatMode && chatStreaming ? (
+                      <button
+                        className='canvas-composer-stop'
+                        aria-label={t('停止回复')}
+                        title={t('停止回复')}
+                        style={styles.generateStopBtnEmbedded}
+                        onClick={() => stopChatStream()}
+                        type='button'
+                      >
+                        <span style={styles.generateStopIcon} />
+                      </button>
+                    ) : null}
+                    <button
+                      className='canvas-composer-submit'
+                      aria-label={
+                        isChatMode
+                          ? t('发送消息')
+                          : isVideoMode
+                            ? t('生成视频')
+                            : t('生成图片')
+                      }
+                      title={
+                        isChatMode
+                          ? t('发送消息')
+                          : isVideoMode
+                            ? t('生成视频')
+                            : t('生成图片')
+                      }
+                      style={{
+                        ...styles.generateIconBtnEmbedded,
+                        '--canvas-submit-bg': promptHasContent
+                          ? 'var(--canvas-primary)'
+                          : 'var(--canvas-toolbar-bg)',
+                        '--canvas-submit-border': promptHasContent
+                          ? 'var(--canvas-primary)'
+                          : 'var(--canvas-border)',
+                        '--canvas-submit-color': promptHasContent
+                          ? 'var(--text-inverse)'
+                          : 'var(--canvas-text-muted)',
+                        '--canvas-submit-shadow': promptHasContent
+                          ? '0 10px 22px rgba(109, 93, 246, 0.16)'
+                          : 'none',
+                      }}
+                      data-submit-emphasis={submitEmphasis}
+                      onClick={handleComposerSubmit}
+                      disabled={submitDisabled}
+                      type='button'
+                    >
+                      {submitLoading ? (
+                        <Spin size='small' />
+                      ) : (
+                        <IconSend size='small' />
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
