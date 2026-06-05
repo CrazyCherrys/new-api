@@ -22,6 +22,21 @@ func TestValidateImageModelEndpointRejectsDeprecatedOpenAIMod(t *testing.T) {
 	}
 }
 
+func TestValidateChatModelEndpointAllowsOpenAIResponse(t *testing.T) {
+	validEndpoints := []string{"openai", "openai-response", "anthropic", "gemini"}
+	for _, endpoint := range validEndpoints {
+		if err := validateModelMappingEndpoint(1, endpoint); err != nil {
+			t.Fatalf("expected chat endpoint %q to remain valid, got %v", endpoint, err)
+		}
+	}
+}
+
+func TestValidateChatModelEndpointRejectsUnknownEndpoint(t *testing.T) {
+	if err := validateModelMappingEndpoint(1, "responses"); err == nil {
+		t.Fatal("expected unknown chat endpoint to be rejected")
+	}
+}
+
 func TestSanitizeModelMappingSettingsKeepsOpenAIImageResolutions(t *testing.T) {
 	for _, endpoint := range []string{"openai", "openai-response"} {
 		t.Run(endpoint, func(t *testing.T) {

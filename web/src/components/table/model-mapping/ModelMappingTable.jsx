@@ -172,7 +172,7 @@ const ModelMappingTable = ({
   const isValidRequestEndpointForModelType = (modelType, endpoint) => {
     const normalizedEndpoint = normalizeRequestEndpoint(endpoint);
     const endpointOptions = {
-      1: ['openai', 'anthropic', 'gemini'],
+      1: ['openai', 'openai-response', 'anthropic', 'gemini'],
       2: ['openai', 'openai-response', 'gemini'],
       3: ['openai-video-generation', 'openai-video'],
     };
@@ -274,6 +274,8 @@ const ModelMappingTable = ({
     if (modelType === 1) {
       const endpointMap = {
         openai: 'OpenAI (/v1/chat/completions)',
+        'openai-response':
+          'OpenAI Responses compatibility (/v1/chat/completions -> /v1/responses)',
         anthropic: 'Claude (/v1/messages)',
         gemini: 'Gemini (/v1beta/models/{model}:generateContent)',
       };

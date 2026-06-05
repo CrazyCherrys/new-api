@@ -11,6 +11,29 @@ import (
 	"github.com/samber/lo"
 )
 
+func buildResponsesWebSearchTool(options *dto.WebSearchOptions) map[string]any {
+	if options == nil {
+		return nil
+	}
+
+	searchContextSize := strings.TrimSpace(options.SearchContextSize)
+	if searchContextSize == "" {
+		searchContextSize = "medium"
+	}
+
+	tool := map[string]any{
+		"type":                dto.BuildInToolWebSearchPreview,
+		"search_context_size": searchContextSize,
+	}
+	if len(options.UserLocation) > 0 {
+		var userLocation any
+		if err := common.Unmarshal(options.UserLocation, &userLocation); err == nil {
+			tool["user_location"] = userLocation
+		}
+	}
+	return tool
+}
+
 func normalizeChatImageURLToString(v any) any {
 	switch vv := v.(type) {
 	case string:
@@ -286,8 +309,8 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	}
 
 	var toolsRaw json.RawMessage
-	if req.Tools != nil {
-		tools := make([]map[string]any, 0, len(req.Tools))
+	if req.Tools != nil || req.WebSearchOptions != nil {
+		tools := make([]map[string]any, 0, len(req.Tools)+1)
 		for _, tool := range req.Tools {
 			switch tool.Type {
 			case "function":
@@ -308,6 +331,9 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 				}
 				tools = append(tools, m)
 			}
+		}
+		if webSearchTool := buildResponsesWebSearchTool(req.WebSearchOptions); webSearchTool != nil {
+			tools = append(tools, webSearchTool)
 		}
 		toolsRaw, _ = common.Marshal(tools)
 	}
