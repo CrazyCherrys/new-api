@@ -21,8 +21,10 @@ import { describe, expect, test } from 'bun:test';
 import {
   CHAT_CAPABILITY_FILE_UPLOAD,
   CHAT_CAPABILITY_IMAGE_UPLOAD,
+  CHAT_CAPABILITY_WEB_SEARCH,
   extractCanvasChatAttachments,
   getCanvasChatUploadVisibility,
+  getCanvasChatWebSearchVisibility,
   normalizeCanvasChatCapabilities,
 } from './canvasChat';
 
@@ -30,9 +32,9 @@ describe('canvas chat helpers', () => {
   test('normalizes chat capabilities', () => {
     expect(
       normalizeCanvasChatCapabilities(
-        '[" image_upload ","file_upload","image_upload","unknown"]',
+        '[" image_upload ","file_upload","web_search","image_upload","unknown"]',
       ),
-    ).toEqual(['image_upload', 'file_upload']);
+    ).toEqual(['image_upload', 'file_upload', 'web_search']);
   });
 
   test('reports upload visibility for image-only models', () => {
@@ -80,6 +82,22 @@ describe('canvas chat helpers', () => {
       showImageUpload: false,
       showFileUpload: false,
     });
+  });
+
+  test('reports web search visibility for supported models', () => {
+    expect(
+      getCanvasChatWebSearchVisibility({
+        chat_capabilities: [CHAT_CAPABILITY_WEB_SEARCH],
+      }),
+    ).toBe(true);
+  });
+
+  test('reports web search visibility for unsupported models', () => {
+    expect(
+      getCanvasChatWebSearchVisibility({
+        chat_capabilities: [CHAT_CAPABILITY_IMAGE_UPLOAD],
+      }),
+    ).toBe(false);
   });
 
   test('extracts persisted chat attachments from message metadata', () => {

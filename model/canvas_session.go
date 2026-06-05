@@ -35,6 +35,7 @@ type CanvasSession struct {
 	CurrentGroup            string  `json:"current_group" gorm:"size:64;not null;default:''"`
 	ChatTemperature         float64 `json:"chat_temperature" gorm:"default:0.7"`
 	ChatContextCount        int     `json:"chat_context_count" gorm:"default:8"`
+	WebSearchEnabled        bool    `json:"web_search_enabled" gorm:"default:false"`
 	SystemPrompt            string  `json:"system_prompt" gorm:"type:text"`
 	SummaryEnabled          bool    `json:"summary_enabled" gorm:"default:true"`
 	SummaryTriggerMessages  int     `json:"summary_trigger_messages" gorm:"default:8"`

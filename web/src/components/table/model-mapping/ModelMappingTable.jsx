@@ -32,6 +32,7 @@ import { API, showError, showSuccess, showWarning } from '../../../helpers';
 import {
   CHAT_CAPABILITY_FILE_UPLOAD,
   CHAT_CAPABILITY_IMAGE_UPLOAD,
+  CHAT_CAPABILITY_WEB_SEARCH,
   normalizeCanvasChatCapabilities,
 } from '../../../helpers/canvasChat';
 import {
@@ -323,6 +324,7 @@ const ModelMappingTable = ({
     const capabilityMap = {
       [CHAT_CAPABILITY_IMAGE_UPLOAD]: t('图片上传'),
       [CHAT_CAPABILITY_FILE_UPLOAD]: t('文件上传'),
+      [CHAT_CAPABILITY_WEB_SEARCH]: t('联网搜索'),
     };
     return capabilities
       .map((capability) => capabilityMap[capability] || capability)

@@ -728,6 +728,7 @@ func TestCreateCanvasChatSessionPersistsConfigAndAllowsZeroValueUpdates(t *testi
 
 	temperature := 1.5
 	contextCount := 16
+	webSearchEnabled := true
 	systemPrompt := "You are a deliberate assistant."
 	summaryEnabled := false
 	summaryTriggerMessages := 12
@@ -737,6 +738,7 @@ func TestCreateCanvasChatSessionPersistsConfigAndAllowsZeroValueUpdates(t *testi
 		CurrentModel:           "gpt-chat-test",
 		ChatTemperature:        &temperature,
 		ChatContextCount:       &contextCount,
+		WebSearchEnabled:       &webSearchEnabled,
 		SystemPrompt:           &systemPrompt,
 		SummaryEnabled:         &summaryEnabled,
 		SummaryTriggerMessages: &summaryTriggerMessages,
@@ -750,6 +752,9 @@ func TestCreateCanvasChatSessionPersistsConfigAndAllowsZeroValueUpdates(t *testi
 	}
 	if session.ChatContextCount != contextCount {
 		t.Fatalf("expected chat context count %d, got %d", contextCount, session.ChatContextCount)
+	}
+	if session.WebSearchEnabled != webSearchEnabled {
+		t.Fatalf("expected web search enabled %v, got %v", webSearchEnabled, session.WebSearchEnabled)
 	}
 	if session.SystemPrompt != systemPrompt {
 		t.Fatalf("expected system prompt %q, got %q", systemPrompt, session.SystemPrompt)
@@ -766,6 +771,7 @@ func TestCreateCanvasChatSessionPersistsConfigAndAllowsZeroValueUpdates(t *testi
 
 	zeroTemperature := 0.0
 	zeroContextCount := 0
+	webSearchDisabled := false
 	emptySystemPrompt := ""
 	summaryEnabled = true
 	zeroSummaryTrigger := 0
@@ -773,6 +779,7 @@ func TestCreateCanvasChatSessionPersistsConfigAndAllowsZeroValueUpdates(t *testi
 	updated, err := UpdateCanvasSession(1, session.Id, UpdateCanvasSessionInput{
 		ChatTemperature:        &zeroTemperature,
 		ChatContextCount:       &zeroContextCount,
+		WebSearchEnabled:       &webSearchDisabled,
 		SystemPrompt:           &emptySystemPrompt,
 		SummaryEnabled:         &summaryEnabled,
 		SummaryTriggerMessages: &zeroSummaryTrigger,
@@ -786,6 +793,9 @@ func TestCreateCanvasChatSessionPersistsConfigAndAllowsZeroValueUpdates(t *testi
 	}
 	if updated.ChatContextCount != zeroContextCount {
 		t.Fatalf("expected zero chat context count to persist, got %d", updated.ChatContextCount)
+	}
+	if updated.WebSearchEnabled != webSearchDisabled {
+		t.Fatalf("expected web search enabled %v, got %v", webSearchDisabled, updated.WebSearchEnabled)
 	}
 	if updated.SystemPrompt != "" {
 		t.Fatalf("expected empty system prompt to persist, got %q", updated.SystemPrompt)
@@ -804,6 +814,11 @@ func TestCreateCanvasChatSessionPersistsConfigAndAllowsZeroValueUpdates(t *testi
 func TestCreateCanvasChatMessageUsesSessionConfigFallbacks(t *testing.T) {
 	db := setupCanvasSessionServiceTestDB(t)
 	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+	if err := db.Model(&model.ModelMapping{}).
+		Where("request_model = ?", "gpt-chat-test").
+		Update("chat_capabilities", `["web_search"]`).Error; err != nil {
+		t.Fatalf("failed to enable web search capability: %v", err)
+	}
 	systemPrompt := "Focus on concise answers."
 
 	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
@@ -812,6 +827,9 @@ func TestCreateCanvasChatMessageUsesSessionConfigFallbacks(t *testing.T) {
 		}
 		if request.Temperature == nil || *request.Temperature != 1.5 {
 			t.Fatalf("expected session chat temperature fallback 1.5, got %#v", request.Temperature)
+		}
+		if !request.WebSearchEnabled {
+			t.Fatalf("expected session web search fallback to stay enabled, got %#v", request)
 		}
 		if len(request.Messages) != 2 {
 			t.Fatalf("expected system prompt plus user message, got %#v", request.Messages)
@@ -832,11 +850,13 @@ func TestCreateCanvasChatMessageUsesSessionConfigFallbacks(t *testing.T) {
 
 	temperature := 1.5
 	contextCount := 2
+	webSearchEnabled := true
 	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{
 		Mode:             model.CanvasModeChat,
 		CurrentModel:     "gpt-chat-test",
 		ChatTemperature:  &temperature,
 		ChatContextCount: &contextCount,
+		WebSearchEnabled: &webSearchEnabled,
 		SystemPrompt:     &systemPrompt,
 	})
 	if err != nil {
@@ -860,8 +880,104 @@ func TestCreateCanvasChatMessageUsesSessionConfigFallbacks(t *testing.T) {
 	if metadata.ContextCount == nil || *metadata.ContextCount != contextCount {
 		t.Fatalf("expected metadata context count %d, got %#v", contextCount, metadata.ContextCount)
 	}
+	if metadata.WebSearchEnabled == nil || !*metadata.WebSearchEnabled {
+		t.Fatalf("expected metadata web search flag to persist, got %#v", metadata.WebSearchEnabled)
+	}
 	if metadata.SystemPrompt != systemPrompt {
 		t.Fatalf("expected metadata system prompt %q, got %q", systemPrompt, metadata.SystemPrompt)
+	}
+}
+
+func TestCreateCanvasChatMessageExplicitWebSearchFalseOverridesSession(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+	if err := db.Model(&model.ModelMapping{}).
+		Where("request_model = ?", "gpt-chat-test").
+		Update("chat_capabilities", `["web_search"]`).Error; err != nil {
+		t.Fatalf("failed to enable web search capability: %v", err)
+	}
+
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
+		if request.WebSearchEnabled {
+			t.Fatalf("expected explicit false web search to disable relay search, got %#v", request)
+		}
+		if onDelta != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: "assistant reply"}); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: "assistant reply"}, nil
+	}
+
+	webSearchEnabled := true
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{
+		Mode:             model.CanvasModeChat,
+		CurrentModel:     "gpt-chat-test",
+		WebSearchEnabled: &webSearchEnabled,
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	webSearchDisabled := false
+	created, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:           "disable web search for this run",
+		ModelId:          "gpt-chat-test",
+		WebSearchEnabled: &webSearchDisabled,
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat message: %v", err)
+	}
+
+	var metadata canvasChatMessageMetadata
+	if err := common.UnmarshalJsonStr(created[0].Metadata, &metadata); err != nil {
+		t.Fatalf("failed to decode user metadata: %v", err)
+	}
+	if metadata.WebSearchEnabled == nil || *metadata.WebSearchEnabled {
+		t.Fatalf("expected metadata web search to stay false, got %#v", metadata.WebSearchEnabled)
+	}
+}
+
+func TestCreateCanvasChatMessageIgnoresUnsupportedWebSearchRequests(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
+		if request.WebSearchEnabled {
+			t.Fatalf("expected unsupported web search request to be downgraded, got %#v", request)
+		}
+		if onDelta != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: "assistant reply"}); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: "assistant reply"}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{
+		Mode:         model.CanvasModeChat,
+		CurrentModel: "gpt-chat-test",
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	webSearchEnabled := true
+	created, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:           "try unsupported search",
+		ModelId:          "gpt-chat-test",
+		WebSearchEnabled: &webSearchEnabled,
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat message: %v", err)
+	}
+
+	var metadata canvasChatMessageMetadata
+	if err := common.UnmarshalJsonStr(created[0].Metadata, &metadata); err != nil {
+		t.Fatalf("failed to decode user metadata: %v", err)
+	}
+	if metadata.WebSearchEnabled == nil || *metadata.WebSearchEnabled {
+		t.Fatalf("expected unsupported web search request to stay disabled in metadata, got %#v", metadata.WebSearchEnabled)
 	}
 }
 

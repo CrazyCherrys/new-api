@@ -24,6 +24,7 @@ import { API, showError, showSuccess, showWarning } from '../../../../helpers';
 import {
   CHAT_CAPABILITY_FILE_UPLOAD,
   CHAT_CAPABILITY_IMAGE_UPLOAD,
+  CHAT_CAPABILITY_WEB_SEARCH,
   normalizeCanvasChatCapabilities,
 } from '../../../../helpers/canvasChat';
 import {
@@ -174,6 +175,7 @@ const EditModelMappingModal = ({
   const chatCapabilityOptions = [
     { value: CHAT_CAPABILITY_IMAGE_UPLOAD, label: t('图片上传') },
     { value: CHAT_CAPABILITY_FILE_UPLOAD, label: t('文件上传') },
+    { value: CHAT_CAPABILITY_WEB_SEARCH, label: t('联网搜索') },
   ];
 
   const videoCapabilityOptions = [

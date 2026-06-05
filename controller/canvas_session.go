@@ -19,6 +19,7 @@ type createCanvasSessionRequest struct {
 	CurrentModel           string   `json:"current_model"`
 	ChatTemperature        *float64 `json:"chat_temperature"`
 	ChatContextCount       *int     `json:"chat_context_count"`
+	WebSearchEnabled       *bool    `json:"web_search_enabled"`
 	SystemPrompt           *string  `json:"system_prompt"`
 	SummaryEnabled         *bool    `json:"summary_enabled"`
 	SummaryTriggerMessages *int     `json:"summary_trigger_messages"`
@@ -31,6 +32,7 @@ type updateCanvasSessionRequest struct {
 	CurrentModel           *string  `json:"current_model"`
 	ChatTemperature        *float64 `json:"chat_temperature"`
 	ChatContextCount       *int     `json:"chat_context_count"`
+	WebSearchEnabled       *bool    `json:"web_search_enabled"`
 	SystemPrompt           *string  `json:"system_prompt"`
 	SummaryEnabled         *bool    `json:"summary_enabled"`
 	SummaryTriggerMessages *int     `json:"summary_trigger_messages"`
@@ -46,10 +48,11 @@ type createCanvasMessageRequest struct {
 	RequestEndpoint string                     `json:"request_endpoint"`
 	Params          string                     `json:"params"`
 	Attachments     []dto.CanvasChatAttachment `json:"attachments"`
-	Stream          *bool                      `json:"stream"`
-	Temperature     *float64                   `json:"temperature"`
-	ContextCount    *int                       `json:"context_count"`
-	ClientRequestId string                     `json:"client_request_id"`
+	dto.CanvasChatRequestSettings
+	Stream          *bool    `json:"stream"`
+	Temperature     *float64 `json:"temperature"`
+	ContextCount    *int     `json:"context_count"`
+	ClientRequestId string   `json:"client_request_id"`
 }
 
 var (
@@ -156,6 +159,7 @@ func CreateCanvasSession(c *gin.Context) {
 		CurrentModel:           req.CurrentModel,
 		ChatTemperature:        req.ChatTemperature,
 		ChatContextCount:       req.ChatContextCount,
+		WebSearchEnabled:       req.WebSearchEnabled,
 		SystemPrompt:           req.SystemPrompt,
 		SummaryEnabled:         req.SummaryEnabled,
 		SummaryTriggerMessages: req.SummaryTriggerMessages,
@@ -195,6 +199,7 @@ func UpdateCanvasSession(c *gin.Context) {
 		CurrentModel:           req.CurrentModel,
 		ChatTemperature:        req.ChatTemperature,
 		ChatContextCount:       req.ChatContextCount,
+		WebSearchEnabled:       req.WebSearchEnabled,
 		SystemPrompt:           req.SystemPrompt,
 		SummaryEnabled:         req.SummaryEnabled,
 		SummaryTriggerMessages: req.SummaryTriggerMessages,
@@ -276,16 +281,17 @@ func CreateCanvasMessage(c *gin.Context) {
 	}
 
 	input := service.CreateCanvasMessageInput{
-		Prompt:          req.Prompt,
-		ModelId:         req.ModelId,
-		Group:           req.Group,
-		RequestEndpoint: req.RequestEndpoint,
-		Params:          req.Params,
-		Attachments:     req.Attachments,
-		Stream:          req.Stream,
-		Temperature:     req.Temperature,
-		ContextCount:    req.ContextCount,
-		ClientRequestId: req.ClientRequestId,
+		Prompt:           req.Prompt,
+		ModelId:          req.ModelId,
+		Group:            req.Group,
+		RequestEndpoint:  req.RequestEndpoint,
+		Params:           req.Params,
+		Attachments:      req.Attachments,
+		WebSearchEnabled: req.WebSearchEnabled,
+		Stream:           req.Stream,
+		Temperature:      req.Temperature,
+		ContextCount:     req.ContextCount,
+		ClientRequestId:  req.ClientRequestId,
 	}
 	if req.Stream != nil && *req.Stream {
 		session, err := getCanvasSessionByIDForController(userId, sessionId)

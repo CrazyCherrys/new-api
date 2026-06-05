@@ -19,10 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 
 export const CHAT_CAPABILITY_IMAGE_UPLOAD = 'image_upload';
 export const CHAT_CAPABILITY_FILE_UPLOAD = 'file_upload';
+export const CHAT_CAPABILITY_WEB_SEARCH = 'web_search';
 
 const SUPPORTED_CHAT_CAPABILITIES = new Set([
   CHAT_CAPABILITY_IMAGE_UPLOAD,
   CHAT_CAPABILITY_FILE_UPLOAD,
+  CHAT_CAPABILITY_WEB_SEARCH,
 ]);
 
 const normalizeCanvasChatCapability = (value) =>
@@ -76,6 +78,9 @@ export const getCanvasChatUploadVisibility = (model) => ({
     CHAT_CAPABILITY_FILE_UPLOAD,
   ),
 });
+
+export const getCanvasChatWebSearchVisibility = (model) =>
+  modelSupportsChatCapability(model, CHAT_CAPABILITY_WEB_SEARCH);
 
 const normalizeCanvasChatAttachmentKind = (value) =>
   String(value || '')

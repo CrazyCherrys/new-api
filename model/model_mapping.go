@@ -15,6 +15,7 @@ const (
 	VideoCapabilityTextToVideo  = "text_to_video"
 	ChatCapabilityImageUpload   = "image_upload"
 	ChatCapabilityFileUpload    = "file_upload"
+	ChatCapabilityWebSearch     = "web_search"
 )
 
 var defaultImageCapabilities = []string{
@@ -41,7 +42,7 @@ type ModelMapping struct {
 	Resolutions           string `json:"resolutions" gorm:"type:text"`               // 分辨率选项 JSON array: ["1K","2K","4K"]
 	AspectRatios          string `json:"aspect_ratios" gorm:"type:text"`             // 长宽比选项 JSON array: ["1:1","16:9",...]
 	ImageCapabilities     string `json:"image_capabilities" gorm:"type:text"`        // JSON array: ["image_generation","image_editing"]
-	ChatCapabilities      string `json:"chat_capabilities" gorm:"type:text"`         // JSON array: ["image_upload","file_upload"]
+	ChatCapabilities      string `json:"chat_capabilities" gorm:"type:text"`         // JSON array: ["image_upload","file_upload","web_search"]
 	ReferenceImageLimit   int    `json:"reference_image_limit" gorm:"default:0"`     // Canvas reference image count limit, 0 means unlimited
 	VideoCapabilities     string `json:"video_capabilities" gorm:"type:text"`        // JSON array: ["image_to_video","text_to_video"]
 	DurationOptions       string `json:"duration_options" gorm:"type:text"`          // JSON array: [5,10]
@@ -160,7 +161,7 @@ func parseChatCapabilities(raw string) ([]string, error) {
 			continue
 		}
 		switch value {
-		case ChatCapabilityImageUpload, ChatCapabilityFileUpload:
+		case ChatCapabilityImageUpload, ChatCapabilityFileUpload, ChatCapabilityWebSearch:
 		default:
 			return nil, fmt.Errorf("unsupported chat capability: %s", capability)
 		}
