@@ -154,10 +154,14 @@ const CHAT_SUMMARY_STRATEGY_OPTIONS = ['0', '4', '8', '12', '16', '24', '32'];
 const CANVAS_AUTO_FOLLOW_BOTTOM_THRESHOLD = 96;
 const CANVAS_HISTORY_AUTOLOAD_TOP_THRESHOLD = 72;
 const CANVAS_CHAT_STREAMING_NOTICE_THROTTLE_MS = 1200;
+const CANVAS_CHAT_SUPPORTED_FILE_ACCEPT =
+  '.pdf,.txt,text/plain,application/pdf';
 const CANVAS_CHAT_SUPPORTED_FILE_MIME_TYPES = new Set([
   'application/pdf',
   'text/plain',
 ]);
+const CANVAS_CHAT_IMAGE_FILE_NAME_PATTERN =
+  /\.(apng|avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$/i;
 
 const sortCanvasSessionsByRecent = (a, b) => {
   if (!!a?.pinned !== !!b?.pinned) {
@@ -698,6 +702,7 @@ const ImageGeneration = () => {
   const [chatPrompt, setChatPrompt] = useState('');
   const [chatImageAttachment, setChatImageAttachment] = useState(null);
   const [chatFileAttachment, setChatFileAttachment] = useState(null);
+  const [chatComposerDragActive, setChatComposerDragActive] = useState(false);
   const [chatTemperature, setChatTemperature] = useState(() =>
     getStoredValue(STORAGE_KEYS.CHAT_TEMPERATURE, DEFAULT_CHAT_TEMPERATURE),
   );
@@ -895,8 +900,8 @@ const ImageGeneration = () => {
   const chatStreamAbortRef = useRef(null);
   const chatStreamingMessageIdRef = useRef(null);
   const chatStreamingSessionIdRef = useRef(null);
-  const chatImageUploadInputRef = useRef(null);
-  const chatFileUploadInputRef = useRef(null);
+  const chatAttachmentUploadInputRef = useRef(null);
+  const chatComposerDragDepthRef = useRef(0);
   const canvasChatCopiedMessageTimerRef = useRef(null);
   const canvasChatReasoningAutoCollapseTimersRef = useRef(new Map());
   const chatStreamingNoticeAtRef = useRef(0);
@@ -1554,6 +1559,14 @@ const ImageGeneration = () => {
       setChatWebSearchEnabled(false);
     }
   }, [activeChatModelOption]);
+
+  useEffect(() => {
+    if (generationMode === CANVAS_MODE_CHAT) {
+      return;
+    }
+    chatComposerDragDepthRef.current = 0;
+    setChatComposerDragActive(false);
+  }, [generationMode]);
 
   const buildRemoteReferenceFile = (imageUrl) => {
     if (!imageUrl) {
@@ -4582,6 +4595,71 @@ const ImageGeneration = () => {
     return '';
   };
 
+  const isCanvasChatImageUploadFile = (file) => {
+    const explicitType = String(file?.type || file?.fileInstance?.type || '')
+      .trim()
+      .toLowerCase();
+    if (explicitType.startsWith('image/')) {
+      return true;
+    }
+    const name = String(file?.name || '')
+      .trim()
+      .toLowerCase();
+    return CANVAS_CHAT_IMAGE_FILE_NAME_PATTERN.test(name);
+  };
+
+  const getCanvasChatUploadAccept = (uploadVisibility) => {
+    if (uploadVisibility.showImageUpload && uploadVisibility.showFileUpload) {
+      return `image/*,${CANVAS_CHAT_SUPPORTED_FILE_ACCEPT}`;
+    }
+    if (uploadVisibility.showImageUpload) {
+      return 'image/*';
+    }
+    if (uploadVisibility.showFileUpload) {
+      return CANVAS_CHAT_SUPPORTED_FILE_ACCEPT;
+    }
+    return '';
+  };
+
+  const extractCanvasChatTransferFiles = (transfer) => {
+    if (!transfer) {
+      return [];
+    }
+    const itemFiles = Array.from(transfer.items || [])
+      .filter((item) => item?.kind === 'file')
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+    if (itemFiles.length > 0) {
+      return itemFiles;
+    }
+    return Array.from(transfer.files || []).filter(Boolean);
+  };
+
+  const hasCanvasChatTransferFiles = (transfer) => {
+    if (!transfer) {
+      return false;
+    }
+    if (extractCanvasChatTransferFiles(transfer).length > 0) {
+      return true;
+    }
+    return Array.from(transfer.types || []).includes('Files');
+  };
+
+  const getPreferredCanvasChatTransferFile = (files) => {
+    if (!Array.isArray(files) || files.length === 0) {
+      return null;
+    }
+    return (
+      files.find((file) => isCanvasChatImageUploadFile(file)) ||
+      files.find((file) =>
+        CANVAS_CHAT_SUPPORTED_FILE_MIME_TYPES.has(
+          inferCanvasChatFileMimeType(file),
+        ),
+      ) ||
+      files[0]
+    );
+  };
+
   const handleChatImageUpload = async ({ fileList }) => {
     const selectedFile = fileList[0] || null;
     if (!selectedFile) {
@@ -4624,30 +4702,53 @@ const ImageGeneration = () => {
     input.click();
   };
 
-  const handleChatImageInputChange = (event) => {
-    const selectedFile = event.target.files?.[0] || null;
-    event.target.value = '';
+  const handleCanvasChatAttachmentSelect = (selectedFile) => {
     if (!selectedFile) {
-      return;
+      return false;
     }
-    const uploadFile = buildCanvasChatUploadFile(selectedFile, 'image');
-    if (!uploadFile || !validateImageSize(uploadFile)) {
-      return;
+    const uploadVisibility = getCanvasChatUploadVisibility(
+      activeChatModelOption,
+    );
+    if (isCanvasChatImageUploadFile(selectedFile)) {
+      if (!uploadVisibility.showImageUpload) {
+        showError(t('当前模型不支持图片上传'));
+        return false;
+      }
+      const uploadFile = buildCanvasChatUploadFile(selectedFile, 'image');
+      if (!uploadFile || !validateImageSize(uploadFile)) {
+        return false;
+      }
+      void handleChatImageUpload({ fileList: [uploadFile] });
+      return true;
     }
-    void handleChatImageUpload({ fileList: [uploadFile] });
-  };
 
-  const handleChatFileInputChange = (event) => {
-    const selectedFile = event.target.files?.[0] || null;
-    event.target.value = '';
-    if (!selectedFile) {
-      return;
-    }
     const uploadFile = buildCanvasChatUploadFile(selectedFile, 'file');
-    if (!uploadFile || !validateCanvasChatFileUpload(uploadFile)) {
-      return;
+    if (!uploadFile) {
+      return false;
+    }
+    if (
+      !CANVAS_CHAT_SUPPORTED_FILE_MIME_TYPES.has(
+        inferCanvasChatFileMimeType(uploadFile),
+      )
+    ) {
+      showError(t('当前仅支持上传图片、PDF 或 TXT 文件'));
+      return false;
+    }
+    if (!uploadVisibility.showFileUpload) {
+      showError(t('当前模型不支持文件上传'));
+      return false;
+    }
+    if (!validateCanvasChatFileUpload(uploadFile)) {
+      return false;
     }
     void handleChatFileUpload({ fileList: [uploadFile] });
+    return true;
+  };
+
+  const handleChatAttachmentInputChange = (event) => {
+    const selectedFile = event.target.files?.[0] || null;
+    event.target.value = '';
+    handleCanvasChatAttachmentSelect(selectedFile);
   };
 
   const handleChatFileUpload = async ({ fileList }) => {
@@ -4676,6 +4777,73 @@ const ImageGeneration = () => {
 
   const handleRemoveChatFileAttachment = () => {
     setChatFileAttachment(null);
+  };
+
+  const resetChatComposerDragState = () => {
+    chatComposerDragDepthRef.current = 0;
+    setChatComposerDragActive(false);
+  };
+
+  const handleChatComposerDragEnter = (event) => {
+    if (!hasCanvasChatTransferFiles(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    chatComposerDragDepthRef.current += 1;
+    setChatComposerDragActive(true);
+  };
+
+  const handleChatComposerDragOver = (event) => {
+    if (!hasCanvasChatTransferFiles(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    if (!chatComposerDragActive) {
+      setChatComposerDragActive(true);
+    }
+  };
+
+  const handleChatComposerDragLeave = (event) => {
+    if (!hasCanvasChatTransferFiles(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    chatComposerDragDepthRef.current = Math.max(
+      0,
+      chatComposerDragDepthRef.current - 1,
+    );
+    if (chatComposerDragDepthRef.current === 0) {
+      setChatComposerDragActive(false);
+    }
+  };
+
+  const handleChatComposerDrop = (event) => {
+    const transferFiles = extractCanvasChatTransferFiles(event.dataTransfer);
+    if (transferFiles.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    resetChatComposerDragState();
+    handleCanvasChatAttachmentSelect(
+      getPreferredCanvasChatTransferFile(transferFiles),
+    );
+  };
+
+  const handleChatComposerPaste = (event) => {
+    const transferFiles = extractCanvasChatTransferFiles(event.clipboardData);
+    const selectedFile = getPreferredCanvasChatTransferFile(transferFiles);
+    if (!selectedFile) {
+      return;
+    }
+    event.preventDefault();
+    handleCanvasChatAttachmentSelect(selectedFile);
   };
 
   const normalizeTaskCount = (value) => {
@@ -6232,6 +6400,10 @@ const ImageGeneration = () => {
       boxShadow: 'none',
       padding: isMobile ? '8px 9px' : 9,
     },
+    promptInputShellDragActive: {
+      background: 'rgba(231, 236, 255, 0.9)',
+      boxShadow: 'inset 0 0 0 1px var(--canvas-primary-soft-border)',
+    },
     promptInlineAssets: {
       display: 'flex',
       alignItems: 'center',
@@ -7191,8 +7363,8 @@ const ImageGeneration = () => {
     canvasChatActions: {
       display: 'flex',
       alignItems: 'center',
-      gap: 8,
-      opacity: isMobile ? 0.72 : 0.18,
+      gap: 6,
+      opacity: isMobile ? 0.82 : 0.22,
       transform: 'translateY(0)',
       transition: 'opacity 0.16s ease, transform 0.16s ease',
       pointerEvents: 'auto',
@@ -7203,15 +7375,15 @@ const ImageGeneration = () => {
       pointerEvents: 'auto',
     },
     canvasChatActionButton: {
-      '--canvas-action-button-bg': 'transparent',
-      '--canvas-action-button-border': 'transparent',
+      '--canvas-action-button-bg': 'rgba(248, 250, 252, 0.94)',
+      '--canvas-action-button-border': 'rgba(226, 232, 240, 0.96)',
       '--canvas-action-button-text': 'var(--canvas-text-secondary)',
-      '--canvas-action-button-shadow': 'none',
-      width: 28,
-      minWidth: 28,
-      height: 28,
-      minHeight: 28,
-      borderRadius: 10,
+      '--canvas-action-button-shadow': '0 1px 2px rgba(15, 23, 42, 0.04)',
+      width: 30,
+      minWidth: 30,
+      height: 30,
+      minHeight: 30,
+      borderRadius: 11,
       border: '1px solid var(--canvas-action-button-border)',
       background: 'var(--canvas-action-button-bg)',
       color: 'var(--canvas-action-button-text)',
@@ -9085,6 +9257,12 @@ const ImageGeneration = () => {
           aria-label={ariaLabel}
           title={ariaLabel}
           className='canvas-chat-action-button'
+          data-canvas-chat-action-kind={actionKey}
+          data-canvas-chat-action-active={
+            isCopyAction && canvasChatCopiedMessageId === message?.id
+              ? 'true'
+              : 'false'
+          }
           style={{
             ...styles.canvasChatActionButton,
             ...(disabled ? styles.canvasChatActionButtonDisabled : null),
@@ -10061,6 +10239,7 @@ const ImageGeneration = () => {
       isChatMode && chatUploadVisibility.showImageUpload;
     const showChatFileUpload =
       isChatMode && chatUploadVisibility.showFileUpload;
+    const chatUploadAccept = getCanvasChatUploadAccept(chatUploadVisibility);
     const hasChatInlineAttachments =
       isChatMode && (!!chatImageAttachment || !!chatFileAttachment);
     const promptHasContent = activePrompt.trim().length > 0;
@@ -10131,105 +10310,37 @@ const ImageGeneration = () => {
         {icon}
       </div>
     );
-    const renderChatUploadDropdown = () => {
+    const renderChatUploadButton = () => {
       if (!showChatImageUpload && !showChatFileUpload) {
         return null;
       }
-      const dropdownKey = 'chat-upload';
-      const buttonLabel = t('添加附件');
-      const closeDropdown = () => {
-        setActiveDropdownKey((current) =>
-          current === dropdownKey ? '' : current,
-        );
-      };
-      const openChatUploadInput = (inputRef) => {
-        closeDropdown();
-        triggerHiddenChatUploadInput(inputRef);
-      };
-      const menu = (
-        <Dropdown.Menu style={styles.darkMenu}>
-          {showChatImageUpload ? (
-            <Dropdown.Item
-              style={styles.darkMenuItem}
-              onClick={() => openChatUploadInput(chatImageUploadInputRef)}
-            >
-              <span style={styles.darkMenuItemContent}>
-                <span style={styles.pillButtonIcon}>
-                  <IconImage size='small' />
-                </span>
-                <span>{t('上传图片')}</span>
-              </span>
-            </Dropdown.Item>
-          ) : null}
-          {showChatFileUpload ? (
-            <Dropdown.Item
-              style={styles.darkMenuItem}
-              onClick={() => openChatUploadInput(chatFileUploadInputRef)}
-            >
-              <span style={styles.darkMenuItemContent}>
-                <span style={styles.pillButtonIcon}>
-                  <IconArchive size='small' />
-                </span>
-                <span>{t('上传文件')}</span>
-              </span>
-            </Dropdown.Item>
-          ) : null}
-        </Dropdown.Menu>
-      );
+      const buttonLabel = t('上传');
 
       return (
         <>
-          {showChatImageUpload ? (
-            <input
-              ref={chatImageUploadInputRef}
-              type='file'
-              accept='image/*'
-              style={{ display: 'none' }}
-              onChange={handleChatImageInputChange}
-            />
-          ) : null}
-          {showChatFileUpload ? (
-            <input
-              ref={chatFileUploadInputRef}
-              type='file'
-              accept='.pdf,.txt,text/plain,application/pdf'
-              style={{ display: 'none' }}
-              onChange={handleChatFileInputChange}
-            />
-          ) : null}
-          <Dropdown
-            trigger='click'
-            position='bottomLeft'
-            render={menu}
-            visible={activeDropdownKey === dropdownKey}
-            onVisibleChange={(visible) => {
-              setActiveDropdownKey((current) =>
-                visible ? dropdownKey : current === dropdownKey ? '' : current,
-              );
+          <input
+            ref={chatAttachmentUploadInputRef}
+            type='file'
+            accept={chatUploadAccept}
+            style={{ display: 'none' }}
+            onChange={handleChatAttachmentInputChange}
+          />
+          <button
+            className='canvas-composer-upload-btn'
+            type='button'
+            aria-label={buttonLabel}
+            title={buttonLabel}
+            data-composer-control-kind='upload'
+            style={{
+              ...styles.uploadIconBtn,
+              cursor: 'pointer',
             }}
+            onClick={() =>
+              triggerHiddenChatUploadInput(chatAttachmentUploadInputRef)
+            }
           >
-            <button
-              className='canvas-composer-upload-btn'
-              type='button'
-              aria-label={buttonLabel}
-              title={buttonLabel}
-              aria-haspopup='menu'
-              aria-expanded={activeDropdownKey === dropdownKey}
-              data-composer-control-kind='upload'
-              data-composer-control-active={
-                activeDropdownKey === dropdownKey ? 'true' : 'false'
-              }
-              style={{
-                ...styles.uploadIconBtn,
-                ...(activeDropdownKey === dropdownKey
-                  ? styles.uploadIconBtnActive
-                  : null),
-                cursor: 'pointer',
-              }}
-            >
-              <IconPlus size='small' />
-            </button>
-          </Dropdown>
+            <IconPlus size='small' />
+          </button>
         </>
       );
     };
@@ -10333,7 +10444,7 @@ const ImageGeneration = () => {
         videoSelectedModelSupportsImageToVideo &&
         !!videoReferenceImage);
     const promptUploadControl = !showPromptUploadEntry ? null : isChatMode ? (
-      renderChatUploadDropdown()
+      renderChatUploadButton()
     ) : isImageMode && selectedModelSupportsEditing ? (
       <Upload
         action=''
@@ -10393,8 +10504,24 @@ const ImageGeneration = () => {
         >
           <div style={styles.promptArea} className='canvas-composer-card'>
             <div
-              style={styles.promptInputShell}
+              style={{
+                ...styles.promptInputShell,
+                ...(isChatMode && chatComposerDragActive
+                  ? styles.promptInputShellDragActive
+                  : null),
+              }}
               className='canvas-composer-input-shell'
+              data-canvas-chat-drag-active={
+                isChatMode && chatComposerDragActive ? 'true' : 'false'
+              }
+              onDragEnter={
+                isChatMode ? handleChatComposerDragEnter : undefined
+              }
+              onDragOver={isChatMode ? handleChatComposerDragOver : undefined}
+              onDragLeave={
+                isChatMode ? handleChatComposerDragLeave : undefined
+              }
+              onDrop={isChatMode ? handleChatComposerDrop : undefined}
             >
               {hasInlineReferenceThumbs ? (
                 <div
@@ -10454,6 +10581,7 @@ const ImageGeneration = () => {
                 onCompositionEnd={() => {
                   composerComposingRef.current = false;
                 }}
+                onPaste={isChatMode ? handleChatComposerPaste : undefined}
                 maxLength={5000}
                 borderless
                 autosize={{ minRows: 2, maxRows: 8 }}
