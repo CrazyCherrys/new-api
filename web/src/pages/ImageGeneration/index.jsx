@@ -151,6 +151,7 @@ const DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES = '8';
 const DEFAULT_CHAT_SUMMARY_RECENT_MESSAGES = '8';
 const DEFAULT_CHAT_WEB_SEARCH_ENABLED = false;
 const CHAT_SUMMARY_STRATEGY_OPTIONS = ['0', '4', '8', '12', '16', '24', '32'];
+const CHAT_MODEL_OPTIONS_CACHE_PREFIX = 'canvas_chat_model_options_v1';
 const CANVAS_AUTO_FOLLOW_BOTTOM_THRESHOLD = 96;
 const CANVAS_HISTORY_AUTOLOAD_TOP_THRESHOLD = 72;
 const CANVAS_CHAT_STREAMING_NOTICE_THROTTLE_MS = 1200;
@@ -695,6 +696,46 @@ const ImageGeneration = () => {
     }
   };
 
+  function getChatModelOptionsCacheKey() {
+    let userId = '-1';
+    try {
+      userId = String(getUserIdFromLocalStorage() ?? '-1').trim() || '-1';
+    } catch (e) {
+      userId = '-1';
+    }
+    return `${CHAT_MODEL_OPTIONS_CACHE_PREFIX}:${userId}`;
+  }
+
+  function normalizeCanvasChatModelRecords(items) {
+    return (Array.isArray(items) ? items : [])
+      .map((item) => normalizeCanvasChatModelRecord(item))
+      .filter(Boolean);
+  }
+
+  function getCachedChatModels() {
+    try {
+      const cached = localStorage.getItem(getChatModelOptionsCacheKey());
+      if (!cached) {
+        return [];
+      }
+      return normalizeCanvasChatModelRecords(JSON.parse(cached));
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function cacheChatModels(items) {
+    try {
+      const normalizedItems = normalizeCanvasChatModelRecords(items);
+      localStorage.setItem(
+        getChatModelOptionsCacheKey(),
+        JSON.stringify(normalizedItems),
+      );
+    } catch (e) {
+      console.error('Failed to cache chat models:', e);
+    }
+  }
+
   const [loading, setLoading] = useState(false);
   const [groupLoading, setGroupLoading] = useState(false);
   const [groupOptions, setGroupOptions] = useState([]);
@@ -724,7 +765,7 @@ const ImageGeneration = () => {
   );
   const [assetBatchDeleting, setAssetBatchDeleting] = useState(false);
 
-  const [chatModels, setChatModels] = useState([]);
+  const [chatModels, setChatModels] = useState(() => getCachedChatModels());
   const [chatModel, setChatModel] = useState(() =>
     getStoredValue(STORAGE_KEYS.CHAT_MODEL, ''),
   );
@@ -934,6 +975,9 @@ const ImageGeneration = () => {
   const canvasChatCopiedMessageTimerRef = useRef(null);
   const canvasChatReasoningAutoCollapseTimersRef = useRef(new Map());
   const chatStreamingNoticeAtRef = useRef(0);
+  const chatModelsRequestRef = useRef(null);
+  const chatModelsRequestNotifyRef = useRef(false);
+  const selectedCanvasSessionRef = useRef(null);
   const generationModeRef = useRef(generationMode);
   const selectedCanvasSessionIdsRef = useRef(selectedCanvasSessionIds);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
@@ -1004,6 +1048,9 @@ const ImageGeneration = () => {
     selectedCanvasSessionId,
     generationMode,
   );
+  useEffect(() => {
+    selectedCanvasSessionRef.current = selectedCanvasSession;
+  }, [selectedCanvasSession]);
   const displayedCanvasMessages = useMemo(
     () =>
       canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [],
@@ -1621,6 +1668,7 @@ const ImageGeneration = () => {
     loadImageGenerationGroups();
     loadVideoModels();
     loadWorkerSettings();
+    loadChatModels({ silent: true });
     connectSSE();
 
     return () => {
@@ -1630,11 +1678,11 @@ const ImageGeneration = () => {
   }, []);
 
   useEffect(() => {
-    if (generationMode !== CANVAS_MODE_CHAT) {
+    if (generationMode !== CANVAS_MODE_CHAT || chatModels.length > 0) {
       return;
     }
     loadChatModels();
-  }, [generationMode]);
+  }, [generationMode, chatModels.length]);
 
   useEffect(() => {
     if (!pollingTimerRef.current) {
@@ -1911,40 +1959,60 @@ const ImageGeneration = () => {
     }
   };
 
-  const loadChatModels = async () => {
-    try {
-      const res = await API.get('/api/canvas/chat-models');
-      if (!res.data.success) {
-        showError(res.data.message || t('加载聊天模型失败'));
-        return;
+  const loadChatModels = async ({ silent = false } = {}) => {
+    if (chatModelsRequestRef.current) {
+      if (!silent) {
+        chatModelsRequestNotifyRef.current = true;
       }
-      const items = (Array.isArray(res.data.data) ? res.data.data : [])
-        .map((item) => normalizeCanvasChatModelRecord(item))
-        .filter(Boolean);
-      setChatModels(items);
-      setChatModel((current) => {
-        const normalizedCurrent = String(current || '').trim();
-        const sessionCurrentModel = String(
-          selectedCanvasSession?.current_model || '',
-        ).trim();
-        if (
-          normalizedCurrent &&
-          normalizedCurrent === sessionCurrentModel &&
-          sessionCurrentModel
-        ) {
-          return normalizedCurrent;
-        }
-        if (
-          normalizedCurrent &&
-          items.some((item) => item?.request_model === normalizedCurrent)
-        ) {
-          return normalizedCurrent;
-        }
-        return items[0]?.request_model || '';
-      });
-    } catch (error) {
-      showError(error.message || t('加载聊天模型失败'));
+      return chatModelsRequestRef.current;
     }
+
+    chatModelsRequestNotifyRef.current = !silent;
+    const request = (async () => {
+      try {
+        const res = await API.get('/api/canvas/chat-models');
+        if (!res.data.success) {
+          if (chatModelsRequestNotifyRef.current) {
+            showError(res.data.message || t('加载聊天模型失败'));
+          }
+          return [];
+        }
+        const items = normalizeCanvasChatModelRecords(res.data.data);
+        setChatModels(items);
+        cacheChatModels(items);
+        setChatModel((current) => {
+          const normalizedCurrent = String(current || '').trim();
+          const sessionCurrentModel =
+            selectedCanvasSessionRef.current?.mode === CANVAS_MODE_CHAT
+              ? String(
+                  selectedCanvasSessionRef.current?.current_model || '',
+                ).trim()
+              : '';
+          if (sessionCurrentModel) {
+            return sessionCurrentModel;
+          }
+          if (
+            normalizedCurrent &&
+            items.some((item) => item?.request_model === normalizedCurrent)
+          ) {
+            return normalizedCurrent;
+          }
+          const firstUsable = items.find((item) => item?.usable !== false);
+          return firstUsable?.request_model || items[0]?.request_model || '';
+        });
+        return items;
+      } catch (error) {
+        if (chatModelsRequestNotifyRef.current) {
+          showError(error.message || t('加载聊天模型失败'));
+        }
+        return [];
+      } finally {
+        chatModelsRequestRef.current = null;
+        chatModelsRequestNotifyRef.current = false;
+      }
+    })();
+    chatModelsRequestRef.current = request;
+    return request;
   };
 
   const loadCanvasAssets = async (nextPage = 1) => {
@@ -2884,7 +2952,7 @@ const ImageGeneration = () => {
     }
     return {
       request_model: requestModel,
-      display_name: getModelDisplayName(item) || requestModel,
+      display_name: getCanvasModelDisplayName(item) || requestModel,
       model_series: String(item?.model_series || '').trim(),
       request_endpoint: String(item?.request_endpoint || '').trim(),
       description: String(item?.description || '').trim(),
@@ -10237,17 +10305,17 @@ const ImageGeneration = () => {
     const options = [
       {
         value: CANVAS_MODE_CHAT,
-        label: t('文本对话'),
+        label: t('对话'),
         icon: <IconCommentStroked size='small' />,
       },
       {
         value: CANVAS_MODE_IMAGE,
-        label: t('图片生成'),
+        label: t('图片'),
         icon: <IconImage size='small' />,
       },
       {
         value: CANVAS_MODE_VIDEO,
-        label: t('视频生成'),
+        label: t('视频'),
         icon: <IconVideo size='small' />,
       },
     ];
