@@ -368,6 +368,17 @@ func StreamCanvasChatMessage(c *gin.Context, userId int, sessionId int, input Cr
 	if session == nil {
 		return fmt.Errorf("canvas session not found")
 	}
+	return StreamCanvasChatMessageWithResolvedSession(c, userId, session, input)
+}
+
+func StreamCanvasChatMessageWithResolvedSession(c *gin.Context, userId int, session *model.CanvasSession, input CreateCanvasMessageInput) error {
+	if c == nil {
+		return fmt.Errorf("stream context is required")
+	}
+	if session == nil {
+		return fmt.Errorf("canvas session not found")
+	}
+	sessionId := session.Id
 	prepared, err := prepareCanvasChatMessage(userId, sessionId, session, input)
 	if err != nil {
 		return err
@@ -421,6 +432,9 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 	}
 	if session.Mode != model.CanvasModeChat {
 		return nil, fmt.Errorf("canvas session is not in chat mode")
+	}
+	if err := model.EnsureCanvasModeAvailable(model.CanvasModeChat); err != nil {
+		return nil, err
 	}
 
 	prompt := strings.TrimSpace(input.Prompt)
@@ -533,7 +547,7 @@ func prepareCanvasChatMessage(userId int, sessionId int, session *model.CanvasSe
 	if !session.TitleManuallySet && messageCount == 0 {
 		sessionUpdates["title"] = truncateCanvasTitle(prompt)
 	}
-	if err := model.UpdateCanvasSessionFields(userId, session.Id, sessionUpdates); err != nil {
+	if err := model.UpdateCanvasSessionFieldsWithSession(userId, session, sessionUpdates); err != nil {
 		cleanupCreatedCanvasMessages(model.CanvasModeChat, userId, []*model.CanvasMessage{
 			prepared.UserMessage,
 			prepared.AssistantMessage,
@@ -841,6 +855,9 @@ func listUserCanvasChatModelCatalog(userId int) ([]*dto.CanvasChatModelCatalogIt
 }
 
 func listUserCanvasChatModelOptions(userId int) ([]CanvasChatModelOption, error) {
+	if err := model.EnsureCanvasModeAvailable(model.CanvasModeChat); err != nil {
+		return nil, err
+	}
 	ctx, err := buildCanvasChatUserModelContext(userId)
 	if err != nil {
 		return nil, err
@@ -1738,7 +1755,7 @@ func summarizeCanvasChatSession(ctx context.Context, userId int, sessionId int, 
 	if err != nil {
 		return err
 	}
-	return model.UpdateCanvasSessionFields(userId, sessionId, map[string]interface{}{
+	return model.UpdateCanvasSessionFieldsWithSession(userId, reloadedSession, map[string]interface{}{
 		"summary_prompt":             storedSummaryPrompt,
 		"last_summarized_message_id": storedLastSummarizedMessageID,
 	})

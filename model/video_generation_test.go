@@ -70,3 +70,29 @@ func TestEffectiveVideoResultURL(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildVideoProxyURLsAndDetection(t *testing.T) {
+	task := &Task{TaskID: " task_proxy_paths "}
+
+	if got := BuildVideoProxyURL(task); got != "/v1/videos/task_proxy_paths/content" {
+		t.Fatalf("expected ordinary video proxy URL, got %q", got)
+	}
+	if got := BuildCanvasVideoProxyURL(task); got != "/api/canvas/videos/task_proxy_paths/content" {
+		t.Fatalf("expected canvas video proxy URL, got %q", got)
+	}
+
+	for _, value := range []string{
+		"/v1/videos/task_proxy_paths/content",
+		"https://gateway.example.com/v1/videos/task_proxy_paths/content",
+		"/api/canvas/videos/task_proxy_paths/content",
+		"https://gateway.example.com/api/canvas/videos/task_proxy_paths/content",
+	} {
+		if !IsTaskVideoProxyURL(task, value) {
+			t.Fatalf("expected %q to be recognized as a proxy URL", value)
+		}
+	}
+
+	if IsTaskVideoProxyURL(task, "https://cdn.example.com/video.mp4") {
+		t.Fatal("direct CDN URL should not be recognized as a proxy URL")
+	}
+}

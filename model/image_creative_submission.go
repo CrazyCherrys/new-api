@@ -620,7 +620,7 @@ func publicInspirationAssetDetailQuery() *gorm.DB {
 }
 
 func encodeInspirationAssetCursor(reviewedTime int64, submittedTime int64, id int) string {
-	if reviewedTime <= 0 || submittedTime < 0 || id <= 0 {
+	if reviewedTime < 0 || submittedTime < 0 || id <= 0 {
 		return ""
 	}
 	return fmt.Sprintf("%d:%d:%d", reviewedTime, submittedTime, id)
@@ -666,47 +666,147 @@ func applyInspirationCursor(query *gorm.DB, cursor string) (*gorm.DB, error) {
 	), nil
 }
 
+type inspirationSubmissionFeedRow struct {
+	Id            int   `gorm:"column:id"`
+	TaskId        int   `gorm:"column:task_id"`
+	ReviewedTime  int64 `gorm:"column:reviewed_time"`
+	SubmittedTime int64 `gorm:"column:submitted_time"`
+}
+
+func countApprovedInspirationAssetsFromStore() (int64, error) {
+	var taskIDs []int
+	if err := DB.Model(&ImageCreativeSubmission{}).
+		Where("status = ?", CreativeSubmissionStatusApproved).
+		Pluck("task_id", &taskIDs).Error; err != nil {
+		return 0, err
+	}
+	if len(taskIDs) == 0 {
+		return 0, nil
+	}
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	err = forEachChunk(taskIDs, func(chunk []int) error {
+		var count int64
+		if err := store.model().
+			Where("id IN ? AND status = ? AND image_url <> ?", chunk, ImageTaskStatusSuccess, "").
+			Count(&count).Error; err != nil {
+			return err
+		}
+		total += count
+		return nil
+	})
+	return total, err
+}
+
+func approvedInspirationTasksByIDs(taskIDs []int) (map[int]*ImageGenerationTask, error) {
+	result := make(map[int]*ImageGenerationTask)
+	tasks, err := listImageTasksByIDs(taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, task := range tasks {
+		if task == nil || task.Status != ImageTaskStatusSuccess || strings.TrimSpace(task.ImageUrl) == "" {
+			continue
+		}
+		result[task.Id] = task
+	}
+	return result, nil
+}
+
+func imageCreativeUsersByIDs(userIDs []int) (map[int]*User, error) {
+	result := make(map[int]*User)
+	if len(userIDs) == 0 {
+		return result, nil
+	}
+	err := forEachChunk(userIDs, func(chunk []int) error {
+		var users []*User
+		if err := DB.Select("id", "username", "display_name").Where("id IN ?", chunk).Find(&users).Error; err != nil {
+			return err
+		}
+		for _, user := range users {
+			if user == nil {
+				continue
+			}
+			result[user.Id] = user
+		}
+		return nil
+	})
+	return result, err
+}
+
 func getApprovedInspirationAssetsFromStore(cursor string, num int, includeTotal bool) (InspirationAssetPage, error) {
 	cursor = strings.TrimSpace(cursor)
-	var assets []*ImageCreativeAsset
 	var total int64
 	limit := num
 	if limit <= 0 {
 		limit = 24
 	}
 	if includeTotal && cursor == "" {
-		if err := DB.Table("image_creative_submissions AS s").
-			Joins("JOIN image_generation_tasks AS t ON t.id = s.task_id").
-			Where("s.status = ? AND t.status = ? AND t.image_url <> ?", CreativeSubmissionStatusApproved, ImageTaskStatusSuccess, "").
-			Count(&total).Error; err != nil {
+		if count, err := countApprovedInspirationAssetsFromStore(); err != nil {
 			return InspirationAssetPage{}, err
+		} else {
+			total = count
 		}
 	}
 
-	subQuery, err := applyInspirationCursor(
-		DB.Table("image_creative_submissions AS s").
-			Select("s.id, s.task_id, s.reviewed_time, s.submitted_time").
-			Where("s.status = ?", CreativeSubmissionStatusApproved),
-		cursor,
-	)
-	if err != nil {
-		return InspirationAssetPage{}, err
-	}
+	assets := make([]*ImageCreativeAsset, 0, limit+1)
+	scanCursor := cursor
+	for len(assets) <= limit {
+		rows, err := listApprovedInspirationSubmissionRows(scanCursor, limit+1)
+		if err != nil {
+			return InspirationAssetPage{}, err
+		}
+		if len(rows) == 0 {
+			break
+		}
 
-	subQuery = subQuery.
-		Order("s.reviewed_time DESC, s.submitted_time DESC, s.id DESC").
-		Limit(limit + 1)
-
-	if err := DB.Table("(?) AS feed", subQuery).
-		Select("feed.id, feed.reviewed_time, feed.submitted_time, COALESCE(NULLIF(t.thumbnail_url, ''), t.image_url) AS thumbnail_url, t.image_metadata").
-		Joins("JOIN image_generation_tasks AS t ON t.id = feed.task_id").
-		Where("t.status = ? AND t.image_url <> ?", ImageTaskStatusSuccess, "").
-		Scan(&assets).Error; err != nil {
-		return InspirationAssetPage{}, err
-	}
-
-	for _, asset := range assets {
-		populateImageCreativeAssetCardAspectRatio(asset)
+		taskIDs := make([]int, 0, len(rows))
+		for _, row := range rows {
+			if row == nil || row.TaskId <= 0 {
+				continue
+			}
+			taskIDs = append(taskIDs, row.TaskId)
+		}
+		tasksByID, err := approvedInspirationTasksByIDs(taskIDs)
+		if err != nil {
+			return InspirationAssetPage{}, err
+		}
+		for _, row := range rows {
+			if row == nil {
+				continue
+			}
+			task := tasksByID[row.TaskId]
+			if task == nil {
+				continue
+			}
+			asset := &ImageCreativeAsset{
+				Id:            row.Id,
+				ThumbnailUrl:  strings.TrimSpace(task.ThumbnailUrl),
+				ImageMetadata: task.ImageMetadata,
+				ReviewedTime:  row.ReviewedTime,
+				SubmittedTime: row.SubmittedTime,
+			}
+			if asset.ThumbnailUrl == "" {
+				asset.ThumbnailUrl = task.ImageUrl
+			}
+			populateImageCreativeAssetCardAspectRatio(asset)
+			assets = append(assets, asset)
+			if len(assets) > limit {
+				break
+			}
+		}
+		if len(assets) > limit || len(rows) < limit+1 {
+			break
+		}
+		lastRow := rows[len(rows)-1]
+		nextScanCursor := encodeInspirationAssetCursor(lastRow.ReviewedTime, lastRow.SubmittedTime, lastRow.Id)
+		if nextScanCursor == "" || nextScanCursor == scanCursor {
+			break
+		}
+		scanCursor = nextScanCursor
 	}
 
 	hasMore := len(assets) > limit
@@ -725,6 +825,30 @@ func getApprovedInspirationAssetsFromStore(cursor string, num int, includeTotal 
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
 	}, nil
+}
+
+func listApprovedInspirationSubmissionRows(cursor string, limit int) ([]*inspirationSubmissionFeedRow, error) {
+	if limit <= 0 {
+		return []*inspirationSubmissionFeedRow{}, nil
+	}
+	subQuery, err := applyInspirationCursor(
+		DB.Table("image_creative_submissions AS s").
+			Select("s.id, s.task_id, s.reviewed_time, s.submitted_time").
+			Where("s.status = ?", CreativeSubmissionStatusApproved),
+		cursor,
+	)
+	if err != nil {
+		return nil, err
+	}
+	subQuery = subQuery.
+		Order("s.reviewed_time DESC, s.submitted_time DESC, s.id DESC").
+		Limit(limit)
+
+	var rows []*inspirationSubmissionFeedRow
+	if err := DB.Table("(?) AS feed", subQuery).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func refreshApprovedInspirationAssetsCache(cacheKey, cursor string, num int, includeTotal bool, cacheTTL time.Duration) error {
@@ -850,13 +974,39 @@ func GetApprovedInspirationAssetByID(id int) (*ImageCreativeAsset, error) {
 		}
 	}
 
-	var asset ImageCreativeAsset
-	err := publicInspirationAssetDetailQuery().Where("s.id = ?", id).Scan(&asset).Error
+	var submission ImageCreativeSubmission
+	err := DB.Where("id = ? AND status = ?", id, CreativeSubmissionStatusApproved).First(&submission).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	if asset.Id == 0 {
+	task, err := GetImageTaskByID(submission.TaskId)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil || task.Status != ImageTaskStatusSuccess || strings.TrimSpace(task.ImageUrl) == "" {
 		return nil, nil
+	}
+	displayByModelID, err := imageTaskModelDisplayByModelIDs([]string{task.ModelId})
+	if err != nil {
+		return nil, err
+	}
+	display := displayByModelID[strings.TrimSpace(task.ModelId)]
+	asset := ImageCreativeAsset{
+		Id:            submission.Id,
+		ModelId:       task.ModelId,
+		SelectedGroup: task.SelectedGroup,
+		DisplayName:   display.DisplayName,
+		ModelSeries:   display.ModelSeries,
+		Prompt:        task.Prompt,
+		Params:        task.Params,
+		ImageUrl:      task.ImageUrl,
+		ThumbnailUrl:  task.ThumbnailUrl,
+		ImageMetadata: task.ImageMetadata,
+		ReviewedTime:  submission.ReviewedTime,
+		SubmittedTime: submission.SubmittedTime,
 	}
 	populateImageCreativeAssetCardAspectRatio(&asset)
 	if cacheKey != "" {
@@ -886,21 +1036,90 @@ func GetImageInspirationSubmissions(startIdx int, num int, status string) ([]*Im
 		return nil, 0, errors.New("无效的审核状态")
 	}
 
-	query := adminInspirationSubmissionsBaseQuery().Where("s.status = ?", status)
+	query := DB.Model(&ImageCreativeSubmission{}).Where("status = ?", status)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	var submissions []*ImageCreativeAdminSubmission
+	var rows []*ImageCreativeSubmission
 	if err := query.
-		Order("s.submitted_time DESC, s.id DESC").
+		Order("submitted_time DESC, id DESC").
 		Limit(num).
 		Offset(startIdx).
-		Scan(&submissions).Error; err != nil {
+		Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
-
+	taskIDs := make([]int, 0, len(rows))
+	userIDs := make([]int, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		taskIDs = append(taskIDs, row.TaskId)
+		userIDs = append(userIDs, row.UserId)
+	}
+	taskList, err := listImageTasksByIDs(taskIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	tasksByID := make(map[int]*ImageGenerationTask, len(taskList))
+	modelIDs := make([]string, 0, len(taskList))
+	for _, task := range taskList {
+		if task == nil {
+			continue
+		}
+		tasksByID[task.Id] = task
+		modelIDs = append(modelIDs, task.ModelId)
+	}
+	displayByModelID, err := imageTaskModelDisplayByModelIDs(modelIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	usersByID, err := imageCreativeUsersByIDs(userIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	submissions := make([]*ImageCreativeAdminSubmission, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		task := tasksByID[row.TaskId]
+		user := usersByID[row.UserId]
+		display := imageTaskModelDisplay{}
+		if task != nil {
+			display = displayByModelID[strings.TrimSpace(task.ModelId)]
+		}
+		item := &ImageCreativeAdminSubmission{
+			Id:            row.Id,
+			SubmissionId:  row.Id,
+			TaskId:        row.TaskId,
+			UserId:        row.UserId,
+			Status:        row.Status,
+			RejectReason:  row.RejectReason,
+			ReviewerId:    row.ReviewerId,
+			SubmittedTime: row.SubmittedTime,
+			ReviewedTime:  row.ReviewedTime,
+		}
+		if user != nil {
+			item.Username = user.Username
+			item.UserName = user.Username
+			item.UserDisplayName = user.DisplayName
+		}
+		if task != nil {
+			item.ModelId = task.ModelId
+			item.DisplayName = display.DisplayName
+			item.ModelSeries = display.ModelSeries
+			item.Prompt = task.Prompt
+			item.Params = task.Params
+			item.ImageUrl = task.ImageUrl
+			item.ImageMetadata = task.ImageMetadata
+			item.CreatedTime = task.CreatedTime
+			item.CompletedTime = task.CompletedTime
+		}
+		submissions = append(submissions, item)
+	}
 	return submissions, total, nil
 }
 
@@ -909,15 +1128,58 @@ func GetImageCreativeSubmissions(startIdx int, num int, status string) ([]*Image
 }
 
 func GetImageInspirationAdminSubmissionByID(id int) (*ImageCreativeAdminSubmission, error) {
-	var submission ImageCreativeAdminSubmission
-	err := adminInspirationSubmissionsBaseQuery().Where("s.id = ?", id).Scan(&submission).Error
+	var row ImageCreativeSubmission
+	err := DB.Where("id = ?", id).First(&row).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	if submission.Id == 0 {
-		return nil, nil
+	task, err := GetImageTaskByID(row.TaskId)
+	if err != nil {
+		return nil, err
 	}
-	return &submission, nil
+	displayByModelID := map[string]imageTaskModelDisplay{}
+	if task != nil {
+		displayByModelID, err = imageTaskModelDisplayByModelIDs([]string{task.ModelId})
+		if err != nil {
+			return nil, err
+		}
+	}
+	usersByID, err := imageCreativeUsersByIDs([]int{row.UserId})
+	if err != nil {
+		return nil, err
+	}
+	submission := &ImageCreativeAdminSubmission{
+		Id:            row.Id,
+		SubmissionId:  row.Id,
+		TaskId:        row.TaskId,
+		UserId:        row.UserId,
+		Status:        row.Status,
+		RejectReason:  row.RejectReason,
+		ReviewerId:    row.ReviewerId,
+		SubmittedTime: row.SubmittedTime,
+		ReviewedTime:  row.ReviewedTime,
+	}
+	if user := usersByID[row.UserId]; user != nil {
+		submission.Username = user.Username
+		submission.UserName = user.Username
+		submission.UserDisplayName = user.DisplayName
+	}
+	if task != nil {
+		display := displayByModelID[strings.TrimSpace(task.ModelId)]
+		submission.ModelId = task.ModelId
+		submission.DisplayName = display.DisplayName
+		submission.ModelSeries = display.ModelSeries
+		submission.Prompt = task.Prompt
+		submission.Params = task.Params
+		submission.ImageUrl = task.ImageUrl
+		submission.ImageMetadata = task.ImageMetadata
+		submission.CreatedTime = task.CreatedTime
+		submission.CompletedTime = task.CompletedTime
+	}
+	return submission, nil
 }
 
 func GetImageCreativeAdminSubmissionByID(id int) (*ImageCreativeAdminSubmission, error) {

@@ -31,14 +31,14 @@ func videoProxyError(c *gin.Context, status int, errType, message string) {
 }
 
 func VideoProxy(c *gin.Context) {
-	taskID := c.Param("task_id")
+	taskID := strings.TrimSpace(c.Param("task_id"))
 	if taskID == "" {
 		videoProxyError(c, http.StatusBadRequest, "invalid_request_error", "task_id is required")
 		return
 	}
 
 	userID := c.GetInt("id")
-	task, exists, err := model.GetByTaskId(userID, taskID)
+	task, exists, err := getVideoProxyTaskByTaskID(userID, taskID)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to query task %s: %s", taskID, err.Error()))
 		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to query task")
@@ -49,6 +49,42 @@ func VideoProxy(c *gin.Context) {
 		return
 	}
 
+	proxyVideoTask(c, task)
+}
+
+func CanvasVideoProxy(c *gin.Context) {
+	taskID := strings.TrimSpace(c.Param("task_id"))
+	if taskID == "" {
+		videoProxyError(c, http.StatusBadRequest, "invalid_request_error", "task_id is required")
+		return
+	}
+
+	userID := c.GetInt("id")
+	task, exists, err := getCanvasVideoProxyTaskByTaskID(userID, taskID)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to query canvas video task %s: %s", taskID, err.Error()))
+		if model.IsCanvasModeUnavailableError(err) {
+			videoProxyError(c, http.StatusServiceUnavailable, "server_error", err.Error())
+			return
+		}
+		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to query task")
+		return
+	}
+	if !exists || task == nil {
+		videoProxyError(c, http.StatusNotFound, "invalid_request_error", "Task not found")
+		return
+	}
+
+	proxyVideoTask(c, task)
+}
+
+var (
+	getVideoProxyTaskByTaskID       = model.GetByTaskId
+	getCanvasVideoProxyTaskByTaskID = model.GetCanvasVideoTaskByTaskID
+)
+
+func proxyVideoTask(c *gin.Context, task *model.Task) {
+	taskID := strings.TrimSpace(task.TaskID)
 	if task.Status != model.TaskStatusSuccess {
 		videoProxyError(c, http.StatusBadRequest, "invalid_request_error",
 			fmt.Sprintf("Task is not completed yet, current status: %s", task.Status))

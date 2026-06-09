@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var commonGroupCol string
@@ -81,32 +83,187 @@ const (
 	canvasMessageStorageModeDisabled      canvasMessageStorageMode = "disabled"
 )
 
+type canvasModeStorageState struct {
+	storageMode canvasMessageStorageMode
+	available   bool
+	reason      string
+}
+
+type CanvasModeUnavailableError struct {
+	Mode   string
+	Reason string
+}
+
+func (e *CanvasModeUnavailableError) Error() string {
+	mode := NormalizeCanvasMode(e.Mode)
+	reason := strings.TrimSpace(e.Reason)
+	if mode == "" {
+		if reason == "" {
+			return "canvas is unavailable"
+		}
+		return reason
+	}
+	if reason == "" {
+		return fmt.Sprintf("canvas %s mode is unavailable", mode)
+	}
+	return fmt.Sprintf("canvas %s mode is unavailable: %s", mode, reason)
+}
+
 var (
-	canvasStateMu                   sync.RWMutex
-	canvasCurrentStorageMode        = canvasMessageStorageModeCompatibility
-	canvasAvailable                 = true
-	canvasUnavailableReason         string
+	canvasStateMu    = sync.RWMutex{}
+	canvasModeStates = map[string]canvasModeStorageState{
+		CanvasModeChat:  {storageMode: canvasMessageStorageModeCompatibility, available: true},
+		CanvasModeImage: {storageMode: canvasMessageStorageModeCompatibility, available: true},
+		CanvasModeVideo: {storageMode: canvasMessageStorageModeCompatibility, available: true},
+	}
 	openCanvasMessagePostgresDBFunc = openCanvasMessagePostgresDB
 )
 
 func CanvasAvailabilityStatus() (bool, string) {
 	canvasStateMu.RLock()
 	defer canvasStateMu.RUnlock()
-	return canvasAvailable, canvasUnavailableReason
+	reasons := make([]string, 0, len(canvasModeStates))
+	for _, mode := range []string{CanvasModeChat, CanvasModeImage, CanvasModeVideo} {
+		state := canvasModeStates[mode]
+		if state.available {
+			return true, ""
+		}
+		if reason := strings.TrimSpace(state.reason); reason != "" {
+			reasons = append(reasons, fmt.Sprintf("%s: %s", mode, reason))
+		}
+	}
+	if len(reasons) == 0 {
+		return false, "canvas is unavailable"
+	}
+	return false, strings.Join(reasons, "; ")
 }
 
 func CanvasUsesDedicatedMessageDBs() bool {
 	canvasStateMu.RLock()
 	defer canvasStateMu.RUnlock()
-	return canvasCurrentStorageMode == canvasMessageStorageModeSplit && canvasAvailable
+	for _, mode := range []string{CanvasModeChat, CanvasModeImage, CanvasModeVideo} {
+		if canvasModeStates[mode].storageMode == canvasMessageStorageModeSplit {
+			return true
+		}
+	}
+	return false
 }
 
-func setCanvasMessageStorageState(mode canvasMessageStorageMode, available bool, reason string) {
+func newCanvasModeUnavailableError(mode string, reason string) error {
+	return &CanvasModeUnavailableError{
+		Mode:   NormalizeCanvasMode(mode),
+		Reason: strings.TrimSpace(reason),
+	}
+}
+
+func IsCanvasModeUnavailableError(err error) bool {
+	var target *CanvasModeUnavailableError
+	return errors.As(err, &target)
+}
+
+func CanvasModeAvailabilityStatus(mode string) (bool, string) {
+	mode = NormalizeCanvasMode(mode)
+	if mode == "" {
+		return false, "invalid canvas mode"
+	}
+	canvasStateMu.RLock()
+	defer canvasStateMu.RUnlock()
+	state, ok := canvasModeStates[mode]
+	if !ok {
+		return false, "invalid canvas mode"
+	}
+	return state.available, strings.TrimSpace(state.reason)
+}
+
+func CanvasModeUsesDedicatedMessageDB(mode string) bool {
+	mode = NormalizeCanvasMode(mode)
+	if mode == "" {
+		return false
+	}
+	canvasStateMu.RLock()
+	defer canvasStateMu.RUnlock()
+	state, ok := canvasModeStates[mode]
+	return ok && state.storageMode == canvasMessageStorageModeSplit
+}
+
+func EnsureCanvasModeAvailable(mode string) error {
+	if available, reason := CanvasModeAvailabilityStatus(mode); available {
+		return nil
+	} else {
+		return newCanvasModeUnavailableError(mode, reason)
+	}
+}
+
+func setCanvasModeStorageState(mode string, storageMode canvasMessageStorageMode, available bool, reason string) {
+	mode = NormalizeCanvasMode(mode)
+	if mode == "" {
+		return
+	}
 	canvasStateMu.Lock()
 	defer canvasStateMu.Unlock()
-	canvasCurrentStorageMode = mode
-	canvasAvailable = available
-	canvasUnavailableReason = strings.TrimSpace(reason)
+	canvasModeStates[mode] = canvasModeStorageState{
+		storageMode: storageMode,
+		available:   available,
+		reason:      strings.TrimSpace(reason),
+	}
+}
+
+func canvasModeDSNEnvName(mode string) string {
+	switch NormalizeCanvasMode(mode) {
+	case CanvasModeChat:
+		return "CANVAS_CHAT_SQL_DSN"
+	case CanvasModeImage:
+		return "CANVAS_IMAGE_SQL_DSN"
+	case CanvasModeVideo:
+		return "CANVAS_VIDEO_SQL_DSN"
+	default:
+		return ""
+	}
+}
+
+func setCanvasModeDBHandle(mode string, db *gorm.DB) {
+	switch NormalizeCanvasMode(mode) {
+	case CanvasModeChat:
+		CANVAS_CHAT_DB = db
+	case CanvasModeImage:
+		CANVAS_IMAGE_DB = db
+	case CanvasModeVideo:
+		CANVAS_VIDEO_DB = db
+	}
+}
+
+func canvasModeDedicatedDB(mode string) *gorm.DB {
+	switch NormalizeCanvasMode(mode) {
+	case CanvasModeChat:
+		return CANVAS_CHAT_DB
+	case CanvasModeImage:
+		return CANVAS_IMAGE_DB
+	case CanvasModeVideo:
+		return CANVAS_VIDEO_DB
+	default:
+		return nil
+	}
+}
+
+func canvasModeDataDB(mode string) (*gorm.DB, error) {
+	mode = NormalizeCanvasMode(mode)
+	if mode == "" {
+		return nil, fmt.Errorf("invalid canvas mode")
+	}
+	if err := EnsureCanvasModeAvailable(mode); err != nil {
+		return nil, err
+	}
+	if CanvasModeUsesDedicatedMessageDB(mode) {
+		db := canvasModeDedicatedDB(mode)
+		if db == nil {
+			return nil, fmt.Errorf("canvas %s database is not initialized", mode)
+		}
+		return db, nil
+	}
+	if DB == nil {
+		return nil, fmt.Errorf("canvas main database is not initialized")
+	}
+	return DB, nil
 }
 
 func closeCanvasMessageDBs() error {
@@ -160,23 +317,354 @@ func openCanvasMessagePostgresDB(envName string, dsn string) (*gorm.DB, error) {
 	return db, nil
 }
 
-func migrateCanvasDBs(chatDB *gorm.DB, imageDB *gorm.DB, videoDB *gorm.DB) error {
-	if err := chatDB.AutoMigrate(&CanvasChatMessage{}); err != nil {
-		return fmt.Errorf("failed to migrate canvas_chat_messages: %w", err)
+func migrateCanvasModeDB(mode string, db *gorm.DB) error {
+	if db == nil {
+		return nil
 	}
-	if err := imageDB.AutoMigrate(&CanvasImageMessage{}); err != nil {
-		return fmt.Errorf("failed to migrate canvas_image_messages: %w", err)
+	switch NormalizeCanvasMode(mode) {
+	case CanvasModeChat:
+		if err := db.AutoMigrate(&CanvasSession{}, &CanvasChatMessage{}, &CanvasChatMessageAttachment{}); err != nil {
+			return fmt.Errorf("failed to migrate chat canvas tables: %w", err)
+		}
+	case CanvasModeImage:
+		if err := db.AutoMigrate(&CanvasSession{}, &CanvasImageMessage{}, &ImageGenerationTask{}, &ImageGenerationReferenceAsset{}, &ImageGenerationTaskReferenceAsset{}, &CanvasAssetCleanupJob{}); err != nil {
+			return fmt.Errorf("failed to migrate image canvas tables: %w", err)
+		}
+	case CanvasModeVideo:
+		if err := db.AutoMigrate(&CanvasSession{}, &CanvasVideoMessage{}, &CanvasAssetCleanupJob{}, &Task{}); err != nil {
+			return fmt.Errorf("failed to migrate video canvas tables: %w", err)
+		}
 	}
-	if err := videoDB.AutoMigrate(&CanvasVideoMessage{}); err != nil {
-		return fmt.Errorf("failed to migrate canvas_video_messages: %w", err)
+	return nil
+}
+
+func MigrateCanvasDedicatedDBs() error {
+	errs := make([]string, 0, 3)
+	for _, mode := range []string{CanvasModeChat, CanvasModeImage, CanvasModeVideo} {
+		if !CanvasModeUsesDedicatedMessageDB(mode) {
+			continue
+		}
+		db := canvasModeDedicatedDB(mode)
+		if db == nil {
+			errs = append(errs, fmt.Sprintf("%s: dedicated database is not initialized", mode))
+			continue
+		}
+		if err := migrateCanvasModeDB(mode, db); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", mode, err))
+			continue
+		}
+		setCanvasModeStorageState(mode, canvasMessageStorageModeSplit, true, "")
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(errs, "; "))
+}
+
+type CanvasDedicatedBackfillStats struct {
+	Mode                     string
+	Sessions                 int64
+	Messages                 int64
+	ChatAttachments          int64
+	ImageTasks               int64
+	ImageReferenceAssets     int64
+	ImageTaskReferenceAssets int64
+	AssetCleanupJobs         int64
+	VideoTasks               int64
+}
+
+const canvasDedicatedBackfillBatchSize = 500
+
+func BackfillCanvasDedicatedDBs() (map[string]CanvasDedicatedBackfillStats, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("canvas main database is not initialized")
+	}
+	if err := MigrateCanvasDedicatedDBs(); err != nil {
+		return nil, err
+	}
+	result := make(map[string]CanvasDedicatedBackfillStats, 3)
+	errs := make([]string, 0, 3)
+	for _, mode := range []string{CanvasModeChat, CanvasModeImage, CanvasModeVideo} {
+		if !CanvasModeUsesDedicatedMessageDB(mode) {
+			continue
+		}
+		db := canvasModeDedicatedDB(mode)
+		if db == nil {
+			errs = append(errs, fmt.Sprintf("%s: dedicated database is not initialized", mode))
+			continue
+		}
+		stats, err := backfillCanvasDedicatedModeDB(mode, db)
+		result[mode] = stats
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", mode, err))
+		}
+	}
+	if len(errs) > 0 {
+		return result, errors.New(strings.Join(errs, "; "))
+	}
+	return result, nil
+}
+
+func backfillCanvasDedicatedModeDB(mode string, db *gorm.DB) (CanvasDedicatedBackfillStats, error) {
+	stats := CanvasDedicatedBackfillStats{Mode: NormalizeCanvasMode(mode)}
+	if stats.Mode == "" {
+		return stats, fmt.Errorf("invalid canvas mode")
+	}
+	if db == nil {
+		return stats, fmt.Errorf("canvas %s database is not initialized", stats.Mode)
+	}
+
+	var err error
+	if canvasBackfillTableExists(DB, "canvas_sessions") {
+		stats.Sessions, err = backfillCanvasRows[CanvasSession](
+			DB.Table("canvas_sessions").Where("mode = ?", stats.Mode).Order("id ASC"),
+			db.Table("canvas_sessions"),
+			func(session *CanvasSession) {
+				if session != nil && strings.TrimSpace(session.PublicId) == "" {
+					session.PublicId = generateCanvasSessionPublicID(session.Mode)
+				}
+			},
+		)
+		if err != nil {
+			return stats, err
+		}
+	}
+	if canvasBackfillTableExists(DB, "canvas_messages") {
+		stats.Messages, err = backfillCanvasRows[CanvasMessage](
+			DB.Table("canvas_messages").Where("mode = ?", stats.Mode).Order("id ASC"),
+			db.Table(canvasDedicatedMessageTableName(stats.Mode)),
+			nil,
+		)
+		if err != nil {
+			return stats, err
+		}
+	}
+
+	switch stats.Mode {
+	case CanvasModeChat:
+		if canvasBackfillTableExists(DB, canvasChatMessageAttachmentsTable) {
+			stats.ChatAttachments, err = backfillCanvasRows[CanvasChatMessageAttachment](
+				DB.Table(canvasChatMessageAttachmentsTable).Order("id ASC"),
+				db.Table(canvasChatMessageAttachmentsTable),
+				nil,
+			)
+			if err != nil {
+				return stats, err
+			}
+		}
+	case CanvasModeImage:
+		if canvasBackfillTableExists(DB, "image_generation_tasks") {
+			stats.ImageTasks, err = backfillCanvasRows[ImageGenerationTask](
+				DB.Table("image_generation_tasks").Order("id ASC"),
+				db.Table("image_generation_tasks"),
+				nil,
+			)
+			if err != nil {
+				return stats, err
+			}
+		}
+		if canvasBackfillTableExists(DB, "image_generation_reference_assets") {
+			stats.ImageReferenceAssets, err = backfillCanvasRows[ImageGenerationReferenceAsset](
+				DB.Table("image_generation_reference_assets").Order("id ASC"),
+				db.Table("image_generation_reference_assets"),
+				nil,
+			)
+			if err != nil {
+				return stats, err
+			}
+		}
+		if canvasBackfillTableExists(DB, "image_generation_task_reference_assets") {
+			stats.ImageTaskReferenceAssets, err = backfillCanvasRows[ImageGenerationTaskReferenceAsset](
+				DB.Table("image_generation_task_reference_assets").Order("id ASC"),
+				db.Table("image_generation_task_reference_assets"),
+				nil,
+			)
+			if err != nil {
+				return stats, err
+			}
+		}
+		if canvasBackfillTableExists(DB, "canvas_asset_cleanup_jobs") {
+			stats.AssetCleanupJobs, err = backfillCanvasRows[CanvasAssetCleanupJob](
+				DB.Table("canvas_asset_cleanup_jobs").Where("task_type = ?", CanvasTaskTypeImage).Order("id ASC"),
+				db.Table("canvas_asset_cleanup_jobs"),
+				nil,
+			)
+			if err != nil {
+				return stats, err
+			}
+		}
+	case CanvasModeVideo:
+		if canvasBackfillTableExists(DB, "tasks") {
+			stats.VideoTasks, err = backfillCanvasRows[Task](
+				DB.Table("tasks").Where("action IN ?", DefaultVideoTaskActions()).Order("id ASC"),
+				db.Table("tasks"),
+				nil,
+			)
+			if err != nil {
+				return stats, err
+			}
+		}
+		if canvasBackfillTableExists(DB, "canvas_asset_cleanup_jobs") {
+			stats.AssetCleanupJobs, err = backfillCanvasRows[CanvasAssetCleanupJob](
+				DB.Table("canvas_asset_cleanup_jobs").Where("task_type = ?", CanvasTaskTypeVideo).Order("id ASC"),
+				db.Table("canvas_asset_cleanup_jobs"),
+				nil,
+			)
+			if err != nil {
+				return stats, err
+			}
+		}
+	}
+
+	if err := resetCanvasDedicatedPostgresSequences(stats.Mode, db); err != nil {
+		return stats, err
+	}
+	return stats, nil
+}
+
+func canvasDedicatedMessageTableName(mode string) string {
+	switch NormalizeCanvasMode(mode) {
+	case CanvasModeChat:
+		return canvasChatMessagesTable
+	case CanvasModeImage:
+		return canvasImageMessagesTable
+	case CanvasModeVideo:
+		return canvasVideoMessagesTable
+	default:
+		return ""
+	}
+}
+
+func canvasBackfillTableExists(db *gorm.DB, tableName string) bool {
+	return db != nil && strings.TrimSpace(tableName) != "" && db.Migrator().HasTable(tableName)
+}
+
+func backfillCanvasRows[T any](source *gorm.DB, destination *gorm.DB, prepare func(*T)) (int64, error) {
+	if source == nil || destination == nil {
+		return 0, fmt.Errorf("canvas backfill source and destination are required")
+	}
+	var total int64
+	var rows []T
+	err := source.FindInBatches(&rows, canvasDedicatedBackfillBatchSize, func(tx *gorm.DB, batch int) error {
+		if len(rows) == 0 {
+			return nil
+		}
+		if prepare != nil {
+			for index := range rows {
+				prepare(&rows[index])
+			}
+		}
+		result := destination.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows)
+		if result.Error != nil {
+			return result.Error
+		}
+		total += result.RowsAffected
+		return nil
+	}).Error
+	return total, err
+}
+
+type canvasDedicatedPostgresSequenceTarget struct {
+	Table  string
+	Column string
+}
+
+func canvasDedicatedPostgresSequenceTargets(mode string) []canvasDedicatedPostgresSequenceTarget {
+	switch NormalizeCanvasMode(mode) {
+	case CanvasModeChat:
+		return []canvasDedicatedPostgresSequenceTarget{
+			{Table: "canvas_sessions", Column: "id"},
+			{Table: canvasChatMessagesTable, Column: "id"},
+			{Table: canvasChatMessageAttachmentsTable, Column: "id"},
+		}
+	case CanvasModeImage:
+		return []canvasDedicatedPostgresSequenceTarget{
+			{Table: "canvas_sessions", Column: "id"},
+			{Table: canvasImageMessagesTable, Column: "id"},
+			{Table: "image_generation_tasks", Column: "id"},
+			{Table: "image_generation_reference_assets", Column: "id"},
+			{Table: "image_generation_task_reference_assets", Column: "id"},
+			{Table: "canvas_asset_cleanup_jobs", Column: "id"},
+		}
+	case CanvasModeVideo:
+		return []canvasDedicatedPostgresSequenceTarget{
+			{Table: "canvas_sessions", Column: "id"},
+			{Table: canvasVideoMessagesTable, Column: "id"},
+			{Table: "tasks", Column: "id"},
+			{Table: "canvas_asset_cleanup_jobs", Column: "id"},
+		}
+	default:
+		return nil
+	}
+}
+
+func isAllowedCanvasDedicatedPostgresSequenceTarget(target canvasDedicatedPostgresSequenceTarget) bool {
+	for _, mode := range []string{CanvasModeChat, CanvasModeImage, CanvasModeVideo} {
+		for _, allowed := range canvasDedicatedPostgresSequenceTargets(mode) {
+			if target == allowed {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func quotePostgresIdentifier(identifier string) (string, error) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return "", fmt.Errorf("empty PostgreSQL identifier")
+	}
+	if strings.Contains(identifier, `"`) {
+		return "", fmt.Errorf("invalid PostgreSQL identifier %q", identifier)
+	}
+	return `"` + identifier + `"`, nil
+}
+
+func canvasDedicatedPostgresSequenceResetSQL(target canvasDedicatedPostgresSequenceTarget) (string, []any, error) {
+	if !isAllowedCanvasDedicatedPostgresSequenceTarget(target) {
+		return "", nil, fmt.Errorf("canvas sequence reset target is not allowed: %s.%s", target.Table, target.Column)
+	}
+	quotedTable, err := quotePostgresIdentifier(target.Table)
+	if err != nil {
+		return "", nil, err
+	}
+	quotedColumn, err := quotePostgresIdentifier(target.Column)
+	if err != nil {
+		return "", nil, err
+	}
+	query := fmt.Sprintf(
+		`SELECT setval(pg_get_serial_sequence(?, ?), COALESCE((SELECT MAX(%s) FROM %s), 0) + 1, false)`,
+		quotedColumn,
+		quotedTable,
+	)
+	return query, []any{target.Table, target.Column}, nil
+}
+
+func resetCanvasDedicatedPostgresSequences(mode string, db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("canvas %s database is not initialized", NormalizeCanvasMode(mode))
+	}
+	if db.Dialector == nil || db.Dialector.Name() != "postgres" {
+		return nil
+	}
+	for _, target := range canvasDedicatedPostgresSequenceTargets(mode) {
+		if !db.Migrator().HasTable(target.Table) {
+			continue
+		}
+		query, args, err := canvasDedicatedPostgresSequenceResetSQL(target)
+		if err != nil {
+			return err
+		}
+		if err := db.Exec(query, args...).Error; err != nil {
+			return fmt.Errorf("failed to reset %s.%s sequence: %w", target.Table, target.Column, err)
+		}
 	}
 	return nil
 }
 
 func InitCanvasDBs() {
 	if err := initCanvasDBs(); err != nil {
-		common.SysError("canvas disabled: " + err.Error())
-		setCanvasMessageStorageState(canvasMessageStorageModeDisabled, false, "canvas is unavailable: "+err.Error())
+		common.SysError("canvas initialization failed: " + err.Error())
 	}
 }
 
@@ -184,21 +672,6 @@ func initCanvasDBs() error {
 	if err := closeCanvasMessageDBs(); err != nil {
 		return err
 	}
-
-	chatDSN := strings.TrimSpace(os.Getenv("CANVAS_CHAT_SQL_DSN"))
-	imageDSN := strings.TrimSpace(os.Getenv("CANVAS_IMAGE_SQL_DSN"))
-	videoDSN := strings.TrimSpace(os.Getenv("CANVAS_VIDEO_SQL_DSN"))
-
-	if chatDSN == "" && imageDSN == "" && videoDSN == "" {
-		setCanvasMessageStorageState(canvasMessageStorageModeCompatibility, true, "")
-		common.SysLog("canvas message storage using main database compatibility mode")
-		return nil
-	}
-
-	if chatDSN == "" || imageDSN == "" || videoDSN == "" {
-		return fmt.Errorf("CANVAS_CHAT_SQL_DSN, CANVAS_IMAGE_SQL_DSN, and CANVAS_VIDEO_SQL_DSN must be configured together")
-	}
-
 	openedByDSN := make(map[string]*gorm.DB, 3)
 	openCanvasDB := func(envName string, dsn string) (*gorm.DB, error) {
 		if db, ok := openedByDSN[dsn]; ok {
@@ -211,40 +684,33 @@ func initCanvasDBs() error {
 		openedByDSN[dsn] = db
 		return db, nil
 	}
-	closeOpenedCanvasDBs := func() {
-		for _, db := range openedByDSN {
-			_ = closeDB(db)
+	for _, mode := range []string{CanvasModeChat, CanvasModeImage, CanvasModeVideo} {
+		envName := canvasModeDSNEnvName(mode)
+		dsn := strings.TrimSpace(os.Getenv(envName))
+		if dsn == "" {
+			if DB == nil {
+				setCanvasModeStorageState(mode, canvasMessageStorageModeCompatibility, false, "canvas main database is not initialized")
+				continue
+			}
+			setCanvasModeStorageState(mode, canvasMessageStorageModeCompatibility, true, "")
+			common.SysLog("canvas " + mode + " message storage using main database compatibility mode")
+			continue
 		}
-	}
-
-	chatDB, err := openCanvasDB("CANVAS_CHAT_SQL_DSN", chatDSN)
-	if err != nil {
-		return err
-	}
-	imageDB, err := openCanvasDB("CANVAS_IMAGE_SQL_DSN", imageDSN)
-	if err != nil {
-		closeOpenedCanvasDBs()
-		return err
-	}
-	videoDB, err := openCanvasDB("CANVAS_VIDEO_SQL_DSN", videoDSN)
-	if err != nil {
-		closeOpenedCanvasDBs()
-		return err
-	}
-
-	if common.IsMasterNode {
-		common.SysLog("canvas database migration started")
-		if err := migrateCanvasDBs(chatDB, imageDB, videoDB); err != nil {
-			closeOpenedCanvasDBs()
-			return err
+		db, err := openCanvasDB(envName, dsn)
+		if err != nil {
+			setCanvasModeStorageState(mode, canvasMessageStorageModeSplit, false, err.Error())
+			common.SysError("canvas " + mode + " mode unavailable: " + err.Error())
+			continue
 		}
+		setCanvasModeDBHandle(mode, db)
+		if err := migrateCanvasModeDB(mode, db); err != nil {
+			setCanvasModeStorageState(mode, canvasMessageStorageModeSplit, false, err.Error())
+			common.SysError("canvas " + mode + " mode unavailable: " + err.Error())
+			continue
+		}
+		setCanvasModeStorageState(mode, canvasMessageStorageModeSplit, true, "")
+		common.SysLog("canvas " + mode + " message storage using dedicated database")
 	}
-
-	CANVAS_CHAT_DB = chatDB
-	CANVAS_IMAGE_DB = imageDB
-	CANVAS_VIDEO_DB = videoDB
-	setCanvasMessageStorageState(canvasMessageStorageModeSplit, true, "")
-	common.SysLog("canvas message storage using dedicated databases")
 	return nil
 }
 
@@ -466,6 +932,7 @@ func migrateDB() error {
 		&ModelMapping{},
 		&CanvasSession{},
 		&CanvasMessage{},
+		&CanvasChatMessageAttachment{},
 		&CanvasAssetCleanupJob{},
 		&ImageGenerationTask{},
 		&ImageGenerationReferenceAsset{},
@@ -522,6 +989,7 @@ func migrateDBFast() error {
 		{&ModelMapping{}, "ModelMapping"},
 		{&CanvasSession{}, "CanvasSession"},
 		{&CanvasMessage{}, "CanvasMessage"},
+		{&CanvasChatMessageAttachment{}, "CanvasChatMessageAttachment"},
 		{&CanvasAssetCleanupJob{}, "CanvasAssetCleanupJob"},
 		{&ImageGenerationTask{}, "ImageGenerationTask"},
 		{&ImageGenerationReferenceAsset{}, "ImageGenerationReferenceAsset"},

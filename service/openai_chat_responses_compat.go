@@ -11,7 +11,10 @@ import (
 	"github.com/QuantumNous/new-api/service/openaicompat"
 )
 
-var canvasChatResponsesCompatSecret = common.GetUUID()
+var (
+	canvasChatResponsesCompatSecret = common.GetUUID()
+	canvasVideoTaskScopeSecret      = common.GetUUID()
+)
 
 func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.OpenAIResponsesRequest, error) {
 	return openaicompat.ChatCompletionsRequestToResponsesRequest(req)
@@ -38,4 +41,19 @@ func IsCanvasChatResponsesCompatHeaderValue(value string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(trimmed), []byte(canvasChatResponsesCompatSecret)) == 1
+}
+
+func SetCanvasVideoTaskScopeHeader(header http.Header) {
+	if header == nil {
+		return
+	}
+	header.Set(constant.HeaderCanvasVideoTaskScope, canvasVideoTaskScopeSecret)
+}
+
+func IsCanvasVideoTaskScopeHeaderValue(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(trimmed), []byte(canvasVideoTaskScopeSecret)) == 1
 }

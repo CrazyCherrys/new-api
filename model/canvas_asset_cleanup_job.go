@@ -1,6 +1,7 @@
 package model
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -56,45 +57,140 @@ func prepareCanvasAssetCleanupJobs(jobs []*CanvasAssetCleanupJob) []*CanvasAsset
 	return prepared
 }
 
-func CreateCanvasAssetCleanupJobsWithDB(db *gorm.DB, jobs []*CanvasAssetCleanupJob) error {
-	if db == nil {
-		db = DB
+func canvasAssetCleanupJobMode(taskType string) string {
+	switch strings.TrimSpace(taskType) {
+	case CanvasTaskTypeImage:
+		return CanvasModeImage
+	case CanvasTaskTypeVideo:
+		return CanvasModeVideo
+	default:
+		return ""
 	}
+}
+
+func canvasAssetCleanupJobDB(taskType string) (*gorm.DB, error) {
+	mode := canvasAssetCleanupJobMode(taskType)
+	if mode == "" {
+		return nil, nil
+	}
+	return canvasModeDataDB(mode)
+}
+
+func createCanvasAssetCleanupJobsRouted(prepared []*CanvasAssetCleanupJob) error {
+	grouped := make(map[string][]*CanvasAssetCleanupJob, 2)
+	orderedTaskTypes := make([]string, 0, 2)
+	for _, job := range prepared {
+		if job == nil {
+			continue
+		}
+		taskType := strings.TrimSpace(job.TaskType)
+		if taskType == "" {
+			return CreateCanvasAssetCleanupJobsWithDB(DB, prepared)
+		}
+		if _, ok := grouped[taskType]; !ok {
+			orderedTaskTypes = append(orderedTaskTypes, taskType)
+		}
+		grouped[taskType] = append(grouped[taskType], job)
+	}
+
+	created := make([]*CanvasAssetCleanupJob, 0, len(prepared))
+	for _, taskType := range orderedTaskTypes {
+		db, err := canvasAssetCleanupJobDB(taskType)
+		if err != nil {
+			_ = DeleteCanvasAssetCleanupJobs(created)
+			return err
+		}
+		if db == nil {
+			db = DB
+		}
+		group := grouped[taskType]
+		if len(group) == 0 {
+			continue
+		}
+		if err := db.Create(group).Error; err != nil {
+			_ = DeleteCanvasAssetCleanupJobs(created)
+			return err
+		}
+		created = append(created, group...)
+	}
+	return nil
+}
+
+func CreateCanvasAssetCleanupJobsWithDB(db *gorm.DB, jobs []*CanvasAssetCleanupJob) error {
 	prepared := prepareCanvasAssetCleanupJobs(jobs)
 	if len(prepared) == 0 {
 		return nil
+	}
+	if db == nil {
+		return createCanvasAssetCleanupJobsRouted(prepared)
 	}
 	return db.Create(prepared).Error
 }
 
 func CreateCanvasAssetCleanupJobs(jobs []*CanvasAssetCleanupJob) error {
-	return CreateCanvasAssetCleanupJobsWithDB(DB, jobs)
+	return CreateCanvasAssetCleanupJobsWithDB(nil, jobs)
 }
 
 func ListClaimableCanvasAssetCleanupJobs(limit int, now int64) ([]*CanvasAssetCleanupJob, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	var jobs []*CanvasAssetCleanupJob
-	err := DB.Where(
-		"(((status IN ?) AND retry_count < max_retries AND next_run_time <= ?) OR (status = ? AND retry_count < max_retries AND lease_expires_at > 0 AND lease_expires_at <= ?))",
-		[]string{CanvasAssetCleanupJobStatusPending, CanvasAssetCleanupJobStatusFailed},
-		now,
-		CanvasAssetCleanupJobStatusProcessing,
-		now,
-	).
-		Order("next_run_time ASC").
-		Order("id ASC").
-		Limit(limit).
-		Find(&jobs).Error
-	return jobs, err
+	taskTypes := []string{CanvasTaskTypeImage, CanvasTaskTypeVideo}
+	jobs := make([]*CanvasAssetCleanupJob, 0, limit*len(taskTypes))
+	for _, taskType := range taskTypes {
+		db, err := canvasAssetCleanupJobDB(taskType)
+		if err != nil {
+			if IsCanvasModeUnavailableError(err) {
+				continue
+			}
+			return nil, err
+		}
+		if db == nil {
+			db = DB
+		}
+		var partial []*CanvasAssetCleanupJob
+		err = db.Where("task_type = ?", taskType).
+			Where(
+				"(((status IN ?) AND retry_count < max_retries AND next_run_time <= ?) OR (status = ? AND retry_count < max_retries AND lease_expires_at > 0 AND lease_expires_at <= ?))",
+				[]string{CanvasAssetCleanupJobStatusPending, CanvasAssetCleanupJobStatusFailed},
+				now,
+				CanvasAssetCleanupJobStatusProcessing,
+				now,
+			).
+			Order("next_run_time ASC").
+			Order("id ASC").
+			Limit(limit).
+			Find(&partial).Error
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, partial...)
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		if jobs[i].NextRunTime == jobs[j].NextRunTime {
+			return jobs[i].Id < jobs[j].Id
+		}
+		return jobs[i].NextRunTime < jobs[j].NextRunTime
+	})
+	if len(jobs) > limit {
+		jobs = jobs[:limit]
+	}
+	return jobs, nil
 }
 
-func ClaimCanvasAssetCleanupJob(id int, now int64, leaseExpiresAt int64) (bool, error) {
-	result := DB.Model(&CanvasAssetCleanupJob{}).
+func ClaimCanvasAssetCleanupJob(taskType string, id int, now int64, leaseExpiresAt int64) (bool, error) {
+	db, err := canvasAssetCleanupJobDB(taskType)
+	if err != nil {
+		return false, err
+	}
+	if db == nil {
+		db = DB
+	}
+	result := db.Model(&CanvasAssetCleanupJob{}).
 		Where(
-			"id = ? AND (((status IN ?) AND retry_count < max_retries AND next_run_time <= ?) OR (status = ? AND retry_count < max_retries AND lease_expires_at > 0 AND lease_expires_at <= ?))",
+			"id = ? AND task_type = ? AND (((status IN ?) AND retry_count < max_retries AND next_run_time <= ?) OR (status = ? AND retry_count < max_retries AND lease_expires_at > 0 AND lease_expires_at <= ?))",
 			id,
+			strings.TrimSpace(taskType),
 			[]string{CanvasAssetCleanupJobStatusPending, CanvasAssetCleanupJobStatusFailed},
 			now,
 			CanvasAssetCleanupJobStatusProcessing,
@@ -110,13 +206,27 @@ func ClaimCanvasAssetCleanupJob(id int, now int64, leaseExpiresAt int64) (bool, 
 	return result.RowsAffected > 0, result.Error
 }
 
-func DeleteCanvasAssetCleanupJob(id int) error {
-	return DB.Delete(&CanvasAssetCleanupJob{}, id).Error
+func DeleteCanvasAssetCleanupJob(taskType string, id int) error {
+	db, err := canvasAssetCleanupJobDB(taskType)
+	if err != nil {
+		return err
+	}
+	if db == nil {
+		db = DB
+	}
+	return db.Where("task_type = ?", strings.TrimSpace(taskType)).Delete(&CanvasAssetCleanupJob{}, id).Error
 }
 
-func MarkCanvasAssetCleanupJobFailed(id int, retryCount int, nextRunTime int64, lastError string) error {
-	return DB.Model(&CanvasAssetCleanupJob{}).
-		Where("id = ?", id).
+func MarkCanvasAssetCleanupJobFailed(taskType string, id int, retryCount int, nextRunTime int64, lastError string) error {
+	db, err := canvasAssetCleanupJobDB(taskType)
+	if err != nil {
+		return err
+	}
+	if db == nil {
+		db = DB
+	}
+	return db.Model(&CanvasAssetCleanupJob{}).
+		Where("id = ? AND task_type = ?", id, strings.TrimSpace(taskType)).
 		Updates(map[string]any{
 			"status":           CanvasAssetCleanupJobStatusFailed,
 			"retry_count":      retryCount,
@@ -125,4 +235,17 @@ func MarkCanvasAssetCleanupJobFailed(id int, retryCount int, nextRunTime int64, 
 			"last_error":       strings.TrimSpace(lastError),
 			"updated_time":     common.GetTimestamp(),
 		}).Error
+}
+
+func DeleteCanvasAssetCleanupJobs(jobs []*CanvasAssetCleanupJob) error {
+	var firstErr error
+	for _, job := range jobs {
+		if job == nil || job.Id <= 0 {
+			continue
+		}
+		if err := DeleteCanvasAssetCleanupJob(job.TaskType, job.Id); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }

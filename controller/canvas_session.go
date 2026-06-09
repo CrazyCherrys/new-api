@@ -56,35 +56,32 @@ type createCanvasMessageRequest struct {
 }
 
 var (
-	listCanvasSessionsForController        = service.ListCanvasSessions
-	listCanvasChatModelsForController      = service.ListUserCanvasChatModelOptions
-	getCanvasChatModelsForController       = service.ListUserCanvasChatModelCatalog
-	getCanvasSessionByIDForController      = model.GetCanvasSessionByID
-	listCanvasMessageTimelineForController = service.ListCanvasMessageTimeline
-	createCanvasMessageForController       = service.CreateCanvasMessageWithContext
-	streamCanvasChatMessageForController   = service.StreamCanvasChatMessage
+	listCanvasSessionsForController                  = service.ListCanvasSessions
+	listCanvasChatModelsForController                = service.ListUserCanvasChatModelOptions
+	getCanvasChatModelsForController                 = service.ListUserCanvasChatModelCatalog
+	getCanvasSessionByIdentifierForController        = model.GetCanvasSessionByIdentifier
+	listCanvasMessageTimelineForSessionForController = service.ListCanvasMessageTimelineWithResolvedSession
+	updateCanvasSessionForController                 = service.UpdateCanvasSessionWithResolvedSession
+	deleteCanvasSessionForController                 = service.DeleteCanvasSessionWithResolvedSession
+	createCanvasMessageForController                 = service.CreateCanvasMessageWithResolvedSession
+	streamCanvasChatMessageForController             = service.StreamCanvasChatMessageWithResolvedSession
 )
 
-func ensureCanvasAvailable(c *gin.Context) bool {
-	if available, reason := model.CanvasAvailabilityStatus(); available {
-		return true
-	} else {
-		if strings.TrimSpace(reason) == "" {
-			reason = "canvas is unavailable"
-		}
+func writeCanvasError(c *gin.Context, err error) {
+	if err == nil {
+		return
+	}
+	if model.IsCanvasModeUnavailableError(err) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"success": false,
-			"message": reason,
+			"message": err.Error(),
 		})
-		c.Abort()
-		return false
+		return
 	}
+	common.ApiError(c, err)
 }
 
 func ListCanvasSessions(c *gin.Context) {
-	if !ensureCanvasAvailable(c) {
-		return
-	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
@@ -95,16 +92,13 @@ func ListCanvasSessions(c *gin.Context) {
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	sessions, err := listCanvasSessionsForController(userId, c.Query("mode"), limit, offset)
 	if err != nil {
-		common.ApiError(c, err)
+		writeCanvasError(c, err)
 		return
 	}
 	common.ApiSuccess(c, sessions)
 }
 
 func ListCanvasChatModels(c *gin.Context) {
-	if !ensureCanvasAvailable(c) {
-		return
-	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
@@ -113,16 +107,13 @@ func ListCanvasChatModels(c *gin.Context) {
 
 	models, err := listCanvasChatModelsForController(userId)
 	if err != nil {
-		common.ApiError(c, err)
+		writeCanvasError(c, err)
 		return
 	}
 	common.ApiSuccess(c, models)
 }
 
 func GetCanvasChatModels(c *gin.Context) {
-	if !ensureCanvasAvailable(c) {
-		return
-	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
@@ -131,16 +122,13 @@ func GetCanvasChatModels(c *gin.Context) {
 
 	models, err := getCanvasChatModelsForController(userId)
 	if err != nil {
-		common.ApiError(c, err)
+		writeCanvasError(c, err)
 		return
 	}
 	common.ApiSuccess(c, models)
 }
 
 func CreateCanvasSession(c *gin.Context) {
-	if !ensureCanvasAvailable(c) {
-		return
-	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
@@ -166,24 +154,25 @@ func CreateCanvasSession(c *gin.Context) {
 		SummaryRecentMessages:  req.SummaryRecentMessages,
 	})
 	if err != nil {
-		common.ApiError(c, err)
+		writeCanvasError(c, err)
 		return
 	}
 	common.ApiSuccess(c, session)
 }
 
 func UpdateCanvasSession(c *gin.Context) {
-	if !ensureCanvasAvailable(c) {
-		return
-	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
 		return
 	}
-	sessionId, err := parseCanvasSessionID(c)
+	session, err := resolveCanvasSessionForController(c, userId)
 	if err != nil {
-		common.ApiError(c, err)
+		writeCanvasError(c, err)
+		return
+	}
+	if session == nil {
+		writeCanvasError(c, fmt.Errorf("canvas session not found"))
 		return
 	}
 
@@ -193,7 +182,7 @@ func UpdateCanvasSession(c *gin.Context) {
 		return
 	}
 
-	session, err := service.UpdateCanvasSession(userId, sessionId, service.UpdateCanvasSessionInput{
+	session, err = updateCanvasSessionForController(userId, session, service.UpdateCanvasSessionInput{
 		Title:                  req.Title,
 		Pinned:                 req.Pinned,
 		CurrentModel:           req.CurrentModel,
@@ -208,69 +197,72 @@ func UpdateCanvasSession(c *gin.Context) {
 		ClearContextToLatest:   req.ClearContextToLatest,
 	})
 	if err != nil {
-		common.ApiError(c, err)
+		writeCanvasError(c, err)
 		return
 	}
 	common.ApiSuccess(c, session)
 }
 
 func DeleteCanvasSession(c *gin.Context) {
-	if !ensureCanvasAvailable(c) {
-		return
-	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
 		return
 	}
-	sessionId, err := parseCanvasSessionID(c)
+	session, err := resolveCanvasSessionForController(c, userId)
 	if err != nil {
-		common.ApiError(c, err)
+		writeCanvasError(c, err)
+		return
+	}
+	if session == nil {
+		writeCanvasError(c, fmt.Errorf("canvas session not found"))
 		return
 	}
 
-	if err := service.DeleteCanvasSession(userId, sessionId); err != nil {
-		common.ApiError(c, err)
+	if err := deleteCanvasSessionForController(userId, session); err != nil {
+		writeCanvasError(c, err)
 		return
 	}
 	common.ApiSuccess(c, nil)
 }
 
 func ListCanvasMessages(c *gin.Context) {
-	if !ensureCanvasAvailable(c) {
-		return
-	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
 		return
 	}
-	sessionId, err := parseCanvasSessionID(c)
+	session, err := resolveCanvasSessionForController(c, userId)
 	if err != nil {
-		common.ApiError(c, err)
+		writeCanvasError(c, err)
+		return
+	}
+	if session == nil {
+		writeCanvasError(c, fmt.Errorf("canvas session not found"))
 		return
 	}
 	limit, _ := strconv.Atoi(c.Query("limit"))
-	messages, err := listCanvasMessageTimelineForController(userId, sessionId, limit, c.Query("cursor"))
+	messages, err := listCanvasMessageTimelineForSessionForController(userId, session, limit, c.Query("cursor"))
 	if err != nil {
-		common.ApiError(c, err)
+		writeCanvasError(c, err)
 		return
 	}
 	common.ApiSuccess(c, messages)
 }
 
 func CreateCanvasMessage(c *gin.Context) {
-	if !ensureCanvasAvailable(c) {
-		return
-	}
 	userId := c.GetInt("id")
 	if userId == 0 {
 		common.ApiErrorMsg(c, "未授权")
 		return
 	}
-	sessionId, err := parseCanvasSessionID(c)
+	session, err := resolveCanvasSessionForController(c, userId)
 	if err != nil {
-		common.ApiError(c, err)
+		writeCanvasError(c, err)
+		return
+	}
+	if session == nil {
+		writeCanvasError(c, fmt.Errorf("canvas session not found"))
 		return
 	}
 
@@ -294,31 +286,30 @@ func CreateCanvasMessage(c *gin.Context) {
 		ClientRequestId:  req.ClientRequestId,
 	}
 	if req.Stream != nil && *req.Stream {
-		session, err := getCanvasSessionByIDForController(userId, sessionId)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		if session == nil {
-			common.ApiError(c, fmt.Errorf("canvas session not found"))
-			return
-		}
 		if session.Mode == model.CanvasModeChat {
-			if err := streamCanvasChatMessageForController(c, userId, sessionId, input); err != nil {
-				common.ApiError(c, err)
+			if err := streamCanvasChatMessageForController(c, userId, session, input); err != nil {
+				writeCanvasError(c, err)
 			}
 			return
 		}
 	}
 
-	messages, err := createCanvasMessageForController(c.Request.Context(), userId, sessionId, input)
+	messages, err := createCanvasMessageForController(c.Request.Context(), userId, session, input)
 	if err != nil {
-		common.ApiError(c, err)
+		writeCanvasError(c, err)
 		return
 	}
 	common.ApiSuccess(c, messages)
 }
 
-func parseCanvasSessionID(c *gin.Context) (int, error) {
-	return strconv.Atoi(strings.TrimSpace(c.Param("id")))
+func parseCanvasSessionIdentifier(c *gin.Context) string {
+	return strings.TrimSpace(c.Param("id"))
+}
+
+func resolveCanvasSessionForController(c *gin.Context, userId int) (*model.CanvasSession, error) {
+	identifier := parseCanvasSessionIdentifier(c)
+	if identifier == "" {
+		return nil, fmt.Errorf("canvas session identifier is required")
+	}
+	return getCanvasSessionByIdentifierForController(userId, identifier)
 }

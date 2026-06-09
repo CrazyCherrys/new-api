@@ -28,9 +28,25 @@ func (ImageGenerationTaskReferenceAsset) TableName() string {
 	return "image_generation_task_reference_assets"
 }
 
+type imageReferenceAssetStore struct {
+	db *gorm.DB
+}
+
+func imageReferenceAssetStoreForCanvas() (*imageReferenceAssetStore, error) {
+	db, err := canvasModeDataDB(CanvasModeImage)
+	if err != nil {
+		return nil, err
+	}
+	return &imageReferenceAssetStore{db: db}, nil
+}
+
 func GetImageGenerationReferenceAssetByHash(contentHash string) (*ImageGenerationReferenceAsset, error) {
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
 	var asset ImageGenerationReferenceAsset
-	err := DB.Where("content_hash = ?", contentHash).First(&asset).Error
+	err = store.db.Where("content_hash = ?", contentHash).First(&asset).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
@@ -41,8 +57,12 @@ func GetImageGenerationReferenceAssetByHash(contentHash string) (*ImageGeneratio
 }
 
 func GetImageGenerationReferenceAssetByID(id int) (*ImageGenerationReferenceAsset, error) {
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
 	var asset ImageGenerationReferenceAsset
-	err := DB.First(&asset, id).Error
+	err = store.db.First(&asset, id).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
@@ -53,8 +73,12 @@ func GetImageGenerationReferenceAssetByID(id int) (*ImageGenerationReferenceAsse
 }
 
 func GetImageGenerationReferenceAssetsByStoragePath(storagePath string) ([]*ImageGenerationReferenceAsset, error) {
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
 	var assets []*ImageGenerationReferenceAsset
-	if err := DB.Where("storage_path = ?", storagePath).Find(&assets).Error; err != nil {
+	if err := store.db.Where("storage_path = ?", storagePath).Find(&assets).Error; err != nil {
 		return nil, err
 	}
 	return assets, nil
@@ -64,6 +88,10 @@ func CreateImageGenerationReferenceAsset(asset *ImageGenerationReferenceAsset) e
 	if asset == nil {
 		return nil
 	}
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return err
+	}
 	now := common.GetTimestamp()
 	if asset.CreatedTime == 0 {
 		asset.CreatedTime = now
@@ -71,18 +99,26 @@ func CreateImageGenerationReferenceAsset(asset *ImageGenerationReferenceAsset) e
 	if asset.LastUsedTime == 0 {
 		asset.LastUsedTime = now
 	}
-	return DB.Create(asset).Error
+	return store.db.Create(asset).Error
 }
 
 func TouchImageGenerationReferenceAsset(assetId int, ts int64) error {
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return err
+	}
 	updates := map[string]interface{}{
 		"last_used_time": ts,
 	}
-	return DB.Model(&ImageGenerationReferenceAsset{}).Where("id = ?", assetId).Updates(updates).Error
+	return store.db.Model(&ImageGenerationReferenceAsset{}).Where("id = ?", assetId).Updates(updates).Error
 }
 
 func IncrementImageGenerationReferenceAssetRefCount(assetId int, ts int64) error {
-	return DB.Model(&ImageGenerationReferenceAsset{}).
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return err
+	}
+	return store.db.Model(&ImageGenerationReferenceAsset{}).
 		Where("id = ?", assetId).
 		Updates(map[string]interface{}{
 			"ref_count":      gorm.Expr("ref_count + ?", 1),
@@ -91,43 +127,71 @@ func IncrementImageGenerationReferenceAssetRefCount(assetId int, ts int64) error
 }
 
 func DecrementImageGenerationReferenceAssetRefCount(assetId int) error {
-	return DB.Model(&ImageGenerationReferenceAsset{}).
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return err
+	}
+	return store.db.Model(&ImageGenerationReferenceAsset{}).
 		Where("id = ? AND ref_count > 0", assetId).
 		Update("ref_count", gorm.Expr("ref_count - ?", 1)).Error
 }
 
 func CreateTaskReferenceAssetLink(taskId int, assetId int) error {
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return err
+	}
 	link := &ImageGenerationTaskReferenceAsset{
 		TaskId:      taskId,
 		AssetId:     assetId,
 		CreatedTime: common.GetTimestamp(),
 	}
-	return DB.Create(link).Error
+	return store.db.Create(link).Error
 }
 
 func ListTaskReferenceAssetLinks(taskId int) ([]*ImageGenerationTaskReferenceAsset, error) {
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
 	var links []*ImageGenerationTaskReferenceAsset
-	if err := DB.Where("task_id = ?", taskId).Find(&links).Error; err != nil {
+	if err := store.db.Where("task_id = ?", taskId).Find(&links).Error; err != nil {
 		return nil, err
 	}
 	return links, nil
 }
 
 func DeleteTaskReferenceAssetLinks(taskId int) error {
-	return DB.Where("task_id = ?", taskId).Delete(&ImageGenerationTaskReferenceAsset{}).Error
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return err
+	}
+	return store.db.Where("task_id = ?", taskId).Delete(&ImageGenerationTaskReferenceAsset{}).Error
 }
 
 func DeleteTaskReferenceAssetLink(taskId int, assetId int) error {
-	return DB.Where("task_id = ? AND asset_id = ?", taskId, assetId).Delete(&ImageGenerationTaskReferenceAsset{}).Error
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return err
+	}
+	return store.db.Where("task_id = ? AND asset_id = ?", taskId, assetId).Delete(&ImageGenerationTaskReferenceAsset{}).Error
 }
 
 func DeleteImageGenerationReferenceAsset(assetId int) error {
-	return DB.Delete(&ImageGenerationReferenceAsset{}, assetId).Error
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return err
+	}
+	return store.db.Delete(&ImageGenerationReferenceAsset{}, assetId).Error
 }
 
 func ListExpiredUnusedReferenceAssets(expirationTime int64) ([]*ImageGenerationReferenceAsset, error) {
+	store, err := imageReferenceAssetStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
 	var assets []*ImageGenerationReferenceAsset
-	err := DB.Where("ref_count <= 0 AND last_used_time > 0 AND last_used_time < ?", expirationTime).
+	err = store.db.Where("ref_count <= 0 AND last_used_time > 0 AND last_used_time < ?", expirationTime).
 		Find(&assets).Error
 	if err != nil {
 		return nil, err

@@ -124,7 +124,7 @@ func runCanvasAssetCleanupJobsOnce() {
 		if job == nil || job.Id <= 0 {
 			continue
 		}
-		claimed, err := model.ClaimCanvasAssetCleanupJob(job.Id, now, now+int64(canvasAssetCleanupLeaseTTL/time.Second))
+		claimed, err := model.ClaimCanvasAssetCleanupJob(job.TaskType, job.Id, now, now+int64(canvasAssetCleanupLeaseTTL/time.Second))
 		if err != nil {
 			common.SysLog(fmt.Sprintf("Failed to claim canvas asset cleanup job %d: %v", job.Id, err))
 			continue
@@ -135,12 +135,12 @@ func runCanvasAssetCleanupJobsOnce() {
 		if err := handleCanvasAssetCleanupJobFn(job); err != nil {
 			retryCount := job.RetryCount + 1
 			nextRunTime := common.GetTimestamp() + int64(canvasAssetCleanupRetryDelay/time.Second)
-			if markErr := model.MarkCanvasAssetCleanupJobFailed(job.Id, retryCount, nextRunTime, err.Error()); markErr != nil {
+			if markErr := model.MarkCanvasAssetCleanupJobFailed(job.TaskType, job.Id, retryCount, nextRunTime, err.Error()); markErr != nil {
 				common.SysLog(fmt.Sprintf("Failed to mark canvas asset cleanup job %d failed: %v", job.Id, markErr))
 			}
 			continue
 		}
-		if err := model.DeleteCanvasAssetCleanupJob(job.Id); err != nil {
+		if err := model.DeleteCanvasAssetCleanupJob(job.TaskType, job.Id); err != nil {
 			common.SysLog(fmt.Sprintf("Failed to delete completed canvas asset cleanup job %d: %v", job.Id, err))
 		}
 	}

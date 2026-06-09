@@ -117,6 +117,8 @@ func SetApiRouter(router *gin.Engine) {
 			canvasRoute.DELETE("/sessions/:id", controller.DeleteCanvasSession)
 			canvasRoute.GET("/sessions/:id/messages", controller.ListCanvasMessages)
 			canvasRoute.POST("/sessions/:id/messages", controller.CreateCanvasMessage)
+			canvasRoute.GET("/video-generation/tasks/:id", controller.GetCanvasVideoGenerationTaskDetail)
+			canvasRoute.GET("/videos/:task_id/content", controller.CanvasVideoProxy)
 		}
 
 		userRoute := apiRouter.Group("/user")

@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -66,6 +67,180 @@ func TestBuildVideoTaskSummaryAndDetailUseEffectiveResultURL(t *testing.T) {
 	}
 	if detail.ResultURL != "https://cdn.example.com/detail.mp4" {
 		t.Fatalf("expected direct detail result url, got %q", detail.ResultURL)
+	}
+}
+
+func TestGetCanvasVideoGenerationTaskDetailUsesCanvasProxyFallback(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	task := &model.Task{
+		UserId:     1,
+		TaskID:     "task_canvas_detail",
+		Action:     constant.TaskActionTextGenerate,
+		Status:     model.TaskStatusSuccess,
+		Progress:   "100%",
+		SubmitTime: common.GetTimestamp(),
+		Properties: model.Properties{
+			Input:             "canvas detail prompt",
+			OriginModelName:   "sora-compatible",
+			UpstreamModelName: "sora-compatible",
+		},
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "/v1/videos/task_canvas_detail/content",
+		},
+	}
+	if err := task.InsertCanvasVideo(); err != nil {
+		t.Fatalf("failed to create canvas video task: %v", err)
+	}
+
+	detail, err := GetCanvasVideoGenerationTaskDetail(1, fmt.Sprint(task.ID))
+	if err != nil {
+		t.Fatalf("GetCanvasVideoGenerationTaskDetail returned error: %v", err)
+	}
+	if detail.VideoURL != "/api/canvas/videos/task_canvas_detail/content" {
+		t.Fatalf("expected canvas detail video_url fallback, got %q", detail.VideoURL)
+	}
+	if detail.ResultURL != "/api/canvas/videos/task_canvas_detail/content" {
+		t.Fatalf("expected canvas detail result_url fallback, got %q", detail.ResultURL)
+	}
+}
+
+type videoRelayRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn videoRelayRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func useVideoRelayHTTPClient(t *testing.T, fn videoRelayRoundTripFunc) {
+	t.Helper()
+
+	previousClient := videoRelayHTTPClient
+	videoRelayHTTPClient = &http.Client{Transport: fn}
+	t.Cleanup(func() {
+		videoRelayHTTPClient = previousClient
+	})
+}
+
+func videoRelayTestResponse(statusCode int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: statusCode,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     make(http.Header),
+	}
+}
+
+func seedVideoGenerationCreatePath(t *testing.T, db *gorm.DB, userId int, modelID string) {
+	t.Helper()
+
+	if err := db.AutoMigrate(&model.Task{}); err != nil {
+		t.Fatalf("failed to migrate task table: %v", err)
+	}
+	user := &model.User{
+		Id:       userId,
+		Username: fmt.Sprintf("video-user-%d", userId),
+		Password: "password123",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to seed video user: %v", err)
+	}
+	seedUserTokenWithGroup(t, db, userId, fmt.Sprintf("video-token-%d", userId), "default")
+	if err := db.Create(&model.ModelMapping{
+		RequestModel:      modelID,
+		ActualModel:       modelID,
+		ModelType:         3,
+		Status:            1,
+		RequestEndpoint:   "openai-video-generation",
+		VideoCapabilities: `["text_to_video"]`,
+		DurationOptions:   `[5]`,
+	}).Error; err != nil {
+		t.Fatalf("failed to seed video model mapping: %v", err)
+	}
+}
+
+func TestCreateCanvasVideoGenerationTaskSetsInternalScopeHeader(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+	userId := 61
+	modelID := "video-canvas-header"
+	seedVideoGenerationCreatePath(t, db, userId, modelID)
+
+	headerSeen := false
+	useVideoRelayHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		headerSeen = IsCanvasVideoTaskScopeHeaderValue(req.Header.Get(constant.HeaderCanvasVideoTaskScope))
+		if !headerSeen {
+			return videoRelayTestResponse(http.StatusBadRequest, "missing canvas video scope header"), nil
+		}
+		task := &model.Task{
+			TaskID:     "task_canvas_header",
+			UserId:     userId,
+			Action:     constant.TaskActionTextGenerate,
+			Status:     model.TaskStatusQueued,
+			Progress:   "0%",
+			SubmitTime: common.GetTimestamp(),
+			Properties: model.Properties{OriginModelName: modelID},
+		}
+		if err := task.InsertCanvasVideo(); err != nil {
+			return videoRelayTestResponse(http.StatusInternalServerError, err.Error()), nil
+		}
+		return videoRelayTestResponse(http.StatusOK, `{"task_id":"task_canvas_header"}`), nil
+	})
+
+	summary, err := CreateCanvasVideoGenerationTask(userId, modelID, "canvas prompt", "openai-video-generation", `{"duration":5}`)
+	if err != nil {
+		t.Fatalf("CreateCanvasVideoGenerationTask returned error: %v", err)
+	}
+	if !headerSeen {
+		t.Fatal("expected canvas creation path to send internal scope header")
+	}
+	if summary == nil || summary.TaskID != "task_canvas_header" {
+		t.Fatalf("unexpected canvas video summary: %#v", summary)
+	}
+	if summary.VideoURL != "/api/canvas/videos/task_canvas_header/content" {
+		t.Fatalf("expected canvas video proxy URL, got %q", summary.VideoURL)
+	}
+	if summary.ResultURL != "/api/canvas/videos/task_canvas_header/content" {
+		t.Fatalf("expected canvas result URL fallback, got %q", summary.ResultURL)
+	}
+}
+
+func TestCreateVideoGenerationTaskDoesNotSetCanvasScopeHeader(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+	userId := 62
+	modelID := "video-normal-header"
+	seedVideoGenerationCreatePath(t, db, userId, modelID)
+
+	headerSeen := false
+	useVideoRelayHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		headerSeen = IsCanvasVideoTaskScopeHeaderValue(req.Header.Get(constant.HeaderCanvasVideoTaskScope))
+		task := &model.Task{
+			TaskID:     "task_normal_header",
+			UserId:     userId,
+			Action:     constant.TaskActionTextGenerate,
+			Status:     model.TaskStatusQueued,
+			Progress:   "0%",
+			SubmitTime: common.GetTimestamp(),
+			Properties: model.Properties{OriginModelName: modelID},
+		}
+		if err := task.Insert(); err != nil {
+			return videoRelayTestResponse(http.StatusInternalServerError, err.Error()), nil
+		}
+		return videoRelayTestResponse(http.StatusOK, `{"task_id":"task_normal_header"}`), nil
+	})
+
+	summary, err := CreateVideoGenerationTask(userId, modelID, "normal prompt", "openai-video-generation", `{"duration":5}`)
+	if err != nil {
+		t.Fatalf("CreateVideoGenerationTask returned error: %v", err)
+	}
+	if headerSeen {
+		t.Fatal("normal creation path should not send canvas video scope header")
+	}
+	if summary == nil || summary.TaskID != "task_normal_header" {
+		t.Fatalf("unexpected normal video summary: %#v", summary)
+	}
+	if summary.VideoURL != "/v1/videos/task_normal_header/content" {
+		t.Fatalf("expected normal video proxy URL, got %q", summary.VideoURL)
 	}
 }
 

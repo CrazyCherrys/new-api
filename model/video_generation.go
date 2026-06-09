@@ -41,6 +41,13 @@ func DefaultVideoTaskActions() []string {
 	return append([]string(nil), defaultVideoTaskActions...)
 }
 
+func videoTaskDBForScope(scope string) (*gorm.DB, error) {
+	if strings.TrimSpace(scope) == taskStorageScopeVideo {
+		return canvasVideoTaskDB()
+	}
+	return videoTaskDB()
+}
+
 func GetUserVideoTasks(userId int, startIdx int, num int, queryParams VideoTaskQueryParams, actions []string) (*VideoTaskPage, error) {
 	if len(actions) == 0 {
 		actions = DefaultVideoTaskActions()
@@ -56,6 +63,9 @@ func GetUserVideoTasks(userId int, startIdx int, num int, queryParams VideoTaskQ
 	}
 
 	query := buildUserVideoTaskQuery(userId, queryParams, actions)
+	if query == nil {
+		return nil, fmt.Errorf("video task database is not initialized")
+	}
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -85,6 +95,7 @@ func GetUserVideoTasks(userId int, startIdx int, num int, queryParams VideoTaskQ
 	if hasMore {
 		tasks = tasks[:num]
 	}
+	markTasksStorageScope(tasks, taskStorageScopeMain)
 
 	nextCursor := ""
 	if hasMore && len(tasks) > 0 {
@@ -102,50 +113,84 @@ func GetUserVideoTasks(userId int, startIdx int, num int, queryParams VideoTaskQ
 }
 
 func GetUserVideoTaskByID(userId int, id int64, actions []string) (*Task, error) {
-	if len(actions) == 0 {
-		actions = DefaultVideoTaskActions()
-	}
-	var task Task
-	err := DB.Where("id = ? AND user_id = ? AND action IN ?", id, userId, actions).First(&task).Error
-	if err != nil {
-		return nil, err
-	}
-	return &task, nil
+	return getUserVideoTaskByIDForScope(taskStorageScopeMain, userId, id, actions)
 }
 
 func GetUserVideoTaskByIdentifier(userId int, identifier string, actions []string) (*Task, error) {
+	return getUserVideoTaskByIdentifierForScope(taskStorageScopeMain, userId, identifier, actions)
+}
+
+func getUserVideoTaskByIDForScope(scope string, userId int, id int64, actions []string) (*Task, error) {
+	if len(actions) == 0 {
+		actions = DefaultVideoTaskActions()
+	}
+	db, err := videoTaskDBForScope(scope)
+	if err != nil {
+		return nil, err
+	}
+	var task Task
+	err = db.Where("id = ? AND user_id = ? AND action IN ?", id, userId, actions).First(&task).Error
+	if err != nil {
+		return nil, err
+	}
+	task.StorageScope = taskScopeForLoadedScope(scope)
+	return &task, nil
+}
+
+func getUserVideoTaskByIdentifierForScope(scope string, userId int, identifier string, actions []string) (*Task, error) {
 	identifier = strings.TrimSpace(identifier)
 	if identifier == "" {
 		return nil, fmt.Errorf("task identifier is required")
 	}
 	if numericID, err := strconv.ParseInt(identifier, 10, 64); err == nil {
-		return GetUserVideoTaskByID(userId, numericID, actions)
+		return getUserVideoTaskByIDForScope(scope, userId, numericID, actions)
 	}
 	if len(actions) == 0 {
 		actions = DefaultVideoTaskActions()
 	}
-	var task Task
-	err := DB.Where("task_id = ? AND user_id = ? AND action IN ?", identifier, userId, actions).First(&task).Error
+	db, err := videoTaskDBForScope(scope)
 	if err != nil {
 		return nil, err
 	}
+	var task Task
+	err = db.Where("task_id = ? AND user_id = ? AND action IN ?", identifier, userId, actions).First(&task).Error
+	if err != nil {
+		return nil, err
+	}
+	task.StorageScope = taskScopeForLoadedScope(scope)
 	return &task, nil
 }
 
+func taskScopeForLoadedScope(scope string) string {
+	if strings.TrimSpace(scope) == taskStorageScopeVideo {
+		return taskStorageScopeVideo
+	}
+	return taskStorageScopeMain
+}
+
 func GetUserVideoTasksByIDs(userId int, ids []int64, actions []string) ([]*Task, error) {
+	return getUserVideoTasksByIDsForScope(taskStorageScopeMain, userId, ids, actions)
+}
+
+func getUserVideoTasksByIDsForScope(scope string, userId int, ids []int64, actions []string) ([]*Task, error) {
 	if userId <= 0 || len(ids) == 0 {
 		return []*Task{}, nil
 	}
 	if len(actions) == 0 {
 		actions = DefaultVideoTaskActions()
 	}
+	db, err := videoTaskDBForScope(scope)
+	if err != nil {
+		return nil, err
+	}
 	var tasks []*Task
-	err := forEachChunk(ids, func(chunk []int64) error {
+	err = forEachChunk(ids, func(chunk []int64) error {
 		var partial []*Task
-		if err := DB.Where("user_id = ? AND id IN ? AND action IN ?", userId, chunk, actions).
+		if err := db.Where("user_id = ? AND id IN ? AND action IN ?", userId, chunk, actions).
 			Find(&partial).Error; err != nil {
 			return err
 		}
+		markTasksStorageScope(partial, taskScopeForLoadedScope(scope))
 		tasks = append(tasks, partial...)
 		return nil
 	})
@@ -153,23 +198,82 @@ func GetUserVideoTasksByIDs(userId int, ids []int64, actions []string) ([]*Task,
 }
 
 func DeleteUserVideoTasksByIDs(userId int, ids []int64, actions []string) error {
-	return DeleteUserVideoTasksByIDsWithDB(DB, userId, ids, actions)
+	return deleteUserVideoTasksByIDsForScope(taskStorageScopeMain, userId, ids, actions)
+}
+
+func deleteUserVideoTasksByIDsForScope(scope string, userId int, ids []int64, actions []string) error {
+	if userId <= 0 || len(ids) == 0 {
+		return nil
+	}
+	db, err := videoTaskDBForScope(scope)
+	if err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		return deleteUserVideoTasksByIDsWithDBForScope(scope, tx, userId, ids, actions)
+	})
 }
 
 func DeleteUserVideoTasksByIDsWithDB(db *gorm.DB, userId int, ids []int64, actions []string) error {
-	if db == nil {
-		db = DB
-	}
+	return deleteUserVideoTasksByIDsWithDBForScope(taskStorageScopeMain, db, userId, ids, actions)
+}
+
+func deleteUserVideoTasksByIDsWithDBForScope(scope string, db *gorm.DB, userId int, ids []int64, actions []string) error {
 	if userId <= 0 || len(ids) == 0 {
 		return nil
 	}
 	if len(actions) == 0 {
 		actions = DefaultVideoTaskActions()
 	}
+	if db == nil {
+		var err error
+		db, err = videoTaskDBForScope(scope)
+		if err != nil {
+			return err
+		}
+	}
 	return forEachChunk(ids, func(chunk []int64) error {
 		return db.Where("user_id = ? AND id IN ? AND action IN ?", userId, chunk, actions).
 			Delete(&Task{}).Error
 	})
+}
+
+func GetCanvasVideoTaskByTaskID(userId int, taskID string) (*Task, bool, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil, false, nil
+	}
+	db, err := canvasVideoTaskDB()
+	if err != nil {
+		return nil, false, err
+	}
+	var task Task
+	err = db.Where("user_id = ? AND task_id = ?", userId, taskID).First(&task).Error
+	exist, recordErr := RecordExist(err)
+	if recordErr != nil {
+		return nil, false, recordErr
+	}
+	if !exist {
+		return nil, false, nil
+	}
+	task.StorageScope = taskStorageScopeVideo
+	return &task, true, nil
+}
+
+func GetCanvasVideoTaskByID(userId int, id int64, actions []string) (*Task, error) {
+	return getUserVideoTaskByIDForScope(taskStorageScopeVideo, userId, id, actions)
+}
+
+func GetCanvasVideoTasksByIDs(userId int, ids []int64, actions []string) ([]*Task, error) {
+	return getUserVideoTasksByIDsForScope(taskStorageScopeVideo, userId, ids, actions)
+}
+
+func DeleteCanvasVideoTasksByIDs(userId int, ids []int64, actions []string) error {
+	return deleteUserVideoTasksByIDsForScope(taskStorageScopeVideo, userId, ids, actions)
+}
+
+func DeleteCanvasVideoTasksByIDsWithDB(db *gorm.DB, userId int, ids []int64, actions []string) error {
+	return deleteUserVideoTasksByIDsWithDBForScope(taskStorageScopeVideo, db, userId, ids, actions)
 }
 
 func encodeVideoTaskCursor(submitTime int64, id int64) string {
@@ -224,6 +328,9 @@ func GetUserVideoTasksByCursor(userId int, cursor string, num int, queryParams V
 	}
 
 	baseQuery := buildUserVideoTaskQuery(userId, queryParams, actions)
+	if baseQuery == nil {
+		return nil, fmt.Errorf("video task database is not initialized")
+	}
 
 	page := &VideoTaskPage{
 		Items:    []*Task{},
@@ -254,6 +361,7 @@ func GetUserVideoTasksByCursor(userId int, cursor string, num int, queryParams V
 	if page.HasMore {
 		tasks = tasks[:num]
 	}
+	markTasksStorageScope(tasks, taskStorageScopeMain)
 	page.Items = tasks
 	if page.HasMore && len(tasks) > 0 {
 		lastTask := tasks[len(tasks)-1]
@@ -280,6 +388,9 @@ func GetUserVideoTaskUpdates(userId int, completedSince int64, limit int, action
 		TaskStatusInProgress,
 	}
 	baseQuery := buildUserVideoTaskQuery(userId, VideoTaskQueryParams{}, actions)
+	if baseQuery == nil {
+		return nil, fmt.Errorf("video task database is not initialized")
+	}
 
 	var tasks []*Task
 	if err := baseQuery.Session(&gorm.Session{}).
@@ -293,6 +404,7 @@ func GetUserVideoTaskUpdates(userId int, completedSince int64, limit int, action
 	}
 
 	if completedSince <= 0 || len(tasks) >= limit {
+		markTasksStorageScope(tasks, taskStorageScopeMain)
 		return tasks, nil
 	}
 
@@ -308,11 +420,17 @@ func GetUserVideoTaskUpdates(userId int, completedSince int64, limit int, action
 		return nil, err
 	}
 
-	return append(tasks, terminalTasks...), nil
+	items := append(tasks, terminalTasks...)
+	markTasksStorageScope(items, taskStorageScopeMain)
+	return items, nil
 }
 
 func buildUserVideoTaskQuery(userId int, queryParams VideoTaskQueryParams, actions []string) *gorm.DB {
-	query := DB.Model(&Task{}).Where("user_id = ?", userId).Where("action IN ?", actions)
+	db, err := videoTaskDB()
+	if err != nil {
+		return nil
+	}
+	query := db.Model(&Task{}).Where("user_id = ?", userId).Where("action IN ?", actions)
 	if queryParams.Status != "" {
 		query = query.Where("status = ?", queryParams.Status)
 	}
@@ -426,20 +544,24 @@ func IsTaskVideoProxyURL(task *Task, value string) bool {
 		return false
 	}
 
-	proxyPath := BuildVideoProxyURL(task)
 	value = strings.TrimSpace(value)
-	if proxyPath == "" || value == "" {
+	if value == "" {
 		return false
 	}
-	if value == proxyPath {
-		return true
-	}
-
 	parsed, err := url.Parse(value)
-	if err != nil {
-		return false
+	valuePath := ""
+	if err == nil {
+		valuePath = parsed.Path
 	}
-	return parsed.Path == proxyPath
+	for _, proxyPath := range []string{BuildVideoProxyURL(task), BuildCanvasVideoProxyURL(task)} {
+		if proxyPath == "" {
+			continue
+		}
+		if value == proxyPath || valuePath == proxyPath {
+			return true
+		}
+	}
+	return false
 }
 
 // EffectiveVideoResultURL prefers a stored direct URL, then recovers one from task.Data,
@@ -467,6 +589,13 @@ func BuildVideoProxyURL(task *Task) string {
 		return ""
 	}
 	return "/v1/videos/" + strings.TrimSpace(task.TaskID) + "/content"
+}
+
+func BuildCanvasVideoProxyURL(task *Task) string {
+	if task == nil || strings.TrimSpace(task.TaskID) == "" {
+		return ""
+	}
+	return "/api/canvas/videos/" + strings.TrimSpace(task.TaskID) + "/content"
 }
 
 func GuessTaskVideoPreviewType(task *Task) string {

@@ -21,18 +21,18 @@ func TestCreateCanvasMessageStreamsChatRequests(t *testing.T) {
 	t.Setenv("CANVAS_VIDEO_SQL_DSN", "")
 	model.InitCanvasDBs()
 
-	previousGetSession := getCanvasSessionByIDForController
+	previousGetSession := getCanvasSessionByIdentifierForController
 	previousCreateCanvasMessage := createCanvasMessageForController
 	previousStreamCanvasChat := streamCanvasChatMessageForController
 	t.Cleanup(func() {
-		getCanvasSessionByIDForController = previousGetSession
+		getCanvasSessionByIdentifierForController = previousGetSession
 		createCanvasMessageForController = previousCreateCanvasMessage
 		streamCanvasChatMessageForController = previousStreamCanvasChat
 	})
 
-	getCanvasSessionByIDForController = func(userId int, sessionId int) (*model.CanvasSession, error) {
+	getCanvasSessionByIdentifierForController = func(userId int, identifier string) (*model.CanvasSession, error) {
 		return &model.CanvasSession{
-			Id:     sessionId,
+			Id:     7,
 			UserId: userId,
 			Mode:   model.CanvasModeChat,
 		}, nil
@@ -40,8 +40,11 @@ func TestCreateCanvasMessageStreamsChatRequests(t *testing.T) {
 
 	streamCalled := false
 	createCalled := false
-	streamCanvasChatMessageForController = func(c *gin.Context, userId int, sessionId int, input service.CreateCanvasMessageInput) error {
+	streamCanvasChatMessageForController = func(c *gin.Context, userId int, session *model.CanvasSession, input service.CreateCanvasMessageInput) error {
 		streamCalled = true
+		if session == nil || session.Id != 7 {
+			t.Fatalf("unexpected resolved session: %#v", session)
+		}
 		if input.Stream == nil || !*input.Stream {
 			t.Fatalf("expected stream flag to be forwarded, got %#v", input.Stream)
 		}
@@ -57,7 +60,7 @@ func TestCreateCanvasMessageStreamsChatRequests(t *testing.T) {
 		c.Status(http.StatusOK)
 		return nil
 	}
-	createCanvasMessageForController = func(ctx context.Context, userId int, sessionId int, input service.CreateCanvasMessageInput) ([]*service.CanvasMessageWithTask, error) {
+	createCanvasMessageForController = func(ctx context.Context, userId int, session *model.CanvasSession, input service.CreateCanvasMessageInput) ([]*service.CanvasMessageWithTask, error) {
 		createCalled = true
 		return nil, nil
 	}
@@ -81,6 +84,62 @@ func TestCreateCanvasMessageStreamsChatRequests(t *testing.T) {
 	}
 	if createCalled {
 		t.Fatal("did not expect blocking create handler to be called for stream chat request")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d", recorder.Code)
+	}
+}
+
+func TestCanvasControllerResolvesSessionByPublicID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousGetSession := getCanvasSessionByIdentifierForController
+	previousListMessages := listCanvasMessageTimelineForSessionForController
+	t.Cleanup(func() {
+		getCanvasSessionByIdentifierForController = previousGetSession
+		listCanvasMessageTimelineForSessionForController = previousListMessages
+	})
+
+	resolvedIdentifier := ""
+	getCanvasSessionByIdentifierForController = func(userId int, identifier string) (*model.CanvasSession, error) {
+		resolvedIdentifier = identifier
+		return &model.CanvasSession{
+			Id:       42,
+			PublicId: "cs_public_demo",
+			UserId:   userId,
+			Mode:     model.CanvasModeChat,
+		}, nil
+	}
+
+	listCanvasMessageTimelineForSessionForController = func(userId int, session *model.CanvasSession, limit int, cursor string) (*service.CanvasMessageTimelinePage, error) {
+		if userId != 7 || session == nil || session.Id != 42 || limit != 20 {
+			t.Fatalf("unexpected list call: user=%d session=%#v limit=%d cursor=%q", userId, session, limit, cursor)
+		}
+		return &service.CanvasMessageTimelinePage{
+			Items: []*service.CanvasMessageWithTask{
+				{
+					CanvasMessage: &model.CanvasMessage{
+						Id:        1,
+						SessionId: session.Id,
+						UserId:    userId,
+						Mode:      model.CanvasModeChat,
+						Role:      model.CanvasMessageRoleUser,
+						Prompt:    "hello",
+					},
+				},
+			},
+		}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", 7)
+	c.Params = gin.Params{{Key: "id", Value: "cs_public_demo"}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/canvas/sessions/cs_public_demo/messages?limit=20", nil)
+
+	ListCanvasMessages(c)
+
+	if resolvedIdentifier != "cs_public_demo" {
+		t.Fatalf("expected public_id resolver to receive cs_public_demo, got %q", resolvedIdentifier)
 	}
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected HTTP 200, got %d", recorder.Code)
@@ -270,35 +329,62 @@ func TestListCanvasChatModelsReturnsStructuredOptions(t *testing.T) {
 	}
 }
 
-func TestCanvasControllersReturn503WhenCanvasDisabled(t *testing.T) {
+func TestCanvasControllersKeepSessionListAvailableWhileModeSpecificErrorsReturn503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("CANVAS_CHAT_SQL_DSN", "postgres://chat")
-	t.Setenv("CANVAS_IMAGE_SQL_DSN", "")
-	t.Setenv("CANVAS_VIDEO_SQL_DSN", "postgres://video")
-	model.InitCanvasDBs()
+	previousListCanvasSessions := listCanvasSessionsForController
+	previousGetCanvasChatModels := getCanvasChatModelsForController
+	t.Cleanup(func() {
+		listCanvasSessionsForController = previousListCanvasSessions
+		getCanvasChatModelsForController = previousGetCanvasChatModels
+	})
 
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Set("id", 7)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/canvas/sessions", nil)
+	listCanvasSessionsForController = func(userId int, mode string, limit int, offset int) (*service.CanvasSessionListPage, error) {
+		return &service.CanvasSessionListPage{
+			Items: []*model.CanvasSession{
+				{Id: 1, PublicId: "cs_demo", Mode: model.CanvasModeImage, Title: "image"},
+			},
+		}, nil
+	}
+	getCanvasChatModelsForController = func(userId int) ([]*dto.CanvasChatModelCatalogItem, error) {
+		return nil, &model.CanvasModeUnavailableError{
+			Mode:   model.CanvasModeChat,
+			Reason: "boom",
+		}
+	}
 
-	ListCanvasSessions(c)
+	sessionRecorder := httptest.NewRecorder()
+	sessionCtx, _ := gin.CreateTestContext(sessionRecorder)
+	sessionCtx.Set("id", 7)
+	sessionCtx.Request = httptest.NewRequest(http.MethodGet, "/api/canvas/sessions", nil)
 
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected HTTP 503, got %d", recorder.Code)
+	ListCanvasSessions(sessionCtx)
+
+	if sessionRecorder.Code != http.StatusOK {
+		t.Fatalf("expected session list to stay available, got %d", sessionRecorder.Code)
+	}
+
+	modelRecorder := httptest.NewRecorder()
+	modelCtx, _ := gin.CreateTestContext(modelRecorder)
+	modelCtx.Set("id", 7)
+	modelCtx.Request = httptest.NewRequest(http.MethodGet, "/api/canvas/chat-models", nil)
+
+	GetCanvasChatModels(modelCtx)
+
+	if modelRecorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected mode-specific outage to return HTTP 503, got %d", modelRecorder.Code)
 	}
 
 	var response struct {
 		Success bool   `json:"success"`
 		Message string `json:"message"`
 	}
-	if err := common.DecodeJson(recorder.Body, &response); err != nil {
+	if err := common.DecodeJson(modelRecorder.Body, &response); err != nil {
 		t.Fatalf("failed to decode response body: %v", err)
 	}
 	if response.Success {
 		t.Fatalf("expected failure response, got success payload %#v", response)
 	}
-	if !strings.Contains(response.Message, "must be configured together") {
+	if !strings.Contains(response.Message, "boom") {
 		t.Fatalf("unexpected 503 message: %q", response.Message)
 	}
 }

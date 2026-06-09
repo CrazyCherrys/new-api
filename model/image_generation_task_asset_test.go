@@ -24,6 +24,9 @@ func setupImageAssetTestDB(t *testing.T) *gorm.DB {
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
 	common.RedisEnabled = false
+	t.Setenv("CANVAS_CHAT_SQL_DSN", "")
+	t.Setenv("CANVAS_IMAGE_SQL_DSN", "")
+	t.Setenv("CANVAS_VIDEO_SQL_DSN", "")
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
@@ -32,12 +35,25 @@ func setupImageAssetTestDB(t *testing.T) *gorm.DB {
 	}
 	DB = db
 	LOG_DB = db
+	InitCanvasDBs()
+	if inspirationAssetListCache != nil {
+		_ = inspirationAssetListCache.Purge()
+	}
+	if inspirationAssetDetailCache != nil {
+		_ = inspirationAssetDetailCache.Purge()
+	}
 
 	if err := db.AutoMigrate(&ImageGenerationTask{}, &ModelMapping{}, &ImageCreativeSubmission{}); err != nil {
 		t.Fatalf("failed to migrate image asset tables: %v", err)
 	}
 
 	t.Cleanup(func() {
+		if inspirationAssetListCache != nil {
+			_ = inspirationAssetListCache.Purge()
+		}
+		if inspirationAssetDetailCache != nil {
+			_ = inspirationAssetDetailCache.Purge()
+		}
 		DB = previousDB
 		LOG_DB = previousLogDB
 		common.UsingSQLite = previousUsingSQLite
@@ -358,6 +374,94 @@ func TestGetApprovedInspirationAssetsUsesCursorPagination(t *testing.T) {
 	}
 	if secondTotal != 0 {
 		t.Fatalf("expected follow-up cursor page total 0 (not computed), got %d", secondTotal)
+	}
+}
+
+func TestGetApprovedInspirationAssetsScansPastInvisibleRowsForCursorPagination(t *testing.T) {
+	db := setupImageAssetTestDB(t)
+
+	invisibleTask := &ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "invisible",
+		Status:          ImageTaskStatusSuccess,
+		ImageUrl:        "",
+		RequestEndpoint: "openai",
+	}
+	taskA := &ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "asset-a",
+		Status:          ImageTaskStatusSuccess,
+		ImageUrl:        "https://example.com/a.png",
+		ThumbnailUrl:    "https://example.com/a-thumb.png",
+		RequestEndpoint: "openai",
+	}
+	taskB := &ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-1",
+		Prompt:          "asset-b",
+		Status:          ImageTaskStatusSuccess,
+		ImageUrl:        "https://example.com/b.png",
+		ThumbnailUrl:    "https://example.com/b-thumb.png",
+		RequestEndpoint: "openai",
+	}
+	for _, task := range []*ImageGenerationTask{invisibleTask, taskA, taskB} {
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+	}
+
+	invisibleSubmission := &ImageCreativeSubmission{
+		TaskId:        invisibleTask.Id,
+		UserId:        1,
+		Status:        CreativeSubmissionStatusApproved,
+		SubmittedTime: 300,
+		ReviewedTime:  300,
+	}
+	submissionA := &ImageCreativeSubmission{
+		TaskId:        taskA.Id,
+		UserId:        1,
+		Status:        CreativeSubmissionStatusApproved,
+		SubmittedTime: 200,
+		ReviewedTime:  200,
+	}
+	submissionB := &ImageCreativeSubmission{
+		TaskId:        taskB.Id,
+		UserId:        1,
+		Status:        CreativeSubmissionStatusApproved,
+		SubmittedTime: 100,
+		ReviewedTime:  100,
+	}
+	for _, submission := range []*ImageCreativeSubmission{invisibleSubmission, submissionA, submissionB} {
+		if err := db.Create(submission).Error; err != nil {
+			t.Fatalf("failed to create submission: %v", err)
+		}
+	}
+
+	firstPage, total, nextCursor, hasMore, err := GetApprovedInspirationAssets("", 1, true)
+	if err != nil {
+		t.Fatalf("failed to fetch first cursor page: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected visible approved asset total 2, got %d", total)
+	}
+	if len(firstPage) != 1 || firstPage[0].Id != submissionA.Id {
+		t.Fatalf("expected first visible page to skip invisible top row, got %#v", firstPage)
+	}
+	if !hasMore || nextCursor == "" {
+		t.Fatalf("expected first page to expose next cursor after scanning past invisible row, hasMore=%v cursor=%q", hasMore, nextCursor)
+	}
+
+	secondPage, _, secondCursor, secondHasMore, err := GetApprovedInspirationAssets(nextCursor, 1, false)
+	if err != nil {
+		t.Fatalf("failed to fetch second cursor page: %v", err)
+	}
+	if len(secondPage) != 1 || secondPage[0].Id != submissionB.Id {
+		t.Fatalf("unexpected second cursor page: %#v", secondPage)
+	}
+	if secondHasMore || secondCursor != "" {
+		t.Fatalf("expected terminal second page, hasMore=%v cursor=%q", secondHasMore, secondCursor)
 	}
 }
 
