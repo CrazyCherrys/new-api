@@ -38,6 +38,9 @@ func setupImageGenerationServiceTestDB(t *testing.T) *gorm.DB {
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
 	common.RedisEnabled = false
+	t.Setenv("CANVAS_CHAT_SQL_DSN", "")
+	t.Setenv("CANVAS_IMAGE_SQL_DSN", "")
+	t.Setenv("CANVAS_VIDEO_SQL_DSN", "")
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
@@ -46,6 +49,7 @@ func setupImageGenerationServiceTestDB(t *testing.T) *gorm.DB {
 	}
 	model.DB = db
 	model.LOG_DB = db
+	model.InitCanvasDBs()
 
 	if err := db.AutoMigrate(&model.User{}, &model.Token{}, &model.Ability{}, &model.ModelMapping{}, &model.ImageGenerationTask{}, &model.ImageGenerationReferenceAsset{}, &model.ImageGenerationTaskReferenceAsset{}, &model.ImageCreativeSubmission{}); err != nil {
 		t.Fatalf("failed to migrate image generation task table: %v", err)

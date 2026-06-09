@@ -1,5 +1,6 @@
 const ABSOLUTE_URL_RE = /^[a-z][a-z0-9+.-]*:/i;
-const VIDEO_PROXY_PATH_RE = /^\/v1\/videos\/[^/]+\/content$/i;
+const VIDEO_PROXY_PATH_RE =
+  /^(?:\/v1\/videos|\/api\/canvas\/videos)\/[^/]+\/content$/i;
 
 const normalizeUrl = (value) => String(value || '').trim();
 

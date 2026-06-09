@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -34,6 +35,22 @@ type ImageGenerationTask struct {
 	HasMask         bool   `json:"has_mask" gorm:"-"`
 }
 
+type imageTaskStore struct {
+	db *gorm.DB
+}
+
+func imageTaskStoreForCanvas() (*imageTaskStore, error) {
+	db, err := canvasModeDataDB(CanvasModeImage)
+	if err != nil {
+		return nil, err
+	}
+	return &imageTaskStore{db: db}, nil
+}
+
+func (s *imageTaskStore) model() *gorm.DB {
+	return s.db.Model(&ImageGenerationTask{})
+}
+
 func (task *ImageGenerationTask) EffectiveStartedTime() int64 {
 	if task == nil {
 		return 0
@@ -54,6 +71,10 @@ const (
 
 // Insert 插入新任务
 func (task *ImageGenerationTask) Insert() error {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return err
+	}
 	task.CreatedTime = common.GetTimestamp()
 	if task.StartedTime == 0 {
 		task.StartedTime = task.CreatedTime
@@ -61,16 +82,24 @@ func (task *ImageGenerationTask) Insert() error {
 	if task.Status == "" {
 		task.Status = ImageTaskStatusPending
 	}
-	return DB.Create(task).Error
+	return store.db.Create(task).Error
 }
 
 // Update 更新任务
 func (task *ImageGenerationTask) Update() error {
-	return DB.Model(task).Updates(task).Error
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return err
+	}
+	return store.db.Model(task).Updates(task).Error
 }
 
 // ResetImageTaskForRetry 将失败任务重置为待处理状态，返回是否实际更新。
 func ResetImageTaskForRetry(id int) (bool, error) {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return false, err
+	}
 	updates := map[string]interface{}{
 		"status":           ImageTaskStatusPending,
 		"error_message":    "",
@@ -79,7 +108,7 @@ func ResetImageTaskForRetry(id int) (bool, error) {
 		"worker_node":      "",
 		"lease_expires_at": 0,
 	}
-	result := DB.Model(&ImageGenerationTask{}).
+	result := store.model().
 		Where("id = ? AND status = ?", id, ImageTaskStatusFailed).
 		Updates(updates)
 	return result.RowsAffected > 0, result.Error
@@ -87,8 +116,12 @@ func ResetImageTaskForRetry(id int) (bool, error) {
 
 // GetImageTaskByID 根据ID获取任务
 func GetImageTaskByID(id int) (*ImageGenerationTask, error) {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
 	var task ImageGenerationTask
-	err := DB.First(&task, id).Error
+	err = store.db.First(&task, id).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
@@ -99,10 +132,14 @@ func GetImageTasksByUserAndIDs(userId int, ids []int) ([]*ImageGenerationTask, e
 	if userId <= 0 || len(ids) == 0 {
 		return []*ImageGenerationTask{}, nil
 	}
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
 	var tasks []*ImageGenerationTask
-	err := forEachChunk(ids, func(chunk []int) error {
+	err = forEachChunk(ids, func(chunk []int) error {
 		var partial []*ImageGenerationTask
-		if err := DB.Where("user_id = ? AND id IN ?", userId, chunk).
+		if err := store.db.Where("user_id = ? AND id IN ?", userId, chunk).
 			Find(&partial).Error; err != nil {
 			return err
 		}
@@ -113,15 +150,28 @@ func GetImageTasksByUserAndIDs(userId int, ids []int) ([]*ImageGenerationTask, e
 }
 
 func DeleteImageTasksByUserAndIDs(userId int, ids []int) error {
-	return DeleteImageTasksByUserAndIDsWithDB(DB, userId, ids)
+	if userId <= 0 || len(ids) == 0 {
+		return nil
+	}
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return err
+	}
+	return store.db.Transaction(func(tx *gorm.DB) error {
+		return DeleteImageTasksByUserAndIDsWithDB(tx, userId, ids)
+	})
 }
 
 func DeleteImageTasksByUserAndIDsWithDB(db *gorm.DB, userId int, ids []int) error {
-	if db == nil {
-		db = DB
-	}
 	if userId <= 0 || len(ids) == 0 {
 		return nil
+	}
+	if db == nil {
+		store, err := imageTaskStoreForCanvas()
+		if err != nil {
+			return err
+		}
+		db = store.db
 	}
 	return forEachChunk(ids, func(chunk []int) error {
 		return db.Where("user_id = ? AND id IN ?", userId, chunk).
@@ -242,12 +292,234 @@ type ImageAssetSeriesOption struct {
 	DisplayName string `json:"display_name"`
 }
 
+type imageTaskModelDisplay struct {
+	DisplayName string
+	ModelSeries string
+}
+
+func listImageTasksByIDs(ids []int) ([]*ImageGenerationTask, error) {
+	if len(ids) == 0 {
+		return []*ImageGenerationTask{}, nil
+	}
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
+	tasks := make([]*ImageGenerationTask, 0, len(ids))
+	err = forEachChunk(ids, func(chunk []int) error {
+		var partial []*ImageGenerationTask
+		if err := store.db.Where("id IN ?", chunk).Find(&partial).Error; err != nil {
+			return err
+		}
+		tasks = append(tasks, partial...)
+		return nil
+	})
+	return tasks, err
+}
+
+func imageCreativeSubmissionsByTaskIDs(taskIDs []int) (map[int]*ImageCreativeSubmission, error) {
+	result := make(map[int]*ImageCreativeSubmission)
+	if len(taskIDs) == 0 {
+		return result, nil
+	}
+	err := forEachChunk(taskIDs, func(chunk []int) error {
+		var partial []*ImageCreativeSubmission
+		if err := DB.Where("task_id IN ?", chunk).Find(&partial).Error; err != nil {
+			return err
+		}
+		for _, item := range partial {
+			if item == nil {
+				continue
+			}
+			result[item.TaskId] = item
+		}
+		return nil
+	})
+	return result, err
+}
+
+func imageTaskModelDisplayByModelIDs(modelIDs []string) (map[string]imageTaskModelDisplay, error) {
+	result := make(map[string]imageTaskModelDisplay)
+	if len(modelIDs) == 0 {
+		return result, nil
+	}
+	mappings, err := GetModelMappingsByRequestModels(modelIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, mapping := range mappings {
+		if mapping == nil {
+			continue
+		}
+		modelID := strings.TrimSpace(mapping.RequestModel)
+		if modelID == "" {
+			continue
+		}
+		result[modelID] = imageTaskModelDisplay{
+			DisplayName: strings.TrimSpace(mapping.DisplayName),
+			ModelSeries: strings.TrimSpace(mapping.ModelSeries),
+		}
+	}
+	return result, nil
+}
+
+func imageTaskIDsByModelSeries(modelSeries string) ([]string, error) {
+	modelSeries = strings.TrimSpace(modelSeries)
+	if modelSeries == "" {
+		return []string{}, nil
+	}
+	var modelIDs []string
+	err := DB.Model(&ModelMapping{}).
+		Where("model_series = ?", modelSeries).
+		Pluck("request_model", &modelIDs).Error
+	return modelIDs, err
+}
+
+func imageTaskIDsByDisplayNameKeyword(keyword string) ([]string, error) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return []string{}, nil
+	}
+	var modelIDs []string
+	err := DB.Model(&ModelMapping{}).
+		Where("display_name LIKE ?", "%"+keyword+"%").
+		Pluck("request_model", &modelIDs).Error
+	return modelIDs, err
+}
+
+func buildImageGenerationAssetRecord(task *ImageGenerationTask, display imageTaskModelDisplay, submission *ImageCreativeSubmission) *ImageGenerationAsset {
+	if task == nil {
+		return nil
+	}
+	record := &ImageGenerationAsset{
+		Id:              task.Id,
+		TaskId:          task.Id,
+		UserId:          task.UserId,
+		ModelId:         task.ModelId,
+		DisplayName:     display.DisplayName,
+		ModelSeries:     display.ModelSeries,
+		Prompt:          task.Prompt,
+		RequestEndpoint: task.RequestEndpoint,
+		Params:          task.Params,
+		ImageUrl:        task.ImageUrl,
+		ThumbnailUrl:    task.ThumbnailUrl,
+		ImageMetadata:   task.ImageMetadata,
+		Cost:            task.Cost,
+		CreatedTime:     task.CreatedTime,
+		CompletedTime:   task.CompletedTime,
+	}
+	if submission != nil {
+		record.InspirationSubmissionId = submission.Id
+		record.InspirationSubmissionStatus = submission.Status
+		record.InspirationRejectReason = submission.RejectReason
+	}
+	return record
+}
+
+func CountUserImageTasksByResultAssetURL(userId int, assetURL string) (int64, error) {
+	if userId <= 0 || strings.TrimSpace(assetURL) == "" {
+		return 0, nil
+	}
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	err = store.model().
+		Where("user_id = ? AND (image_url = ? OR thumbnail_url = ?)", userId, assetURL, assetURL).
+		Count(&count).Error
+	return count, err
+}
+
+func ListUserImageTaskParamsContainingAssetURL(userId int, assetURL string) ([]string, error) {
+	if userId <= 0 || strings.TrimSpace(assetURL) == "" {
+		return []string{}, nil
+	}
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
+	var tasks []*ImageGenerationTask
+	if err := store.model().
+		Select("params").
+		Where("user_id = ?", userId).
+		Where("params LIKE ?", "%"+assetURL+"%").
+		Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	params := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		params = append(params, task.Params)
+	}
+	return params, nil
+}
+
+func ListSuccessfulImageTaskIDsByResultAssetURL(assetURL string) ([]int, error) {
+	assetURL = strings.TrimSpace(assetURL)
+	if assetURL == "" {
+		return []int{}, nil
+	}
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
+	var taskIDs []int
+	err = store.model().
+		Where("status = ? AND (image_url = ? OR thumbnail_url = ?)", ImageTaskStatusSuccess, assetURL, assetURL).
+		Pluck("id", &taskIDs).Error
+	return taskIDs, err
+}
+
+func ListExpiredImageTasksBefore(expirationTime int64) ([]*ImageGenerationTask, error) {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
+	var tasks []*ImageGenerationTask
+	err = store.db.Where("created_time < ?", expirationTime).Find(&tasks).Error
+	return tasks, err
+}
+
+func CountImageTasksGroupedByUserAndStatuses(statuses []string) (map[int]int64, error) {
+	result := make(map[int]int64)
+	if len(statuses) == 0 {
+		return result, nil
+	}
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
+	type userTaskCount struct {
+		UserId int   `gorm:"column:user_id"`
+		Count  int64 `gorm:"column:count"`
+	}
+	rows := make([]userTaskCount, 0)
+	if err := store.model().
+		Select("user_id, COUNT(*) AS count").
+		Where("status IN ?", statuses).
+		Group("user_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.UserId] = row.Count
+	}
+	return result, nil
+}
+
 // GetImageTasksByUserID 根据用户ID获取任务列表（分页+筛选+排序）
 func GetImageTasksByUserID(userId int, startIdx int, num int, queryParams ImageTaskQueryParams, includeTotal bool) ([]*ImageGenerationTask, int64, bool, error) {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, 0, false, err
+	}
 	var tasks []*ImageGenerationTask
 	var total int64
 
-	query := DB.Model(&ImageGenerationTask{}).Where("user_id = ?", userId)
+	query := store.model().Where("user_id = ?", userId)
 
 	if queryParams.Status != "" {
 		query = query.Where("status = ?", queryParams.Status)
@@ -401,6 +673,10 @@ func applyImageTaskCursor(query *gorm.DB, cursor string, sortField string, sortO
 }
 
 func GetImageTasksByUserCursor(userId int, cursor string, num int, queryParams ImageTaskQueryParams) (*ImageTaskCursorPage, error) {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
 	if num <= 0 {
 		num = 20
 	}
@@ -413,7 +689,7 @@ func GetImageTasksByUserCursor(userId int, cursor string, num int, queryParams I
 		return nil, fmt.Errorf("cursor pagination is not supported for sort field %s", sortField)
 	}
 
-	baseQuery := applyImageTaskFilters(DB.Model(&ImageGenerationTask{}), userId, queryParams)
+	baseQuery := applyImageTaskFilters(store.model(), userId, queryParams)
 
 	var total int64
 	if strings.TrimSpace(cursor) == "" {
@@ -464,6 +740,10 @@ func GetImageTasksByUserCursor(userId int, cursor string, num int, queryParams I
 
 // GetImageTaskUpdatesByUserID 获取 SSE 所需的轻量任务更新，不执行分页统计。
 func GetImageTaskUpdatesByUserID(userId int, completedSince int64, limit int) ([]*ImageGenerationTask, error) {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 100
 	}
@@ -473,7 +753,7 @@ func GetImageTaskUpdatesByUserID(userId int, completedSince int64, limit int) ([
 
 	var tasks []*ImageGenerationTask
 	activeStatuses := []string{ImageTaskStatusPending, ImageTaskStatusGenerating}
-	query := DB.Model(&ImageGenerationTask{}).
+	query := store.model().
 		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, error_message, created_time, started_time, completed_time").
 		Where("user_id = ? AND status IN ?", userId, activeStatuses).
 		Order("id DESC").
@@ -488,7 +768,7 @@ func GetImageTaskUpdatesByUserID(userId int, completedSince int64, limit int) ([
 
 	var terminalTasks []*ImageGenerationTask
 	remaining := limit - len(tasks)
-	err := DB.Model(&ImageGenerationTask{}).
+	err = store.model().
 		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, error_message, created_time, started_time, completed_time").
 		Where("user_id = ? AND status NOT IN ? AND completed_time >= ?", userId, activeStatuses, completedSince).
 		Order("id DESC").
@@ -552,56 +832,78 @@ func CountImageTasksByUserAndStatuses(userId int, statuses []string) (int64, err
 	if userId <= 0 || len(statuses) == 0 {
 		return 0, nil
 	}
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return 0, err
+	}
 
 	var total int64
-	err := DB.Model(&ImageGenerationTask{}).
+	err = store.model().
 		Where("user_id = ? AND status IN ?", userId, statuses).
 		Count(&total).Error
 	return total, err
 }
 
-func imageAssetsBaseQuery(userId int) *gorm.DB {
-	return DB.Table("image_generation_tasks AS t").
-		Select("t.id, t.id AS task_id, t.user_id, t.model_id, COALESCE(m.display_name, '') AS display_name, COALESCE(m.model_series, '') AS model_series, t.prompt, t.request_endpoint, t.params, t.image_url, t.thumbnail_url, t.image_metadata, t.cost, t.created_time, t.completed_time, COALESCE(s.id, 0) AS inspiration_submission_id, COALESCE(s.status, '') AS inspiration_submission_status, COALESCE(s.reject_reason, '') AS inspiration_reject_reason").
-		Joins("LEFT JOIN model_mappings AS m ON m.request_model = t.model_id").
-		Joins("LEFT JOIN image_creative_submissions AS s ON s.task_id = t.id").
-		Where("t.user_id = ? AND t.status = ? AND t.image_url <> ?", userId, ImageTaskStatusSuccess, "")
-}
-
-func applyImageAssetFilters(query *gorm.DB, queryParams ImageAssetQueryParams) *gorm.DB {
+func applyImageAssetFilters(query *gorm.DB, queryParams ImageAssetQueryParams) (*gorm.DB, error) {
 	if keywordText := strings.TrimSpace(queryParams.Keyword); keywordText != "" {
 		keyword := "%" + keywordText + "%"
-		query = query.Where("t.prompt LIKE ? OR t.model_id LIKE ? OR m.display_name LIKE ?", keyword, keyword, keyword)
+		displayNameModelIDs, err := imageTaskIDsByDisplayNameKeyword(keywordText)
+		if err != nil {
+			return nil, err
+		}
+		if len(displayNameModelIDs) > 0 {
+			query = query.Where("(prompt LIKE ? OR model_id LIKE ? OR model_id IN ?)", keyword, keyword, displayNameModelIDs)
+		} else {
+			query = query.Where("(prompt LIKE ? OR model_id LIKE ?)", keyword, keyword)
+		}
 	}
 	if modelId := strings.TrimSpace(queryParams.ModelId); modelId != "" {
-		query = query.Where("t.model_id = ?", modelId)
+		query = query.Where("model_id = ?", modelId)
 	}
 	if modelSeries := strings.TrimSpace(queryParams.ModelSeries); modelSeries != "" {
-		query = query.Where("m.model_series = ?", modelSeries)
+		seriesModelIDs, err := imageTaskIDsByModelSeries(modelSeries)
+		if err != nil {
+			return nil, err
+		}
+		if len(seriesModelIDs) == 0 {
+			query = query.Where("1 = 0")
+		} else {
+			query = query.Where("model_id IN ?", seriesModelIDs)
+		}
 	}
 	if queryParams.StartTime > 0 {
-		query = query.Where("t.created_time >= ?", queryParams.StartTime)
+		query = query.Where("created_time >= ?", queryParams.StartTime)
 	}
 	if queryParams.EndTime > 0 {
-		query = query.Where("t.created_time <= ?", queryParams.EndTime)
+		query = query.Where("created_time <= ?", queryParams.EndTime)
 	}
-	return query
+	return query, nil
 }
 
 // GetImageAssetsByUserID 获取当前用户的图片资产列表（成功任务视图）。
 func GetImageAssetsByUserID(userId int, startIdx int, num int, queryParams ImageAssetQueryParams) ([]*ImageGenerationAsset, int64, ImageAssetStats, error) {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, 0, ImageAssetStats{}, err
+	}
 	var assets []*ImageGenerationAsset
 	var total int64
 	stats := ImageAssetStats{}
-
-	if err := applyImageAssetFilters(imageAssetsBaseQuery(userId), queryParams).Count(&total).Error; err != nil {
+	baseQuery, err := applyImageAssetFilters(
+		store.model().Where("user_id = ? AND status = ? AND image_url <> ?", userId, ImageTaskStatusSuccess, ""),
+		queryParams,
+	)
+	if err != nil {
+		return nil, 0, stats, err
+	}
+	if err := baseQuery.Count(&total).Error; err != nil {
 		return nil, 0, stats, err
 	}
 
 	if total > 0 {
 		var latestCreatedTime int64
-		if err := applyImageAssetFilters(imageAssetsBaseQuery(userId), queryParams).
-			Select("MAX(t.created_time)").
+		if err := baseQuery.Session(&gorm.Session{}).
+			Select("MAX(created_time)").
 			Scan(&latestCreatedTime).Error; err != nil {
 			return nil, 0, stats, err
 		}
@@ -612,24 +914,53 @@ func GetImageAssetsByUserID(userId int, startIdx int, num int, queryParams Image
 	sortField := "t.created_time"
 	switch queryParams.SortBy {
 	case "completed_time":
-		sortField = "t.completed_time"
+		sortField = "completed_time"
 	case "cost":
-		sortField = "t.cost"
+		sortField = "cost"
 	case "created_time":
-		sortField = "t.created_time"
+		sortField = "created_time"
 	}
 	sortOrder := "DESC"
 	if queryParams.SortOrder == "asc" {
 		sortOrder = "ASC"
 	}
 
-	orderClause := sortField + " " + sortOrder + ", t.id " + sortOrder
-	if err := applyImageAssetFilters(imageAssetsBaseQuery(userId), queryParams).
+	orderClause := sortField + " " + sortOrder + ", id " + sortOrder
+	var tasks []*ImageGenerationTask
+	if err := baseQuery.Session(&gorm.Session{}).
 		Order(orderClause).
 		Limit(num).
 		Offset(startIdx).
-		Scan(&assets).Error; err != nil {
+		Find(&tasks).Error; err != nil {
 		return nil, 0, stats, err
+	}
+	taskIDs := make([]int, 0, len(tasks))
+	modelIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		taskIDs = append(taskIDs, task.Id)
+		modelIDs = append(modelIDs, task.ModelId)
+	}
+	submissionsByTaskID, err := imageCreativeSubmissionsByTaskIDs(taskIDs)
+	if err != nil {
+		return nil, 0, stats, err
+	}
+	displayByModelID, err := imageTaskModelDisplayByModelIDs(modelIDs)
+	if err != nil {
+		return nil, 0, stats, err
+	}
+	assets = make([]*ImageGenerationAsset, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		assets = append(assets, buildImageGenerationAssetRecord(
+			task,
+			displayByModelID[strings.TrimSpace(task.ModelId)],
+			submissionsByTaskID[task.Id],
+		))
 	}
 
 	return assets, total, stats, nil
@@ -642,48 +973,98 @@ func GetImageAssetFilterOptions(userId int) (ImageAssetFilterOptions, error) {
 		Series: []ImageAssetSeriesOption{},
 	}
 
-	if err := imageAssetsBaseQuery(userId).
-		Select("t.model_id, COALESCE(MAX(m.display_name), '') AS display_name").
-		Group("t.model_id").
-		Order("t.model_id ASC").
-		Scan(&options.Models).Error; err != nil {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
 		return options, err
 	}
-
-	if err := imageAssetsBaseQuery(userId).
-		Select("m.model_series, COALESCE(MAX(m.display_name), '') AS display_name").
-		Where("m.model_series <> ?", "").
-		Group("m.model_series").
-		Order("m.model_series ASC").
-		Scan(&options.Series).Error; err != nil {
+	var modelIDs []string
+	if err := store.model().
+		Where("user_id = ? AND status = ? AND image_url <> ?", userId, ImageTaskStatusSuccess, "").
+		Distinct("model_id").
+		Order("model_id ASC").
+		Pluck("model_id", &modelIDs).Error; err != nil {
 		return options, err
 	}
-
+	displayByModelID, err := imageTaskModelDisplayByModelIDs(modelIDs)
+	if err != nil {
+		return options, err
+	}
+	seriesSeen := make(map[string]struct{})
+	for _, modelID := range modelIDs {
+		display := displayByModelID[strings.TrimSpace(modelID)]
+		options.Models = append(options.Models, ImageAssetModelOption{
+			ModelId:     modelID,
+			DisplayName: display.DisplayName,
+		})
+		if display.ModelSeries == "" {
+			continue
+		}
+		if _, ok := seriesSeen[display.ModelSeries]; ok {
+			continue
+		}
+		seriesSeen[display.ModelSeries] = struct{}{}
+		options.Series = append(options.Series, ImageAssetSeriesOption{
+			ModelSeries: display.ModelSeries,
+			DisplayName: display.DisplayName,
+		})
+	}
+	sort.Slice(options.Series, func(i, j int) bool {
+		return options.Series[i].ModelSeries < options.Series[j].ModelSeries
+	})
+	if len(options.Models) == 0 {
+		return options, err
+	}
 	return options, nil
 }
 
 // GetImageAssetByID 根据任务 ID 获取当前用户的图片资产详情。
 func GetImageAssetByID(userId int, taskId int) (*ImageGenerationAsset, error) {
-	var asset ImageGenerationAsset
-	err := imageAssetsBaseQuery(userId).Where("t.id = ?", taskId).Scan(&asset).Error
+	store, err := imageTaskStoreForCanvas()
 	if err != nil {
 		return nil, err
 	}
-	if asset.Id == 0 {
+	var task ImageGenerationTask
+	err = store.model().
+		Where("user_id = ? AND id = ? AND status = ? AND image_url <> ?", userId, taskId, ImageTaskStatusSuccess, "").
+		First(&task).Error
+	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
-	return &asset, nil
+	if err != nil {
+		return nil, err
+	}
+	submissionsByTaskID, err := imageCreativeSubmissionsByTaskIDs([]int{task.Id})
+	if err != nil {
+		return nil, err
+	}
+	displayByModelID, err := imageTaskModelDisplayByModelIDs([]string{task.ModelId})
+	if err != nil {
+		return nil, err
+	}
+	return buildImageGenerationAssetRecord(
+		&task,
+		displayByModelID[strings.TrimSpace(task.ModelId)],
+		submissionsByTaskID[task.Id],
+	), nil
 }
 
 // DeleteImageTask 删除任务
 func DeleteImageTask(id int) error {
-	return DB.Delete(&ImageGenerationTask{}, id).Error
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return err
+	}
+	return store.db.Delete(&ImageGenerationTask{}, id).Error
 }
 
 // GetPendingImageTasks 获取所有待处理的任务
 func GetPendingImageTasks(limit int) ([]*ImageGenerationTask, error) {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
 	var tasks []*ImageGenerationTask
-	err := DB.Where("status = ?", ImageTaskStatusPending).
+	err = store.db.Where("status = ?", ImageTaskStatusPending).
 		Order("id ASC").
 		Limit(limit).
 		Find(&tasks).Error
@@ -697,7 +1078,11 @@ func ClaimNextPendingImageTask(workerNode string, startedTime int64, leaseExpire
 	}
 
 	task := tasks[0]
-	result := DB.Model(&ImageGenerationTask{}).
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
+	result := store.model().
 		Where("id = ? AND status = ?", task.Id, ImageTaskStatusPending).
 		Updates(map[string]interface{}{
 			"status":           ImageTaskStatusGenerating,
@@ -722,7 +1107,11 @@ func ClaimNextPendingImageTask(workerNode string, startedTime int64, leaseExpire
 }
 
 func MarkImageTaskGenerating(id int, workerNode string, startedTime int64, leaseExpiresAt int64) (bool, error) {
-	result := DB.Model(&ImageGenerationTask{}).
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return false, err
+	}
+	result := store.model().
 		Where("id = ? AND status = ?", id, ImageTaskStatusPending).
 		Updates(map[string]interface{}{
 			"status":           ImageTaskStatusGenerating,
@@ -739,6 +1128,10 @@ func MarkImageTaskGenerating(id int, workerNode string, startedTime int64, lease
 
 // UpdateImageTaskStatus 更新任务状态
 func UpdateImageTaskStatus(id int, status string, errorMessage string) error {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return err
+	}
 	updates := map[string]interface{}{
 		"status": status,
 	}
@@ -751,11 +1144,15 @@ func UpdateImageTaskStatus(id int, status string, errorMessage string) error {
 	if status == ImageTaskStatusSuccess || status == ImageTaskStatusFailed {
 		updates["completed_time"] = common.GetTimestamp()
 	}
-	return DB.Model(&ImageGenerationTask{}).Where("id = ?", id).Updates(updates).Error
+	return store.model().Where("id = ?", id).Updates(updates).Error
 }
 
 // UpdateImageTaskResult 更新任务结果
 func UpdateImageTaskResult(id int, imageUrl string, thumbnailUrl string, imageMetadata string, cost int) error {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return err
+	}
 	updates := map[string]interface{}{
 		"status":         ImageTaskStatusSuccess,
 		"image_url":      imageUrl,
@@ -764,10 +1161,14 @@ func UpdateImageTaskResult(id int, imageUrl string, thumbnailUrl string, imageMe
 		"cost":           cost,
 		"completed_time": common.GetTimestamp(),
 	}
-	return DB.Model(&ImageGenerationTask{}).Where("id = ?", id).Updates(updates).Error
+	return store.model().Where("id = ?", id).Updates(updates).Error
 }
 
 func UpdateImageTaskResultClaimed(id int, workerNode string, imageUrl string, thumbnailUrl string, imageMetadata string, cost int) (bool, error) {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return false, err
+	}
 	updates := map[string]interface{}{
 		"status":           ImageTaskStatusSuccess,
 		"image_url":        imageUrl,
@@ -778,7 +1179,7 @@ func UpdateImageTaskResultClaimed(id int, workerNode string, imageUrl string, th
 		"worker_node":      "",
 		"lease_expires_at": 0,
 	}
-	result := DB.Model(&ImageGenerationTask{}).
+	result := store.model().
 		Where("id = ? AND worker_node = ? AND status = ?", id, workerNode, ImageTaskStatusGenerating).
 		Updates(updates)
 	if result.Error != nil {
@@ -788,6 +1189,10 @@ func UpdateImageTaskResultClaimed(id int, workerNode string, imageUrl string, th
 }
 
 func UpdateImageTaskTerminalStatusClaimed(id int, workerNode string, status string, errorMessage string) (bool, error) {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return false, err
+	}
 	updates := map[string]interface{}{
 		"status":           status,
 		"completed_time":   common.GetTimestamp(),
@@ -797,7 +1202,7 @@ func UpdateImageTaskTerminalStatusClaimed(id int, workerNode string, status stri
 	if strings.TrimSpace(errorMessage) != "" {
 		updates["error_message"] = errorMessage
 	}
-	result := DB.Model(&ImageGenerationTask{}).
+	result := store.model().
 		Where("id = ? AND worker_node = ? AND status = ?", id, workerNode, ImageTaskStatusGenerating).
 		Updates(updates)
 	if result.Error != nil {
@@ -810,7 +1215,11 @@ func RenewImageTaskLease(id int, workerNode string, leaseExpiresAt int64) (bool,
 	if leaseExpiresAt <= 0 {
 		return false, nil
 	}
-	result := DB.Model(&ImageGenerationTask{}).
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return false, err
+	}
+	result := store.model().
 		Where("id = ? AND worker_node = ? AND status = ?", id, workerNode, ImageTaskStatusGenerating).
 		Update("lease_expires_at", leaseExpiresAt)
 	if result.Error != nil {
@@ -829,9 +1238,13 @@ func FailExpiredGeneratingImageTasks(expiredBefore int64, errorMessage string, l
 	if limit <= 0 {
 		limit = 100
 	}
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return 0, err
+	}
 
 	var ids []int
-	if err := DB.Model(&ImageGenerationTask{}).
+	if err := store.model().
 		Where("status = ? AND lease_expires_at > 0 AND lease_expires_at <= ?", ImageTaskStatusGenerating, expiredBefore).
 		Order("lease_expires_at ASC, id ASC").
 		Limit(limit).
@@ -842,7 +1255,7 @@ func FailExpiredGeneratingImageTasks(expiredBefore int64, errorMessage string, l
 		return 0, nil
 	}
 
-	result := DB.Model(&ImageGenerationTask{}).
+	result := store.model().
 		Where("id IN ? AND status = ?", ids, ImageTaskStatusGenerating).
 		Updates(map[string]interface{}{
 			"status":           ImageTaskStatusFailed,
@@ -864,9 +1277,13 @@ func GetExpiredGeneratingImageTaskUserIDs(expiredBefore int64, limit int) ([]int
 	if limit <= 0 {
 		limit = 100
 	}
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return nil, err
+	}
 
 	var ids []int
-	if err := DB.Model(&ImageGenerationTask{}).
+	if err := store.model().
 		Distinct("user_id").
 		Where("status = ? AND lease_expires_at > 0 AND lease_expires_at <= ?", ImageTaskStatusGenerating, expiredBefore).
 		Limit(limit).

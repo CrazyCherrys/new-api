@@ -48,6 +48,9 @@ func setupImageGenerationControllerTestDB(t *testing.T) *gorm.DB {
 	common.UsingPostgreSQL = false
 	common.RedisEnabled = false
 	model.InitCommonColumnNames()
+	t.Setenv("CANVAS_CHAT_SQL_DSN", "")
+	t.Setenv("CANVAS_IMAGE_SQL_DSN", "")
+	t.Setenv("CANVAS_VIDEO_SQL_DSN", "")
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
@@ -56,6 +59,7 @@ func setupImageGenerationControllerTestDB(t *testing.T) *gorm.DB {
 	}
 	model.DB = db
 	model.LOG_DB = db
+	model.InitCanvasDBs()
 
 	if err := db.AutoMigrate(
 		&model.User{},

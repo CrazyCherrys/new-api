@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,9 +66,73 @@ type Task struct {
 	UpstreamModelName string                `json:"upstream_model_name,omitempty" gorm:"type:varchar(191);index:idx_tasks_user_action_upstream_model_id,priority:3"`
 	Properties        Properties            `json:"properties" gorm:"type:json"`
 	Username          string                `json:"username,omitempty" gorm:"-"`
+	StorageScope      string                `json:"-" gorm:"-"`
 	// 禁止返回给用户，内部可能包含key等隐私信息
 	PrivateData TaskPrivateData `json:"-" gorm:"column:private_data;type:json"`
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
+}
+
+const (
+	taskStorageScopeMain  = "main"
+	taskStorageScopeVideo = "canvas_video"
+)
+
+func videoTaskDB() (*gorm.DB, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("video task database is not initialized")
+	}
+	return DB, nil
+}
+
+func canvasVideoTaskDB() (*gorm.DB, error) {
+	return canvasModeDataDB(CanvasModeVideo)
+}
+
+func taskDBForScope(scope string) (*gorm.DB, error) {
+	switch strings.TrimSpace(scope) {
+	case taskStorageScopeVideo:
+		return canvasVideoTaskDB()
+	default:
+		if DB == nil {
+			return nil, fmt.Errorf("task database is not initialized")
+		}
+		return DB, nil
+	}
+}
+
+func taskScopeForTask(task *Task) string {
+	if task == nil {
+		return taskStorageScopeMain
+	}
+	if strings.TrimSpace(task.StorageScope) == taskStorageScopeVideo {
+		return taskStorageScopeVideo
+	}
+	return taskStorageScopeMain
+}
+
+func taskDBForTask(task *Task) (*gorm.DB, error) {
+	return taskDBForScope(taskScopeForTask(task))
+}
+
+func MarkTaskCanvasVideoScope(task *Task) {
+	if task == nil {
+		return
+	}
+	task.StorageScope = taskStorageScopeVideo
+}
+
+func (Task *Task) InsertCanvasVideo() error {
+	MarkTaskCanvasVideoScope(Task)
+	return Task.Insert()
+}
+
+func markTasksStorageScope(tasks []*Task, scope string) {
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		task.StorageScope = scope
+	}
 }
 
 func (t *Task) SetData(data any) {
@@ -215,50 +281,30 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 	return t
 }
 
-func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQueryParams) []*Task {
-	var tasks []*Task
-	var err error
-
-	// 初始化查询构建器
-	query := DB.Where("user_id = ?", userId)
-
-	if queryParams.TaskID != "" {
-		query = query.Where("task_id = ?", queryParams.TaskID)
-	}
-	if queryParams.Action != "" {
-		query = query.Where("action = ?", queryParams.Action)
-	}
-	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
-	}
-	if queryParams.Platform != "" {
-		query = query.Where("platform = ?", queryParams.Platform)
-	}
-	if queryParams.StartTimestamp != 0 {
-		// 假设您已将前端传来的时间戳转换为数据库所需的时间格式，并处理了时间戳的验证和解析
-		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
-	}
-	if queryParams.EndTimestamp != 0 {
-		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
-	}
-
-	// 获取数据
-	err = query.Omit("channel_id").Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
-	if err != nil {
-		return nil
-	}
-
-	return tasks
+func taskScopesForQuery(queryParams SyncTaskQueryParams) []string {
+	return []string{taskStorageScopeMain}
 }
 
-func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*Task {
-	var tasks []*Task
-	var err error
+func videoTasksUseDedicatedStore() bool {
+	return CanvasModeUsesDedicatedMessageDB(CanvasModeVideo)
+}
 
-	// 初始化查询构建器
-	query := DB
+func taskLookupScopes() []string {
+	return []string{taskStorageScopeMain}
+}
 
-	// 添加过滤条件
+func taskPollingScopes() []string {
+	if videoTasksUseDedicatedStore() {
+		return []string{taskStorageScopeMain, taskStorageScopeVideo}
+	}
+	return []string{taskStorageScopeMain}
+}
+
+func applyTaskStorageScopeFilters(query *gorm.DB, scope string) *gorm.DB {
+	return query
+}
+
+func applySyncTaskFilters(query *gorm.DB, queryParams SyncTaskQueryParams) *gorm.DB {
 	if queryParams.ChannelID != "" {
 		query = query.Where("channel_id = ?", queryParams.ChannelID)
 	}
@@ -286,88 +332,247 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	if queryParams.EndTimestamp != 0 {
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
 	}
+	return query
+}
 
-	// 获取数据
-	err = query.Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
+func listTasksForScope(scope string, queryParams SyncTaskQueryParams, extra func(*gorm.DB) *gorm.DB) ([]*Task, error) {
+	db, err := taskDBForScope(scope)
+	if err != nil {
+		if scope == taskStorageScopeVideo && IsCanvasModeUnavailableError(err) {
+			return []*Task{}, nil
+		}
+		return nil, err
+	}
+	query := db.Model(&Task{})
+	query = applyTaskStorageScopeFilters(query, scope)
+	query = applySyncTaskFilters(query, queryParams)
+	if extra != nil {
+		query = extra(query)
+	}
+	var tasks []*Task
+	if err := query.Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	markTasksStorageScope(tasks, scope)
+	return tasks, nil
+}
+
+func sortTasksNewestFirst(tasks []*Task) {
+	sort.Slice(tasks, func(i, j int) bool {
+		if tasks[i].SubmitTime == tasks[j].SubmitTime {
+			if tasks[i].ID == tasks[j].ID {
+				return taskScopeForTask(tasks[i]) < taskScopeForTask(tasks[j])
+			}
+			return tasks[i].ID > tasks[j].ID
+		}
+		return tasks[i].SubmitTime > tasks[j].SubmitTime
+	})
+}
+
+func sortTasksOldestFirst(tasks []*Task) {
+	sort.Slice(tasks, func(i, j int) bool {
+		if tasks[i].SubmitTime == tasks[j].SubmitTime {
+			if tasks[i].ID == tasks[j].ID {
+				return taskScopeForTask(tasks[i]) < taskScopeForTask(tasks[j])
+			}
+			return tasks[i].ID < tasks[j].ID
+		}
+		return tasks[i].SubmitTime < tasks[j].SubmitTime
+	})
+}
+
+func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQueryParams) []*Task {
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	db, err := taskDBForScope(taskStorageScopeMain)
 	if err != nil {
 		return nil
 	}
+	query := db.Model(&Task{}).Omit("channel_id")
+	query = applyTaskStorageScopeFilters(query, taskStorageScopeMain)
+	query = applySyncTaskFilters(query.Where("user_id = ?", userId), queryParams)
+	query = query.Order("id desc").Offset(startIdx)
+	if num > 0 {
+		query = query.Limit(num)
+	}
+	var tasks []*Task
+	if err := query.Find(&tasks).Error; err != nil {
+		return nil
+	}
+	markTasksStorageScope(tasks, taskStorageScopeMain)
+	return tasks
+}
 
+func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*Task {
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	db, err := taskDBForScope(taskStorageScopeMain)
+	if err != nil {
+		return nil
+	}
+	query := db.Model(&Task{})
+	query = applyTaskStorageScopeFilters(query, taskStorageScopeMain)
+	query = applySyncTaskFilters(query, queryParams)
+	query = query.Order("id desc").Offset(startIdx)
+	if num > 0 {
+		query = query.Limit(num)
+	}
+	var tasks []*Task
+	if err := query.Find(&tasks).Error; err != nil {
+		return nil
+	}
+	markTasksStorageScope(tasks, taskStorageScopeMain)
 	return tasks
 }
 
 func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
-	var tasks []*Task
-	err := DB.Where("progress != ?", "100%").
-		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
-		Where("submit_time < ?", cutoffUnix).
-		Order("submit_time").
-		Limit(limit).
-		Find(&tasks).Error
-	if err != nil {
-		return nil
+	items := make([]*Task, 0)
+	queryParams := SyncTaskQueryParams{
+		EndTimestamp: cutoffUnix - 1,
 	}
-	return tasks
+	for _, scope := range taskPollingScopes() {
+		tasks, err := listTasksForScope(scope, queryParams, func(query *gorm.DB) *gorm.DB {
+			return query.Where("progress != ?", "100%").
+				Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess})
+		})
+		if err != nil {
+			return nil
+		}
+		items = append(items, tasks...)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].SubmitTime == items[j].SubmitTime {
+			return items[i].ID < items[j].ID
+		}
+		return items[i].SubmitTime < items[j].SubmitTime
+	})
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items
 }
 
 func GetAllUnFinishSyncTasks(limit int) []*Task {
-	var tasks []*Task
-	var err error
-	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Limit(limit).Order("id").Find(&tasks).Error
-	if err != nil {
-		return nil
+	items := make([]*Task, 0)
+	for _, scope := range taskPollingScopes() {
+		tasks, err := listTasksForScope(scope, SyncTaskQueryParams{}, func(query *gorm.DB) *gorm.DB {
+			return query.Where("progress != ?", "100%").
+				Where("status != ?", TaskStatusFailure).
+				Where("status != ?", TaskStatusSuccess)
+		})
+		if err != nil {
+			return nil
+		}
+		items = append(items, tasks...)
 	}
-	return tasks
+	sortTasksOldestFirst(items)
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items
 }
 
 func GetByOnlyTaskId(taskId string) (*Task, bool, error) {
 	if taskId == "" {
 		return nil, false, nil
 	}
-	var task *Task
-	var err error
-	err = DB.Where("task_id = ?", taskId).First(&task).Error
-	exist, err := RecordExist(err)
-	if err != nil {
-		return nil, false, err
+	for _, scope := range taskLookupScopes() {
+		db, err := taskDBForScope(scope)
+		if err != nil {
+			if scope == taskStorageScopeVideo && IsCanvasModeUnavailableError(err) {
+				continue
+			}
+			return nil, false, err
+		}
+		var task Task
+		query := applyTaskStorageScopeFilters(db.Model(&Task{}), scope)
+		err = query.Where("task_id = ?", taskId).First(&task).Error
+		exist, recordErr := RecordExist(err)
+		if recordErr != nil {
+			return nil, false, recordErr
+		}
+		if exist {
+			task.StorageScope = scope
+			return &task, true, nil
+		}
 	}
-	return task, exist, err
+	return nil, false, nil
 }
 
 func GetByTaskId(userId int, taskId string) (*Task, bool, error) {
 	if taskId == "" {
 		return nil, false, nil
 	}
-	var task *Task
-	var err error
-	err = DB.Where("user_id = ? and task_id = ?", userId, taskId).
-		First(&task).Error
-	exist, err := RecordExist(err)
-	if err != nil {
-		return nil, false, err
+	for _, scope := range taskLookupScopes() {
+		db, err := taskDBForScope(scope)
+		if err != nil {
+			if scope == taskStorageScopeVideo && IsCanvasModeUnavailableError(err) {
+				continue
+			}
+			return nil, false, err
+		}
+		var task Task
+		query := applyTaskStorageScopeFilters(db.Model(&Task{}), scope)
+		err = query.Where("user_id = ? and task_id = ?", userId, taskId).First(&task).Error
+		exist, recordErr := RecordExist(err)
+		if recordErr != nil {
+			return nil, false, recordErr
+		}
+		if exist {
+			task.StorageScope = scope
+			return &task, true, nil
+		}
 	}
-	return task, exist, err
+	return nil, false, nil
 }
 
 func GetByTaskIds(userId int, taskIds []any) ([]*Task, error) {
 	if len(taskIds) == 0 {
 		return nil, nil
 	}
-	var task []*Task
-	var err error
-	err = DB.Where("user_id = ? and task_id in (?)", userId, taskIds).
-		Find(&task).Error
-	if err != nil {
-		return nil, err
+	result := make([]*Task, 0)
+	seenTaskIDs := make(map[string]struct{}, len(taskIds))
+	for _, scope := range taskLookupScopes() {
+		db, err := taskDBForScope(scope)
+		if err != nil {
+			if scope == taskStorageScopeVideo && IsCanvasModeUnavailableError(err) {
+				continue
+			}
+			return nil, err
+		}
+		var tasks []*Task
+		query := applyTaskStorageScopeFilters(db.Model(&Task{}), scope)
+		if err := query.Where("user_id = ? and task_id in (?)", userId, taskIds).Find(&tasks).Error; err != nil {
+			return nil, err
+		}
+		markTasksStorageScope(tasks, scope)
+		for _, task := range tasks {
+			if task == nil {
+				continue
+			}
+			taskKey := strings.TrimSpace(task.TaskID)
+			if taskKey == "" {
+				taskKey = fmt.Sprintf("%s:%d", scope, task.ID)
+			}
+			if _, ok := seenTaskIDs[taskKey]; ok {
+				continue
+			}
+			seenTaskIDs[taskKey] = struct{}{}
+			result = append(result, task)
+		}
 	}
-	return task, nil
+	return result, nil
 }
 
 func (Task *Task) Insert() error {
-	var err error
-	err = DB.Create(Task).Error
-	return err
+	db, err := taskDBForTask(Task)
+	if err != nil {
+		return err
+	}
+	Task.StorageScope = taskScopeForTask(Task)
+	return db.Create(Task).Error
 }
 
 type taskSnapshot struct {
@@ -403,9 +608,11 @@ func (t *Task) Snapshot() taskSnapshot {
 }
 
 func (Task *Task) Update() error {
-	var err error
-	err = DB.Save(Task).Error
-	return err
+	db, err := taskDBForTask(Task)
+	if err != nil {
+		return err
+	}
+	return db.Save(Task).Error
 }
 
 func (t *Task) EffectiveOriginModelName() string {
@@ -451,7 +658,11 @@ func (t *Task) BeforeSave(tx *gorm.DB) error {
 // falls back to INSERT ON CONFLICT when the WHERE-guarded UPDATE matches
 // zero rows, which silently bypasses the CAS guard.
 func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
-	result := DB.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
+	db, err := taskDBForTask(t)
+	if err != nil {
+		return false, err
+	}
+	result := db.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -472,6 +683,27 @@ func TaskBulkUpdateByID(ids []int64, params map[string]any) error {
 		Updates(params).Error
 }
 
+func TaskBulkUpdateTasks(tasks []*Task, params map[string]any) error {
+	groupedIDs := map[string][]int64{}
+	for _, task := range tasks {
+		if task == nil || task.ID <= 0 {
+			continue
+		}
+		scope := taskScopeForTask(task)
+		groupedIDs[scope] = append(groupedIDs[scope], task.ID)
+	}
+	for scope, ids := range groupedIDs {
+		db, err := taskDBForScope(scope)
+		if err != nil {
+			return err
+		}
+		if err := db.Model(&Task{}).Where("id in (?)", ids).Updates(params).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type TaskQuotaUsage struct {
 	Mode  string  `json:"mode"`
 	Count float64 `json:"count"`
@@ -480,61 +712,34 @@ type TaskQuotaUsage struct {
 // TaskCountAllTasks returns total tasks that match the given query params (admin usage)
 func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 	var total int64
-	query := DB.Model(&Task{})
-	if queryParams.ChannelID != "" {
-		query = query.Where("channel_id = ?", queryParams.ChannelID)
+	for _, scope := range taskScopesForQuery(queryParams) {
+		db, err := taskDBForScope(scope)
+		if err != nil {
+			continue
+		}
+		var count int64
+		query := applyTaskStorageScopeFilters(db.Model(&Task{}), scope)
+		query = applySyncTaskFilters(query, queryParams)
+		_ = query.Count(&count).Error
+		total += count
 	}
-	if queryParams.Platform != "" {
-		query = query.Where("platform = ?", queryParams.Platform)
-	}
-	if queryParams.UserID != "" {
-		query = query.Where("user_id = ?", queryParams.UserID)
-	}
-	if len(queryParams.UserIDs) != 0 {
-		query = query.Where("user_id in (?)", queryParams.UserIDs)
-	}
-	if queryParams.TaskID != "" {
-		query = query.Where("task_id = ?", queryParams.TaskID)
-	}
-	if queryParams.Action != "" {
-		query = query.Where("action = ?", queryParams.Action)
-	}
-	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
-	}
-	if queryParams.StartTimestamp != 0 {
-		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
-	}
-	if queryParams.EndTimestamp != 0 {
-		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
-	}
-	_ = query.Count(&total).Error
 	return total
 }
 
 // TaskCountAllUserTask returns total tasks for given user
 func TaskCountAllUserTask(userId int, queryParams SyncTaskQueryParams) int64 {
 	var total int64
-	query := DB.Model(&Task{}).Where("user_id = ?", userId)
-	if queryParams.TaskID != "" {
-		query = query.Where("task_id = ?", queryParams.TaskID)
+	for _, scope := range taskScopesForQuery(queryParams) {
+		db, err := taskDBForScope(scope)
+		if err != nil {
+			continue
+		}
+		var count int64
+		query := applyTaskStorageScopeFilters(db.Model(&Task{}), scope)
+		query = applySyncTaskFilters(query.Where("user_id = ?", userId), queryParams)
+		_ = query.Count(&count).Error
+		total += count
 	}
-	if queryParams.Action != "" {
-		query = query.Where("action = ?", queryParams.Action)
-	}
-	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
-	}
-	if queryParams.Platform != "" {
-		query = query.Where("platform = ?", queryParams.Platform)
-	}
-	if queryParams.StartTimestamp != 0 {
-		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
-	}
-	if queryParams.EndTimestamp != 0 {
-		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
-	}
-	_ = query.Count(&total).Error
 	return total
 }
 func (t *Task) ToOpenAIVideo() *dto.OpenAIVideo {

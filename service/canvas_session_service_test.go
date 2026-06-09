@@ -63,6 +63,7 @@ func setupCanvasSessionServiceTestDB(t *testing.T) *gorm.DB {
 		&model.ModelMapping{},
 		&model.CanvasSession{},
 		&model.CanvasMessage{},
+		&model.CanvasChatMessageAttachment{},
 		&model.CanvasAssetCleanupJob{},
 		&model.ImageGenerationTask{},
 		&model.ImageGenerationReferenceAsset{},
@@ -266,6 +267,34 @@ func TestCanvasSessionCreateRenamePinSortAndModeFilter(t *testing.T) {
 	videoSessions := videoPage.Items
 	if len(videoSessions) != 1 || videoSessions[0].Id != videoSession.Id {
 		t.Fatalf("expected only the video session, got %#v", videoSessions)
+	}
+}
+
+func TestCanvasSessionIdentifierSupportsPublicIDAndNumericID(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat, Title: "identifier"})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	if strings.TrimSpace(session.PublicId) == "" {
+		t.Fatalf("expected public_id on created session, got %#v", session)
+	}
+
+	byPublicID, err := model.GetCanvasSessionByIdentifier(1, session.PublicId)
+	if err != nil {
+		t.Fatalf("failed to load session by public_id: %v", err)
+	}
+	if byPublicID == nil || byPublicID.Id != session.Id {
+		t.Fatalf("unexpected session by public_id: %#v", byPublicID)
+	}
+
+	byNumericID, err := model.GetCanvasSessionByIdentifier(1, strconv.Itoa(session.Id))
+	if err != nil {
+		t.Fatalf("failed to load session by numeric id: %v", err)
+	}
+	if byNumericID == nil || byNumericID.PublicId != session.PublicId {
+		t.Fatalf("unexpected session by numeric id: %#v", byNumericID)
 	}
 }
 
@@ -1043,6 +1072,39 @@ func TestCreateCanvasChatMessagePersistsAttachmentsAndReusesThemInRelayHistory(t
 	}
 	if len(metadata.Attachments) != 2 {
 		t.Fatalf("expected persisted attachments in user metadata, got %#v", metadata)
+	}
+
+	var storedUserMessage model.CanvasMessage
+	if err := db.Table("canvas_messages").Where("id = ?", first[0].Id).First(&storedUserMessage).Error; err != nil {
+		t.Fatalf("failed to reload stored user message: %v", err)
+	}
+	if strings.Contains(storedUserMessage.Metadata, "data:image") || strings.Contains(storedUserMessage.Metadata, "data:text") {
+		t.Fatalf("expected stored message metadata to omit attachment data, got %s", storedUserMessage.Metadata)
+	}
+	var storedMetadata canvasChatMessageMetadata
+	if err := common.UnmarshalJsonStr(storedUserMessage.Metadata, &storedMetadata); err != nil {
+		t.Fatalf("failed to decode stored user metadata: %v", err)
+	}
+	if len(storedMetadata.Attachments) != 2 {
+		t.Fatalf("expected stored metadata to retain attachment descriptors, got %#v", storedMetadata)
+	}
+	for _, attachment := range storedMetadata.Attachments {
+		if strings.TrimSpace(attachment.Data) != "" {
+			t.Fatalf("expected stored metadata attachment data to be empty, got %#v", storedMetadata.Attachments)
+		}
+	}
+	var storedAttachmentRows []*model.CanvasChatMessageAttachment
+	if err := db.Model(&model.CanvasChatMessageAttachment{}).
+		Where("message_id = ? AND user_id = ? AND session_id = ?", first[0].Id, 1, session.Id).
+		Order("sort_order ASC").
+		Find(&storedAttachmentRows).Error; err != nil {
+		t.Fatalf("failed to load stored attachment rows: %v", err)
+	}
+	if len(storedAttachmentRows) != 2 {
+		t.Fatalf("expected two stored attachment rows, got %#v", storedAttachmentRows)
+	}
+	if storedAttachmentRows[0].Data != attachments[0].Data || storedAttachmentRows[1].Data != attachments[1].Data {
+		t.Fatalf("expected attachment table to retain original data, got %#v", storedAttachmentRows)
 	}
 
 	var assistantMetadata canvasChatMessageMetadata
@@ -2088,8 +2150,67 @@ func TestListCanvasMessagesIncludesEffectiveVideoResultURL(t *testing.T) {
 	if messages[0].VideoTask.ResultURL != "https://cdn.example.com/canvas.mp4" {
 		t.Fatalf("expected direct canvas result url, got %q", messages[0].VideoTask.ResultURL)
 	}
+	if messages[0].VideoTask.VideoURL != "/api/canvas/videos/task_canvas_direct/content" {
+		t.Fatalf("expected canvas proxy video url, got %q", messages[0].VideoTask.VideoURL)
+	}
 	if len(messages[0].ReferenceImages) != 1 || messages[0].ReferenceImages[0] != "https://cdn.example.com/reference.png" {
 		t.Fatalf("expected attached video reference image, got %#v", messages[0].ReferenceImages)
+	}
+}
+
+func TestListCanvasMessagesUsesCanvasVideoProxyFallback(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeVideo})
+	if err != nil {
+		t.Fatalf("failed to create video session: %v", err)
+	}
+
+	task := &model.Task{
+		UserId:     1,
+		TaskID:     "task_canvas_proxy_only",
+		Action:     constant.TaskActionTextGenerate,
+		Status:     model.TaskStatusSuccess,
+		Progress:   "100%",
+		SubmitTime: common.GetTimestamp(),
+		Properties: model.Properties{
+			Input:             "canvas proxy prompt",
+			OriginModelName:   "sora-compatible",
+			UpstreamModelName: "sora-compatible",
+		},
+	}
+	if err := model.DB.Create(task).Error; err != nil {
+		t.Fatalf("failed to create video task: %v", err)
+	}
+
+	message := &model.CanvasMessage{
+		SessionId:   session.Id,
+		UserId:      1,
+		Mode:        model.CanvasModeVideo,
+		Role:        model.CanvasMessageRoleAssistant,
+		Prompt:      "canvas proxy prompt",
+		Status:      dto.VideoStatusCompleted,
+		TaskId:      strconv.FormatInt(task.ID, 10),
+		TaskType:    model.CanvasTaskTypeVideo,
+		CreatedTime: common.GetTimestamp(),
+		UpdatedTime: common.GetTimestamp(),
+	}
+	if err := model.DB.Create(message).Error; err != nil {
+		t.Fatalf("failed to create canvas message: %v", err)
+	}
+
+	messages, err := ListCanvasMessages(1, session.Id)
+	if err != nil {
+		t.Fatalf("ListCanvasMessages returned error: %v", err)
+	}
+	if len(messages) != 1 || messages[0].VideoTask == nil {
+		t.Fatalf("expected one canvas message with video task, got %#v", messages)
+	}
+	if messages[0].VideoTask.VideoURL != "/api/canvas/videos/task_canvas_proxy_only/content" {
+		t.Fatalf("expected canvas proxy video url, got %q", messages[0].VideoTask.VideoURL)
+	}
+	if messages[0].VideoTask.ResultURL != "/api/canvas/videos/task_canvas_proxy_only/content" {
+		t.Fatalf("expected canvas proxy result url fallback, got %q", messages[0].VideoTask.ResultURL)
 	}
 }
 

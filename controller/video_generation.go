@@ -16,6 +16,11 @@ type createVideoGenerationTaskRequest struct {
 	Params          string `json:"params"`
 }
 
+var (
+	getVideoGenerationTaskDetailForController       = service.GetVideoGenerationTaskDetail
+	getCanvasVideoGenerationTaskDetailForController = service.GetCanvasVideoGenerationTaskDetail
+)
+
 func GetVideoGenerationModels(c *gin.Context) {
 	items, err := service.ListVideoGenerationModels()
 	if err != nil {
@@ -118,9 +123,24 @@ func GetVideoGenerationTaskDetail(c *gin.Context) {
 		return
 	}
 	identifier := strings.TrimSpace(c.Param("id"))
-	task, err := service.GetVideoGenerationTaskDetail(userId, identifier)
+	task, err := getVideoGenerationTaskDetailForController(userId, identifier)
 	if err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, task)
+}
+
+func GetCanvasVideoGenerationTaskDetail(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		common.ApiErrorMsg(c, "未授权")
+		return
+	}
+	identifier := strings.TrimSpace(c.Param("id"))
+	task, err := getCanvasVideoGenerationTaskDetailForController(userId, identifier)
+	if err != nil {
+		writeCanvasError(c, err)
 		return
 	}
 	common.ApiSuccess(c, task)

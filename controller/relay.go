@@ -613,7 +613,7 @@ func RelayTask(c *gin.Context) {
 		task.Quota = result.Quota
 		task.Data = result.TaskData
 		task.Action = relayInfo.Action
-		if insertErr := task.Insert(); insertErr != nil {
+		if insertErr := insertRelayTask(c, task); insertErr != nil {
 			common.SysError("insert task error: " + insertErr.Error())
 		}
 	}
@@ -621,6 +621,13 @@ func RelayTask(c *gin.Context) {
 	if taskErr != nil {
 		respondTaskError(c, taskErr)
 	}
+}
+
+func insertRelayTask(c *gin.Context, task *model.Task) error {
+	if service.IsCanvasVideoTaskScopeHeaderValue(c.GetHeader(constant.HeaderCanvasVideoTaskScope)) {
+		return task.InsertCanvasVideo()
+	}
+	return task.Insert()
 }
 
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）

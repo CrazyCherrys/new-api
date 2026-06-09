@@ -1172,27 +1172,18 @@ func CanAccessImageGenerationLocalAsset(userId int, assetPath string) (bool, err
 	}
 
 	assetURL := buildImageGenerationLocalObjectURL(clean)
-	var count int64
-	if err := model.DB.Model(&model.ImageGenerationTask{}).
-		Where("user_id = ? AND (image_url = ? OR thumbnail_url = ?)", userId, assetURL, assetURL).
-		Count(&count).Error; err != nil {
+	count, err := model.CountUserImageTasksByResultAssetURL(userId, assetURL)
+	if err != nil {
 		return false, err
 	}
 	allowed := count > 0
 	if !allowed {
-		var tasks []*model.ImageGenerationTask
-		if err := model.DB.Model(&model.ImageGenerationTask{}).
-			Select("params").
-			Where("user_id = ?", userId).
-			Where("params LIKE ?", "%"+assetURL+"%").
-			Find(&tasks).Error; err != nil {
+		paramsList, err := model.ListUserImageTaskParamsContainingAssetURL(userId, assetURL)
+		if err != nil {
 			return false, err
 		}
-		for _, task := range tasks {
-			if task == nil {
-				continue
-			}
-			matched, matchErr := taskParamsContainReferenceAssetURL(task.Params, assetURL)
+		for _, params := range paramsList {
+			matched, matchErr := taskParamsContainReferenceAssetURL(params, assetURL)
 			if matchErr != nil {
 				return false, matchErr
 			}
@@ -1220,12 +1211,17 @@ func CanAccessApprovedInspirationLocalAsset(assetPath string) (bool, error) {
 	}
 
 	assetURL := buildImageGenerationLocalObjectURL(clean)
-	var count int64
-	if err := model.DB.Table("image_generation_tasks AS t").
-		Joins("JOIN image_creative_submissions AS s ON s.task_id = t.id").
-		Where("s.status = ? AND t.status = ? AND (t.image_url = ? OR t.thumbnail_url = ?)", model.CreativeSubmissionStatusApproved, model.ImageTaskStatusSuccess, assetURL, assetURL).
-		Count(&count).Error; err != nil {
+	taskIDs, err := model.ListSuccessfulImageTaskIDsByResultAssetURL(assetURL)
+	if err != nil {
 		return false, err
+	}
+	count := int64(0)
+	if len(taskIDs) > 0 {
+		if err := model.DB.Model(&model.ImageCreativeSubmission{}).
+			Where("status = ? AND task_id IN ?", model.CreativeSubmissionStatusApproved, taskIDs).
+			Count(&count).Error; err != nil {
+			return false, err
+		}
 	}
 	allowed := count > 0
 	if allowed {

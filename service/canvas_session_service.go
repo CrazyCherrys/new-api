@@ -89,7 +89,7 @@ type CreateCanvasMessageInput struct {
 
 var (
 	createImageGenerationTaskForCanvas = CreateImageGenerationTask
-	createVideoGenerationTaskForCanvas = CreateVideoGenerationTask
+	createVideoGenerationTaskForCanvas = CreateCanvasVideoGenerationTask
 )
 
 const (
@@ -145,6 +145,9 @@ func CreateCanvasSession(userId int, input CreateCanvasSessionInput) (*model.Can
 	if mode == "" {
 		return nil, fmt.Errorf("invalid canvas mode")
 	}
+	if err := model.EnsureCanvasModeAvailable(mode); err != nil {
+		return nil, err
+	}
 	title := strings.TrimSpace(input.Title)
 	if title == "" {
 		title = defaultCanvasSessionTitle(mode)
@@ -179,32 +182,10 @@ func CreateCanvasSession(userId int, input CreateCanvasSessionInput) (*model.Can
 		session.SummaryTriggerMessages = summaryTriggerMessages
 		session.SummaryRecentMessages = summaryRecentMessages
 	}
-	err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Select("*").Create(session).Error; err != nil {
-			return err
-		}
-		if mode != model.CanvasModeChat {
-			return nil
-		}
-		return tx.Exec(
-			`UPDATE canvas_sessions
-			 SET chat_temperature = ?, chat_context_count = ?, web_search_enabled = ?, system_prompt = ?, summary_enabled = ?, summary_trigger_messages = ?, summary_recent_messages = ?
-			 WHERE id = ? AND user_id = ? AND deleted_time = 0`,
-			chatTemperature,
-			chatContextCount,
-			canvasChatSummaryEnabledDBValue(webSearchEnabled),
-			systemPrompt,
-			canvasChatSummaryEnabledDBValue(summaryEnabled),
-			summaryTriggerMessages,
-			summaryRecentMessages,
-			session.Id,
-			userId,
-		).Error
-	})
-	if err != nil {
+	if err := model.CreateCanvasSession(session); err != nil {
 		return nil, err
 	}
-	return model.GetCanvasSessionByID(userId, session.Id)
+	return model.GetCanvasSessionByPublicID(userId, session.PublicId)
 }
 
 func UpdateCanvasSession(userId int, id int, input UpdateCanvasSessionInput) (*model.CanvasSession, error) {
@@ -212,6 +193,13 @@ func UpdateCanvasSession(userId int, id int, input UpdateCanvasSessionInput) (*m
 	if err != nil {
 		return nil, err
 	}
+	if session == nil {
+		return nil, fmt.Errorf("canvas session not found")
+	}
+	return UpdateCanvasSessionWithResolvedSession(userId, session, input)
+}
+
+func UpdateCanvasSessionWithResolvedSession(userId int, session *model.CanvasSession, input UpdateCanvasSessionInput) (*model.CanvasSession, error) {
 	if session == nil {
 		return nil, fmt.Errorf("canvas session not found")
 	}
@@ -293,18 +281,19 @@ func UpdateCanvasSession(userId int, id int, input UpdateCanvasSessionInput) (*m
 		}
 		clearContextMessageID := 0
 		if *input.ClearContextToLatest {
-			clearContextMessageID, err = getLatestCanvasChatClearContextMessageID(userId, session.Id)
-			if err != nil {
-				return nil, err
+			latestMessageID, latestErr := getLatestCanvasChatClearContextMessageID(userId, session.Id)
+			if latestErr != nil {
+				return nil, latestErr
 			}
+			clearContextMessageID = latestMessageID
 		}
 		updates["clear_context_message_id"] = clearContextMessageID
 		updates["last_summarized_message_id"] = getCanvasChatSummaryCursorForClearContext(session, clearContextMessageID)
 	}
-	if err := model.UpdateCanvasSessionFields(userId, id, updates); err != nil {
+	if err := model.UpdateCanvasSessionFieldsWithSession(userId, session, updates); err != nil {
 		return nil, err
 	}
-	return model.GetCanvasSessionByID(userId, id)
+	return model.GetCanvasSessionByPublicID(userId, session.PublicId)
 }
 
 func ListCanvasMessages(userId int, sessionId int) ([]*CanvasMessageWithTask, error) {
@@ -330,9 +319,15 @@ func ListCanvasMessageTimeline(userId int, sessionId int, limit int, cursor stri
 	if session == nil {
 		return nil, fmt.Errorf("canvas session not found")
 	}
+	return ListCanvasMessageTimelineWithResolvedSession(userId, session, limit, cursor)
+}
 
+func ListCanvasMessageTimelineWithResolvedSession(userId int, session *model.CanvasSession, limit int, cursor string) (*CanvasMessageTimelinePage, error) {
+	if session == nil {
+		return nil, fmt.Errorf("canvas session not found")
+	}
 	limit = normalizeCanvasMessagePageLimit(limit)
-	beforeCursor, err := parseCanvasMessageTimelineCursor(session.Mode, userId, sessionId, cursor)
+	beforeCursor, err := parseCanvasMessageTimelineCursor(session.Mode, userId, session.Id, cursor)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +335,7 @@ func ListCanvasMessageTimeline(userId int, sessionId int, limit int, cursor stri
 	messages, hasMore, err := model.ListCanvasMessagesPageForMode(
 		session.Mode,
 		userId,
-		sessionId,
+		session.Id,
 		limit,
 		beforeCursor.CreatedTime,
 		beforeCursor.ID,
@@ -377,11 +372,26 @@ func CreateCanvasMessageWithContext(ctx context.Context, userId int, sessionId i
 	if session == nil {
 		return nil, fmt.Errorf("canvas session not found")
 	}
+	return CreateCanvasMessageWithResolvedSession(ctx, userId, session, input)
+}
+
+func CreateCanvasMessageWithResolvedSession(ctx context.Context, userId int, session *model.CanvasSession, input CreateCanvasMessageInput) ([]*CanvasMessageWithTask, error) {
+	if session == nil {
+		return nil, fmt.Errorf("canvas session not found")
+	}
+	if err := model.EnsureCanvasModeAvailable(session.Mode); err != nil {
+		return nil, err
+	}
 	prompt := strings.TrimSpace(input.Prompt)
 	if prompt == "" {
 		return nil, fmt.Errorf("prompt is required")
 	}
 	clientRequestId := strings.TrimSpace(input.ClientRequestId)
+	if replay, ok, replayErr := loadCanvasMessageReplayByClientRequestID(session.Mode, userId, session.Id, clientRequestId); replayErr != nil {
+		return nil, replayErr
+	} else if ok {
+		return replay, nil
+	}
 
 	var taskMessage *model.CanvasMessage
 	var cleanupCreatedTask func()
@@ -392,7 +402,7 @@ func CreateCanvasMessageWithContext(ctx context.Context, userId int, sessionId i
 			return nil, err
 		}
 		taskMessage = &model.CanvasMessage{
-			SessionId:       sessionId,
+			SessionId:       session.Id,
 			UserId:          userId,
 			Mode:            session.Mode,
 			Role:            model.CanvasMessageRoleAssistant,
@@ -413,7 +423,7 @@ func CreateCanvasMessageWithContext(ctx context.Context, userId int, sessionId i
 			return nil, err
 		}
 		taskMessage = &model.CanvasMessage{
-			SessionId:       sessionId,
+			SessionId:       session.Id,
 			UserId:          userId,
 			Mode:            session.Mode,
 			Role:            model.CanvasMessageRoleAssistant,
@@ -429,7 +439,7 @@ func CreateCanvasMessageWithContext(ctx context.Context, userId int, sessionId i
 			}
 		}
 	case model.CanvasModeChat:
-		return createCanvasChatMessage(ctx, userId, sessionId, session, input)
+		return createCanvasChatMessage(ctx, userId, session.Id, session, input)
 	default:
 		return nil, fmt.Errorf("invalid canvas mode")
 	}
@@ -444,7 +454,7 @@ func CreateCanvasMessageWithContext(ctx context.Context, userId int, sessionId i
 
 	now := common.GetTimestamp()
 	userMessage := &model.CanvasMessage{
-		SessionId:       sessionId,
+		SessionId:       session.Id,
 		UserId:          userId,
 		Mode:            session.Mode,
 		Role:            model.CanvasMessageRoleUser,
@@ -473,7 +483,7 @@ func CreateCanvasMessageWithContext(ctx context.Context, userId int, sessionId i
 	if !session.TitleManuallySet && messageCount == 0 {
 		sessionUpdates["title"] = truncateCanvasTitle(prompt)
 	}
-	if err := model.UpdateCanvasSessionFields(userId, sessionId, sessionUpdates); err != nil {
+	if err := model.UpdateCanvasSessionFieldsWithSession(userId, session, sessionUpdates); err != nil {
 		cleanupCreatedCanvasMessages(session.Mode, userId, createdMessages)
 		if cleanupCreatedTask != nil {
 			cleanupCreatedTask()
@@ -491,6 +501,14 @@ func DeleteCanvasSession(userId int, sessionId int) error {
 	if session == nil {
 		return fmt.Errorf("canvas session not found")
 	}
+	return DeleteCanvasSessionWithResolvedSession(userId, session)
+}
+
+func DeleteCanvasSessionWithResolvedSession(userId int, session *model.CanvasSession) error {
+	if session == nil {
+		return fmt.Errorf("canvas session not found")
+	}
+	sessionId := session.Id
 	messageRefs, err := model.ListCanvasSessionMessageTaskRefsForMode(session.Mode, userId, sessionId)
 	if err != nil {
 		return err
@@ -560,7 +578,7 @@ func DeleteCanvasSession(userId int, sessionId int) error {
 		}
 	}
 
-	videoTasks, err := model.GetUserVideoTasksByIDs(userId, videoTaskIDs, nil)
+	videoTasks, err := model.GetCanvasVideoTasksByIDs(userId, videoTaskIDs, nil)
 	if err != nil {
 		return err
 	}
@@ -579,21 +597,8 @@ func DeleteCanvasSession(userId int, sessionId int) error {
 	}
 
 	deletedTime := common.GetTimestamp()
-	if model.CanvasUsesDedicatedMessageDBs() {
-		if err := model.SoftDeleteCanvasMessagesByIDs(session.Mode, userId, messageIDs, deletedTime); err != nil {
-			return err
-		}
-		if err := deleteCanvasSessionData(userId, sessionId, session.Mode, messageIDs, imageTasks, videoTasks, cleanupJobs, deletedTime); err != nil {
-			restoreErr := model.RestoreCanvasMessagesByIDs(session.Mode, userId, messageIDs)
-			if restoreErr != nil {
-				return fmt.Errorf("failed to delete canvas session data: %w (message restore also failed: %v)", err, restoreErr)
-			}
-			return err
-		}
-	} else {
-		if err := deleteCanvasSessionData(userId, sessionId, session.Mode, messageIDs, imageTasks, videoTasks, cleanupJobs, deletedTime); err != nil {
-			return err
-		}
+	if err := deleteCanvasSessionData(userId, session, messageIDs, imageTasks, videoTasks, cleanupJobs, deletedTime); err != nil {
+		return err
 	}
 	InvalidateImageGenerationLocalAssetAccessCache()
 	return nil
@@ -628,7 +633,7 @@ func SyncCanvasMessageTaskStatus(userId int, taskType string, taskId string) err
 		if err != nil {
 			return err
 		}
-		task, err := model.GetUserVideoTaskByID(userId, id, nil)
+		task, err := model.GetCanvasVideoTaskByID(userId, id, nil)
 		if err != nil {
 			return err
 		}
@@ -827,7 +832,7 @@ func loadCanvasVideoTasksByID(userId int, messages []*model.CanvasMessage) (map[
 		return tasksByID, refsByID
 	}
 
-	tasks, err := model.GetUserVideoTasksByIDs(userId, taskIDs, nil)
+	tasks, err := model.GetCanvasVideoTasksByIDs(userId, taskIDs, nil)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("Failed to batch load canvas video tasks: %v", err))
 		return tasksByID, refsByID
@@ -837,7 +842,7 @@ func loadCanvasVideoTasksByID(userId int, messages []*model.CanvasMessage) (map[
 		if task == nil {
 			continue
 		}
-		summary := buildVideoTaskSummaryWithResolvedMapping(
+		summary := buildCanvasVideoTaskSummaryWithResolvedMapping(
 			task,
 			mappingsByModel[extractVideoTaskModelID(task)],
 			mappingsResolved,
@@ -904,7 +909,7 @@ func maybeAutoTitleCanvasSession(userId int, session *model.CanvasSession, promp
 	if title == "" {
 		return nil
 	}
-	return model.UpdateCanvasSessionFields(userId, session.Id, map[string]interface{}{
+	return model.UpdateCanvasSessionFieldsWithSession(userId, session, map[string]interface{}{
 		"title": title,
 	})
 }
@@ -932,7 +937,7 @@ func truncateCanvasTitle(title string) string {
 }
 
 func deleteVideoGenerationTaskForCanvas(userId int, id int64) error {
-	task, err := model.GetUserVideoTaskByID(userId, id, nil)
+	task, err := model.GetCanvasVideoTaskByID(userId, id, nil)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil
@@ -943,10 +948,13 @@ func deleteVideoGenerationTaskForCanvas(userId int, id int64) error {
 		return fmt.Errorf("running task cannot be deleted")
 	}
 	deleteVideoTaskStoredAssets(task)
-	return model.DB.Delete(&model.Task{}, task.ID).Error
+	return model.DeleteCanvasVideoTasksByIDs(userId, []int64{task.ID}, nil)
 }
 
-func deleteCanvasSessionData(userId int, sessionId int, messageMode string, messageIDs []int, imageTasks []*model.ImageGenerationTask, videoTasks []*model.Task, cleanupJobs []*model.CanvasAssetCleanupJob, deletedTime int64) error {
+func deleteCanvasSessionData(userId int, session *model.CanvasSession, messageIDs []int, imageTasks []*model.ImageGenerationTask, videoTasks []*model.Task, cleanupJobs []*model.CanvasAssetCleanupJob, deletedTime int64) error {
+	if session == nil {
+		return fmt.Errorf("canvas session not found")
+	}
 	imageTaskIDs := make([]int, 0, len(imageTasks))
 	videoTaskIDs := make([]int64, 0, len(videoTasks))
 	queueSlotsToRelease := 0
@@ -965,24 +973,7 @@ func deleteCanvasSessionData(userId int, sessionId int, messageMode string, mess
 		}
 		videoTaskIDs = append(videoTaskIDs, task.ID)
 	}
-
-	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := model.CreateCanvasAssetCleanupJobsWithDB(tx, cleanupJobs); err != nil {
-			return err
-		}
-		if err := model.DeleteImageTasksByUserAndIDsWithDB(tx, userId, imageTaskIDs); err != nil {
-			return err
-		}
-		if err := model.DeleteUserVideoTasksByIDsWithDB(tx, userId, videoTaskIDs, nil); err != nil {
-			return err
-		}
-		if !model.CanvasUsesDedicatedMessageDBs() {
-			if err := model.SoftDeleteCanvasMessagesByIDsWithDB(tx, messageMode, userId, messageIDs, deletedTime); err != nil {
-				return err
-			}
-		}
-		return model.SoftDeleteCanvasSessionWithDB(tx, userId, sessionId, deletedTime)
-	}); err != nil {
+	if err := model.DeleteCanvasSessionDataWithSession(userId, session, messageIDs, imageTaskIDs, videoTaskIDs, cleanupJobs, deletedTime); err != nil {
 		return err
 	}
 
@@ -992,6 +983,21 @@ func deleteCanvasSessionData(userId int, sessionId int, messageMode string, mess
 		}
 	}
 	return nil
+}
+
+func loadCanvasMessageReplayByClientRequestID(mode string, userId int, sessionId int, clientRequestId string) ([]*CanvasMessageWithTask, bool, error) {
+	clientRequestId = strings.TrimSpace(clientRequestId)
+	if clientRequestId == "" {
+		return nil, false, nil
+	}
+	messages, err := model.ListCanvasMessagesByClientRequestIDForMode(mode, userId, sessionId, clientRequestId)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(messages) == 0 {
+		return nil, false, nil
+	}
+	return attachCanvasMessageTasks(userId, messages), true, nil
 }
 
 func validateCanvasSessionClearContextMessageID(userId int, sessionId int, messageID int) (int, error) {

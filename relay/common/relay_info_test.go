@@ -77,10 +77,12 @@ func TestCloneRequestHeadersSkipsCanvasCompatHeader(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	request.Header.Set("Authorization", "Bearer test-token")
 	request.Header.Set(constant.HeaderCanvasChatResponsesCompat, "secret")
+	request.Header.Set(constant.HeaderCanvasVideoTaskScope, "secret")
 	context.Request = request
 
 	headers := cloneRequestHeaders(context)
 
 	require.Equal(t, "Bearer test-token", headers["Authorization"])
 	require.NotContains(t, headers, constant.HeaderCanvasChatResponsesCompat)
+	require.NotContains(t, headers, constant.HeaderCanvasVideoTaskScope)
 }

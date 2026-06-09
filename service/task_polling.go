@@ -105,26 +105,26 @@ func TaskPollingLoop() {
 			}
 			taskChannelM := make(map[int][]string)
 			taskM := make(map[string]*model.Task)
-			nullTaskIds := make([]int64, 0)
+			nullTasks := make([]*model.Task, 0)
 			for _, task := range tasks {
 				upstreamID := task.GetUpstreamTaskID()
 				if upstreamID == "" {
 					// 统计失败的未完成任务
-					nullTaskIds = append(nullTaskIds, task.ID)
+					nullTasks = append(nullTasks, task)
 					continue
 				}
 				taskM[upstreamID] = task
 				taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], upstreamID)
 			}
-			if len(nullTaskIds) > 0 {
-				err := model.TaskBulkUpdateByID(nullTaskIds, map[string]any{
+			if len(nullTasks) > 0 {
+				err := model.TaskBulkUpdateTasks(nullTasks, map[string]any{
 					"status":   "FAILURE",
 					"progress": "100%",
 				})
 				if err != nil {
 					logger.LogError(ctx, fmt.Sprintf("Fix null task_id task error: %v", err))
 				} else {
-					logger.LogInfo(ctx, fmt.Sprintf("Fix null task_id task success: %v", nullTaskIds))
+					logger.LogInfo(ctx, fmt.Sprintf("Fix null task_id task success: %d", len(nullTasks)))
 				}
 			}
 			if len(taskChannelM) == 0 {
@@ -171,13 +171,13 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 	if err != nil {
 		common.SysLog(fmt.Sprintf("CacheGetChannel: %v", err))
 		// Collect DB primary key IDs for bulk update (taskIds are upstream IDs, not task_id column values)
-		var failedIDs []int64
+		failedTasks := make([]*model.Task, 0)
 		for _, upstreamID := range taskIds {
 			if t, ok := taskM[upstreamID]; ok {
-				failedIDs = append(failedIDs, t.ID)
+				failedTasks = append(failedTasks, t)
 			}
 		}
-		err = model.TaskBulkUpdateByID(failedIDs, map[string]any{
+		err = model.TaskBulkUpdateTasks(failedTasks, map[string]any{
 			"fail_reason": fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId),
 			"status":      "FAILURE",
 			"progress":    "100%",
@@ -305,13 +305,13 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 	cacheGetChannel, err := model.CacheGetChannel(channelId)
 	if err != nil {
 		// Collect DB primary key IDs for bulk update (taskIds are upstream IDs, not task_id column values)
-		var failedIDs []int64
+		failedTasks := make([]*model.Task, 0)
 		for _, upstreamID := range taskIds {
 			if t, ok := taskM[upstreamID]; ok {
-				failedIDs = append(failedIDs, t.ID)
+				failedTasks = append(failedTasks, t)
 			}
 		}
-		errUpdate := model.TaskBulkUpdateByID(failedIDs, map[string]any{
+		errUpdate := model.TaskBulkUpdateTasks(failedTasks, map[string]any{
 			"fail_reason": fmt.Sprintf("Failed to get channel info, channel ID: %d", channelId),
 			"status":      "FAILURE",
 			"progress":    "100%",

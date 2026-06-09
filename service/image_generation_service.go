@@ -1903,8 +1903,7 @@ func CleanupExpiredImageTasks() error {
 	common.SysLog(fmt.Sprintf("Starting image cleanup: retention_days=%d, expiration_time=%d", retentionDays, expirationTime))
 
 	// 查询过期任务
-	var expiredTasks []*model.ImageGenerationTask
-	err := model.DB.Where("created_time < ?", expirationTime).Find(&expiredTasks).Error
+	expiredTasks, err := model.ListExpiredImageTasksBefore(expirationTime)
 	if err != nil {
 		return fmt.Errorf("failed to query expired tasks: %w", err)
 	}

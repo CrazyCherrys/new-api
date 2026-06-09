@@ -28,6 +28,8 @@ const (
 
 var getVideoReferenceImageFromURL = GetImageFromUrl
 
+var videoRelayHTTPClient = &http.Client{Timeout: 60 * time.Second}
+
 type VideoGenerationParams struct {
 	Duration        int      `json:"duration"`
 	Resolution      string   `json:"resolution"`
@@ -88,6 +90,14 @@ func ListVideoGenerationModels() ([]*dto.VideoGenerationModel, error) {
 }
 
 func CreateVideoGenerationTask(userId int, modelId string, prompt string, requestEndpoint string, rawParams string) (*dto.VideoGenerationTaskSummary, error) {
+	return createVideoGenerationTask(userId, modelId, prompt, requestEndpoint, rawParams, false)
+}
+
+func CreateCanvasVideoGenerationTask(userId int, modelId string, prompt string, requestEndpoint string, rawParams string) (*dto.VideoGenerationTaskSummary, error) {
+	return createVideoGenerationTask(userId, modelId, prompt, requestEndpoint, rawParams, true)
+}
+
+func createVideoGenerationTask(userId int, modelId string, prompt string, requestEndpoint string, rawParams string, canvasVideoScope bool) (*dto.VideoGenerationTaskSummary, error) {
 	requestEndpoint = normalizeVideoEndpoint(requestEndpoint)
 
 	mapping, err := model.GetActiveModelMappingByRequestModel(modelId)
@@ -153,12 +163,12 @@ func CreateVideoGenerationTask(userId int, modelId string, prompt string, reques
 		return nil, fmt.Errorf("unsupported aspect ratio: %s", params.AspectRatio)
 	}
 
-	respBody, publicTaskID, err := callUpstreamVideoAPIViaRelay(context.Background(), userId, modelId, prompt, requestEndpoint, params)
+	respBody, publicTaskID, err := callUpstreamVideoAPIViaRelay(context.Background(), userId, modelId, prompt, requestEndpoint, params, canvasVideoScope)
 	if err != nil {
 		return nil, err
 	}
 
-	task, err := waitVideoTaskCreated(userId, publicTaskID)
+	task, err := waitVideoTaskCreated(userId, publicTaskID, canvasVideoScope)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +179,10 @@ func CreateVideoGenerationTask(userId int, modelId string, prompt string, reques
 		task.Data = respBody
 		_ = task.Update()
 	}
-	return buildVideoTaskSummary(task), nil
+	if canvasVideoScope {
+		return buildCanvasVideoTaskSummaryWithResolvedMapping(task, mapping, true), nil
+	}
+	return buildVideoTaskSummaryWithMapping(task, mapping), nil
 }
 
 func ListVideoGenerationTasks(userId int, page int, pageSize int, cursor string, status string, modelID string, startTime int64, endTime int64) (*VideoGenerationTaskPage, error) {
@@ -242,6 +255,22 @@ func GetVideoGenerationTaskDetail(userId int, identifier string) (*dto.VideoGene
 	return buildVideoTaskDetail(task), nil
 }
 
+func GetCanvasVideoGenerationTaskDetail(userId int, identifier string) (*dto.VideoGenerationTaskDetail, error) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return nil, fmt.Errorf("canvas video task id is required")
+	}
+	id, err := strconv.ParseInt(identifier, 10, 64)
+	if err != nil || id <= 0 {
+		return nil, fmt.Errorf("invalid canvas video task id")
+	}
+	task, err := model.GetCanvasVideoTaskByID(userId, id, nil)
+	if err != nil {
+		return nil, err
+	}
+	return buildCanvasVideoTaskDetail(task), nil
+}
+
 func RetryVideoGenerationTask(userId int, id int64) (*dto.VideoGenerationTaskSummary, error) {
 	task, err := model.GetUserVideoTaskByID(userId, id, nil)
 	if err != nil {
@@ -288,7 +317,7 @@ func DeleteVideoGenerationTask(userId int, id int64) error {
 		return fmt.Errorf("running task cannot be deleted")
 	}
 	deleteVideoTaskStoredAssets(task)
-	return model.DB.Delete(&model.Task{}, task.ID).Error
+	return model.DeleteUserVideoTasksByIDs(userId, []int64{task.ID}, nil)
 }
 
 func normalizeVideoEndpoint(endpoint string) string {
@@ -344,7 +373,7 @@ func defaultVideoModelAspectRatios(requestEndpoint string) []string {
 	}
 }
 
-func callUpstreamVideoAPIViaRelay(ctx context.Context, userId int, modelId string, prompt string, requestEndpoint string, params VideoGenerationParams) ([]byte, string, error) {
+func callUpstreamVideoAPIViaRelay(ctx context.Context, userId int, modelId string, prompt string, requestEndpoint string, params VideoGenerationParams, canvasVideoScope bool) ([]byte, string, error) {
 	userToken, err := getUserValidToken(userId)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get user token: %w", err)
@@ -382,6 +411,9 @@ func callUpstreamVideoAPIViaRelay(ctx context.Context, userId int, modelId strin
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+userToken)
+	if canvasVideoScope {
+		SetCanvasVideoTaskScopeHeader(req.Header)
+	}
 	// TODO(remove after diagnosing /v1/videos submit path): temporary low-frequency diagnostics
 	// to confirm the local relay request is being sent with the expected protocol.
 	common.SysLog(fmt.Sprintf(
@@ -395,7 +427,10 @@ func callUpstreamVideoAPIViaRelay(ctx context.Context, userId int, modelId strin
 		strings.TrimSpace(imageInput) != "",
 	))
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := videoRelayHTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 60 * time.Second}
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to send video request: %w", err)
@@ -556,9 +591,18 @@ func extractPublicTaskID(data []byte) (string, bool) {
 	return "", false
 }
 
-func waitVideoTaskCreated(userId int, taskID string) (*model.Task, error) {
+func waitVideoTaskCreated(userId int, taskID string, canvasVideoScope bool) (*model.Task, error) {
 	for i := 0; i < 20; i++ {
-		task, exists, err := model.GetByTaskId(userId, taskID)
+		var (
+			task   *model.Task
+			exists bool
+			err    error
+		)
+		if canvasVideoScope {
+			task, exists, err = model.GetCanvasVideoTaskByTaskID(userId, taskID)
+		} else {
+			task, exists, err = model.GetByTaskId(userId, taskID)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -576,6 +620,10 @@ func buildVideoTaskSummary(task *model.Task) *dto.VideoGenerationTaskSummary {
 
 func buildVideoTaskSummaryWithMapping(task *model.Task, mapping *model.ModelMapping) *dto.VideoGenerationTaskSummary {
 	return buildVideoTaskSummaryWithResolvedMapping(task, mapping, false)
+}
+
+func buildCanvasVideoTaskSummaryWithResolvedMapping(task *model.Task, mapping *model.ModelMapping, mappingResolved bool) *dto.VideoGenerationTaskSummary {
+	return buildVideoTaskSummaryWithProxyURL(task, mapping, mappingResolved, model.BuildCanvasVideoProxyURL, true)
 }
 
 func loadVideoTaskMappingsByModelID(tasks []*model.Task) (map[string]*model.ModelMapping, bool) {
@@ -611,8 +659,15 @@ func loadVideoTaskMappingsByModelID(tasks []*model.Task) (map[string]*model.Mode
 }
 
 func buildVideoTaskSummaryWithResolvedMapping(task *model.Task, mapping *model.ModelMapping, mappingResolved bool) *dto.VideoGenerationTaskSummary {
+	return buildVideoTaskSummaryWithProxyURL(task, mapping, mappingResolved, model.BuildVideoProxyURL, false)
+}
+
+func buildVideoTaskSummaryWithProxyURL(task *model.Task, mapping *model.ModelMapping, mappingResolved bool, proxyURLBuilder func(*model.Task) string, normalizeProxyResultURL bool) *dto.VideoGenerationTaskSummary {
 	if task == nil {
 		return nil
+	}
+	if proxyURLBuilder == nil {
+		proxyURLBuilder = model.BuildVideoProxyURL
 	}
 
 	modelID := extractVideoTaskModelID(task)
@@ -632,6 +687,11 @@ func buildVideoTaskSummaryWithResolvedMapping(task *model.Task, mapping *model.M
 	}
 
 	duration, resolution, aspectRatio, prompt := extractVideoTaskContext(task)
+	videoURL := proxyURLBuilder(task)
+	resultURL := model.EffectiveVideoResultURL(task)
+	if normalizeProxyResultURL && model.IsTaskVideoProxyURL(task, resultURL) {
+		resultURL = videoURL
+	}
 
 	return &dto.VideoGenerationTaskSummary{
 		ID:              task.ID,
@@ -650,8 +710,8 @@ func buildVideoTaskSummaryWithResolvedMapping(task *model.Task, mapping *model.M
 		StartedTime:     task.StartTime,
 		CompletedTime:   task.FinishTime,
 		ThumbnailURL:    model.ExtractTaskThumbnailURL(task),
-		VideoURL:        model.BuildVideoProxyURL(task),
-		ResultURL:       model.EffectiveVideoResultURL(task),
+		VideoURL:        videoURL,
+		ResultURL:       resultURL,
 		FailReason:      task.FailReason,
 	}
 }
@@ -668,7 +728,15 @@ func extractVideoTaskModelID(task *model.Task) string {
 }
 
 func buildVideoTaskDetail(task *model.Task) *dto.VideoGenerationTaskDetail {
-	summary := buildVideoTaskSummary(task)
+	return buildVideoTaskDetailWithProxyURL(task, model.BuildVideoProxyURL, false)
+}
+
+func buildCanvasVideoTaskDetail(task *model.Task) *dto.VideoGenerationTaskDetail {
+	return buildVideoTaskDetailWithProxyURL(task, model.BuildCanvasVideoProxyURL, true)
+}
+
+func buildVideoTaskDetailWithProxyURL(task *model.Task, proxyURLBuilder func(*model.Task) string, normalizeProxyResultURL bool) *dto.VideoGenerationTaskDetail {
+	summary := buildVideoTaskSummaryWithProxyURL(task, nil, false, proxyURLBuilder, normalizeProxyResultURL)
 	if summary == nil {
 		return nil
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"gorm.io/gorm"
 )
 
@@ -103,13 +104,10 @@ func canvasMessageStoreForMode(mode string) (*canvasMessageStore, error) {
 	if mode == "" {
 		return nil, fmt.Errorf("invalid canvas mode")
 	}
-	if available, reason := CanvasAvailabilityStatus(); !available {
-		if reason == "" {
-			reason = "canvas is unavailable"
-		}
-		return nil, fmt.Errorf("%s", reason)
+	if available, reason := CanvasModeAvailabilityStatus(mode); !available {
+		return nil, newCanvasModeUnavailableError(mode, reason)
 	}
-	if !CanvasUsesDedicatedMessageDBs() {
+	if !CanvasModeUsesDedicatedMessageDB(mode) {
 		if DB == nil {
 			return nil, fmt.Errorf("canvas main database is not initialized")
 		}
@@ -181,14 +179,23 @@ func (s *canvasMessageStore) prepareMessage(message *CanvasMessage) error {
 }
 
 func (s *canvasMessageStore) create(message *CanvasMessage) error {
-	if err := s.prepareMessage(message); err != nil {
-		return err
+	return s.createBatch([]*CanvasMessage{message})
+}
+
+func (s *canvasMessageStore) hydrateMessages(userId int, sessionId int, messages []*CanvasMessage) error {
+	if s.mode != CanvasModeChat {
+		return nil
 	}
-	return s.query().Create(message).Error
+	return hydrateCanvasChatMessageMetadata(s.db, userId, sessionId, messages)
 }
 
 func (s *canvasMessageStore) createBatch(messages []*CanvasMessage) error {
-	filtered := make([]*CanvasMessage, 0, len(messages))
+	type persistedMessage struct {
+		original    *CanvasMessage
+		persisted   *CanvasMessage
+		attachments []dto.CanvasChatAttachment
+	}
+	filtered := make([]persistedMessage, 0, len(messages))
 	for _, message := range messages {
 		if message == nil {
 			continue
@@ -196,13 +203,45 @@ func (s *canvasMessageStore) createBatch(messages []*CanvasMessage) error {
 		if err := s.prepareMessage(message); err != nil {
 			return err
 		}
-		filtered = append(filtered, message)
+		persisted := *message
+		attachments := []dto.CanvasChatAttachment(nil)
+		if s.mode == CanvasModeChat && message.Role == CanvasMessageRoleUser {
+			sanitizedMetadata, extractedAttachments, err := sanitizeCanvasChatMetadataForStorage(message.Metadata)
+			if err != nil {
+				return err
+			}
+			persisted.Metadata = sanitizedMetadata
+			attachments = extractedAttachments
+		}
+		filtered = append(filtered, persistedMessage{
+			original:    message,
+			persisted:   &persisted,
+			attachments: attachments,
+		})
 	}
 	if len(filtered) == 0 {
 		return nil
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		return tx.Table(s.tableName).Create(filtered).Error
+		rows := make([]*CanvasMessage, 0, len(filtered))
+		for _, item := range filtered {
+			rows = append(rows, item.persisted)
+		}
+		if err := tx.Table(s.tableName).Create(rows).Error; err != nil {
+			return err
+		}
+		for _, item := range filtered {
+			item.original.Id = item.persisted.Id
+			item.original.CreatedTime = item.persisted.CreatedTime
+			item.original.UpdatedTime = item.persisted.UpdatedTime
+			if len(item.attachments) == 0 {
+				continue
+			}
+			if err := defaultCanvasChatAttachmentBodyStore.PersistMessageAttachments(tx, item.persisted, item.attachments); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -213,7 +252,13 @@ func (s *canvasMessageStore) list(userId int, sessionId int) ([]*CanvasMessage, 
 		Order("created_time ASC").
 		Order("id ASC").
 		Find(&messages).Error
-	return messages, err
+	if err != nil {
+		return nil, err
+	}
+	if err := s.hydrateMessages(userId, sessionId, messages); err != nil {
+		return nil, err
+	}
+	return messages, nil
 }
 
 func (s *canvasMessageStore) listPage(userId int, sessionId int, limit int, beforeCreatedTime int64, beforeID int) ([]*CanvasMessage, bool, error) {
@@ -226,9 +271,18 @@ func (s *canvasMessageStore) listPage(userId int, sessionId int, limit int, befo
 	query = query.Order("created_time DESC").Order("id DESC")
 	if limit <= 0 {
 		err := query.Find(&messages).Error
-		return messages, false, err
+		if err != nil {
+			return nil, false, err
+		}
+		if err := s.hydrateMessages(userId, sessionId, messages); err != nil {
+			return nil, false, err
+		}
+		return messages, false, nil
 	}
 	if err := query.Limit(limit + 1).Find(&messages).Error; err != nil {
+		return nil, false, err
+	}
+	if err := s.hydrateMessages(userId, sessionId, messages); err != nil {
 		return nil, false, err
 	}
 	hasMore := len(messages) > limit
@@ -247,6 +301,9 @@ func (s *canvasMessageStore) getBySessionAndID(userId int, sessionId int, id int
 		return nil, nil
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := s.hydrateMessages(userId, sessionId, []*CanvasMessage{&message}); err != nil {
 		return nil, err
 	}
 	return &message, nil
@@ -333,13 +390,10 @@ func ListCanvasSessionMessageTaskRefsForMode(mode string, userId int, sessionId 
 	if mode == "" {
 		return nil, fmt.Errorf("invalid canvas mode")
 	}
-	if available, reason := CanvasAvailabilityStatus(); !available {
-		if reason == "" {
-			reason = "canvas is unavailable"
-		}
-		return nil, fmt.Errorf("%s", reason)
+	if available, reason := CanvasModeAvailabilityStatus(mode); !available {
+		return nil, newCanvasModeUnavailableError(mode, reason)
 	}
-	if !CanvasUsesDedicatedMessageDBs() {
+	if !CanvasModeUsesDedicatedMessageDB(mode) {
 		if DB == nil {
 			return nil, fmt.Errorf("canvas main database is not initialized")
 		}
@@ -373,6 +427,9 @@ func (s *canvasMessageStore) listSuccessful(userId int, sessionId int, afterMess
 		query = query.Limit(limit)
 	}
 	if err := query.Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrateMessages(userId, sessionId, messages); err != nil {
 		return nil, err
 	}
 	if descending && len(messages) > 1 {
@@ -411,7 +468,29 @@ func (s *canvasMessageStore) latestSuccessful(userId int, sessionId int) (*Canva
 	if err != nil {
 		return nil, err
 	}
+	if err := s.hydrateMessages(userId, sessionId, []*CanvasMessage{&message}); err != nil {
+		return nil, err
+	}
 	return &message, nil
+}
+
+func (s *canvasMessageStore) listByClientRequestID(userId int, sessionId int, clientRequestID string) ([]*CanvasMessage, error) {
+	clientRequestID = strings.TrimSpace(clientRequestID)
+	if clientRequestID == "" {
+		return []*CanvasMessage{}, nil
+	}
+	var messages []*CanvasMessage
+	if err := s.query().
+		Where("user_id = ? AND session_id = ? AND mode = ? AND client_request_id = ? AND deleted_time = 0", userId, sessionId, s.mode, clientRequestID).
+		Order("created_time ASC").
+		Order("id ASC").
+		Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrateMessages(userId, sessionId, messages); err != nil {
+		return nil, err
+	}
+	return messages, nil
 }
 
 func CreateCanvasMessageForMode(mode string, message *CanvasMessage) error {
@@ -508,6 +587,14 @@ func RestoreCanvasMessagesByIDs(mode string, userId int, ids []int) error {
 		return err
 	}
 	return store.restoreIDs(userId, ids)
+}
+
+func ListCanvasMessagesByClientRequestIDForMode(mode string, userId int, sessionId int, clientRequestID string) ([]*CanvasMessage, error) {
+	store, err := canvasMessageStoreForMode(mode)
+	if err != nil {
+		return nil, err
+	}
+	return store.listByClientRequestID(userId, sessionId, clientRequestID)
 }
 
 func ListSuccessfulCanvasMessagesBefore(mode string, userId int, sessionId int, beforeMessageId int) ([]*CanvasMessage, error) {

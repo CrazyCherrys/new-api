@@ -175,11 +175,38 @@ const sortCanvasSessionsByRecent = (a, b) => {
   return (Number(b?.id) || 0) - (Number(a?.id) || 0);
 };
 
+const getCanvasSessionIdentifier = (session) => {
+  const publicId = String(session?.public_id || '').trim();
+  if (publicId) {
+    return publicId;
+  }
+  return normalizeComparableId(session?.id).trim();
+};
+
+const canvasSessionMatchesIdentifier = (session, identifier) => {
+  const target = String(identifier || '').trim();
+  if (!target) {
+    return false;
+  }
+  return (
+    getCanvasSessionIdentifier(session) === target ||
+    normalizeComparableId(session?.id) === target
+  );
+};
+
+const buildCanvasSessionApiPath = (sessionOrIdentifier, suffix = '') => {
+  const identifier =
+    typeof sessionOrIdentifier === 'object'
+      ? getCanvasSessionIdentifier(sessionOrIdentifier)
+      : String(sessionOrIdentifier || '').trim();
+  return `/api/canvas/sessions/${encodeURIComponent(identifier)}${suffix}`;
+};
+
 const normalizeCanvasSessionRecord = (
   session,
   fallbackMode = CANVAS_MODE_IMAGE,
 ) => {
-  if (!session?.id) {
+  if (!session?.id && !session?.public_id) {
     return null;
   }
   const normalizedMode = CANVAS_MODES.includes(session.mode)
@@ -188,6 +215,8 @@ const normalizeCanvasSessionRecord = (
   return {
     ...session,
     mode: normalizedMode,
+    public_id: String(session?.public_id || '').trim(),
+    session_identifier: getCanvasSessionIdentifier(session),
     web_search_enabled: !!session?.web_search_enabled,
   };
 };
@@ -199,7 +228,7 @@ const mergeCanvasSessionItems = (existing = [], incoming = []) => {
     if (!normalized) {
       return;
     }
-    merged.set(String(normalized.id), normalized);
+    merged.set(getCanvasSessionIdentifier(normalized), normalized);
   });
   return Array.from(merged.values()).sort(sortCanvasSessionsByRecent);
 };
@@ -933,34 +962,37 @@ const ImageGeneration = () => {
   const showsReliableTaskTotal = !canUseTaskCursorPagination;
   const hasNextTaskPage = taskHasMore;
   const selectedCanvasSessionId = selectedCanvasSessionIds[generationMode];
-  const findCanvasSessionById = (sessionId, mode = '') => {
-    if (!sessionId) {
+  const findCanvasSessionByIdentifier = (sessionId, mode = '') => {
+    const target = String(sessionId || '').trim();
+    if (!target) {
       return null;
     }
     const normalizedMode = CANVAS_MODES.includes(mode) ? mode : '';
     if (normalizedMode) {
       const directMatch = (canvasSessions[normalizedMode] || []).find(
-        (item) => item.id === sessionId,
+        (item) => canvasSessionMatchesIdentifier(item, target),
       );
       if (directMatch) {
         return directMatch;
       }
       const recentMatch = recentCanvasSessions.items.find(
-        (item) => item.id === sessionId && item.mode === normalizedMode,
+        (item) =>
+          item.mode === normalizedMode &&
+          canvasSessionMatchesIdentifier(item, target),
       );
       if (recentMatch) {
         return recentMatch;
       }
     }
     const anyRecentMatch = recentCanvasSessions.items.find(
-      (item) => item.id === sessionId,
+      (item) => canvasSessionMatchesIdentifier(item, target),
     );
     if (anyRecentMatch) {
       return anyRecentMatch;
     }
     for (const canvasMode of CANVAS_MODES) {
       const match = (canvasSessions[canvasMode] || []).find(
-        (item) => item.id === sessionId,
+        (item) => canvasSessionMatchesIdentifier(item, target),
       );
       if (match) {
         return match;
@@ -968,7 +1000,7 @@ const ImageGeneration = () => {
     }
     return null;
   };
-  const selectedCanvasSession = findCanvasSessionById(
+  const selectedCanvasSession = findCanvasSessionByIdentifier(
     selectedCanvasSessionId,
     generationMode,
   );
@@ -1108,20 +1140,21 @@ const ImageGeneration = () => {
   const updateCurrentCanvasSessionModel = async (mode, modelId) => {
     const normalizedMode = CANVAS_MODES.includes(mode) ? mode : generationMode;
     const sessionId = selectedCanvasSessionIds[normalizedMode];
-    const session = findCanvasSessionById(sessionId, normalizedMode);
-    if (!session?.id) {
+    const session = findCanvasSessionByIdentifier(sessionId, normalizedMode);
+    const sessionIdentifier = getCanvasSessionIdentifier(session);
+    if (!sessionIdentifier) {
       return;
     }
     const currentModel = String(modelId || '').trim();
     setCanvasSessionsForMode(normalizedMode, (prev) =>
       prev.map((item) =>
-        item.id === session.id
+        canvasSessionMatchesIdentifier(item, sessionIdentifier)
           ? { ...item, current_model: currentModel }
           : item,
       ),
     );
     try {
-      const res = await API.patch(`/api/canvas/sessions/${session.id}`, {
+      const res = await API.patch(buildCanvasSessionApiPath(session), {
         current_model: currentModel,
       });
       if (res.data.success && res.data.data) {
@@ -1139,20 +1172,23 @@ const ImageGeneration = () => {
     errorMessage,
   ) => {
     const sessionId = selectedCanvasSessionIds[CANVAS_MODE_CHAT];
-    const session = findCanvasSessionById(sessionId, CANVAS_MODE_CHAT);
-    if (!session?.id || !updates || Object.keys(updates).length === 0) {
+    const session = findCanvasSessionByIdentifier(
+      sessionId,
+      CANVAS_MODE_CHAT,
+    );
+    const sessionIdentifier = getCanvasSessionIdentifier(session);
+    if (!sessionIdentifier || !updates || Object.keys(updates).length === 0) {
       return;
     }
     setCanvasSessionsForMode(CANVAS_MODE_CHAT, (prev) =>
       prev.map((item) =>
-        item.id === session.id ? { ...item, ...updates } : item,
+        canvasSessionMatchesIdentifier(item, sessionIdentifier)
+          ? { ...item, ...updates }
+          : item,
       ),
     );
     try {
-      const res = await API.patch(
-        `/api/canvas/sessions/${session.id}`,
-        updates,
-      );
+      const res = await API.patch(buildCanvasSessionApiPath(session), updates);
       if (res.data.success && res.data.data) {
         updateCanvasSessionInState(res.data.data);
       } else {
@@ -1175,7 +1211,7 @@ const ImageGeneration = () => {
     if (!chatSessionSettingsVisible || !chatSessionSettingsSessionId) {
       return;
     }
-    const session = findCanvasSessionById(chatSessionSettingsSessionId);
+    const session = findCanvasSessionByIdentifier(chatSessionSettingsSessionId);
     if (!session) {
       closeCanvasChatSessionSettings();
     }
@@ -1994,18 +2030,21 @@ const ImageGeneration = () => {
   };
 
   const removeCanvasSessionFromCollections = (session) => {
-    if (!session?.id) {
+    const sessionIdentifier = getCanvasSessionIdentifier(session);
+    if (!sessionIdentifier) {
       return;
     }
     const normalizedMode = CANVAS_MODES.includes(session.mode)
       ? session.mode
       : CANVAS_MODE_IMAGE;
     setCanvasSessionsForMode(normalizedMode, (prev) =>
-      prev.filter((item) => item.id !== session.id),
+      prev.filter((item) => !canvasSessionMatchesIdentifier(item, sessionIdentifier)),
     );
     setRecentCanvasSessions((prev) => ({
       ...prev,
-      items: prev.items.filter((item) => item.id !== session.id),
+      items: prev.items.filter(
+        (item) => !canvasSessionMatchesIdentifier(item, sessionIdentifier),
+      ),
     }));
   };
 
@@ -2034,8 +2073,8 @@ const ImageGeneration = () => {
           return;
         }
         const firstSession = firstByMode[mode];
-        if (firstSession?.id) {
-          next[mode] = firstSession.id;
+        if (firstSession) {
+          next[mode] = getCanvasSessionIdentifier(firstSession);
           changed = true;
         }
       });
@@ -2157,15 +2196,16 @@ const ImageGeneration = () => {
       throw new Error(res.data.message || t('创建会话失败'));
     }
     const session = res.data.data;
+    const sessionIdentifier = getCanvasSessionIdentifier(session);
     blankCanvasSelectionModesRef.current[normalizedMode] = false;
     upsertCanvasSessionInCollections(session);
     setSelectedCanvasSessionIds((prev) => ({
       ...prev,
-      [normalizedMode]: session.id,
+      [normalizedMode]: sessionIdentifier,
     }));
     canvasMessagesRequestSeqRef.current += 1;
-    canvasMessagesSessionIdRef.current = session.id;
-    setCanvasMessagesSessionId(session.id);
+    canvasMessagesSessionIdRef.current = sessionIdentifier;
+    setCanvasMessagesSessionId(sessionIdentifier);
     setCanvasMessages([]);
     setCanvasMessagesHasMore(false);
     setCanvasMessagesNextCursor('');
@@ -2178,7 +2218,7 @@ const ImageGeneration = () => {
 
   const ensureCanvasSession = async (mode = generationMode) => {
     const existingId = selectedCanvasSessionIds[mode];
-    const existing = findCanvasSessionById(existingId, mode);
+    const existing = findCanvasSessionByIdentifier(existingId, mode);
     if (existing) {
       return existing;
     }
@@ -2212,7 +2252,7 @@ const ImageGeneration = () => {
       setCanvasMessagesLoading(true);
     }
     try {
-      const res = await API.get(`/api/canvas/sessions/${sessionId}/messages`, {
+      const res = await API.get(buildCanvasSessionApiPath(sessionId, '/messages'), {
         params: {
           limit: DEFAULT_CANVAS_MESSAGE_PAGE_SIZE,
         },
@@ -2286,7 +2326,7 @@ const ImageGeneration = () => {
     const previousScrollHeight = container?.scrollHeight || 0;
     setCanvasMessagesLoadingMore(true);
     try {
-      const res = await API.get(`/api/canvas/sessions/${sessionId}/messages`, {
+      const res = await API.get(buildCanvasSessionApiPath(sessionId, '/messages'), {
         params: {
           limit: DEFAULT_CANVAS_MESSAGE_PAGE_SIZE,
           cursor: canvasMessagesNextCursor,
@@ -2501,10 +2541,11 @@ const ImageGeneration = () => {
   });
 
   const openCanvasChatSessionSettings = (session) => {
-    if (session?.mode !== CANVAS_MODE_CHAT || !session?.id) {
+    const sessionIdentifier = getCanvasSessionIdentifier(session);
+    if (session?.mode !== CANVAS_MODE_CHAT || !sessionIdentifier) {
       return;
     }
-    setChatSessionSettingsSessionId(session.id);
+    setChatSessionSettingsSessionId(sessionIdentifier);
     setChatSessionSettingsDraft(buildCanvasChatSessionSettingsDraft(session));
     setChatSessionSettingsVisible(true);
   };
@@ -2531,7 +2572,7 @@ const ImageGeneration = () => {
     if (!chatSessionSettingsSessionId || !chatSessionSettingsDraft) {
       return;
     }
-    const session = findCanvasSessionById(chatSessionSettingsSessionId);
+    const session = findCanvasSessionByIdentifier(chatSessionSettingsSessionId);
     if (!session) {
       showError(t('会话不存在'));
       return;
@@ -2579,18 +2620,17 @@ const ImageGeneration = () => {
 
     setChatSessionSettingsSaving(true);
     try {
-      const res = await API.patch(
-        `/api/canvas/sessions/${session.id}`,
-        payload,
-      );
+      const res = await API.patch(buildCanvasSessionApiPath(session), payload);
       if (!res.data.success || !res.data.data) {
         showError(res.data.message || t('保存会话设置失败'));
         return;
       }
       updateCanvasSessionInState(res.data.data);
+      const sessionIdentifier = getCanvasSessionIdentifier(session);
       if (
         generationModeRef.current === CANVAS_MODE_CHAT &&
-        selectedCanvasSessionIdsRef.current?.[CANVAS_MODE_CHAT] === session.id
+        selectedCanvasSessionIdsRef.current?.[CANVAS_MODE_CHAT] ===
+          sessionIdentifier
       ) {
         setChatModel(String(res.data.data.current_model || ''));
         setChatTemperature(
@@ -2619,7 +2659,7 @@ const ImageGeneration = () => {
     if (
       chatStreaming &&
       chatStreamingSessionIdRef.current &&
-      chatStreamingSessionIdRef.current === session.id
+      chatStreamingSessionIdRef.current === getCanvasSessionIdentifier(session)
     ) {
       showError(t('请先停止当前对话生成'));
       return;
@@ -2627,7 +2667,7 @@ const ImageGeneration = () => {
     const isRestoring = Number(session.clear_context_message_id) > 0;
     try {
       const res = await API.patch(
-        `/api/canvas/sessions/${session.id}`,
+        buildCanvasSessionApiPath(session),
         isRestoring
           ? { clear_context_message_id: 0 }
           : { clear_context_to_latest: true },
@@ -2728,7 +2768,7 @@ const ImageGeneration = () => {
       return;
     }
     try {
-      const res = await API.patch(`/api/canvas/sessions/${session.id}`, {
+      const res = await API.patch(buildCanvasSessionApiPath(session), {
         title: trimmedTitle,
       });
       if (!res.data.success) {
@@ -2743,7 +2783,7 @@ const ImageGeneration = () => {
 
   const toggleCanvasSessionPin = async (session) => {
     try {
-      const res = await API.patch(`/api/canvas/sessions/${session.id}`, {
+      const res = await API.patch(buildCanvasSessionApiPath(session), {
         pinned: !session.pinned,
       });
       if (!res.data.success) {
@@ -2757,12 +2797,13 @@ const ImageGeneration = () => {
   };
 
   const deleteCanvasSession = async (session) => {
-    if (!session?.id) {
+    const sessionIdentifier = getCanvasSessionIdentifier(session);
+    if (!sessionIdentifier) {
       return;
     }
     setDeletingCanvasSession(true);
     try {
-      const res = await API.delete(`/api/canvas/sessions/${session.id}`);
+      const res = await API.delete(buildCanvasSessionApiPath(session));
       if (!res.data.success) {
         showError(res.data.message || t('删除会话失败'));
         return;
@@ -2770,23 +2811,25 @@ const ImageGeneration = () => {
       showSuccess(t('删除成功'));
       removeCanvasSessionFromCollections(session);
       setSelectedCanvasSessionIds((prev) => {
-        if (prev[session.mode] !== session.id) {
+        if (prev[session.mode] !== sessionIdentifier) {
           return prev;
         }
         const nextSessions = mergeCanvasSessionItems(
           (canvasSessions[session.mode] || []).filter(
-            (item) => item.id !== session.id,
+            (item) => !canvasSessionMatchesIdentifier(item, sessionIdentifier),
           ),
           recentCanvasSessions.items.filter(
-            (item) => item.mode === session.mode && item.id !== session.id,
+            (item) =>
+              item.mode === session.mode &&
+              !canvasSessionMatchesIdentifier(item, sessionIdentifier),
           ),
         );
         return {
           ...prev,
-          [session.mode]: nextSessions[0]?.id || null,
+          [session.mode]: getCanvasSessionIdentifier(nextSessions[0]) || null,
         };
       });
-      if (isCurrentCanvasMessageSession(session.id)) {
+      if (isCurrentCanvasMessageSession(sessionIdentifier)) {
         canvasMessagesRequestSeqRef.current += 1;
         canvasMessagesSessionIdRef.current = null;
         setCanvasMessagesSessionId(null);
@@ -3534,7 +3577,7 @@ const ImageGeneration = () => {
     try {
       const endpoint =
         taskType === 'video_generation'
-          ? `/api/video-generation/tasks/${taskId}`
+          ? `/api/canvas/video-generation/tasks/${taskId}`
           : `/api/image-generation/tasks/${taskId}`;
       const res = await API.get(endpoint);
       if (
@@ -4995,8 +5038,9 @@ const ImageGeneration = () => {
         client_request_id: clientRequestId,
       };
       const submittedAt = Math.floor(Date.now() / 1000);
+      const canvasSessionIdentifier = getCanvasSessionIdentifier(canvasSession);
       replaceCanvasMessagesForSession(
-        canvasSession.id,
+        canvasSessionIdentifier,
         clientRequestId,
         [
           {
@@ -5042,10 +5086,7 @@ const ImageGeneration = () => {
       );
       const results = await Promise.allSettled(
         Array.from({ length: taskCount }, () =>
-          API.post(
-            `/api/canvas/sessions/${canvasSession.id}/messages`,
-            taskPayload,
-          ),
+          API.post(buildCanvasSessionApiPath(canvasSession, '/messages'), taskPayload),
         ),
       );
 
@@ -5076,7 +5117,7 @@ const ImageGeneration = () => {
 
       if (createdTasks.length > 0) {
         replaceCanvasMessagesForSession(
-          canvasSession.id,
+          canvasSessionIdentifier,
           clientRequestId,
           attachPendingReferencesToMessages(
             createdMessages,
@@ -5125,7 +5166,7 @@ const ImageGeneration = () => {
       }
 
       if (createdTasks.length === 0) {
-        removeCanvasMessagesForRequest(canvasSession.id, clientRequestId);
+        removeCanvasMessagesForRequest(canvasSessionIdentifier, clientRequestId);
         showError(firstError || t('创建任务失败'));
       } else if (createdTasks.length < taskCount) {
         showError(
@@ -5231,6 +5272,7 @@ const ImageGeneration = () => {
         params.reference_images = [base64Image];
       }
       canvasSession = await ensureCanvasSession(CANVAS_MODE_VIDEO);
+      const canvasSessionIdentifier = getCanvasSessionIdentifier(canvasSession);
       clientRequestId = generateCanvasClientRequestId();
       const taskPayload = {
         model_id: videoSelectedModel,
@@ -5240,7 +5282,7 @@ const ImageGeneration = () => {
         client_request_id: clientRequestId,
       };
       replaceCanvasMessagesForSession(
-        canvasSession.id,
+        canvasSessionIdentifier,
         clientRequestId,
         [
           {
@@ -5280,11 +5322,11 @@ const ImageGeneration = () => {
         },
       );
       const res = await API.post(
-        `/api/canvas/sessions/${canvasSession.id}/messages`,
+        buildCanvasSessionApiPath(canvasSession, '/messages'),
         taskPayload,
       );
       if (!res.data.success) {
-        removeCanvasMessagesForRequest(canvasSession.id, clientRequestId);
+        removeCanvasMessagesForRequest(canvasSessionIdentifier, clientRequestId);
         showError(res.data.message || t('创建视频任务失败'));
         return;
       }
@@ -5294,7 +5336,7 @@ const ImageGeneration = () => {
         null;
       showSuccess(t('视频任务已创建，正在生成中...'));
       replaceCanvasMessagesForSession(
-        canvasSession.id,
+        canvasSessionIdentifier,
         clientRequestId,
         attachPendingReferencesToMessages(
           createdMessages,
@@ -5321,8 +5363,9 @@ const ImageGeneration = () => {
         setVideoTaskTotal((prev) => prev + 1);
       }
     } catch (error) {
-      if (canvasSession?.id && clientRequestId) {
-        removeCanvasMessagesForRequest(canvasSession.id, clientRequestId);
+      const canvasSessionIdentifier = getCanvasSessionIdentifier(canvasSession);
+      if (canvasSessionIdentifier && clientRequestId) {
+        removeCanvasMessagesForRequest(canvasSessionIdentifier, clientRequestId);
       }
       showError(
         error.response?.data?.message || error.message || t('创建视频任务失败'),
@@ -5574,14 +5617,15 @@ const ImageGeneration = () => {
     const mode = CANVAS_MODES.includes(session?.mode)
       ? session.mode
       : CANVAS_MODE_IMAGE;
-    if (!session?.id) {
+    const sessionIdentifier = getCanvasSessionIdentifier(session);
+    if (!sessionIdentifier) {
       return;
     }
     blankCanvasSelectionModesRef.current[mode] = false;
     setGenerationMode(mode);
     setSelectedCanvasSessionIds((prev) => ({
       ...prev,
-      [mode]: session.id,
+      [mode]: sessionIdentifier,
     }));
     setMobileTaskbarVisible(false);
   };
@@ -5759,7 +5803,7 @@ const ImageGeneration = () => {
 
     try {
       const canvasSession = await ensureCanvasSession(CANVAS_MODE_CHAT);
-      activeSessionId = canvasSession.id;
+      activeSessionId = getCanvasSessionIdentifier(canvasSession);
       clientRequestId = generateCanvasClientRequestId();
       replaceCanvasMessagesForSession(
         activeSessionId,
@@ -5777,7 +5821,7 @@ const ImageGeneration = () => {
         setChatFileAttachment(null);
       }
       const requestURL = buildCanvasStreamRequestUrl(
-        `/api/canvas/sessions/${activeSessionId}/messages`,
+        buildCanvasSessionApiPath(activeSessionId, '/messages'),
       );
       const controller = new AbortController();
       chatStreamAbortRef.current = controller;
@@ -8769,16 +8813,19 @@ const ImageGeneration = () => {
   const handleCanvasWorkspaceScroll = (event) => {
     const container = event.currentTarget;
     syncCanvasAutoFollowState(container);
+    const selectedSessionIdentifier = getCanvasSessionIdentifier(
+      selectedCanvasSession,
+    );
     if (
       generationMode !== CANVAS_MODE_CHAT ||
-      !selectedCanvasSession?.id ||
+      !selectedSessionIdentifier ||
       canvasMessagesLoadingMore ||
       !canvasMessagesHasMore
     ) {
       return;
     }
     if (container.scrollTop <= CANVAS_HISTORY_AUTOLOAD_TOP_THRESHOLD) {
-      void loadOlderCanvasMessages(selectedCanvasSession.id);
+      void loadOlderCanvasMessages(selectedSessionIdentifier);
     }
   };
 
@@ -8808,14 +8855,15 @@ const ImageGeneration = () => {
               const sessionMode = CANVAS_MODES.includes(session.mode)
                 ? session.mode
                 : CANVAS_MODE_IMAGE;
+              const sessionIdentifier = getCanvasSessionIdentifier(session);
               const active =
                 generationMode === sessionMode &&
-                session.id === selectedCanvasSessionIds[sessionMode];
+                sessionIdentifier === selectedCanvasSessionIds[sessionMode];
               const hovered =
-                !isMobile && hoveredCanvasSessionId === session.id;
+                !isMobile && hoveredCanvasSessionId === sessionIdentifier;
               return (
                 <div
-                  key={session.id}
+                  key={sessionIdentifier || session.id}
                   role='button'
                   tabIndex={0}
                   style={{
@@ -8833,13 +8881,13 @@ const ImageGeneration = () => {
                   }}
                   onMouseEnter={() => {
                     if (!isMobile) {
-                      setHoveredCanvasSessionId(session.id);
+                      setHoveredCanvasSessionId(sessionIdentifier);
                     }
                   }}
                   onMouseLeave={() => {
                     if (!isMobile) {
                       setHoveredCanvasSessionId((current) =>
-                        current === session.id ? null : current,
+                        current === sessionIdentifier ? null : current,
                       );
                     }
                   }}
@@ -10124,7 +10172,11 @@ const ImageGeneration = () => {
             canvasMessagesError,
             <Button
               size='small'
-              onClick={() => loadCanvasMessages(selectedCanvasSession.id)}
+              onClick={() =>
+                loadCanvasMessages(
+                  getCanvasSessionIdentifier(selectedCanvasSession),
+                )
+              }
             >
               {t('重试')}
             </Button>,
@@ -11081,7 +11133,7 @@ const ImageGeneration = () => {
   );
 
   const renderCanvasChatSessionSettingsSheet = () => {
-    const session = findCanvasSessionById(chatSessionSettingsSessionId);
+    const session = findCanvasSessionByIdentifier(chatSessionSettingsSessionId);
     const draft = chatSessionSettingsDraft;
     if (!session || !draft) {
       return null;
