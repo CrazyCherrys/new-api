@@ -3973,6 +3973,7 @@
     "当前分组暂无可用令牌，请前往令牌管理创建或启用": "The current group has no available token. Please go to token management to create or enable one.",
     "前往令牌管理": "Go to token management",
     "暂无可用模式": "No available mode",
+    "图片": "Image",
     "图片生成": "Image generation",
     "视频生成": "Video generation",
     "比例": "Ratio",
