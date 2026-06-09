@@ -6248,11 +6248,10 @@ const ImageGeneration = () => {
         : 'width 0.24s ease, min-width 0.24s ease, opacity 0.2s ease, border-color 0.24s ease',
     },
     leftPanelCollapsed: {
-      width: 0,
-      minWidth: 0,
-      borderRightColor: 'transparent',
-      opacity: 0,
-      pointerEvents: 'none',
+      width: isMobile ? '100%' : 52,
+      minWidth: isMobile ? 0 : 52,
+      opacity: 1,
+      pointerEvents: 'auto',
     },
     sidebarHeader: {
       minHeight: 42,
@@ -6264,15 +6263,15 @@ const ImageGeneration = () => {
       padding: '12px 12px 6px',
     },
     sidebarHeaderActionButton: {
-      height: 30,
-      borderRadius: 8,
+      height: 32,
+      borderRadius: 10,
       padding: '0 10px',
     },
     sidebarIconButton: {
-      width: 30,
-      height: 30,
-      minWidth: 30,
-      borderRadius: 8,
+      width: 32,
+      height: 32,
+      minWidth: 32,
+      borderRadius: 10,
     },
     sidebarNav: {
       display: 'flex',
@@ -6294,25 +6293,49 @@ const ImageGeneration = () => {
       cursor: 'pointer',
       textAlign: 'left',
       fontSize: 14,
-      transition: 'background 0.16s, color 0.16s',
+      fontWeight: 500,
+      transition:
+        'background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease',
+    },
+    sidebarNavItemPrimary: {
+      minHeight: 42,
+      margin: '2px 0 4px',
+      background: 'var(--canvas-sidebar-action-bg)',
+      color: 'var(--canvas-text-primary)',
+      fontWeight: 650,
+      boxShadow: 'var(--canvas-sidebar-action-shadow)',
     },
     sidebarNavItemHover: {
-      background: 'var(--canvas-hover-bg)',
+      background: 'var(--canvas-sidebar-row-hover-bg)',
       color: 'var(--canvas-text-primary)',
     },
     sidebarNavItemActive: {
-      background: 'var(--canvas-primary-soft-bg)',
+      background: 'var(--canvas-sidebar-row-active-bg)',
       color: 'var(--canvas-text-primary)',
+      boxShadow: 'var(--canvas-sidebar-row-active-shadow)',
     },
     sidebarNavItemMuted: {
       color: 'var(--canvas-text-muted)',
     },
     sidebarNavIcon: {
-      width: 18,
-      minWidth: 18,
+      width: 26,
+      minWidth: 26,
+      height: 26,
+      borderRadius: 8,
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
+      color: 'var(--canvas-text-muted)',
+      background: 'var(--canvas-sidebar-icon-bg)',
+      flexShrink: 0,
+    },
+    sidebarNavIconActive: {
+      color: 'var(--canvas-text-primary)',
+      background: 'var(--canvas-sidebar-icon-active-bg)',
+    },
+    sidebarNavIconPrimary: {
+      color: 'var(--canvas-primary)',
+      background: 'var(--canvas-primary-soft-bg)',
     },
     sidebarNavLabel: {
       flex: 1,
@@ -6348,7 +6371,7 @@ const ImageGeneration = () => {
       padding: '7px 10px',
       display: 'flex',
       alignItems: 'center',
-      gap: 9,
+      gap: 10,
       textAlign: 'left',
       cursor: 'pointer',
       opacity: 0.82,
@@ -6356,13 +6379,13 @@ const ImageGeneration = () => {
         'background 0.16s, color 0.16s, opacity 0.16s, box-shadow 0.16s',
     },
     taskListItemHover: {
-      background: 'var(--canvas-hover-bg)',
+      background: 'var(--canvas-sidebar-row-hover-bg)',
       opacity: 0.96,
     },
     taskListItemActive: {
-      background: 'var(--canvas-primary-soft-bg)',
+      background: 'var(--canvas-sidebar-row-active-bg)',
       opacity: 1,
-      boxShadow: 'inset 0 0 0 1px var(--canvas-primary-soft-border)',
+      boxShadow: 'var(--canvas-sidebar-row-active-shadow)',
     },
     taskListText: {
       minWidth: 0,
@@ -6381,15 +6404,20 @@ const ImageGeneration = () => {
       paddingRight: 8,
     },
     sessionTypeIcon: {
-      width: 20,
-      minWidth: 20,
-      height: 20,
-      borderRadius: 5,
+      width: 26,
+      minWidth: 26,
+      height: 26,
+      borderRadius: 8,
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
       color: 'var(--canvas-text-muted)',
-      background: 'var(--canvas-hover-bg)',
+      background: 'var(--canvas-sidebar-icon-bg)',
+      flexShrink: 0,
+    },
+    sessionTypeIconActive: {
+      color: 'var(--canvas-text-primary)',
+      background: 'var(--canvas-sidebar-icon-active-bg)',
     },
     sessionListTitle: {
       fontSize: 14,
@@ -6407,6 +6435,41 @@ const ImageGeneration = () => {
       borderRadius: 8,
       flexShrink: 0,
     },
+    sidebarRail: {
+      width: '100%',
+      minHeight: 0,
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 8,
+      padding: '10px 7px',
+    },
+    sidebarRailSection: {
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 8,
+    },
+    sidebarRailDivider: {
+      width: 28,
+      height: 1,
+      background: 'var(--canvas-border)',
+      margin: '2px 0',
+      flexShrink: 0,
+    },
+    sidebarRailButton: {
+      width: 38,
+      height: 38,
+      minWidth: 38,
+      borderRadius: 12,
+    },
+    sidebarRailButtonActive: {
+      background: 'var(--canvas-sidebar-row-active-bg)',
+      color: 'var(--canvas-text-primary)',
+      boxShadow: 'var(--canvas-sidebar-row-active-shadow)',
+    },
     recentListFooter: {
       display: 'flex',
       justifyContent: 'center',
@@ -6419,12 +6482,6 @@ const ImageGeneration = () => {
       background: 'var(--canvas-page-bg)',
       overflow: 'hidden',
       position: 'relative',
-    },
-    sidebarRevealButtonWrap: {
-      position: 'absolute',
-      top: 10,
-      left: 10,
-      zIndex: 5,
     },
     rightContent: {
       flex: 1,
@@ -8747,6 +8804,7 @@ const ImageGeneration = () => {
     icon,
     active = false,
     muted = false,
+    primary = false,
     onClick,
     suffix = null,
     ariaExpanded,
@@ -8757,8 +8815,12 @@ const ImageGeneration = () => {
         key={key}
         type='button'
         aria-expanded={ariaExpanded}
+        className='canvas-sidebar-nav-item'
+        data-canvas-sidebar-active={active ? 'true' : undefined}
+        data-canvas-sidebar-primary={primary ? 'true' : undefined}
         style={{
           ...styles.sidebarNavItem,
+          ...(primary ? styles.sidebarNavItemPrimary : null),
           ...(hovered && !active ? styles.sidebarNavItemHover : null),
           ...(active ? styles.sidebarNavItemActive : null),
           ...(muted ? styles.sidebarNavItemMuted : null),
@@ -8777,12 +8839,82 @@ const ImageGeneration = () => {
           }
         }}
       >
-        <span style={styles.sidebarNavIcon}>{icon}</span>
+        <span
+          style={{
+            ...styles.sidebarNavIcon,
+            ...(primary ? styles.sidebarNavIconPrimary : null),
+            ...(active ? styles.sidebarNavIconActive : null),
+          }}
+        >
+          {icon}
+        </span>
         <span style={styles.sidebarNavLabel}>{label}</span>
         {suffix ? <span style={styles.sidebarNavSuffix}>{suffix}</span> : null}
       </button>
     );
   };
+
+  const renderSidebarRailButton = ({
+    key,
+    label,
+    icon,
+    active = false,
+    onClick,
+  }) => (
+    <Tooltip key={key} content={label} position='right'>
+      <Button
+        type='tertiary'
+        aria-label={label}
+        className='canvas-sidebar-rail-button'
+        data-canvas-sidebar-active={active ? 'true' : undefined}
+        icon={icon}
+        style={{
+          ...styles.sidebarRailButton,
+          ...(active ? styles.sidebarRailButtonActive : null),
+        }}
+        onClick={onClick}
+      />
+    </Tooltip>
+  );
+
+  const renderCollapsedSidebarRail = () => (
+    <div style={styles.sidebarRail} data-canvas-sidebar-rail='true'>
+      <div style={styles.sidebarRailSection}>
+        {renderSidebarRailButton({
+          key: 'show-sidebar',
+          label: t('显示侧边栏'),
+          icon: <IconSidebar />,
+          onClick: () => setDesktopSidebarCollapsed(false),
+        })}
+        {renderSidebarRailButton({
+          key: 'new-chat',
+          label: t('新聊天'),
+          icon: <IconPlus />,
+          active:
+            generationMode === CANVAS_MODE_CHAT && !selectedCanvasSessionId,
+          onClick: handleNewBlankChat,
+        })}
+      </div>
+      <div style={styles.sidebarRailDivider} />
+      <div style={styles.sidebarRailSection}>
+        {renderSidebarRailButton({
+          key: 'asset-library',
+          label: t('资产库'),
+          icon: <IconArchive />,
+          onClick: () => {
+            setAssetLibraryVisible(true);
+            setMobileTaskbarVisible(false);
+          },
+        })}
+        {renderSidebarRailButton({
+          key: 'projects',
+          label: t('项目'),
+          icon: <IconExternalOpen />,
+          onClick: handleProjectEntryClick,
+        })}
+      </div>
+    </div>
+  );
 
   const renderCanvasSessionMenu = (session) => (
     <Dropdown.Menu style={styles.darkMenu}>
@@ -8934,6 +9066,8 @@ const ImageGeneration = () => {
                   key={sessionIdentifier || session.id}
                   role='button'
                   tabIndex={0}
+                  className='canvas-sidebar-session-item'
+                  data-canvas-sidebar-active={active ? 'true' : undefined}
                   style={{
                     ...styles.taskListItem,
                     ...styles.sessionListItem,
@@ -8960,7 +9094,12 @@ const ImageGeneration = () => {
                     }
                   }}
                 >
-                  <span style={styles.sessionTypeIcon}>
+                  <span
+                    style={{
+                      ...styles.sessionTypeIcon,
+                      ...(active ? styles.sessionTypeIconActive : null),
+                    }}
+                  >
                     {renderCanvasSessionIcon(sessionMode)}
                   </span>
                   <div style={styles.taskListText}>
@@ -8977,6 +9116,10 @@ const ImageGeneration = () => {
                       size='small'
                       type='tertiary'
                       aria-label={t('会话菜单')}
+                      className='canvas-sidebar-session-menu'
+                      data-canvas-session-menu-active={
+                        active ? 'true' : undefined
+                      }
                       icon={<IconMore />}
                       style={styles.sessionMenuButton}
                       onClick={(event) => event.stopPropagation()}
@@ -9014,10 +9157,12 @@ const ImageGeneration = () => {
         ...styles.leftPanel,
         ...(collapsed ? styles.leftPanelCollapsed : null),
       }}
-      aria-hidden={collapsed ? 'true' : undefined}
       data-canvas-task-sidebar={generationMode}
+      data-canvas-sidebar-collapsed={collapsed ? 'true' : undefined}
     >
-      {collapsed ? null : (
+      {collapsed ? (
+        renderCollapsedSidebarRail()
+      ) : (
         <>
           <div style={styles.sidebarHeader}>
             <Button
@@ -9055,9 +9200,10 @@ const ImageGeneration = () => {
             {renderSidebarNavItem({
               key: 'new-chat',
               label: t('新聊天'),
-              icon: <IconCommentStroked />,
+              icon: <IconPlus />,
               active:
                 generationMode === CANVAS_MODE_CHAT && !selectedCanvasSessionId,
+              primary: true,
               onClick: handleNewBlankChat,
             })}
             {renderSidebarNavItem({
@@ -11471,20 +11617,6 @@ const ImageGeneration = () => {
 
   const renderWorkspace = () => (
     <div style={styles.rightPanel}>
-      {!isMobile && desktopSidebarCollapsed ? (
-        <div style={styles.sidebarRevealButtonWrap}>
-          <Tooltip content={t('显示侧边栏')} position='right'>
-            <Button
-              type='tertiary'
-              aria-label={t('显示侧边栏')}
-              data-canvas-sidebar-reveal='true'
-              icon={<IconSidebar />}
-              style={styles.sidebarIconButton}
-              onClick={() => setDesktopSidebarCollapsed(false)}
-            />
-          </Tooltip>
-        </div>
-      ) : null}
       {isMobile ? (
         <div style={styles.workspaceTopbar}>
           <div style={styles.workspaceTopbarLeft}>
