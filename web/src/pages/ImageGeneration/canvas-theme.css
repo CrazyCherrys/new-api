@@ -46,6 +46,18 @@ html.dark body.canvas-theme-route {
   --canvas-card-shadow: var(--canvas-shadow-sm);
   --canvas-card-shadow-hover: var(--shadow-soft);
   --canvas-selected-shadow: 0 16px 34px rgba(109, 93, 246, 0.14);
+  --canvas-sidebar-row-hover-bg: rgba(255, 255, 255, 0.62);
+  --canvas-sidebar-row-active-bg: rgba(255, 255, 255, 0.94);
+  --canvas-sidebar-row-active-shadow:
+    inset 0 0 0 1px rgba(203, 213, 225, 0.74),
+    0 6px 16px rgba(15, 23, 42, 0.06);
+  --canvas-sidebar-action-bg: linear-gradient(180deg, #ffffff 0%, #fafbfe 100%);
+  --canvas-sidebar-action-shadow:
+    inset 0 0 0 1px rgba(203, 213, 225, 0.72),
+    0 10px 22px rgba(15, 23, 42, 0.07);
+  --canvas-sidebar-icon-bg: rgba(255, 255, 255, 0.58);
+  --canvas-sidebar-icon-active-bg: #f1f5f9;
+  --canvas-sidebar-focus-ring: rgba(99, 102, 241, 0.18);
   --canvas-input-bg: var(--bg-panel);
   --canvas-input-border: var(--border-light);
   --canvas-input-radius: 18px;
@@ -229,6 +241,89 @@ body.canvas-theme-route .canvas-chat-stream {
   border: none;
   border-radius: 0;
   box-shadow: none;
+}
+
+body.canvas-theme-route .canvas-sidebar-nav-item,
+body.canvas-theme-route .canvas-sidebar-session-item {
+  outline: none;
+}
+
+body.canvas-theme-route .canvas-sidebar-nav-item:focus-visible,
+body.canvas-theme-route .canvas-sidebar-session-item:focus-visible {
+  background: var(--canvas-sidebar-row-active-bg) !important;
+  box-shadow:
+    0 0 0 3px var(--canvas-sidebar-focus-ring),
+    var(--canvas-sidebar-row-active-shadow) !important;
+}
+
+body.canvas-theme-route .canvas-sidebar-nav-item:active,
+body.canvas-theme-route .canvas-sidebar-session-item:active {
+  transform: translateY(0);
+}
+
+body.canvas-theme-route .canvas-sidebar-nav-item .semi-icon,
+body.canvas-theme-route .canvas-sidebar-nav-item svg,
+body.canvas-theme-route .canvas-sidebar-session-item .semi-icon,
+body.canvas-theme-route .canvas-sidebar-session-item svg,
+body.canvas-theme-route .canvas-sidebar-rail-button .semi-icon,
+body.canvas-theme-route .canvas-sidebar-rail-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+body.canvas-theme-route .canvas-sidebar-session-menu {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.94);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+body.canvas-theme-route
+  .canvas-sidebar-session-item:hover
+  .canvas-sidebar-session-menu,
+body.canvas-theme-route
+  .canvas-sidebar-session-item:focus-within
+  .canvas-sidebar-session-menu,
+body.canvas-theme-route
+  .canvas-sidebar-session-item[data-canvas-sidebar-active='true']
+  .canvas-sidebar-session-menu,
+body.canvas-theme-route .canvas-sidebar-session-menu:focus-visible,
+body.canvas-theme-route
+  .canvas-sidebar-session-menu[data-canvas-session-menu-active='true'] {
+  opacity: 0.86;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+body.canvas-theme-route .canvas-sidebar-session-menu:hover,
+body.canvas-theme-route .canvas-sidebar-session-menu:focus-visible {
+  opacity: 1 !important;
+}
+
+body.canvas-theme-route .canvas-sidebar-rail-button {
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+body.canvas-theme-route .canvas-sidebar-rail-button:hover,
+body.canvas-theme-route .canvas-sidebar-rail-button:focus-visible {
+  background: var(--canvas-sidebar-row-active-bg) !important;
+  color: var(--canvas-text-primary) !important;
+  box-shadow: var(--canvas-sidebar-row-active-shadow) !important;
+}
+
+body.canvas-theme-route .canvas-sidebar-rail-button:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px var(--canvas-sidebar-focus-ring),
+    var(--canvas-sidebar-row-active-shadow) !important;
 }
 
 body.canvas-theme-route .canvas-composer-dock {
@@ -585,6 +680,12 @@ body.canvas-theme-route .canvas-chat-context-divider {
 @media (max-width: 767px) {
   body.canvas-theme-route .canvas-chat-actions {
     opacity: 0.72;
+  }
+
+  body.canvas-theme-route .canvas-sidebar-session-menu {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
   }
 }
 
