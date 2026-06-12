@@ -32,6 +32,7 @@ func (CanvasChatMessageAttachment) TableName() string {
 type CanvasChatAttachmentBodyStore interface {
 	PersistMessageAttachments(db *gorm.DB, message *CanvasMessage, attachments []dto.CanvasChatAttachment) error
 	LoadMessageAttachments(db *gorm.DB, userId int, sessionId int, messageIDs []int) (map[int][]dto.CanvasChatAttachment, error)
+	DeleteSessionAttachments(db *gorm.DB, userId int, sessionId int) error
 }
 
 type gormCanvasChatAttachmentBodyStore struct{}
@@ -102,6 +103,30 @@ func (s *gormCanvasChatAttachmentBodyStore) LoadMessageAttachments(db *gorm.DB, 
 		})
 	}
 	return result, nil
+}
+
+func (s *gormCanvasChatAttachmentBodyStore) DeleteSessionAttachments(db *gorm.DB, userId int, sessionId int) error {
+	if db == nil || userId <= 0 || sessionId <= 0 {
+		return nil
+	}
+	return db.Table(canvasChatMessageAttachmentsTable).
+		Where("user_id = ? AND session_id = ?", userId, sessionId).
+		Delete(&CanvasChatMessageAttachment{}).Error
+}
+
+func DeleteCanvasChatMessageAttachmentsBySessionWithDB(db *gorm.DB, userId int, sessionId int) error {
+	if db == nil {
+		resolvedDB, err := canvasModeDataDB(CanvasModeChat)
+		if err != nil {
+			return err
+		}
+		db = resolvedDB
+	}
+	return defaultCanvasChatAttachmentBodyStore.DeleteSessionAttachments(db, userId, sessionId)
+}
+
+func DeleteCanvasChatMessageAttachmentsBySession(userId int, sessionId int) error {
+	return DeleteCanvasChatMessageAttachmentsBySessionWithDB(nil, userId, sessionId)
 }
 
 func canvasChatAttachmentMetadataEntries(attachments []dto.CanvasChatAttachment, includeData bool) []map[string]any {

@@ -723,6 +723,11 @@ func DeleteCanvasSessionDataWithSession(userId int, session *CanvasSession, mess
 		if err := DeleteCanvasVideoTasksByIDsWithDB(tx, userId, videoTaskIDs, nil); err != nil {
 			return err
 		}
+		if messageMode == CanvasModeChat {
+			if err := DeleteCanvasChatMessageAttachmentsBySessionWithDB(tx, userId, session.Id); err != nil {
+				return err
+			}
+		}
 		if err := SoftDeleteCanvasMessagesByIDsWithDB(tx, messageMode, userId, messageIDs, deletedTime); err != nil {
 			return err
 		}
@@ -732,6 +737,21 @@ func DeleteCanvasSessionDataWithSession(userId int, session *CanvasSession, mess
 
 func deleteCanvasSessionDataDedicated(userId int, session *CanvasSession, messageIDs []int, imageTaskIDs []int, videoTaskIDs []int64, cleanupJobs []*CanvasAssetCleanupJob, deletedTime int64) error {
 	messageMode := NormalizeCanvasMode(session.Mode)
+	if messageMode == CanvasModeChat {
+		chatDB, err := canvasModeDataDB(CanvasModeChat)
+		if err != nil {
+			return err
+		}
+		return chatDB.Transaction(func(tx *gorm.DB) error {
+			if err := DeleteCanvasChatMessageAttachmentsBySessionWithDB(tx, userId, session.Id); err != nil {
+				return err
+			}
+			if err := SoftDeleteCanvasMessagesByIDsWithDB(tx, messageMode, userId, messageIDs, deletedTime); err != nil {
+				return err
+			}
+			return SoftDeleteCanvasSessionWithSessionAndDB(tx, userId, session, deletedTime)
+		})
+	}
 	if err := SoftDeleteCanvasMessagesByIDs(messageMode, userId, messageIDs, deletedTime); err != nil {
 		return err
 	}
