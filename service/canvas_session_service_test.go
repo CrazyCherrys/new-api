@@ -2674,6 +2674,90 @@ func TestDeleteCanvasSessionSoftDeletesSessionMessagesAndAssociatedTasks(t *test
 	}
 }
 
+func TestDeleteCanvasChatSessionDeletesStoredAttachments(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-delete")
+	if err := db.Model(&model.ModelMapping{}).
+		Where("request_model = ?", "gpt-chat-delete").
+		Update("chat_capabilities", `["image_upload","file_upload"]`).Error; err != nil {
+		t.Fatalf("failed to enable chat capabilities: %v", err)
+	}
+
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
+		if onDelta != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: "done"}); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: "done"}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat, Title: "delete attachments"})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	created, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "with attachments",
+		ModelId: "gpt-chat-delete",
+		Attachments: []dto.CanvasChatAttachment{
+			{
+				Kind:     "image",
+				Name:     "reference.png",
+				MimeType: "image/png",
+				Data:     "data:image/png;base64,Zm9v",
+			},
+			{
+				Kind:     "file",
+				Name:     "notes.txt",
+				MimeType: "text/plain",
+				Data:     "data:text/plain;base64,YmFy",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create chat message: %v", err)
+	}
+	if len(created) != 2 {
+		t.Fatalf("expected user and assistant messages, got %#v", created)
+	}
+
+	var beforeCount int64
+	if err := db.Model(&model.CanvasChatMessageAttachment{}).
+		Where("user_id = ? AND session_id = ?", 1, session.Id).
+		Count(&beforeCount).Error; err != nil {
+		t.Fatalf("failed to count attachments before delete: %v", err)
+	}
+	if beforeCount != 2 {
+		t.Fatalf("expected 2 attachment rows before delete, got %d", beforeCount)
+	}
+
+	if err := DeleteCanvasSession(1, session.Id); err != nil {
+		t.Fatalf("failed to delete chat session: %v", err)
+	}
+
+	var afterCount int64
+	if err := db.Model(&model.CanvasChatMessageAttachment{}).
+		Where("user_id = ? AND session_id = ?", 1, session.Id).
+		Count(&afterCount).Error; err != nil {
+		t.Fatalf("failed to count attachments after delete: %v", err)
+	}
+	if afterCount != 0 {
+		t.Fatalf("expected attachment rows to be deleted, got %d", afterCount)
+	}
+
+	if reloaded, err := model.GetCanvasSessionByID(1, session.Id); err != nil || reloaded != nil {
+		t.Fatalf("expected chat session to be soft deleted, got %#v err=%v", reloaded, err)
+	}
+	messageRefs, err := model.ListCanvasSessionMessageTaskRefsForMode(model.CanvasModeChat, 1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to list chat message refs after delete: %v", err)
+	}
+	if len(messageRefs) != 0 {
+		t.Fatalf("expected chat messages to be soft deleted, got %d", len(messageRefs))
+	}
+}
+
 func TestDeleteCanvasSessionRollsBackWhenMessageSoftDeleteFails(t *testing.T) {
 	db := setupCanvasSessionServiceTestDB(t)
 
@@ -2751,6 +2835,87 @@ func TestDeleteCanvasSessionRollsBackWhenMessageSoftDeleteFails(t *testing.T) {
 	}
 }
 
+func TestDeleteCanvasChatSessionRollsBackAttachmentDeleteOnSessionFailure(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-rollback")
+	if err := db.Model(&model.ModelMapping{}).
+		Where("request_model = ?", "gpt-chat-rollback").
+		Update("chat_capabilities", `["image_upload"]`).Error; err != nil {
+		t.Fatalf("failed to enable chat capabilities: %v", err)
+	}
+
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
+		if onDelta != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: "done"}); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{Text: "done"}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat, Title: "rollback attachments"})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	if _, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "keep attachment",
+		ModelId: "gpt-chat-rollback",
+		Attachments: []dto.CanvasChatAttachment{
+			{
+				Kind:     "image",
+				Name:     "reference.png",
+				MimeType: "image/png",
+				Data:     "data:image/png;base64,Zm9v",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("failed to create chat message: %v", err)
+	}
+
+	updateCallbackName := "fail_canvas_chat_session_soft_delete"
+	if err := db.Callback().Update().Before("gorm:update").Register(updateCallbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "canvas_sessions" {
+			tx.AddError(fmt.Errorf("boom"))
+		}
+	}); err != nil {
+		t.Fatalf("failed to register update callback: %v", err)
+	}
+	defer func() {
+		_ = db.Callback().Update().Remove(updateCallbackName)
+	}()
+
+	if err := DeleteCanvasSession(1, session.Id); err == nil {
+		t.Fatal("expected DeleteCanvasSession to fail when chat session soft delete fails")
+	}
+
+	reloadedSession, err := model.GetCanvasSessionByID(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload session: %v", err)
+	}
+	if reloadedSession == nil || reloadedSession.DeletedTime != 0 {
+		t.Fatalf("expected chat session deletion to roll back, got %#v", reloadedSession)
+	}
+
+	messageRefs, err := model.ListCanvasSessionMessageTaskRefsForMode(model.CanvasModeChat, 1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to list chat message refs after rollback: %v", err)
+	}
+	if len(messageRefs) != 2 {
+		t.Fatalf("expected chat messages to remain visible after rollback, got %d", len(messageRefs))
+	}
+
+	var attachmentCount int64
+	if err := db.Model(&model.CanvasChatMessageAttachment{}).
+		Where("user_id = ? AND session_id = ?", 1, session.Id).
+		Count(&attachmentCount).Error; err != nil {
+		t.Fatalf("failed to count attachments after rollback: %v", err)
+	}
+	if attachmentCount != 1 {
+		t.Fatalf("expected attachment delete to roll back, got %d rows", attachmentCount)
+	}
+}
+
 func TestDeleteCanvasSessionRejectsRunningAssociatedTasks(t *testing.T) {
 	db := setupCanvasSessionServiceTestDB(t)
 
@@ -2793,6 +2958,49 @@ func TestDeleteCanvasSessionRejectsRunningAssociatedTasks(t *testing.T) {
 	}
 	if reloaded == nil {
 		t.Fatal("session should remain when deletion is rejected")
+	}
+}
+
+func TestDeleteCanvasSessionRejectsRunningImageTask(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage, Title: "running image"})
+	if err != nil {
+		t.Fatalf("failed to create image session: %v", err)
+	}
+	imageTask := &model.ImageGenerationTask{
+		UserId:          1,
+		ModelId:         "gpt-image-test",
+		Prompt:          "image running",
+		RequestEndpoint: "openai",
+		Status:          model.ImageTaskStatusPending,
+		CreatedTime:     common.GetTimestamp(),
+	}
+	if err := db.Create(imageTask).Error; err != nil {
+		t.Fatalf("failed to create image task: %v", err)
+	}
+	if err := model.CreateCanvasMessage(&model.CanvasMessage{
+		SessionId: session.Id,
+		UserId:    1,
+		Mode:      model.CanvasModeImage,
+		Role:      model.CanvasMessageRoleAssistant,
+		Prompt:    "image",
+		Status:    model.ImageTaskStatusPending,
+		TaskId:    strconv.Itoa(imageTask.Id),
+		TaskType:  model.CanvasTaskTypeImage,
+	}); err != nil {
+		t.Fatalf("failed to create image canvas message: %v", err)
+	}
+
+	if err := DeleteCanvasSession(1, session.Id); err == nil {
+		t.Fatal("expected running image task to block session deletion")
+	}
+	reloaded, err := model.GetCanvasSessionByID(1, session.Id)
+	if err != nil {
+		t.Fatalf("failed to reload image session: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("image session should remain when deletion is rejected")
 	}
 }
 

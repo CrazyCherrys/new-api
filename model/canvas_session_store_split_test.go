@@ -475,6 +475,153 @@ func TestDeleteCanvasSessionDataWithSessionDeletesTasksFromDedicatedDomainDB(t *
 	}
 }
 
+func TestDeleteCanvasChatSessionDataWithSessionDeletesAttachmentsInDedicatedChatDB(t *testing.T) {
+	_, childDBs := setupCanvasFullSplitTestDBs(t)
+
+	chatSession := &CanvasSession{UserId: 12, Mode: CanvasModeChat, Title: "chat delete"}
+	if err := CreateCanvasSession(chatSession); err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	userMessage := &CanvasMessage{
+		SessionId: chatSession.Id,
+		UserId:    12,
+		Mode:      CanvasModeChat,
+		Role:      CanvasMessageRoleUser,
+		Prompt:    "chat",
+		Metadata:  `{"attachments":[{"kind":"image","name":"ref.png","mime_type":"image/png","data":"data:image/png;base64,AA=="}]}`,
+		Status:    CanvasMessageStatusSuccess,
+	}
+	if err := CreateCanvasMessageForMode(CanvasModeChat, userMessage); err != nil {
+		t.Fatalf("failed to create chat user message: %v", err)
+	}
+	assistantMessage := &CanvasMessage{
+		SessionId: chatSession.Id,
+		UserId:    12,
+		Mode:      CanvasModeChat,
+		Role:      CanvasMessageRoleAssistant,
+		Prompt:    "reply",
+		Status:    CanvasMessageStatusSuccess,
+	}
+	if err := CreateCanvasMessageForMode(CanvasModeChat, assistantMessage); err != nil {
+		t.Fatalf("failed to create chat assistant message: %v", err)
+	}
+
+	var beforeCount int64
+	if err := childDBs[CanvasModeChat].Model(&CanvasChatMessageAttachment{}).
+		Where("user_id = ? AND session_id = ?", 12, chatSession.Id).
+		Count(&beforeCount).Error; err != nil {
+		t.Fatalf("failed to count dedicated chat attachments before delete: %v", err)
+	}
+	if beforeCount != 1 {
+		t.Fatalf("expected 1 dedicated chat attachment before delete, got %d", beforeCount)
+	}
+
+	if err := DeleteCanvasSessionDataWithSession(12, chatSession, []int{userMessage.Id, assistantMessage.Id}, nil, nil, nil, 120); err != nil {
+		t.Fatalf("failed to delete chat session data: %v", err)
+	}
+
+	var afterCount int64
+	if err := childDBs[CanvasModeChat].Model(&CanvasChatMessageAttachment{}).
+		Where("user_id = ? AND session_id = ?", 12, chatSession.Id).
+		Count(&afterCount).Error; err != nil {
+		t.Fatalf("failed to count dedicated chat attachments after delete: %v", err)
+	}
+	if afterCount != 0 {
+		t.Fatalf("expected dedicated chat attachments to be deleted, got %d", afterCount)
+	}
+
+	reloadedSession, err := GetCanvasSessionByID(12, chatSession.Id)
+	if err != nil {
+		t.Fatalf("failed to reload deleted chat session: %v", err)
+	}
+	if reloadedSession != nil {
+		t.Fatalf("expected chat session to be soft deleted, got %#v", reloadedSession)
+	}
+	messageRefs, err := ListCanvasSessionMessageTaskRefsForMode(CanvasModeChat, 12, chatSession.Id)
+	if err != nil {
+		t.Fatalf("failed to list chat message refs after delete: %v", err)
+	}
+	if len(messageRefs) != 0 {
+		t.Fatalf("expected dedicated chat messages to be soft deleted, got %d", len(messageRefs))
+	}
+}
+
+func TestDeleteCanvasChatSessionDataWithSessionRollsBackAttachmentDeleteOnSessionFailureInDedicatedChatDB(t *testing.T) {
+	_, childDBs := setupCanvasFullSplitTestDBs(t)
+
+	chatSession := &CanvasSession{UserId: 13, Mode: CanvasModeChat, Title: "chat rollback"}
+	if err := CreateCanvasSession(chatSession); err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	userMessage := &CanvasMessage{
+		SessionId: chatSession.Id,
+		UserId:    13,
+		Mode:      CanvasModeChat,
+		Role:      CanvasMessageRoleUser,
+		Prompt:    "chat",
+		Metadata:  `{"attachments":[{"kind":"image","name":"ref.png","mime_type":"image/png","data":"data:image/png;base64,AA=="}]}`,
+		Status:    CanvasMessageStatusSuccess,
+	}
+	if err := CreateCanvasMessageForMode(CanvasModeChat, userMessage); err != nil {
+		t.Fatalf("failed to create chat user message: %v", err)
+	}
+	assistantMessage := &CanvasMessage{
+		SessionId: chatSession.Id,
+		UserId:    13,
+		Mode:      CanvasModeChat,
+		Role:      CanvasMessageRoleAssistant,
+		Prompt:    "reply",
+		Status:    CanvasMessageStatusSuccess,
+	}
+	if err := CreateCanvasMessageForMode(CanvasModeChat, assistantMessage); err != nil {
+		t.Fatalf("failed to create chat assistant message: %v", err)
+	}
+
+	updateCallbackName := "fail_dedicated_canvas_chat_session_soft_delete"
+	if err := childDBs[CanvasModeChat].Callback().Update().Before("gorm:update").Register(updateCallbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "canvas_sessions" {
+			tx.AddError(fmt.Errorf("boom"))
+		}
+	}); err != nil {
+		t.Fatalf("failed to register dedicated update callback: %v", err)
+	}
+	defer func() {
+		_ = childDBs[CanvasModeChat].Callback().Update().Remove(updateCallbackName)
+	}()
+
+	if err := DeleteCanvasSessionDataWithSession(13, chatSession, []int{userMessage.Id, assistantMessage.Id}, nil, nil, nil, 121); err == nil {
+		t.Fatal("expected dedicated chat delete to fail when session soft delete fails")
+	}
+
+	reloadedSession, err := GetCanvasSessionByID(13, chatSession.Id)
+	if err != nil {
+		t.Fatalf("failed to reload chat session after rollback: %v", err)
+	}
+	if reloadedSession == nil || reloadedSession.DeletedTime != 0 {
+		t.Fatalf("expected chat session to remain undeleted after rollback, got %#v", reloadedSession)
+	}
+
+	messageRefs, err := ListCanvasSessionMessageTaskRefsForMode(CanvasModeChat, 13, chatSession.Id)
+	if err != nil {
+		t.Fatalf("failed to list chat message refs after rollback: %v", err)
+	}
+	if len(messageRefs) != 2 {
+		t.Fatalf("expected dedicated chat messages to remain visible after rollback, got %d", len(messageRefs))
+	}
+
+	var attachmentCount int64
+	if err := childDBs[CanvasModeChat].Model(&CanvasChatMessageAttachment{}).
+		Where("user_id = ? AND session_id = ?", 13, chatSession.Id).
+		Count(&attachmentCount).Error; err != nil {
+		t.Fatalf("failed to count dedicated chat attachments after rollback: %v", err)
+	}
+	if attachmentCount != 1 {
+		t.Fatalf("expected dedicated chat attachment delete to roll back, got %d", attachmentCount)
+	}
+}
+
 func TestBackfillCanvasDedicatedDBsCopiesMainRowsIdempotently(t *testing.T) {
 	mainDB, childDBs := setupCanvasFullSplitTestDBs(t)
 	if err := mainDB.AutoMigrate(
