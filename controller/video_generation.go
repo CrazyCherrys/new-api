@@ -68,6 +68,10 @@ func GetVideoGenerationTasks(c *gin.Context) {
 		c.Query("cursor"),
 		c.Query("status"),
 		c.Query("model_id"),
+		c.Query("model_series"),
+		c.Query("keyword"),
+		c.Query("sort_by"),
+		c.Query("sort_order"),
 		startTime,
 		endTime,
 	)

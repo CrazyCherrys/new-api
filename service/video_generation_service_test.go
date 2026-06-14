@@ -466,7 +466,7 @@ func TestListVideoGenerationTasksUsesSQLFilterAndBatchedMappings(t *testing.T) {
 		_ = db.Callback().Query().Remove(callbackName)
 	}()
 
-	page, err := ListVideoGenerationTasks(1, 1, 1, "", "", "video-alpha", 0, 0)
+	page, err := ListVideoGenerationTasks(1, 1, 1, "", "", "video-alpha", "", "", "", "", 0, 0)
 	if err != nil {
 		t.Fatalf("ListVideoGenerationTasks returned error: %v", err)
 	}
@@ -543,7 +543,7 @@ func TestListVideoGenerationTasksCursorPaginationReturnsNextCursor(t *testing.T)
 		}
 	}
 
-	firstPage, err := ListVideoGenerationTasks(1, 1, 2, "", "", "", 0, 0)
+	firstPage, err := ListVideoGenerationTasks(1, 1, 2, "", "", "", "", "", "", "", 0, 0)
 	if err != nil {
 		t.Fatalf("failed to list first page: %v", err)
 	}
@@ -560,7 +560,7 @@ func TestListVideoGenerationTasksCursorPaginationReturnsNextCursor(t *testing.T)
 		t.Fatalf("unexpected first page ordering: %#v", got)
 	}
 
-	secondPage, err := ListVideoGenerationTasks(1, 2, 2, firstPage.NextCursor, "", "", 0, 0)
+	secondPage, err := ListVideoGenerationTasks(1, 2, 2, firstPage.NextCursor, "", "", "", "", "", "", 0, 0)
 	if err != nil {
 		t.Fatalf("failed to list second page: %v", err)
 	}
@@ -572,6 +572,100 @@ func TestListVideoGenerationTasksCursorPaginationReturnsNextCursor(t *testing.T)
 	}
 	if len(secondPage.Items) != 1 || secondPage.Items[0].CreatedTime != 100 {
 		t.Fatalf("unexpected second page items: %#v", secondPage.Items)
+	}
+}
+
+func TestListVideoGenerationTasksSupportsKeywordSeriesAndSort(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	for _, mapping := range []*model.ModelMapping{
+		{
+			RequestModel:    "video-alpha",
+			ActualModel:     "video-alpha",
+			DisplayName:     "Video Alpha",
+			ModelSeries:     "series-a",
+			ModelType:       3,
+			Status:          1,
+			RequestEndpoint: "openai-video",
+		},
+		{
+			RequestModel:    "video-beta",
+			ActualModel:     "video-beta",
+			DisplayName:     "Video Beta",
+			ModelSeries:     "series-b",
+			ModelType:       3,
+			Status:          1,
+			RequestEndpoint: "openai-video-generation",
+		},
+	} {
+		if err := db.Create(mapping).Error; err != nil {
+			t.Fatalf("failed to create model mapping: %v", err)
+		}
+	}
+
+	tasks := []*model.Task{
+		{
+			UserId:     1,
+			TaskID:     "task_video_keyword_1",
+			Action:     constant.TaskActionTextGenerate,
+			Status:     model.TaskStatusSuccess,
+			Progress:   "100%",
+			SubmitTime: 100,
+			FinishTime: 200,
+			Quota:      10,
+			Properties: model.Properties{
+				Input:             "ocean sunrise prompt",
+				OriginModelName:   "video-alpha",
+				UpstreamModelName: "video-alpha",
+			},
+		},
+		{
+			UserId:     1,
+			TaskID:     "task_video_keyword_2",
+			Action:     constant.TaskActionTextGenerate,
+			Status:     model.TaskStatusSuccess,
+			Progress:   "100%",
+			SubmitTime: 110,
+			FinishTime: 210,
+			Quota:      90,
+			Properties: model.Properties{
+				Input:             "forest dusk prompt",
+				OriginModelName:   "video-beta",
+				UpstreamModelName: "video-beta",
+			},
+		},
+	}
+	for _, task := range tasks {
+		if err := db.Create(task).Error; err != nil {
+			t.Fatalf("failed to create video task: %v", err)
+		}
+	}
+
+	page, err := ListVideoGenerationTasks(
+		1,
+		1,
+		10,
+		"",
+		"completed",
+		"",
+		"series-b",
+		"forest",
+		"cost",
+		"desc",
+		0,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("ListVideoGenerationTasks returned error: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected one filtered task, got %d", len(page.Items))
+	}
+	if page.Items[0].ModelID != "video-beta" {
+		t.Fatalf("expected filtered series model video-beta, got %#v", page.Items[0])
+	}
+	if page.Items[0].Prompt != "forest dusk prompt" {
+		t.Fatalf("expected keyword matched prompt, got %#v", page.Items[0])
 	}
 }
 

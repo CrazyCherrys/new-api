@@ -17,30 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
+import { Button, Checkbox, Empty, Input, Popconfirm, Select, SideSheet, Spin, Tag, Typography } from '@douyinfe/semi-ui';
 import {
-  Button,
-  Empty,
-  Input,
-  Select,
-  SideSheet,
-  Spin,
-  Tag,
-  Typography,
-  Checkbox,
-  Popconfirm,
-} from '@douyinfe/semi-ui';
-import { formatModelSeriesLabel } from '../../helpers/modelSeries';
-import {
+  IconArrowLeft,
   IconChevronUp,
   IconCopy,
   IconDelete,
@@ -51,13 +34,22 @@ import {
   IconRefresh,
   IconSearch,
   IconTick,
+  IconVideo,
 } from '@douyinfe/semi-icons';
 import { API, copy, renderQuota, showError, showSuccess } from '../../helpers';
+import { formatModelSeriesLabel } from '../../helpers/modelSeries';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { useContainerWidth } from '../../hooks/common/useContainerWidth';
+import PlayableVideo from '../../components/PlayableVideo';
+import VideoGenerationTaskCard from '../../components/VideoGenerationTaskCard';
 
 const { Paragraph } = Typography;
 const PAGE_SIZE = 24;
+const MEDIA_IMAGE = 'image';
+const MEDIA_VIDEO = 'video';
+
+const EMPTY_FILTERS = { models: [], series: [] };
+const EMPTY_STATS = { total_assets: 0, latest_created_time: 0 };
 
 const Assets = () => {
   const { t } = useTranslation();
@@ -65,118 +57,114 @@ const Assets = () => {
   const isMobile = useIsMobile();
   const [shellRef, shellWidth] = useContainerWidth();
 
-  const [assets, setAssets] = useState([]);
-  const [filters, setFilters] = useState({ models: [], series: [] });
-  const [stats, setStats] = useState({
-    total_assets: 0,
-    latest_created_time: 0,
+  const [activeMediaType, setActiveMediaType] = useState(MEDIA_IMAGE);
+  const [imageState, setImageState] = useState({
+    items: [],
+    filters: EMPTY_FILTERS,
+    stats: EMPTY_STATS,
+    loading: false,
+    loadingMore: false,
+    page: 1,
+    total: 0,
+    hasMore: false,
+    keyword: '',
+    submittedKeyword: '',
+    modelId: '',
+    modelSeries: '',
+    timeRange: '',
+    sortValue: 'created_time_desc',
+    selectedIds: new Set(),
   });
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [batchDeleting, setBatchDeleting] = useState(false);
-  const [selectedAsset, setSelectedAsset] = useState(null);
+  const [videoState, setVideoState] = useState({
+    items: [],
+    filters: EMPTY_FILTERS,
+    stats: EMPTY_STATS,
+    loading: false,
+    loadingMore: false,
+    page: 1,
+    total: 0,
+    hasMore: false,
+    nextCursor: '',
+    keyword: '',
+    submittedKeyword: '',
+    modelId: '',
+    modelSeries: '',
+    timeRange: '',
+    sortValue: 'created_time_desc',
+    selectedIds: new Set(),
+  });
   const [detailVisible, setDetailVisible] = useState(false);
-  const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
-  const [selectedAssetIds, setSelectedAssetIds] = useState(() => new Set());
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [keyword, setKeyword] = useState('');
-  const [submittedKeyword, setSubmittedKeyword] = useState('');
-  const [modelId, setModelId] = useState('');
-  const [modelSeries, setModelSeries] = useState('');
-  const [timeRange, setTimeRange] = useState('');
-  const [sortValue, setSortValue] = useState('created_time_desc');
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedAsset, setSelectedAsset] = useState(null);
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
-  const sentinelRef = useRef(null);
-  const loadingPagesRef = useRef(new Set());
-  const loadSeqRef = useRef(0);
+  const imageSentinelRef = useRef(null);
+  const videoSentinelRef = useRef(null);
+  const imageLoadSeqRef = useRef(0);
+  const videoLoadSeqRef = useRef(0);
   const detailSeqRef = useRef(0);
+  const loadingPagesRef = useRef(new Set());
+  const videoFiltersLoadedRef = useRef(false);
 
-  const hasMore = assets.length < total;
-  const activeFilterCount = [
-    submittedKeyword,
-    modelId,
-    modelSeries,
-    timeRange,
-  ].filter(Boolean).length;
+  const activeState = activeMediaType === MEDIA_IMAGE ? imageState : videoState;
+  const setActiveState =
+    activeMediaType === MEDIA_IMAGE ? setImageState : setVideoState;
+  const sentinelRef = activeMediaType === MEDIA_IMAGE ? imageSentinelRef : videoSentinelRef;
 
-  const formatTime = (timestamp) => {
+  const formatTime = useCallback((timestamp) => {
     if (!timestamp) return '-';
     return dayjs(timestamp * 1000).format('YYYY/MM/DD HH:mm');
-  };
+  }, []);
 
-  const formatSeries = (series) => {
-    if (!series) return t('未分组');
-    return formatModelSeriesLabel(series, t('未分组'));
-  };
-
-  const parseJsonObject = (raw) => {
+  const parseJsonObject = useCallback((raw) => {
     if (!raw) return {};
     try {
       const parsed = JSON.parse(raw);
       return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (e) {
+    } catch (error) {
       return {};
     }
-  };
+  }, []);
 
-  const parseSortValue = (value) => {
-    const parts = (value || 'created_time_desc').split('_');
+  const parseSortValue = useCallback((value) => {
+    const normalized = value || 'created_time_desc';
+    const parts = normalized.split('_');
     const sortOrder = parts.pop() || 'desc';
     return {
       sort_by: parts.join('_') || 'created_time',
       sort_order: sortOrder,
     };
-  };
+  }, []);
 
-  const selectedParams = useMemo(
-    () => parseJsonObject(selectedAsset?.params),
-    [selectedAsset?.params],
-  );
-  const selectedMetadata = useMemo(
-    () => parseJsonObject(selectedAsset?.image_metadata),
-    [selectedAsset?.image_metadata],
-  );
-
-  const getInspirationStatusMeta = useCallback(
-    (status) => {
-      const statusMap = {
-        pending: { label: t('审核中'), color: 'orange' },
-        approved: { label: t('已展示'), color: 'green' },
-        rejected: { label: t('已驳回'), color: 'red' },
-      };
-      return statusMap[status || ''] || { label: t('未提交'), color: 'blue' };
+  const formatSeries = useCallback(
+    (series) => {
+      if (!series) return t('未分组');
+      return formatModelSeriesLabel(series, t('未分组'));
     },
     [t],
   );
 
-  const selectedInspirationStatusMeta = useMemo(
-    () =>
-      getInspirationStatusMeta(selectedAsset?.inspiration_submission_status),
-    [getInspirationStatusMeta, selectedAsset?.inspiration_submission_status],
-  );
-
-  const selectedAssets = useMemo(
-    () =>
-      assets.filter((asset) => selectedAssetIds.has(asset.task_id || asset.id)),
-    [assets, selectedAssetIds],
-  );
+  const activeFilterCount = [
+    activeState.submittedKeyword,
+    activeState.modelId,
+    activeState.modelSeries,
+    activeState.timeRange,
+  ].filter(Boolean).length;
 
   const visibleAssetIds = useMemo(
-    () => assets.map((asset) => asset.task_id || asset.id),
-    [assets],
+    () => activeState.items.map((asset) => asset.assetKey),
+    [activeState.items],
   );
 
-  const selectedCount = selectedAssetIds.size;
+  const selectedCount = activeState.selectedIds.size;
   const hasSelectedAssets = selectedCount > 0;
   const visibleSelectedCount = useMemo(
     () =>
       visibleAssetIds.reduce(
-        (count, id) => count + (selectedAssetIds.has(id) ? 1 : 0),
+        (count, id) => count + (activeState.selectedIds.has(id) ? 1 : 0),
         0,
       ),
-    [selectedAssetIds, visibleAssetIds],
+    [activeState.selectedIds, visibleAssetIds],
   );
   const allVisibleSelected =
     visibleAssetIds.length > 0 &&
@@ -184,142 +172,326 @@ const Assets = () => {
   const partiallyVisibleSelected =
     visibleSelectedCount > 0 && !allVisibleSelected;
 
-  const masonryColumnCount = useMemo(() => {
-    if (!shellWidth) return 1;
-    let preferredColumns = 5;
-    if (shellWidth <= 420) {
-      preferredColumns = 1;
-    } else if (shellWidth <= 780) {
-      preferredColumns = 2;
-    } else if (shellWidth <= 1180) {
-      preferredColumns = 3;
-    } else if (shellWidth <= 1540) {
-      preferredColumns = 4;
-    }
-    return Math.max(1, Math.min(assets.length || 1, preferredColumns));
-  }, [assets.length, shellWidth]);
+  const currentDetailAsset = selectedAsset;
+  const selectedImageParams = useMemo(
+    () => parseJsonObject(currentDetailAsset?.params),
+    [currentDetailAsset?.params, parseJsonObject],
+  );
+  const selectedImageMetadata = useMemo(
+    () => parseJsonObject(currentDetailAsset?.image_metadata),
+    [currentDetailAsset?.image_metadata, parseJsonObject],
+  );
 
-  const getTimeRangeParams = useCallback(() => {
+  const selectedInspirationStatusMeta = useMemo(() => {
+    const statusMap = {
+      pending: { label: t('审核中'), color: 'orange' },
+      approved: { label: t('已展示'), color: 'green' },
+      rejected: { label: t('已驳回'), color: 'red' },
+    };
+    return (
+      statusMap[currentDetailAsset?.inspiration_submission_status || ''] || {
+        label: t('未提交'),
+        color: 'blue',
+      }
+    );
+  }, [currentDetailAsset?.inspiration_submission_status, t]);
+
+  const getTimeRangeParams = useCallback((timeRange) => {
+    if (!timeRange) {
+      return {};
+    }
     const now = dayjs();
-    switch (timeRange) {
-      case 'today':
-        return {
-          start_time: now.startOf('day').unix(),
-          end_time: now.endOf('day').unix(),
-        };
-      case 'last7d':
-        return {
-          start_time: now.subtract(6, 'day').startOf('day').unix(),
-          end_time: now.endOf('day').unix(),
-        };
-      case 'last30d':
-        return {
-          start_time: now.subtract(29, 'day').startOf('day').unix(),
-          end_time: now.endOf('day').unix(),
-        };
-      case 'thisMonth':
-        return {
-          start_time: now.startOf('month').unix(),
-          end_time: now.endOf('month').unix(),
-        };
-      default:
-        return {};
+    if (timeRange === 'today') {
+      return {
+        start_time: now.startOf('day').unix(),
+        end_time: now.endOf('day').unix(),
+      };
     }
-  }, [timeRange]);
+    if (timeRange === 'last7d') {
+      return {
+        start_time: now.subtract(6, 'day').startOf('day').unix(),
+        end_time: now.endOf('day').unix(),
+      };
+    }
+    if (timeRange === 'last30d') {
+      return {
+        start_time: now.subtract(29, 'day').startOf('day').unix(),
+        end_time: now.endOf('day').unix(),
+      };
+    }
+    if (timeRange === 'thisMonth') {
+      return {
+        start_time: now.startOf('month').unix(),
+        end_time: now.endOf('month').unix(),
+      };
+    }
+    return {};
+  }, []);
 
-  const buildQueryParams = useCallback(
-    (nextPage) => {
+  const buildImageParams = useCallback(
+    (queryState, nextPage) => {
       const params = {
         p: nextPage,
         page_size: PAGE_SIZE,
-        ...parseSortValue(sortValue),
-        ...getTimeRangeParams(),
+        ...parseSortValue(queryState.sortValue),
+        ...getTimeRangeParams(queryState.timeRange),
       };
-      if (submittedKeyword.trim()) {
-        params.keyword = submittedKeyword.trim();
+      if (queryState.submittedKeyword.trim()) {
+        params.keyword = queryState.submittedKeyword.trim();
       }
-      if (modelId) {
-        params.model_id = modelId;
-      }
-      if (modelSeries) {
-        params.model_series = modelSeries;
-      }
+      if (queryState.modelId) params.model_id = queryState.modelId;
+      if (queryState.modelSeries) params.model_series = queryState.modelSeries;
       return params;
     },
-    [getTimeRangeParams, modelId, modelSeries, sortValue, submittedKeyword],
+    [getTimeRangeParams, parseSortValue],
   );
 
-  const loadAssets = useCallback(
-    async (nextPage = 1, append = false) => {
-      const requestSeq = ++loadSeqRef.current;
-      if (append) {
-        setLoadingMore(true);
-      } else {
-        setLoading(true);
+  const buildVideoParams = useCallback(
+    (queryState, nextPage) => {
+      const params = {
+        p: nextPage,
+        page_size: PAGE_SIZE,
+        status: 'completed',
+        ...parseSortValue(queryState.sortValue),
+        ...getTimeRangeParams(queryState.timeRange),
+      };
+      if (queryState.submittedKeyword.trim()) {
+        params.keyword = queryState.submittedKeyword.trim();
       }
+      if (queryState.modelId) params.model_id = queryState.modelId;
+      if (queryState.modelSeries) params.model_series = queryState.modelSeries;
+      return params;
+    },
+    [getTimeRangeParams, parseSortValue],
+  );
+
+  const loadImageAssets = useCallback(
+    async (nextPage = 1, append = false, queryState = imageState) => {
+      const requestSeq = ++imageLoadSeqRef.current;
+      setImageState((prev) => ({
+        ...prev,
+        loading: !append,
+        loadingMore: append,
+      }));
+      const params = buildImageParams(queryState, nextPage);
 
       try {
-        const res = await API.get('/api/image-generation/assets', {
-          params: buildQueryParams(nextPage),
-        });
-        if (requestSeq !== loadSeqRef.current) return;
-
+        const res = await API.get('/api/image-generation/assets', { params });
+        if (requestSeq !== imageLoadSeqRef.current) return;
         if (res.data.success) {
           const data = res.data.data || {};
-          const items = data.items || [];
-          setAssets((prev) => {
-            if (!append) return items;
-            const seen = new Set(
-              prev.map((asset) => asset.task_id || asset.id),
-            );
-            const nextItems = items.filter(
-              (asset) => !seen.has(asset.task_id || asset.id),
-            );
-            return [...prev, ...nextItems];
-          });
-          setTotal(data.total || 0);
-          setPage(data.page || nextPage);
-          setStats(data.stats || { total_assets: 0, latest_created_time: 0 });
-          setFilters(data.filters || { models: [], series: [] });
+          const items = (data.items || []).map((item) => ({
+            ...item,
+            mediaType: MEDIA_IMAGE,
+            assetKey: item.task_id || item.id,
+          }));
+          setImageState((prev) => ({
+            ...prev,
+            items: append ? [...prev.items, ...items] : items,
+            filters: data.filters || EMPTY_FILTERS,
+            stats: data.stats || EMPTY_STATS,
+            page: data.page || nextPage,
+            total: data.total || 0,
+            hasMore:
+              typeof data.total === 'number'
+                ? (append ? prev.items.length : 0) + items.length < data.total
+                : false,
+            loading: false,
+            loadingMore: false,
+          }));
         } else {
           showError(res.data.message || t('加载资产失败'));
         }
       } catch (error) {
-        if (requestSeq !== loadSeqRef.current) return;
+        if (requestSeq !== imageLoadSeqRef.current) return;
         showError(error.message || t('加载资产失败'));
+        setImageState((prev) => ({
+          ...prev,
+          loading: false,
+          loadingMore: false,
+        }));
       } finally {
-        if (requestSeq !== loadSeqRef.current) return;
-        loadingPagesRef.current.delete(nextPage);
-        if (append) {
-          setLoadingMore(false);
-        } else {
-          setLoading(false);
-        }
+        loadingPagesRef.current.delete(`image:${nextPage}`);
       }
     },
-    [buildQueryParams, t],
+    [buildImageParams, imageState, t],
   );
 
-  useEffect(() => {
+  const loadVideoAssets = useCallback(
+    async (nextPage = 1, append = false, queryState = videoState) => {
+      const requestSeq = ++videoLoadSeqRef.current;
+      setVideoState((prev) => ({
+        ...prev,
+        loading: !append,
+        loadingMore: append,
+      }));
+      const params = buildVideoParams(queryState, nextPage);
+
+      try {
+        const res = await API.get('/api/video-generation/tasks', { params });
+        if (requestSeq !== videoLoadSeqRef.current) return;
+        if (res.data.success) {
+          const data = res.data.data || {};
+          const items = (data.items || []).map((item) => ({
+            ...item,
+            mediaType: MEDIA_VIDEO,
+            assetKey: item.id,
+          }));
+          setVideoState((prev) => ({
+            ...prev,
+            items: append ? [...prev.items, ...items] : items,
+            filters: data.filters || EMPTY_FILTERS,
+            stats: data.stats || EMPTY_STATS,
+            page: data.page || nextPage,
+            total: data.total || 0,
+            nextCursor: data.next_cursor || '',
+            hasMore: Boolean(data.has_more),
+            loading: false,
+            loadingMore: false,
+          }));
+        } else {
+          showError(res.data.message || t('加载视频失败'));
+        }
+      } catch (error) {
+        if (requestSeq !== videoLoadSeqRef.current) return;
+        showError(error.message || t('加载视频失败'));
+        setVideoState((prev) => ({
+          ...prev,
+          loading: false,
+          loadingMore: false,
+        }));
+      } finally {
+        loadingPagesRef.current.delete(`video:${nextPage}`);
+      }
+    },
+    [buildVideoParams, t, videoState],
+  );
+
+  const loadVideoFilters = useCallback(async () => {
+    if (videoFiltersLoadedRef.current) {
+      return;
+    }
+    try {
+      const res = await API.get('/api/video-generation/models');
+      if (!res.data.success) {
+        return;
+      }
+      const items = res.data.data || [];
+      const modelMap = new Map();
+      const seriesMap = new Map();
+      items.forEach((item) => {
+        const modelId = String(item.request_model || '').trim();
+        if (modelId && !modelMap.has(modelId)) {
+          modelMap.set(modelId, {
+            model_id: modelId,
+            display_name: String(item.display_name || modelId).trim(),
+          });
+        }
+        const modelSeries = String(item.model_series || '').trim();
+        if (modelSeries && !seriesMap.has(modelSeries)) {
+          seriesMap.set(modelSeries, {
+            model_series: modelSeries,
+            display_name: String(item.display_name || modelSeries).trim(),
+          });
+        }
+      });
+      const filters = {
+        models: Array.from(modelMap.values()).sort((a, b) =>
+          a.display_name.localeCompare(b.display_name),
+        ),
+        series: Array.from(seriesMap.values()).sort((a, b) =>
+          a.model_series.localeCompare(b.model_series),
+        ),
+      };
+      videoFiltersLoadedRef.current = true;
+      setVideoState((prev) => ({
+        ...prev,
+        filters,
+      }));
+    } catch (error) {
+      // Ignore filter preload errors; page can still render the list itself.
+    }
+  }, []);
+
+  const refreshActiveMedia = useCallback(() => {
+    if (activeMediaType === MEDIA_IMAGE) {
+      imageLoadSeqRef.current += 1;
+      loadingPagesRef.current.clear();
+      setImageState((prev) => ({
+        ...prev,
+        items: [],
+        total: 0,
+        page: 1,
+        hasMore: false,
+      }));
+      loadImageAssets(1, false);
+      return;
+    }
+    videoLoadSeqRef.current += 1;
     loadingPagesRef.current.clear();
-    setLoadingMore(false);
-    setPage(1);
-    loadAssets(1, false);
-  }, [loadAssets]);
+    setVideoState((prev) => ({
+      ...prev,
+      items: [],
+      total: 0,
+      page: 1,
+      nextCursor: '',
+      hasMore: false,
+    }));
+    loadVideoAssets(1, false);
+  }, [activeMediaType, loadImageAssets, loadVideoAssets]);
+
+  useEffect(() => {
+    loadImageAssets(1, false);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (activeMediaType === MEDIA_IMAGE) {
+      if (
+        imageState.items.length === 0 &&
+        !imageState.loading &&
+        imageLoadSeqRef.current === 0
+      ) {
+        loadImageAssets(imageState.page || 1, false);
+      }
+      return;
+    }
+    if (videoState.items.length === 0 && !videoState.loading) {
+      loadVideoFilters();
+      loadVideoAssets(videoState.page || 1, false);
+    }
+  }, [
+    activeMediaType,
+    imageState.items.length,
+    imageState.loading,
+    imageState.page,
+    loadImageAssets,
+    loadVideoFilters,
+    loadVideoAssets,
+    videoState.items.length,
+    videoState.loading,
+    videoState.page,
+  ]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!sentinel || !hasMore || loading || loadingMore) return;
+    if (!sentinel) return undefined;
+    if (!activeState.hasMore || activeState.loading || activeState.loadingMore) {
+      return undefined;
+    }
 
     const observer = new IntersectionObserver(
       (entries) => {
-        const nextPage = page + 1;
+        const nextPage = activeState.page + 1;
         if (
           entries[0]?.isIntersecting &&
-          !loadingPagesRef.current.has(nextPage)
+          !loadingPagesRef.current.has(`${activeMediaType}:${nextPage}`)
         ) {
-          loadingPagesRef.current.add(nextPage);
-          loadAssets(nextPage, true);
+          loadingPagesRef.current.add(`${activeMediaType}:${nextPage}`);
+          if (activeMediaType === MEDIA_IMAGE) {
+            loadImageAssets(nextPage, true);
+          } else {
+            loadVideoAssets(nextPage, true);
+          }
         }
       },
       { rootMargin: '420px 0px' },
@@ -327,41 +499,37 @@ const Assets = () => {
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, loadAssets, loading, loadingMore, page]);
+  }, [
+    activeMediaType,
+    activeState.hasMore,
+    activeState.items,
+    activeState.loading,
+    activeState.loadingMore,
+    activeState.page,
+    loadImageAssets,
+    loadVideoAssets,
+  ]);
 
-  useEffect(() => {
-    if (!detailVisible) {
-      setImagePreviewVisible(false);
-    }
-  }, [detailVisible]);
-
-  const queueListReload = useCallback(() => {
-    loadSeqRef.current += 1;
-    loadingPagesRef.current.clear();
-    setLoadingMore(false);
-    setPage(1);
-    setAssets([]);
-    setTotal(0);
-  }, []);
-
-  const refreshAssets = () => {
-    queueListReload();
-    loadAssets(1, false);
-  };
-
-  const openDetail = async (asset) => {
+  const openDetail = useCallback(async (asset) => {
+    if (!asset?.assetKey) return;
     const requestSeq = ++detailSeqRef.current;
-    setImagePreviewVisible(false);
     setSelectedAsset(asset);
     setDetailVisible(true);
     setDetailLoading(true);
+
     try {
-      const res = await API.get(
-        `/api/image-generation/assets/${asset.task_id || asset.id}`,
-      );
+      const url =
+        asset.mediaType === MEDIA_VIDEO
+          ? `/api/video-generation/tasks/${asset.assetKey}`
+          : `/api/image-generation/assets/${asset.assetKey}`;
+      const res = await API.get(url);
       if (requestSeq !== detailSeqRef.current) return;
       if (res.data.success) {
-        setSelectedAsset(res.data.data);
+        setSelectedAsset({
+          ...(res.data.data || asset),
+          mediaType: asset.mediaType,
+          assetKey: asset.assetKey,
+        });
       } else {
         showError(res.data.message || t('加载资产详情失败'));
       }
@@ -372,108 +540,105 @@ const Assets = () => {
       if (requestSeq !== detailSeqRef.current) return;
       setDetailLoading(false);
     }
-  };
+  }, [t]);
 
-  const toggleAssetSelection = (asset, checked) => {
-    const key = asset.task_id || asset.id;
-    setSelectedAssetIds((prev) => {
-      const next = new Set(prev);
+  const closeDetail = useCallback(() => {
+    setDetailVisible(false);
+  }, []);
+
+  const getActiveTaskId = useCallback((asset) => asset?.task_id || asset?.id, []);
+
+  const handleSelectAsset = useCallback((asset, checked) => {
+    const key = asset.assetKey;
+    setActiveState((prev) => {
+      const next = new Set(prev.selectedIds);
       if (checked) {
         next.add(key);
       } else {
         next.delete(key);
       }
-      return next;
+      return { ...prev, selectedIds: next };
     });
-  };
+  }, [setActiveState]);
 
-  const toggleAllVisibleAssets = () => {
-    setSelectedAssetIds((prev) => {
-      const next = new Set(prev);
+  const toggleAllVisibleAssets = useCallback(() => {
+    setActiveState((prev) => {
+      const next = new Set(prev.selectedIds);
       const shouldSelect = visibleAssetIds.some((id) => !next.has(id));
       visibleAssetIds.forEach((id) => {
-        if (shouldSelect) {
-          next.add(id);
-        } else {
-          next.delete(id);
-        }
+        if (shouldSelect) next.add(id);
+        else next.delete(id);
       });
-      return next;
+      return { ...prev, selectedIds: next };
     });
-  };
+  }, [setActiveState, visibleAssetIds]);
 
-  const clearSelectedAssets = () => {
-    setSelectedAssetIds(new Set());
-  };
+  const clearSelectedAssets = useCallback(() => {
+    setActiveState((prev) => ({ ...prev, selectedIds: new Set() }));
+  }, [setActiveState]);
 
-  const copyPrompt = async (asset) => {
-    if (!asset?.prompt) {
-      showError(t('暂无提示词'));
-      return;
-    }
-    if (await copy(asset.prompt)) {
-      showSuccess(t('已复制到剪贴板'));
-    } else {
-      showError(t('复制失败'));
-    }
-  };
+  const copyPrompt = useCallback(
+    async (asset) => {
+      if (!asset?.prompt) {
+        showError(t('暂无提示词'));
+        return;
+      }
+      if (await copy(asset.prompt)) {
+        showSuccess(t('已复制到剪贴板'));
+      } else {
+        showError(t('复制失败'));
+      }
+    },
+    [t],
+  );
 
-  const downloadAsset = (asset) => {
-    if (!asset?.image_url) return;
+  const downloadAsset = useCallback((asset) => {
+    const url = asset?.mediaType === MEDIA_VIDEO ? asset?.video_url || asset?.result_url : asset?.image_url;
+    if (!url) return;
     const link = document.createElement('a');
-    link.href = asset.image_url;
-    link.download = `image-${asset.task_id || asset.id}.png`;
+    link.href = url;
+    link.download = `${asset.mediaType}-${asset.assetKey}`;
     link.target = '_blank';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
+  }, []);
 
-  const downloadSelectedAssets = () => {
+  const deleteSelectedAssets = useCallback(async () => {
+    const selectedAssets = activeState.items.filter((asset) => activeState.selectedIds.has(asset.assetKey));
     if (!selectedAssets.length) return;
-    selectedAssets.forEach((asset, index) => {
-      setTimeout(() => downloadAsset(asset), index * 120);
-    });
-  };
 
-  const deleteSelectedAssets = async () => {
-    if (!selectedAssets.length) return;
     setBatchDeleting(true);
     try {
       const results = await Promise.allSettled(
-        selectedAssets.map((asset) =>
-          API.delete(
-            `/api/image-generation/tasks/${asset.task_id || asset.id}`,
-          ),
-        ),
+        selectedAssets.map((asset) => {
+          const url =
+            asset.mediaType === MEDIA_VIDEO
+              ? `/api/video-generation/tasks/${asset.assetKey}`
+              : `/api/image-generation/tasks/${asset.assetKey}`;
+          return API.delete(url);
+        }),
       );
-      const successIds = [];
+      const successKeys = [];
       const failedCount = results.reduce((count, result, index) => {
         if (result.status === 'fulfilled' && result.value?.data?.success) {
-          successIds.push(
-            selectedAssets[index].task_id || selectedAssets[index].id,
-          );
+          successKeys.push(selectedAssets[index].assetKey);
           return count;
         }
         return count + 1;
       }, 0);
-      if (successIds.length > 0) {
-        setAssets((prev) =>
-          prev.filter(
-            (asset) => !successIds.includes(asset.task_id || asset.id),
-          ),
-        );
-        setTotal((prev) => Math.max(0, prev - successIds.length));
-        setSelectedAssetIds((prev) => {
-          const next = new Set(prev);
-          successIds.forEach((id) => next.delete(id));
-          return next;
-        });
-      }
-      if (successIds.length > 0) {
-        showSuccess(
-          t('删除成功 {{count}} 个任务', { count: successIds.length }),
-        );
+      if (successKeys.length > 0) {
+        setActiveState((prev) => ({
+          ...prev,
+          items: prev.items.filter((asset) => !successKeys.includes(asset.assetKey)),
+          total: Math.max(0, prev.total - successKeys.length),
+          selectedIds: (() => {
+            const next = new Set(prev.selectedIds);
+            successKeys.forEach((key) => next.delete(key));
+            return next;
+          })(),
+        }));
+        showSuccess(t('删除成功 {{count}} 个任务', { count: successKeys.length }));
       }
       if (failedCount > 0) {
         showError(t('删除失败 {{count}} 个任务', { count: failedCount }));
@@ -483,121 +648,487 @@ const Assets = () => {
     } finally {
       setBatchDeleting(false);
     }
-  };
+  }, [activeState.items, activeState.selectedIds, setActiveState, t]);
 
-  const openSourceTask = (asset) => {
-    navigate(`/canvas?task_id=${asset.task_id || asset.id}`);
-  };
+  const handleVideoRetry = useCallback(
+    async (asset) => {
+      if (!asset?.assetKey) return;
+      try {
+        const res = await API.post(`/api/video-generation/tasks/${asset.assetKey}/retry`);
+        if (res.data.success) {
+          showSuccess(t('已创建新的重试任务'));
+          refreshActiveMedia();
+        } else {
+          showError(res.data.message || t('重试失败'));
+        }
+      } catch (error) {
+        showError(error.message || t('重试失败'));
+      }
+    },
+    [refreshActiveMedia, t],
+  );
 
-  const submitSearch = () => {
-    const nextKeyword = keyword.trim();
-    queueListReload();
-    if (nextKeyword === submittedKeyword) {
-      loadAssets(1, false);
-    } else {
-      setSubmittedKeyword(nextKeyword);
+  const openSourceTask = useCallback((asset) => {
+    if (!asset?.assetKey) return;
+    if (asset.mediaType === MEDIA_VIDEO) {
+      navigate(`/canvas?task_id=${asset.assetKey}&mode=video`);
+      return;
     }
-  };
+    navigate(`/canvas?task_id=${asset.assetKey}`);
+  }, [navigate]);
 
-  const handleModelSeriesChange = (value) => {
-    const nextValue = value || '';
-    if (nextValue === modelSeries) return;
-    queueListReload();
-    setModelSeries(nextValue);
-  };
+  const openTaskLogs = useCallback(() => {
+    navigate('/console/log');
+  }, [navigate]);
 
-  const handleModelIdChange = (value) => {
-    const nextValue = value || '';
-    if (nextValue === modelId) return;
-    queueListReload();
-    setModelId(nextValue);
-  };
+  const handleMediaTypeSwitch = useCallback(
+    (mediaType) => {
+      if (mediaType === activeMediaType) return;
+      setActiveMediaType(mediaType);
+    },
+    [activeMediaType],
+  );
 
-  const handleTimeRangeChange = (value) => {
-    const nextValue = value || '';
-    if (nextValue === timeRange) return;
-    queueListReload();
-    setTimeRange(nextValue);
-  };
-
-  const handleSortChange = (value) => {
-    const nextValue = value || 'created_time_desc';
-    if (nextValue === sortValue) return;
-    queueListReload();
-    setSortValue(nextValue);
-  };
-
-  const resetFilters = () => {
-    const alreadyDefault =
-      !keyword &&
-      !submittedKeyword &&
-      !modelId &&
-      !modelSeries &&
-      !timeRange &&
-      sortValue === 'created_time_desc';
-
-    queueListReload();
-    setKeyword('');
-    setSubmittedKeyword('');
-    setModelId('');
-    setModelSeries('');
-    setTimeRange('');
-    setSortValue('created_time_desc');
-
-    if (
-      alreadyDefault ||
-      (!submittedKeyword && !modelId && !modelSeries && !timeRange)
-    ) {
-      loadAssets(1, false);
+  const submitSearch = useCallback(() => {
+    if (activeMediaType === MEDIA_IMAGE) {
+      setImageState((prev) => {
+        const next = {
+          ...prev,
+          submittedKeyword: prev.keyword.trim(),
+          items: [],
+          total: 0,
+          page: 1,
+          hasMore: false,
+        };
+        imageLoadSeqRef.current += 1;
+        loadImageAssets(1, false, next);
+        return next;
+      });
+      return;
     }
-  };
+    setVideoState((prev) => {
+      const next = {
+        ...prev,
+        submittedKeyword: prev.keyword.trim(),
+        items: [],
+        total: 0,
+        page: 1,
+        hasMore: false,
+        nextCursor: '',
+      };
+      videoLoadSeqRef.current += 1;
+      loadVideoAssets(1, false, next);
+      return next;
+    });
+  }, [activeMediaType, loadImageAssets, loadVideoAssets, setActiveState]);
 
-  const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleCardKeyDown = (event, asset) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      openDetail(asset);
+  const resetFilters = useCallback(() => {
+    if (activeMediaType === MEDIA_IMAGE) {
+      setImageState((prev) => {
+        const next = {
+          ...prev,
+          keyword: '',
+          submittedKeyword: '',
+          modelId: '',
+          modelSeries: '',
+          timeRange: '',
+          sortValue: 'created_time_desc',
+          items: [],
+          total: 0,
+          page: 1,
+          hasMore: false,
+          selectedIds: new Set(),
+        };
+        imageLoadSeqRef.current += 1;
+        loadImageAssets(1, false, next);
+        return next;
+      });
+      return;
     }
-  };
+    setVideoState((prev) => {
+      const next = {
+        ...prev,
+        keyword: '',
+        submittedKeyword: '',
+        modelId: '',
+        modelSeries: '',
+        timeRange: '',
+        sortValue: 'created_time_desc',
+        items: [],
+        total: 0,
+        page: 1,
+        hasMore: false,
+        nextCursor: '',
+        selectedIds: new Set(),
+      };
+      videoLoadSeqRef.current += 1;
+      loadVideoAssets(1, false, next);
+      return next;
+    });
+  }, [activeMediaType, loadImageAssets, loadVideoAssets, setActiveState]);
 
-  const openImagePreview = () => {
-    if (!selectedAsset?.image_url) return;
-    setImagePreviewVisible(true);
-  };
+  const handleFieldChange = useCallback((field, value) => {
+    setActiveState((prev) => ({ ...prev, [field]: value || '' }));
+  }, [setActiveState]);
 
-  const closeImagePreview = () => {
-    setImagePreviewVisible(false);
-  };
+  const handleSortChange = useCallback((value) => {
+    setActiveState((prev) => ({ ...prev, sortValue: value || 'created_time_desc' }));
+  }, [setActiveState]);
 
-  const renderAssetCard = (asset) => (
-    <div
-      key={asset.task_id || asset.id}
-      className='asset-card'
-      role='button'
-      tabIndex={0}
+  const renderImageCard = (asset) => (
+    <button
+      key={asset.assetKey}
+      type='button'
+      className='asset-card asset-card-image'
       onClick={() => openDetail(asset)}
-      onKeyDown={(event) => handleCardKeyDown(event, asset)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openDetail(asset);
+        }
+      }}
     >
-      <div className='asset-card-select'>
-        <div onClick={(e) => e.stopPropagation()}>
-          <Checkbox
-            checked={selectedAssetIds.has(asset.task_id || asset.id)}
-            onChange={(e) => toggleAssetSelection(asset, e.target.checked)}
-          />
+      <div className='asset-card-select' onClick={(e) => e.stopPropagation()}>
+        <Checkbox
+          checked={activeState.selectedIds.has(asset.assetKey)}
+          onChange={(e) => handleSelectAsset(asset, e.target.checked)}
+        />
+      </div>
+      <div className='asset-media asset-media-image'>
+        <img src={asset.thumbnail_url || asset.image_url} alt={asset.prompt || 'Generated'} loading='lazy' />
+      </div>
+      <div className='asset-card-overlay'>
+        <div className='asset-card-title'>{asset.prompt || t('暂无提示词')}</div>
+        <div className='asset-card-meta'>
+          <span>{asset.display_name || asset.model_id || '-'}</span>
+          <span>{asset.completed_time ? formatTime(asset.completed_time) : formatTime(asset.created_time)}</span>
         </div>
       </div>
-      <div className='asset-image-wrap'>
-        <img
-          src={asset.thumbnail_url || asset.image_url}
-          alt={asset.prompt || 'Generated'}
-          loading='lazy'
-        />
+    </button>
+  );
+
+  const renderVideoCard = (asset) => (
+    <div key={asset.assetKey} className='asset-video-card-wrap'>
+      <VideoGenerationTaskCard
+        task={asset}
+        onClick={() => openDetail(asset)}
+        selected={activeState.selectedIds.has(asset.assetKey)}
+        onSelectChange={(_, checked) => handleSelectAsset(asset, checked)}
+      />
+    </div>
+  );
+
+  const renderDetailPanel = () => {
+    if (!currentDetailAsset) return null;
+    const isVideo = currentDetailAsset.mediaType === MEDIA_VIDEO;
+    const detailTitle = isVideo ? t('视频资产详情') : t('资产详情');
+
+    return (
+      <SideSheet
+        placement='right'
+        visible={detailVisible}
+        width={isMobile ? '100%' : '100%'}
+        bodyStyle={{ padding: 0, background: 'var(--semi-color-bg-0)' }}
+        style={{ width: '100vw', maxWidth: '100vw' }}
+        title={detailTitle}
+        onCancel={closeDetail}
+      >
+        <Spin spinning={detailLoading}>
+          <div className='asset-detail-shell'>
+            <div className='asset-detail-topbar'>
+              <Button type='tertiary' icon={<IconArrowLeft />} onClick={closeDetail}>
+                {t('返回')}
+              </Button>
+              <div className='asset-detail-top-actions'>
+                {isVideo ? (
+                  <Button type='primary' icon={<IconExternalOpen />} onClick={() => openTaskLogs(currentDetailAsset)}>
+                    {t('查看任务日志')}
+                  </Button>
+                ) : null}
+                <Button icon={<IconDownload />} onClick={() => downloadAsset(currentDetailAsset)}>
+                  {isVideo ? t('下载视频') : t('下载图片')}
+                </Button>
+              </div>
+            </div>
+            <div className='asset-detail-grid'>
+              <div className='asset-detail-preview'>
+                {isVideo ? (
+                  <PlayableVideo
+                    task={currentDetailAsset}
+                    poster={currentDetailAsset.thumbnail_url || ''}
+                    style={{ width: '100%', height: '100%', maxHeight: '72vh', objectFit: 'contain' }}
+                  />
+                ) : currentDetailAsset.image_url ? (
+                  <img
+                    src={currentDetailAsset.image_url}
+                    alt={currentDetailAsset.prompt || 'Generated'}
+                    className='asset-detail-image'
+                  />
+                ) : (
+                  <div className='asset-detail-empty'>
+                    {t('暂无媒体预览')}
+                  </div>
+                )}
+              </div>
+
+              <div className='asset-detail-info'>
+                <div className='asset-detail-info-header'>
+                  <div className='asset-detail-info-title'>
+                    {currentDetailAsset.prompt || t('暂无提示词')}
+                  </div>
+                  <Tag color={isVideo ? 'blue' : 'green'}>
+                    {isVideo ? t('视频') : t('图片')}
+                  </Tag>
+                </div>
+
+                <div className='asset-detail-info-actions'>
+                  <Button theme='outline' type='tertiary' icon={<IconCopy />} onClick={() => copyPrompt(currentDetailAsset)}>
+                    {t('复制提示词')}
+                  </Button>
+                  <Button theme='outline' type='tertiary' icon={<IconExternalOpen />} onClick={() => openSourceTask(currentDetailAsset)}>
+                    {t('打开源任务')}
+                  </Button>
+                  {isVideo ? (
+                    <Button
+                      theme='outline'
+                      type='tertiary'
+                      icon={<IconExternalOpen />}
+                      onClick={() => {
+                        const target = currentDetailAsset.result_url || currentDetailAsset.video_url;
+                        if (target) {
+                          window.open(target, '_blank', 'noopener');
+                        } else {
+                          showError(t('暂无可打开视频'));
+                        }
+                      }}
+                    >
+                      {t('打开视频')}
+                    </Button>
+                  ) : null}
+                  {isVideo && currentDetailAsset.status === 'failed' ? (
+                    <Button theme='outline' type='tertiary' icon={<IconRefresh />} onClick={() => handleVideoRetry(currentDetailAsset)}>
+                      {t('重试')}
+                    </Button>
+                  ) : null}
+                </div>
+
+                <div className='asset-detail-grid-list'>
+                  <div><span>{t('模型')}</span><strong>{currentDetailAsset.display_name || currentDetailAsset.model_id || '-'}</strong></div>
+                  <div><span>{t('模型系列')}</span><strong>{formatSeries(currentDetailAsset.model_series)}</strong></div>
+                  <div><span>{t('创建时间')}</span><strong>{formatTime(currentDetailAsset.created_time)}</strong></div>
+                  <div><span>{t('完成时间')}</span><strong>{formatTime(currentDetailAsset.completed_time)}</strong></div>
+                  <div><span>{isVideo ? t('任务 ID') : t('来源任务')}</span><strong>#{getActiveTaskId(currentDetailAsset)}</strong></div>
+                  <div><span>{isVideo ? t('时长') : t('消耗额度')}</span><strong>{isVideo ? (currentDetailAsset.duration ? `${currentDetailAsset.duration}s` : '-') : renderQuota(currentDetailAsset.cost || 0)}</strong></div>
+                  {isVideo ? (
+                    <>
+                      <div><span>{t('分辨率')}</span><strong>{currentDetailAsset.resolution || '-'}</strong></div>
+                      <div><span>{t('比例')}</span><strong>{currentDetailAsset.aspect_ratio || '-'}</strong></div>
+                      <div><span>{t('消耗额度')}</span><strong>{renderQuota(currentDetailAsset.quota || 0)}</strong></div>
+                      <div><span>{t('请求类型')}</span><strong>{currentDetailAsset.request_type || '-'}</strong></div>
+                      <div className='asset-detail-wide'><span>{t('状态')}</span><strong>{currentDetailAsset.status || '-'}</strong></div>
+                      {currentDetailAsset.fail_reason ? (
+                        <div className='asset-detail-wide'><span>{t('失败原因')}</span><strong>{currentDetailAsset.fail_reason}</strong></div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <div><span>{t('灵感')}</span><strong><Tag color={selectedInspirationStatusMeta.color}>{selectedInspirationStatusMeta.label}</Tag></strong></div>
+                      {currentDetailAsset.inspiration_reject_reason ? (
+                        <div className='asset-detail-wide'><span>{t('驳回原因')}</span><strong>{currentDetailAsset.inspiration_reject_reason}</strong></div>
+                      ) : null}
+                      <div className='asset-detail-wide'><span>{t('提示词')}</span><Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{currentDetailAsset.prompt || '-'}</Paragraph></div>
+                      {Object.keys(selectedImageParams).length > 0 ? (
+                        <div className='asset-detail-wide'><span>{t('生成参数')}</span><pre>{JSON.stringify(selectedImageParams, null, 2)}</pre></div>
+                      ) : null}
+                      {Object.keys(selectedImageMetadata).length > 0 ? (
+                        <div className='asset-detail-wide'><span>{t('图片元数据')}</span><pre>{JSON.stringify(selectedImageMetadata, null, 2)}</pre></div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Spin>
+      </SideSheet>
+    );
+  };
+
+  const renderToolbar = () => (
+    <div className='assets-toolbar'>
+      <div className='assets-toolbar-main'>
+        <div className='assets-toolbar-tabs'>
+          <button
+            type='button'
+            className={activeMediaType === MEDIA_IMAGE ? 'assets-tab assets-tab-active' : 'assets-tab'}
+            onClick={() => handleMediaTypeSwitch(MEDIA_IMAGE)}
+          >
+            {t('图片')}
+          </button>
+          <button
+            type='button'
+            className={activeMediaType === MEDIA_VIDEO ? 'assets-tab assets-tab-active' : 'assets-tab'}
+            onClick={() => handleMediaTypeSwitch(MEDIA_VIDEO)}
+          >
+            {t('视频')}
+          </button>
+        </div>
+        <div className='assets-toolbar-copy'>
+          <div className='assets-toolbar-title-line'>
+            <h1 className='assets-page-title'>{t('资产仓库')}</h1>
+            {activeFilterCount > 0 ? <Tag color='blue'>{t('筛选')} {activeFilterCount}</Tag> : null}
+          </div>
+          <div className='assets-toolbar-subtitle'>
+            {activeMediaType === MEDIA_VIDEO ? t('已归档的视频作品会集中展示在这里。') : t('已完成的图片作品会集中展示在这里。')}
+            <strong>{t('共 {{count}} 项', { count: activeState.total || activeState.items.length })}</strong>
+          </div>
+        </div>
+      </div>
+      <div className='assets-toolbar-actions'>
+        <Button type={hasSelectedAssets ? 'primary' : 'tertiary'} icon={<IconTick />} onClick={toggleAllVisibleAssets} disabled={activeState.items.length === 0}>
+          {allVisibleSelected ? t('取消全选') : t('全选当前页')}
+        </Button>
+        <Button icon={<IconRefresh />} onClick={refreshActiveMedia}>{t('刷新')}</Button>
+        <Button icon={<IconChevronUp />} onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>{t('回到顶部')}</Button>
+        <Button type='primary' icon={activeMediaType === MEDIA_VIDEO ? <IconVideo /> : <IconImage />} onClick={() => navigate('/canvas')}>
+          {activeMediaType === MEDIA_VIDEO ? t('去生成视频') : t('去生成图片')}
+        </Button>
       </div>
     </div>
   );
+
+  const renderFilters = () => (
+    <div className='assets-controls'>
+      <span className='assets-filter-label'>
+        <IconFilter size='small' />
+        {t('筛选')}
+      </span>
+      <Input
+        className='assets-search'
+        value={activeState.keyword}
+        prefix={<IconSearch />}
+        placeholder={activeMediaType === MEDIA_VIDEO ? t('搜索提示词、模型') : t('搜索提示词、模型')}
+        showClear
+        onChange={(value) => handleFieldChange('keyword', value)}
+        onEnterPress={submitSearch}
+      />
+      <Select
+        className='assets-select'
+        value={activeState.modelSeries}
+        onChange={(value) => handleFieldChange('modelSeries', value)}
+        placeholder={t('全部系列')}
+        showClear
+      >
+        {(activeState.filters.series || []).map((item) => (
+          <Select.Option key={item.model_series} value={item.model_series}>
+            {formatSeries(item.model_series)}
+          </Select.Option>
+        ))}
+      </Select>
+      <Select
+        className='assets-select'
+        value={activeState.modelId}
+        onChange={(value) => handleFieldChange('modelId', value)}
+        placeholder={t('全部模型')}
+        showClear
+        filter
+      >
+        {(activeState.filters.models || []).map((item) => (
+          <Select.Option key={item.model_id} value={item.model_id}>
+            {item.display_name || item.model_id}
+          </Select.Option>
+        ))}
+      </Select>
+      <Select
+        className='assets-select'
+        value={activeState.timeRange}
+        onChange={(value) => handleFieldChange('timeRange', value)}
+        placeholder={t('全部时间')}
+        showClear
+      >
+        <Select.Option value='today'>{t('今天')}</Select.Option>
+        <Select.Option value='last7d'>{t('近 7 天')}</Select.Option>
+        <Select.Option value='last30d'>{t('近 30 天')}</Select.Option>
+        <Select.Option value='thisMonth'>{t('本月')}</Select.Option>
+      </Select>
+      <Select className='assets-sort' value={activeState.sortValue} onChange={handleSortChange}>
+        <Select.Option value='created_time_desc'>{t('创建时间倒序')}</Select.Option>
+        <Select.Option value='created_time_asc'>{t('创建时间正序')}</Select.Option>
+        <Select.Option value='completed_time_desc'>{t('完成时间倒序')}</Select.Option>
+        <Select.Option value='cost_desc'>{t('消耗额度倒序')}</Select.Option>
+      </Select>
+      <div className='assets-filter-actions'>
+        <Button type='primary' icon={<IconSearch />} onClick={submitSearch}>{t('查询')}</Button>
+        <Button icon={<IconRefresh />} onClick={resetFilters}>{t('重置')}</Button>
+      </div>
+      <div className='assets-selection-actions'>
+        <Checkbox checked={allVisibleSelected} indeterminate={partiallyVisibleSelected} disabled={activeState.items.length === 0} onChange={toggleAllVisibleAssets}>
+          {allVisibleSelected ? t('取消全选') : t('全选当前页')}
+        </Checkbox>
+        <Button size='small' type='tertiary' disabled={!hasSelectedAssets} onClick={clearSelectedAssets}>
+          {t('清空已选')}
+        </Button>
+        <Tag color={hasSelectedAssets ? 'blue' : 'grey'}>{t('已选 {{count}} 项', { count: selectedCount })}</Tag>
+      </div>
+    </div>
+  );
+
+  const renderBatchBar = () =>
+    hasSelectedAssets ? (
+      <div className='assets-batch-bar'>
+        <div className='assets-batch-meta'>
+          <span>
+            {t('已选择')} <strong>{selectedCount}</strong> {t('个')}
+          </span>
+          <Button size='small' type='tertiary' onClick={clearSelectedAssets}>{t('取消选择')}</Button>
+        </div>
+        <div className='assets-batch-actions'>
+          <Button size='small' theme='outline' type='tertiary' icon={<IconDownload />} onClick={() => activeState.items.filter((asset) => activeState.selectedIds.has(asset.assetKey)).forEach((asset, index) => setTimeout(() => downloadAsset(asset), index * 120))}>
+            {t('下载选中')}
+          </Button>
+          <Popconfirm title={t('确定要删除选中的')} content={t('删除后无法恢复，请确认是否继续')} okText={t('确认删除')} cancelText={t('取消')} okType='danger' onConfirm={deleteSelectedAssets} position='bottom'>
+            <Button size='small' theme='outline' type='danger' icon={<IconDelete />} loading={batchDeleting}>
+              {t('删除选中')}
+            </Button>
+          </Popconfirm>
+        </div>
+      </div>
+    ) : null;
+
+  const renderMediaList = () => {
+    if (activeState.loading && activeState.items.length === 0) {
+      return <div className='assets-loading'><Spin /></div>;
+    }
+    if (!activeState.items.length) {
+      return (
+        <div className='assets-empty-wrap'>
+          <Empty
+            image={activeMediaType === MEDIA_VIDEO ? <IconVideo size='extra-large' /> : <IconImage size='extra-large' />}
+            title={activeMediaType === MEDIA_VIDEO ? t('暂无视频资产') : t('暂无图片资产')}
+            description={activeMediaType === MEDIA_VIDEO ? t('完成一次视频生成后，成功的视频会出现在这里。') : t('完成一次图片生成后，成功的图片会出现在这里。')}
+          >
+            <Button type='primary' icon={<IconImage />} onClick={() => navigate('/canvas')}>
+              {activeMediaType === MEDIA_VIDEO ? t('去生成视频') : t('去生成图片')}
+            </Button>
+          </Empty>
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <div className={activeMediaType === MEDIA_VIDEO ? 'assets-grid assets-grid-video' : 'assets-grid'} style={{ columnCount: activeMediaType === MEDIA_IMAGE ? Math.max(1, Math.min(activeState.items.length || 1, shellWidth <= 420 ? 1 : shellWidth <= 780 ? 2 : shellWidth <= 1180 ? 3 : shellWidth <= 1540 ? 4 : 5)) : undefined }}>
+          {activeState.items.map((asset) =>
+            activeMediaType === MEDIA_VIDEO ? renderVideoCard(asset) : renderImageCard(asset),
+          )}
+        </div>
+        <div ref={sentinelRef} className='assets-load-more'>
+          {activeState.loadingMore && <Spin size='small' />}
+          {!activeState.hasMore && activeState.total > 0 && <span>{t('已加载全部作品')}</span>}
+        </div>
+      </>
+    );
+  };
 
   return (
     <div className='assets-page'>
@@ -614,55 +1145,74 @@ const Assets = () => {
           flex-direction: column;
           gap: 14px;
         }
-        .assets-topbar {
+        .assets-toolbar {
           display: flex;
-          align-items: flex-start;
+          align-items: center;
           justify-content: space-between;
           gap: 16px;
+          flex-wrap: wrap;
         }
-        .assets-title-wrap {
+        .assets-toolbar-main {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          flex-wrap: wrap;
+        }
+        .assets-toolbar-copy {
           display: flex;
           flex-direction: column;
           gap: 6px;
           min-width: 0;
         }
-        .assets-title-line {
+        .assets-toolbar-title-line {
           display: flex;
           align-items: center;
           gap: 10px;
           min-width: 0;
         }
-        .assets-title {
+        .assets-page-title {
           margin: 0;
-          color: var(--semi-color-text-0);
           font-size: 20px;
           line-height: 1.3;
           font-weight: 700;
-          letter-spacing: 0;
         }
-        .assets-filter-count {
-          white-space: nowrap;
-        }
-        .assets-subtitle {
+        .assets-toolbar-subtitle {
           display: flex;
           align-items: center;
           flex-wrap: wrap;
           gap: 8px;
           color: var(--semi-color-text-2);
           font-size: 13px;
-          line-height: 1.4;
         }
-        .assets-subtitle strong {
+        .assets-toolbar-subtitle strong {
           color: var(--semi-color-text-0);
-          font-weight: 650;
         }
-        .assets-top-actions {
+        .assets-toolbar-tabs {
+          display: inline-flex;
+          gap: 8px;
+          padding: 4px;
+          border-radius: 14px;
+          background: var(--semi-color-fill-0);
+          border: 1px solid var(--semi-color-border);
+        }
+        .assets-tab {
+          border: 0;
+          background: transparent;
+          padding: 8px 14px;
+          border-radius: 10px;
+          cursor: pointer;
+          color: var(--semi-color-text-1);
+        }
+        .assets-tab-active {
+          background: var(--semi-color-bg-0);
+          color: var(--semi-color-primary);
+          box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+        }
+        .assets-toolbar-actions {
           display: flex;
           align-items: center;
-          justify-content: flex-end;
           gap: 8px;
           flex-wrap: wrap;
-          flex-shrink: 0;
         }
         .assets-controls {
           display: flex;
@@ -692,72 +1242,132 @@ const Assets = () => {
           width: 184px;
           flex: 0 1 184px;
         }
-        .assets-filter-actions {
+        .assets-filter-actions, .assets-selection-actions {
           display: flex;
           align-items: center;
           gap: 8px;
           flex-wrap: wrap;
         }
-        .assets-selection-actions {
+        .assets-batch-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 12px 14px;
+          border: 1px solid var(--semi-color-border);
+          border-radius: 12px;
+          background: var(--semi-color-fill-0);
+        }
+        .assets-batch-meta {
           display: flex;
           align-items: center;
           gap: 10px;
           flex-wrap: wrap;
-          min-height: 32px;
-          padding: 0 2px;
         }
-        .assets-selection-checkbox {
-          white-space: nowrap;
+        .assets-batch-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
         }
-        .assets-masonry {
-          column-gap: 4px;
+        .assets-grid {
+          column-gap: 8px;
+          width: 100%;
+        }
+        .assets-grid-video {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+          gap: 12px;
+          column-gap: 12px;
+        }
+        .asset-video-card-wrap {
           width: 100%;
         }
         .asset-card {
           position: relative;
-          display: inline-block;
+          display: block;
           width: 100%;
           break-inside: avoid;
-          margin: 0 0 4px;
+          margin: 0 0 8px;
           overflow: hidden;
-          border: 1px solid var(--semi-color-border);
-          border-radius: 8px;
+          border: 0;
+          border-radius: 16px;
           background: var(--semi-color-bg-0);
-          color: inherit;
-          text-align: left;
           cursor: pointer;
-          outline: none;
-          transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
+          padding: 0;
+          text-align: left;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+          transition: transform 0.18s ease, box-shadow 0.18s ease;
         }
-        .asset-card:hover,
-        .asset-card:focus-visible {
-          transform: translateY(-1px);
-          border-color: var(--semi-color-primary-light-default);
-          box-shadow: 0 18px 42px -30px rgba(15, 23, 42, 0.5);
-        }
-        .asset-image-wrap {
-          position: relative;
-          width: 100%;
-          min-height: 120px;
-          background: var(--semi-color-fill-0);
+        .asset-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 18px 42px -30px rgba(15, 23, 42, 0.42);
         }
         .asset-card-select {
           position: absolute;
-          top: 8px;
-          left: 8px;
+          top: 10px;
+          left: 10px;
           z-index: 2;
           display: flex;
           align-items: center;
           justify-content: center;
           padding: 4px;
-          border-radius: 8px;
-          background: rgba(0, 0, 0, 0.34);
+          border-radius: 10px;
+          background: rgba(15, 23, 42, 0.34);
           backdrop-filter: blur(6px);
         }
-        .asset-image-wrap img {
+        .asset-media {
+          width: 100%;
+          background: var(--semi-color-fill-0);
+        }
+        .asset-media img {
           display: block;
           width: 100%;
           height: auto;
+        }
+        .asset-media-image {
+          aspect-ratio: auto;
+        }
+        .asset-video-media {
+          position: relative;
+          width: 100%;
+          aspect-ratio: 16 / 9;
+          overflow: hidden;
+          background: var(--semi-color-fill-0);
+        }
+        .asset-video-media video {
+          pointer-events: none;
+        }
+        .asset-card-overlay {
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          padding: 24px 12px 10px;
+          background: linear-gradient(180deg, rgba(15, 23, 42, 0), rgba(15, 23, 42, 0.82));
+          color: #fff;
+        }
+        .asset-card-title {
+          font-size: 13px;
+          font-weight: 600;
+          line-height: 1.4;
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+        }
+        .asset-card-meta {
+          display: flex;
+          justify-content: space-between;
+          gap: 8px;
+          font-size: 12px;
+          opacity: 0.8;
+          margin-top: 4px;
+        }
+        .asset-loading {
+          padding: 48px 0;
+          display: flex;
+          justify-content: center;
         }
         .assets-load-more {
           display: flex;
@@ -769,189 +1379,121 @@ const Assets = () => {
           color: var(--semi-color-text-2);
           font-size: 13px;
         }
-        .assets-batch-bar {
+        .assets-empty-wrap {
+          padding: 48px 0;
+        }
+        .asset-detail-shell {
+          width: 100%;
+          min-height: 100vh;
+          padding: 18px;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+        .asset-detail-topbar {
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 12px;
-          padding: 12px 14px;
-          border: 1px solid var(--semi-color-border);
-          border-radius: 10px;
-          background: var(--semi-color-fill-0);
-        }
-        .assets-batch-meta {
-          display: flex;
-          align-items: center;
-          gap: 10px;
           flex-wrap: wrap;
-          min-width: 0;
-          color: var(--semi-color-text-1);
-          font-size: 13px;
         }
-        .assets-batch-actions {
+        .asset-detail-top-actions {
           display: flex;
-          align-items: center;
           gap: 8px;
           flex-wrap: wrap;
-          justify-content: flex-end;
         }
-        .assets-empty-wrap {
-          padding: 48px 0;
-        }
-        .asset-detail {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          padding: 16px;
+        .asset-detail-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.7fr);
+          gap: 18px;
+          align-items: start;
         }
         .asset-detail-preview {
-          border: 1px solid var(--semi-color-border);
-          border-radius: 8px;
+          min-height: 68vh;
+          border-radius: 18px;
+          overflow: hidden;
           background: var(--semi-color-fill-0);
           display: flex;
           align-items: center;
           justify-content: center;
-          overflow: hidden;
         }
-        .asset-detail-preview-button {
-          display: flex;
-          width: 100%;
-          padding: 0;
-          border: 0;
-          background: transparent;
-          cursor: zoom-in;
-          line-height: 0;
-          align-items: center;
-          justify-content: center;
-        }
-        .asset-detail-preview-button img {
+        .asset-detail-image {
           display: block;
-          max-width: 100%;
-          max-height: 62vh;
+          width: 100%;
+          max-height: 72vh;
           object-fit: contain;
-          transition: transform 0.18s ease;
+          background: var(--semi-color-fill-0);
         }
-        .asset-detail-preview-button:hover img {
-          transform: scale(1.01);
-        }
-        .asset-detail-preview-button:focus-visible {
-          outline: 2px solid var(--semi-color-primary);
-          outline-offset: -2px;
-        }
-        .asset-detail-preview-empty {
+        .asset-detail-empty {
           padding: 56px 0;
           color: var(--semi-color-text-2);
-          font-size: 14px;
         }
-        .asset-image-preview-overlay {
-          position: fixed;
-          inset: 0;
-          z-index: 2200;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 24px;
-          background: rgba(2, 6, 23, 0.74);
-          backdrop-filter: blur(10px);
-          cursor: zoom-out;
-        }
-        .asset-image-preview-panel {
-          max-width: min(92vw, 1280px);
-          max-height: 92vh;
-          overflow: hidden;
-          border-radius: 16px;
-          background: var(--semi-color-bg-0);
-          box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
-          cursor: default;
-        }
-        .asset-image-preview-panel img {
-          display: block;
-          max-width: 100%;
-          max-height: 92vh;
-          object-fit: contain;
-        }
-        .asset-detail-actions {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px;
-        }
-        .asset-detail-actions .asset-submit-action {
-          grid-column: 1 / -1;
-        }
-        .asset-info-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-        }
-        .asset-info-block {
+        .asset-detail-info {
           display: flex;
           flex-direction: column;
-          gap: 5px;
-          min-width: 0;
+          gap: 14px;
+          padding: 4px 0;
         }
-        .asset-info-wide {
-          grid-column: 1 / -1;
+        .asset-detail-info-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
         }
-        .asset-info-label {
+        .asset-detail-info-title {
+          font-size: 18px;
+          font-weight: 700;
+          line-height: 1.4;
+          color: var(--semi-color-text-0);
+          overflow-wrap: anywhere;
+        }
+        .asset-detail-info-actions {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .asset-detail-grid-list {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+        }
+        .asset-detail-grid-list > div {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          padding: 12px;
+          border-radius: 14px;
+          background: var(--semi-color-fill-0);
+        }
+        .asset-detail-grid-list span {
           color: var(--semi-color-text-2);
           font-size: 12px;
         }
-        .asset-info-value {
-          color: var(--semi-color-text-0);
+        .asset-detail-grid-list strong {
           font-size: 14px;
-          font-weight: 500;
+          color: var(--semi-color-text-0);
+          font-weight: 600;
           overflow-wrap: anywhere;
         }
-        .asset-code-block {
+        .asset-detail-wide {
+          grid-column: 1 / -1;
+        }
+        .asset-detail-grid-list pre {
           margin: 0;
-          max-height: 180px;
-          overflow: auto;
-          padding: 10px;
-          border-radius: 8px;
-          background: var(--semi-color-fill-0);
-          font-size: 12px;
-          line-height: 1.5;
           white-space: pre-wrap;
           overflow-wrap: anywhere;
-        }
-        .asset-reject-reason {
-          color: var(--semi-color-danger);
           font-size: 12px;
-          line-height: 1.45;
-          overflow-wrap: anywhere;
-        }
-        @media (max-width: 1280px) {
-          .assets-select,
-          .assets-sort {
-            width: 160px;
-            flex-basis: 160px;
-          }
+          line-height: 1.5;
         }
         @media (max-width: 960px) {
-          .assets-topbar {
-            flex-direction: column;
-            align-items: stretch;
-          }
-          .assets-top-actions {
-            justify-content: flex-start;
-          }
-          .assets-batch-bar {
-            flex-direction: column;
-            align-items: stretch;
-          }
-          .assets-batch-actions {
-            justify-content: flex-start;
+          .asset-detail-grid {
+            grid-template-columns: 1fr;
           }
         }
         @media (max-width: 720px) {
           .assets-page {
             min-height: calc(100vh - 70px);
-          }
-          .assets-controls {
-            align-items: stretch;
-          }
-          .assets-filter-label {
-            width: 100%;
           }
           .assets-search,
           .assets-select,
@@ -959,416 +1501,23 @@ const Assets = () => {
             width: 100%;
             flex: 1 1 100%;
           }
-          .assets-filter-actions,
-          .assets-filter-actions .semi-button,
-          .assets-selection-actions {
-            width: 100%;
+          .asset-detail-shell {
+            padding: 12px;
           }
-          .assets-selection-actions .semi-button,
-          .assets-selection-actions .semi-tag {
-            width: auto;
-          }
-          .assets-masonry {
-            column-gap: 4px;
-          }
-          .asset-card {
-            margin-bottom: 4px;
-          }
-          .asset-info-grid {
-            grid-template-columns: 1fr;
-          }
-          .asset-detail-actions {
+          .asset-detail-grid-list {
             grid-template-columns: 1fr;
           }
         }
       `}</style>
 
       <div className='assets-shell' ref={shellRef}>
-        <div className='assets-topbar'>
-          <div className='assets-title-wrap'>
-            <div className='assets-title-line'>
-              <h1 className='assets-title'>{t('资产仓库')}</h1>
-              {activeFilterCount > 0 && (
-                <Tag color='blue' className='assets-filter-count'>
-                  {t('筛选')} {activeFilterCount}
-                </Tag>
-              )}
-            </div>
-          </div>
-          <div className='assets-top-actions'>
-            <Button
-              type={hasSelectedAssets ? 'primary' : 'tertiary'}
-              icon={<IconTick />}
-              onClick={toggleAllVisibleAssets}
-              disabled={assets.length === 0}
-            >
-              {allVisibleSelected ? t('取消全选') : t('全选')}
-            </Button>
-            <Button icon={<IconRefresh />} onClick={refreshAssets}>
-              {t('刷新')}
-            </Button>
-            <Button icon={<IconChevronUp />} onClick={scrollToTop}>
-              {t('回到顶部')}
-            </Button>
-            <Button
-              type='primary'
-              icon={<IconImage />}
-              onClick={() => navigate('/canvas')}
-            >
-              {t('去生成图片')}
-            </Button>
-          </div>
-        </div>
-
-        <div className='assets-controls'>
-          <span className='assets-filter-label'>
-            <IconFilter size='small' />
-            {t('筛选')}
-          </span>
-          <Input
-            className='assets-search'
-            value={keyword}
-            prefix={<IconSearch />}
-            placeholder={t('搜索提示词、模型')}
-            showClear
-            onChange={setKeyword}
-            onEnterPress={submitSearch}
-          />
-          <Select
-            className='assets-select'
-            value={modelSeries}
-            onChange={handleModelSeriesChange}
-            placeholder={t('全部系列')}
-            showClear
-          >
-            {(filters.series || []).map((item) => (
-              <Select.Option key={item.model_series} value={item.model_series}>
-                {formatSeries(item.model_series)}
-              </Select.Option>
-            ))}
-          </Select>
-          <Select
-            className='assets-select'
-            value={modelId}
-            onChange={handleModelIdChange}
-            placeholder={t('全部模型')}
-            showClear
-            filter
-          >
-            {(filters.models || []).map((item) => (
-              <Select.Option key={item.model_id} value={item.model_id}>
-                {item.display_name || item.model_id}
-              </Select.Option>
-            ))}
-          </Select>
-          <Select
-            className='assets-select'
-            value={timeRange}
-            onChange={handleTimeRangeChange}
-            placeholder={t('全部时间')}
-            showClear
-          >
-            <Select.Option value='today'>{t('今天')}</Select.Option>
-            <Select.Option value='last7d'>{t('近 7 天')}</Select.Option>
-            <Select.Option value='last30d'>{t('近 30 天')}</Select.Option>
-            <Select.Option value='thisMonth'>{t('本月')}</Select.Option>
-          </Select>
-          <Select
-            className='assets-sort'
-            value={sortValue}
-            onChange={handleSortChange}
-          >
-            <Select.Option value='created_time_desc'>
-              {t('创建时间倒序')}
-            </Select.Option>
-            <Select.Option value='created_time_asc'>
-              {t('创建时间正序')}
-            </Select.Option>
-            <Select.Option value='completed_time_desc'>
-              {t('完成时间倒序')}
-            </Select.Option>
-            <Select.Option value='cost_desc'>{t('消耗额度倒序')}</Select.Option>
-          </Select>
-          <div className='assets-filter-actions'>
-            <Button type='primary' icon={<IconSearch />} onClick={submitSearch}>
-              {t('查询')}
-            </Button>
-            <Button icon={<IconRefresh />} onClick={resetFilters}>
-              {t('重置')}
-            </Button>
-          </div>
-          <div className='assets-selection-actions'>
-            <Checkbox
-              className='assets-selection-checkbox'
-              checked={allVisibleSelected}
-              indeterminate={partiallyVisibleSelected}
-              disabled={assets.length === 0}
-              onChange={toggleAllVisibleAssets}
-            >
-              {allVisibleSelected ? t('取消全选') : t('全选当前页')}
-            </Checkbox>
-            <Button
-              size='small'
-              type='tertiary'
-              disabled={!hasSelectedAssets}
-              onClick={clearSelectedAssets}
-            >
-              {t('清空已选')}
-            </Button>
-            <Tag color={hasSelectedAssets ? 'blue' : 'grey'}>
-              {t('已选 {{count}} 项', { count: selectedCount })}
-            </Tag>
-          </div>
-        </div>
-
-        {hasSelectedAssets && (
-          <div className='assets-batch-bar'>
-            <div className='assets-batch-meta'>
-              <span>
-                {t('已选择')} <strong>{selectedCount}</strong> {t('个')}
-              </span>
-              <Button
-                size='small'
-                type='tertiary'
-                onClick={clearSelectedAssets}
-              >
-                {t('取消选择')}
-              </Button>
-            </div>
-            <div className='assets-batch-actions'>
-              <Button
-                size='small'
-                theme='outline'
-                type='tertiary'
-                icon={<IconDownload />}
-                onClick={downloadSelectedAssets}
-              >
-                {t('下载选中')}
-              </Button>
-              <Popconfirm
-                title={t('确定要删除选中的')}
-                content={t('删除后无法恢复，请确认是否继续')}
-                okText={t('确认删除')}
-                cancelText={t('取消')}
-                okType='danger'
-                onConfirm={deleteSelectedAssets}
-                position='bottom'
-              >
-                <Button
-                  size='small'
-                  theme='outline'
-                  type='danger'
-                  icon={<IconDelete />}
-                  loading={batchDeleting}
-                >
-                  {t('删除选中')}
-                </Button>
-              </Popconfirm>
-            </div>
-          </div>
-        )}
-
-        <Spin spinning={loading && assets.length === 0}>
-          {assets.length > 0 ? (
-            <>
-              <div
-                className='assets-masonry'
-                style={{ columnCount: masonryColumnCount }}
-              >
-                {assets.map(renderAssetCard)}
-              </div>
-              <div ref={sentinelRef} className='assets-load-more'>
-                {loadingMore && (
-                  <>
-                    <Spin size='small' />
-                  </>
-                )}
-                {!hasMore && total > 0 && <span>{t('已加载全部作品')}</span>}
-              </div>
-            </>
-          ) : (
-            <div className='assets-empty-wrap'>
-              <Empty
-                image={<IconImage size='extra-large' />}
-                title={t('暂无图片资产')}
-                description={t('完成一次图片生成后，成功的图片会出现在这里。')}
-              >
-                <Button
-                  type='primary'
-                  icon={<IconImage />}
-                  onClick={() => navigate('/canvas')}
-                >
-                  {t('去生成图片')}
-                </Button>
-              </Empty>
-            </div>
-          )}
-        </Spin>
+        {renderToolbar()}
+        {renderFilters()}
+        {renderBatchBar()}
+        {renderMediaList()}
       </div>
 
-      <SideSheet
-        placement='right'
-        visible={detailVisible}
-        width={isMobile ? '100%' : 560}
-        title={t('资产详情')}
-        onCancel={() => setDetailVisible(false)}
-        bodyStyle={{ padding: 0 }}
-      >
-        <Spin spinning={detailLoading}>
-          {selectedAsset && (
-            <div className='asset-detail'>
-              <div className='asset-detail-preview'>
-                {selectedAsset.image_url ? (
-                  <button
-                    type='button'
-                    className='asset-detail-preview-button'
-                    onClick={openImagePreview}
-                    aria-label={t('点击放大图片')}
-                    title={t('点击放大图片')}
-                  >
-                    <img
-                      src={selectedAsset.image_url}
-                      alt={selectedAsset.prompt || 'Generated'}
-                    />
-                  </button>
-                ) : (
-                  <div className='asset-detail-preview-empty'>
-                    {t('暂无图片')}
-                  </div>
-                )}
-              </div>
-
-              <div className='asset-detail-actions'>
-                <Button
-                  theme='outline'
-                  type='tertiary'
-                  icon={<IconCopy />}
-                  onClick={() => copyPrompt(selectedAsset)}
-                >
-                  {t('复制提示词')}
-                </Button>
-                <Button
-                  theme='outline'
-                  type='tertiary'
-                  icon={<IconDownload />}
-                  onClick={() => downloadAsset(selectedAsset)}
-                >
-                  {t('下载图片')}
-                </Button>
-                <Button
-                  theme='outline'
-                  type='tertiary'
-                  icon={<IconExternalOpen />}
-                  onClick={() => openSourceTask(selectedAsset)}
-                >
-                  {t('打开源任务')}
-                </Button>
-              </div>
-
-              <div className='asset-info-grid'>
-                <div className='asset-info-block'>
-                  <span className='asset-info-label'>{t('模型')}</span>
-                  <span className='asset-info-value'>
-                    {selectedAsset.display_name || selectedAsset.model_id}
-                  </span>
-                </div>
-                <div className='asset-info-block'>
-                  <span className='asset-info-label'>{t('模型系列')}</span>
-                  <span className='asset-info-value'>
-                    {formatSeries(selectedAsset.model_series)}
-                  </span>
-                </div>
-                <div className='asset-info-block'>
-                  <span className='asset-info-label'>{t('创建时间')}</span>
-                  <span className='asset-info-value'>
-                    {formatTime(selectedAsset.created_time)}
-                  </span>
-                </div>
-                <div className='asset-info-block'>
-                  <span className='asset-info-label'>{t('完成时间')}</span>
-                  <span className='asset-info-value'>
-                    {formatTime(selectedAsset.completed_time)}
-                  </span>
-                </div>
-                <div className='asset-info-block'>
-                  <span className='asset-info-label'>{t('消耗额度')}</span>
-                  <span className='asset-info-value'>
-                    {renderQuota(selectedAsset.cost || 0)}
-                  </span>
-                </div>
-                <div className='asset-info-block'>
-                  <span className='asset-info-label'>{t('来源任务')}</span>
-                  <span className='asset-info-value'>
-                    #{selectedAsset.task_id}
-                  </span>
-                </div>
-                <div className='asset-info-block asset-info-wide'>
-                  <span className='asset-info-label'>{t('灵感')}</span>
-                  <span className='asset-info-value'>
-                    <Tag color={selectedInspirationStatusMeta.color}>
-                      {selectedInspirationStatusMeta.label}
-                    </Tag>
-                  </span>
-                  {selectedAsset.inspiration_reject_reason && (
-                    <span className='asset-reject-reason'>
-                      {selectedAsset.inspiration_reject_reason}
-                    </span>
-                  )}
-                </div>
-                <div className='asset-info-block asset-info-wide'>
-                  <span className='asset-info-label'>{t('提示词')}</span>
-                  <Paragraph
-                    copyable={{ content: selectedAsset.prompt || '' }}
-                    style={{
-                      margin: 0,
-                      maxHeight: 160,
-                      overflow: 'auto',
-                      whiteSpace: 'pre-wrap',
-                    }}
-                  >
-                    {selectedAsset.prompt || '-'}
-                  </Paragraph>
-                </div>
-                {Object.keys(selectedParams).length > 0 && (
-                  <div className='asset-info-block asset-info-wide'>
-                    <span className='asset-info-label'>{t('生成参数')}</span>
-                    <pre className='asset-code-block'>
-                      {JSON.stringify(selectedParams, null, 2)}
-                    </pre>
-                  </div>
-                )}
-                {Object.keys(selectedMetadata).length > 0 && (
-                  <div className='asset-info-block asset-info-wide'>
-                    <span className='asset-info-label'>{t('图片元数据')}</span>
-                    <pre className='asset-code-block'>
-                      {JSON.stringify(selectedMetadata, null, 2)}
-                    </pre>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </Spin>
-      </SideSheet>
-
-      {imagePreviewVisible && selectedAsset?.image_url && (
-        <div
-          className='asset-image-preview-overlay'
-          role='presentation'
-          onClick={closeImagePreview}
-        >
-          <div
-            className='asset-image-preview-panel'
-            role='presentation'
-            onClick={(event) => event.stopPropagation()}
-          >
-            <img
-              src={selectedAsset.image_url}
-              alt={selectedAsset.prompt || 'Generated'}
-            />
-          </div>
-        </div>
-      )}
+      {renderDetailPanel()}
     </div>
   );
 };

@@ -185,7 +185,20 @@ func createVideoGenerationTask(userId int, modelId string, prompt string, reques
 	return buildVideoTaskSummaryWithMapping(task, mapping), nil
 }
 
-func ListVideoGenerationTasks(userId int, page int, pageSize int, cursor string, status string, modelID string, startTime int64, endTime int64) (*VideoGenerationTaskPage, error) {
+func ListVideoGenerationTasks(
+	userId int,
+	page int,
+	pageSize int,
+	cursor string,
+	status string,
+	modelID string,
+	modelSeries string,
+	keyword string,
+	sortBy string,
+	sortOrder string,
+	startTime int64,
+	endTime int64,
+) (*VideoGenerationTaskPage, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -196,6 +209,10 @@ func ListVideoGenerationTasks(userId int, page int, pageSize int, cursor string,
 	queryParams := model.VideoTaskQueryParams{
 		Status:         normalizeVideoTaskStatus(status),
 		ModelID:        modelID,
+		ModelSeries:    strings.TrimSpace(modelSeries),
+		Keyword:        strings.TrimSpace(keyword),
+		SortBy:         strings.TrimSpace(sortBy),
+		SortOrder:      strings.TrimSpace(sortOrder),
 		StartTimestamp: startTime,
 		EndTimestamp:   endTime,
 	}
@@ -213,12 +230,26 @@ func ListVideoGenerationTasks(userId int, page int, pageSize int, cursor string,
 
 	mappingsByModel, mappingsResolved := loadVideoTaskMappingsByModelID(taskPage.Items)
 	result := make([]*dto.VideoGenerationTaskSummary, 0, len(taskPage.Items))
+	trimmedKeyword := strings.TrimSpace(keyword)
 	for _, task := range taskPage.Items {
-		result = append(result, buildVideoTaskSummaryWithResolvedMapping(
+		summary := buildVideoTaskSummaryWithResolvedMapping(
 			task,
 			mappingsByModel[extractVideoTaskModelID(task)],
 			mappingsResolved,
-		))
+		)
+		if summary == nil {
+			continue
+		}
+		if trimmedKeyword != "" {
+			lowerKeyword := strings.ToLower(trimmedKeyword)
+			if !strings.Contains(strings.ToLower(summary.Prompt), lowerKeyword) &&
+				!strings.Contains(strings.ToLower(summary.ModelID), lowerKeyword) &&
+				!strings.Contains(strings.ToLower(summary.DisplayName), lowerKeyword) &&
+				!strings.Contains(strings.ToLower(summary.TaskID), lowerKeyword) {
+				continue
+			}
+		}
+		result = append(result, summary)
 	}
 	return &VideoGenerationTaskPage{
 		Items:      result,

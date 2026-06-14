@@ -15,6 +15,10 @@ import (
 type VideoTaskQueryParams struct {
 	Status         string
 	ModelID        string
+	ModelSeries    string
+	Keyword        string
+	SortBy         string
+	SortOrder      string
 	StartTimestamp int64
 	EndTimestamp   int64
 }
@@ -80,10 +84,10 @@ func GetUserVideoTasks(userId int, startIdx int, num int, queryParams VideoTaskQ
 	}
 
 	var tasks []*Task
+	orderClause := videoTaskOrderClause(queryParams)
 	pageQuery := query.Session(&gorm.Session{}).
 		Select(videoTaskSummarySelectColumns).
-		Order("submit_time DESC").
-		Order("id DESC")
+		Order(orderClause)
 	if startIdx > 0 {
 		pageQuery = pageQuery.Offset(startIdx)
 	}
@@ -350,8 +354,7 @@ func GetUserVideoTasksByCursor(userId int, cursor string, num int, queryParams V
 	var tasks []*Task
 	if err := cursorQuery.
 		Select(videoTaskSummarySelectColumns).
-		Order("submit_time DESC").
-		Order("id DESC").
+		Order(videoTaskOrderClause(queryParams)).
 		Limit(num + 1).
 		Find(&tasks).Error; err != nil {
 		return nil, err
@@ -434,20 +437,64 @@ func buildUserVideoTaskQuery(userId int, queryParams VideoTaskQueryParams, actio
 	if queryParams.Status != "" {
 		query = query.Where("status = ?", queryParams.Status)
 	}
+	if keyword := strings.TrimSpace(queryParams.Keyword); keyword != "" {
+		pattern := "%" + keyword + "%"
+		displayNameModelIDs, err := imageTaskIDsByDisplayNameKeyword(keyword)
+		if err != nil {
+			return nil
+		}
+		if common.UsingPostgreSQL || common.UsingSQLite {
+			if len(displayNameModelIDs) > 0 {
+				query = query.Where("(CAST(properties AS TEXT) LIKE ? OR origin_model_name LIKE ? OR upstream_model_name LIKE ? OR task_id LIKE ? OR origin_model_name IN ? OR upstream_model_name IN ?)", pattern, pattern, pattern, pattern, displayNameModelIDs, displayNameModelIDs)
+			} else {
+				query = query.Where("(CAST(properties AS TEXT) LIKE ? OR origin_model_name LIKE ? OR upstream_model_name LIKE ? OR task_id LIKE ?)", pattern, pattern, pattern, pattern)
+			}
+		} else {
+			if len(displayNameModelIDs) > 0 {
+				query = query.Where("(properties LIKE ? OR origin_model_name LIKE ? OR upstream_model_name LIKE ? OR task_id LIKE ? OR origin_model_name IN ? OR upstream_model_name IN ?)", pattern, pattern, pattern, pattern, displayNameModelIDs, displayNameModelIDs)
+			} else {
+				query = query.Where("(properties LIKE ? OR origin_model_name LIKE ? OR upstream_model_name LIKE ? OR task_id LIKE ?)", pattern, pattern, pattern, pattern)
+			}
+		}
+	}
 	if queryParams.StartTimestamp > 0 {
 		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
 	}
 	if queryParams.EndTimestamp > 0 {
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
 	}
-	if strings.TrimSpace(queryParams.ModelID) == "" {
-		return query
+	if modelID := strings.TrimSpace(queryParams.ModelID); modelID != "" {
+		query = query.Where("origin_model_name = ? OR upstream_model_name = ?", modelID, modelID)
 	}
-	return query.Where(
-		"origin_model_name = ? OR upstream_model_name = ?",
-		queryParams.ModelID,
-		queryParams.ModelID,
-	)
+	if modelSeries := strings.TrimSpace(queryParams.ModelSeries); modelSeries != "" {
+		modelIDs, err := imageTaskIDsByModelSeries(modelSeries)
+		if err != nil {
+			return nil
+		}
+		if len(modelIDs) == 0 {
+			query = query.Where("1 = 0")
+		} else {
+			query = query.Where("(origin_model_name IN ? OR upstream_model_name IN ?)", modelIDs, modelIDs)
+		}
+	}
+	return query
+}
+
+func videoTaskOrderClause(queryParams VideoTaskQueryParams) string {
+	sortField := "submit_time"
+	switch strings.TrimSpace(queryParams.SortBy) {
+	case "completed_time":
+		sortField = "finish_time"
+	case "cost":
+		sortField = "quota"
+	case "created_time":
+		sortField = "submit_time"
+	}
+	sortOrder := "DESC"
+	if strings.EqualFold(strings.TrimSpace(queryParams.SortOrder), "asc") {
+		sortOrder = "ASC"
+	}
+	return sortField + " " + sortOrder + ", id " + sortOrder
 }
 
 func ExtractTaskThumbnailURL(task *Task) string {
