@@ -197,6 +197,14 @@ function App() {
             </PrivateRoute>
           }
         />
+        <Route
+          path='/canvas/:sessionId'
+          element={
+            <PrivateRoute>
+              <ImageGeneration />
+            </PrivateRoute>
+          }
+        />
         <Route path='/inspiration' element={<Navigate to='/' replace />} />
         <Route path='/creative-space' element={<Navigate to='/' replace />} />
         <Route

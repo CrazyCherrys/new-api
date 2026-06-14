@@ -146,6 +146,89 @@ func TestCanvasControllerResolvesSessionByPublicID(t *testing.T) {
 	}
 }
 
+func TestGetCanvasSessionReturnsResolvedSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousGetSession := getCanvasSessionByIdentifierForController
+	t.Cleanup(func() {
+		getCanvasSessionByIdentifierForController = previousGetSession
+	})
+
+	capturedIdentifier := ""
+	getCanvasSessionByIdentifierForController = func(userId int, identifier string) (*model.CanvasSession, error) {
+		capturedIdentifier = identifier
+		return &model.CanvasSession{
+			Id:       42,
+			PublicId: "cs_public_demo",
+			UserId:   userId,
+			Mode:     model.CanvasModeImage,
+			Title:    "demo",
+		}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", 7)
+	c.Params = gin.Params{{Key: "id", Value: "cs_public_demo"}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/canvas/sessions/cs_public_demo", nil)
+
+	GetCanvasSession(c)
+
+	if capturedIdentifier != "cs_public_demo" {
+		t.Fatalf("expected resolver to receive cs_public_demo, got %q", capturedIdentifier)
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d", recorder.Code)
+	}
+
+	var response struct {
+		Success bool                `json:"success"`
+		Message string              `json:"message"`
+		Data    model.CanvasSession `json:"data"`
+	}
+	if err := common.DecodeJson(recorder.Body, &response); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if !response.Success {
+		t.Fatalf("expected success response, got %#v", response)
+	}
+	if response.Data.PublicId != "cs_public_demo" || response.Data.Mode != model.CanvasModeImage {
+		t.Fatalf("unexpected session payload: %#v", response.Data)
+	}
+}
+
+func TestGetCanvasSessionSupportsNumericID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousGetSession := getCanvasSessionByIdentifierForController
+	t.Cleanup(func() {
+		getCanvasSessionByIdentifierForController = previousGetSession
+	})
+
+	capturedIdentifier := ""
+	getCanvasSessionByIdentifierForController = func(userId int, identifier string) (*model.CanvasSession, error) {
+		capturedIdentifier = identifier
+		return &model.CanvasSession{
+			Id:     42,
+			UserId: userId,
+			Mode:   model.CanvasModeChat,
+		}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", 7)
+	c.Params = gin.Params{{Key: "id", Value: "42"}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/canvas/sessions/42", nil)
+
+	GetCanvasSession(c)
+
+	if capturedIdentifier != "42" {
+		t.Fatalf("expected resolver to receive numeric identifier 42, got %q", capturedIdentifier)
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d", recorder.Code)
+	}
+}
+
 func TestGetCanvasChatModelsReturnsCatalogCapabilities(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("CANVAS_CHAT_SQL_DSN", "")

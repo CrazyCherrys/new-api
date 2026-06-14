@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Brain } from 'lucide-react';
 import {
@@ -201,6 +201,14 @@ const buildCanvasSessionApiPath = (sessionOrIdentifier, suffix = '') => {
       ? getCanvasSessionIdentifier(sessionOrIdentifier)
       : String(sessionOrIdentifier || '').trim();
   return `/api/canvas/sessions/${encodeURIComponent(identifier)}${suffix}`;
+};
+
+const buildCanvasSessionPath = (sessionOrIdentifier = '') => {
+  const identifier =
+    typeof sessionOrIdentifier === 'object'
+      ? getCanvasSessionIdentifier(sessionOrIdentifier)
+      : String(sessionOrIdentifier || '').trim();
+  return identifier ? `/canvas/${encodeURIComponent(identifier)}` : '/canvas';
 };
 
 const normalizeCanvasSessionRecord = (
@@ -644,6 +652,7 @@ const ImageGeneration = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const { sessionId: routeSessionId = '' } = useParams();
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -839,6 +848,7 @@ const ImageGeneration = () => {
     canvasChatReasoningUiStateByMessageId,
     setCanvasChatReasoningUiStateByMessageId,
   ] = useState({});
+  const routeSessionIdNormalized = String(routeSessionId || '').trim();
 
   const [selectedSeries, setSelectedSeries] = useState(() =>
     getStoredValue(STORAGE_KEYS.SERIES, ''),
@@ -980,6 +990,9 @@ const ImageGeneration = () => {
   const selectedCanvasSessionRef = useRef(null);
   const generationModeRef = useRef(generationMode);
   const selectedCanvasSessionIdsRef = useRef(selectedCanvasSessionIds);
+  const routeSyncInFlightRef = useRef(false);
+  const routeSessionLookupRequestSeqRef = useRef(0);
+  const routeSessionLookupTargetRef = useRef('');
   const canvasImagePreviewRequestSeqRef = useRef(0);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
   const [userCustomWorkerKeyEnabled, setUserCustomWorkerKeyEnabled] =
@@ -1045,17 +1058,23 @@ const ImageGeneration = () => {
     }
     return null;
   };
-  const selectedCanvasSession = findCanvasSessionByIdentifier(
-    selectedCanvasSessionId,
-    generationMode,
-  );
+  const selectedCanvasSession = routeSessionIdNormalized
+    ? findCanvasSessionByIdentifier(routeSessionIdNormalized, generationMode)
+    : null;
   useEffect(() => {
     selectedCanvasSessionRef.current = selectedCanvasSession;
   }, [selectedCanvasSession]);
   const displayedCanvasMessages = useMemo(
-    () =>
-      canvasMessagesSessionId === selectedCanvasSessionId ? canvasMessages : [],
-    [canvasMessages, canvasMessagesSessionId, selectedCanvasSessionId],
+    () => {
+      const activeSessionId = routeSessionIdNormalized;
+      return canvasMessagesSessionId === activeSessionId ? canvasMessages : [];
+    },
+    [
+      canvasMessages,
+      canvasMessagesSessionId,
+      routeSessionIdNormalized,
+      selectedCanvasSessionId,
+    ],
   );
   const renderableCanvasMessages = useMemo(
     () => getRenderableCanvasMessages(displayedCanvasMessages),
@@ -1184,6 +1203,45 @@ const ImageGeneration = () => {
     }
     chatStreamingNoticeAtRef.current = now;
     showInfo(t('当前回复仍在生成，请先停止后再发送下一条消息'));
+  };
+  const syncCanvasRouteToSession = (sessionOrIdentifier, options = {}) => {
+    const identifier =
+      typeof sessionOrIdentifier === 'object'
+        ? getCanvasSessionIdentifier(sessionOrIdentifier)
+        : String(sessionOrIdentifier || '').trim();
+    const replace = options.replace !== false;
+    const nextPath = buildCanvasSessionPath(identifier);
+    const currentPath = `${location.pathname}${location.search}`;
+    const nextLocation = `${nextPath}${location.search}`;
+    routeSyncInFlightRef.current = true;
+    if (currentPath === nextLocation) {
+      window.setTimeout(() => {
+        routeSyncInFlightRef.current = false;
+      }, 0);
+      return;
+    }
+    navigate(nextPath, {
+      replace,
+      state: location.state,
+    });
+    window.setTimeout(() => {
+      routeSyncInFlightRef.current = false;
+    }, 0);
+  };
+  const syncCanvasRouteToBlank = (options = {}) => {
+    const replace = options.replace !== false;
+    const currentPath = `${location.pathname}${location.search}`;
+    if (currentPath === '/canvas') {
+      return;
+    }
+    routeSyncInFlightRef.current = true;
+    navigate('/canvas', {
+      replace,
+      state: location.state,
+    });
+    window.setTimeout(() => {
+      routeSyncInFlightRef.current = false;
+    }, 0);
   };
   const updateCurrentCanvasSessionModel = async (mode, modelId) => {
     const normalizedMode = CANVAS_MODES.includes(mode) ? mode : generationMode;
@@ -1806,7 +1864,92 @@ const ImageGeneration = () => {
   }, []);
 
   useEffect(() => {
-    if (!selectedCanvasSessionId) {
+    const nextRouteId = routeSessionIdNormalized;
+    routeSessionLookupTargetRef.current = nextRouteId;
+    if (!nextRouteId) {
+      setSelectedCanvasSessionIds((prev) => {
+        if (
+          prev[CANVAS_MODE_CHAT] === null &&
+          prev[CANVAS_MODE_IMAGE] === null &&
+          prev[CANVAS_MODE_VIDEO] === null
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [CANVAS_MODE_CHAT]: null,
+          [CANVAS_MODE_IMAGE]: null,
+          [CANVAS_MODE_VIDEO]: null,
+        };
+      });
+      if (generationMode !== CANVAS_MODE_CHAT) {
+        setGenerationMode(CANVAS_MODE_CHAT);
+      }
+      return;
+    }
+    if (routeSyncInFlightRef.current) {
+      return;
+    }
+
+    const session = findCanvasSessionByIdentifier(nextRouteId);
+    if (session) {
+      const sessionIdentifier = getCanvasSessionIdentifier(session);
+      const sessionMode = CANVAS_MODES.includes(session.mode)
+        ? session.mode
+        : CANVAS_MODE_IMAGE;
+      blankCanvasSelectionModesRef.current[sessionMode] = false;
+      setGenerationMode(sessionMode);
+      setSelectedCanvasSessionIds((prev) => {
+        if (prev[sessionMode] === sessionIdentifier) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [sessionMode]: sessionIdentifier,
+        };
+      });
+      return;
+    }
+
+    const requestSeq = ++routeSessionLookupRequestSeqRef.current;
+    (async () => {
+      const loadedSession = await loadCanvasSessionByRouteId(nextRouteId);
+      if (
+        requestSeq !== routeSessionLookupRequestSeqRef.current ||
+        routeSessionLookupTargetRef.current !== nextRouteId
+      ) {
+        return;
+      }
+      if (!loadedSession) {
+        syncCanvasRouteToBlank({ replace: true });
+        return;
+      }
+      const sessionIdentifier = getCanvasSessionIdentifier(loadedSession);
+      const sessionMode = CANVAS_MODES.includes(loadedSession.mode)
+        ? loadedSession.mode
+        : CANVAS_MODE_IMAGE;
+      blankCanvasSelectionModesRef.current[sessionMode] = false;
+      setGenerationMode(sessionMode);
+      setSelectedCanvasSessionIds((prev) => {
+        if (prev[sessionMode] === sessionIdentifier) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [sessionMode]: sessionIdentifier,
+        };
+      });
+    })();
+  }, [
+    findCanvasSessionByIdentifier,
+    generationMode,
+    routeSessionIdNormalized,
+    selectedCanvasSessionId,
+  ]);
+
+  useEffect(() => {
+    const targetSessionId = routeSessionIdNormalized;
+    if (!targetSessionId) {
       canvasMessagesRequestSeqRef.current += 1;
       canvasMessagesSessionIdRef.current = null;
       setCanvasMessagesSessionId(null);
@@ -1818,8 +1961,8 @@ const ImageGeneration = () => {
       setCanvasMessagesLoadingMore(false);
       return;
     }
-    loadCanvasMessages(selectedCanvasSessionId);
-  }, [selectedCanvasSessionId]);
+    loadCanvasMessages(targetSessionId);
+  }, [routeSessionIdNormalized]);
 
   // 切换任意筛选/排序时回到第一页
   useEffect(() => {
@@ -2121,34 +2264,9 @@ const ImageGeneration = () => {
     if (!sessions?.length) {
       return;
     }
-    const firstByMode = {};
-    sessions.forEach((session) => {
-      if (!firstByMode[session.mode]) {
-        firstByMode[session.mode] = session;
-      }
-    });
-    setSelectedCanvasSessionIds((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      CANVAS_MODES.forEach((mode) => {
-        if (next[mode]) {
-          return;
-        }
-        if (blankCanvasSelectionModesRef.current[mode]) {
-          if (next[mode] !== null) {
-            next[mode] = null;
-            changed = true;
-          }
-          return;
-        }
-        const firstSession = firstByMode[mode];
-        if (firstSession) {
-          next[mode] = getCanvasSessionIdentifier(firstSession);
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
-    });
+    if (routeSessionIdNormalized) {
+      return;
+    }
   };
 
   const loadRecentCanvasSessions = async (options = {}) => {
@@ -2282,6 +2400,9 @@ const ImageGeneration = () => {
     setCanvasMessagesLoading(false);
     setCanvasMessagesLoadingMore(false);
     setMobileTaskbarVisible(false);
+    if (!routeSessionIdNormalized) {
+      syncCanvasRouteToSession(session, { replace: true });
+    }
     return session;
   };
 
@@ -2378,6 +2499,27 @@ const ImageGeneration = () => {
       ) {
         setCanvasMessagesLoading(false);
       }
+    }
+  };
+
+  const loadCanvasSessionByRouteId = async (identifier) => {
+    const targetIdentifier = String(identifier || '').trim();
+    if (!targetIdentifier) {
+      return null;
+    }
+    try {
+      const res = await API.get(buildCanvasSessionApiPath(targetIdentifier));
+      if (!res.data.success || !res.data.data) {
+        return null;
+      }
+      const session = normalizeCanvasSessionRecord(res.data.data);
+      if (!session) {
+        return null;
+      }
+      upsertCanvasSessionInCollections(session);
+      return session;
+    } catch (error) {
+      return null;
     }
   };
 
@@ -2883,19 +3025,9 @@ const ImageGeneration = () => {
         if (prev[session.mode] !== sessionIdentifier) {
           return prev;
         }
-        const nextSessions = mergeCanvasSessionItems(
-          (canvasSessions[session.mode] || []).filter(
-            (item) => !canvasSessionMatchesIdentifier(item, sessionIdentifier),
-          ),
-          recentCanvasSessions.items.filter(
-            (item) =>
-              item.mode === session.mode &&
-              !canvasSessionMatchesIdentifier(item, sessionIdentifier),
-          ),
-        );
         return {
           ...prev,
-          [session.mode]: getCanvasSessionIdentifier(nextSessions[0]) || null,
+          [session.mode]: null,
         };
       });
       if (isCurrentCanvasMessageSession(sessionIdentifier)) {
@@ -2908,6 +3040,9 @@ const ImageGeneration = () => {
         setCanvasMessagesError('');
         setCanvasMessagesLoading(false);
         setCanvasMessagesLoadingMore(false);
+      }
+      if (routeSessionIdNormalized === sessionIdentifier) {
+        syncCanvasRouteToBlank({ replace: true });
       }
       if (session.mode === CANVAS_MODE_IMAGE) {
         loadTasks(true, { forceRefresh: true });
@@ -5697,6 +5832,7 @@ const ImageGeneration = () => {
       [mode]: sessionIdentifier,
     }));
     setMobileTaskbarVisible(false);
+    syncCanvasRouteToSession(session, { replace: false });
   };
 
   useEffect(() => {
@@ -5802,6 +5938,9 @@ const ImageGeneration = () => {
     }));
     setChatPrompt('');
     setMobileTaskbarVisible(false);
+    if (routeSessionIdNormalized) {
+      syncCanvasRouteToBlank({ replace: false });
+    }
   };
 
   const handleProjectEntryClick = () => {
@@ -7712,26 +7851,6 @@ const ImageGeneration = () => {
       height: '100%',
       objectFit: 'contain',
       display: 'block',
-      background: 'var(--canvas-toolbar-bg)',
-    },
-    canvasImagePreviewPanel: {
-      maxWidth: isMobile ? 'calc(100vw - 24px)' : 'calc(100vw - 48px)',
-      maxHeight: 'calc(100vh - 48px)',
-      overflow: 'hidden',
-      borderRadius: 10,
-      border: '1px solid var(--canvas-border)',
-      background: 'var(--canvas-card-bg)',
-      boxShadow: 'var(--canvas-shadow-lg)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      position: 'relative',
-    },
-    canvasImagePreviewImage: {
-      display: 'block',
-      maxWidth: '100%',
-      maxHeight: 'calc(100vh - 48px)',
-      objectFit: 'contain',
       background: 'var(--canvas-toolbar-bg)',
     },
     canvasMediaStatusBody: {

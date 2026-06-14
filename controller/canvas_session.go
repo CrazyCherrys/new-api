@@ -98,6 +98,26 @@ func ListCanvasSessions(c *gin.Context) {
 	common.ApiSuccess(c, sessions)
 }
 
+func GetCanvasSession(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		common.ApiErrorMsg(c, "未授权")
+		return
+	}
+
+	session, err := resolveCanvasSessionForController(c, userId)
+	if err != nil {
+		writeCanvasError(c, err)
+		return
+	}
+	if session == nil {
+		writeCanvasError(c, fmt.Errorf("canvas session not found"))
+		return
+	}
+
+	common.ApiSuccess(c, session)
+}
+
 func ListCanvasChatModels(c *gin.Context) {
 	userId := c.GetInt("id")
 	if userId == 0 {
