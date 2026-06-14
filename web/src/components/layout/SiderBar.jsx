@@ -42,7 +42,6 @@ const routerMap = {
   log: '/console/log',
   midjourney: '/console/midjourney',
   setting: '/console/setting',
-  'inspiration-review': '/console/inspiration-review',
   about: '/about',
   detail: '/console',
   pricing: '/pricing',
@@ -160,12 +159,6 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('渠道管理'),
         itemKey: 'channel',
         to: '/channel',
-        className: isAdmin() ? '' : 'tableHiddle',
-      },
-      {
-        text: t('灵感审核'),
-        itemKey: 'inspiration-review',
-        to: '/console/inspiration-review',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

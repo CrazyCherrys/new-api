@@ -52,14 +52,12 @@ import ModelDeploymentPage from './pages/ModelDeployment';
 import ModelMapping from './pages/ModelMapping';
 import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
-import InspirationReviewPage from './pages/Channel/InspirationReview';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
 import SetupCheck from './components/layout/SetupCheck';
 import ImageGeneration from './pages/ImageGeneration';
 import Assets from './pages/Assets';
-import Inspiration from './pages/Inspiration';
 
 const Home = lazy(() => import('./pages/Home'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -150,17 +148,14 @@ function App() {
             </AdminRoute>
           }
         />
+        {/* 灵感/灵感审核入口已停用；后端与组件暂保留，观察多个版本后再彻底清理。 */}
         <Route
           path='/console/inspiration-review'
-          element={
-            <AdminRoute>
-              <InspirationReviewPage />
-            </AdminRoute>
-          }
+          element={<Navigate to='/console' replace />}
         />
         <Route
           path='/console/creative-space-review'
-          element={<Navigate to='/console/inspiration-review' replace />}
+          element={<Navigate to='/console' replace />}
         />
         <Route
           path='/console/model-mapping'
@@ -202,8 +197,8 @@ function App() {
             </PrivateRoute>
           }
         />
-        <Route path='/inspiration' element={<Inspiration />} />
-        <Route path='/creative-space' element={<Navigate to='/inspiration' replace />} />
+        <Route path='/inspiration' element={<Navigate to='/' replace />} />
+        <Route path='/creative-space' element={<Navigate to='/' replace />} />
         <Route
           path='/console/redemption'
           element={

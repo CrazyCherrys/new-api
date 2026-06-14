@@ -74,9 +74,7 @@ const Assets = () => {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [inspirationSubmitting, setInspirationSubmitting] = useState(false);
   const [batchDeleting, setBatchDeleting] = useState(false);
-  const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
@@ -487,112 +485,8 @@ const Assets = () => {
     }
   };
 
-  const submitSelectedAssetsToInspiration = async () => {
-    if (!selectedAssets.length) return;
-    setBatchSubmitting(true);
-    try {
-      const submitableAssets = selectedAssets.filter(
-        (asset) => !asset.inspiration_submission_status,
-      );
-      if (submitableAssets.length === 0) {
-        showError(t('已选择的资产都已提交'));
-        return;
-      }
-      const results = await Promise.allSettled(
-        submitableAssets.map((asset) =>
-          API.post(
-            `/api/image-generation/assets/${asset.task_id || asset.id}/inspiration-submission`,
-          ),
-        ),
-      );
-      let successCount = 0;
-      const patchIds = [];
-      results.forEach((result, index) => {
-        if (result.status === 'fulfilled' && result.value?.data?.success) {
-          const submission = result.value.data.data || {};
-          const asset = submitableAssets[index];
-          const patch = {
-            inspiration_submission_id: submission.id,
-            inspiration_submission_status: submission.status,
-            inspiration_reject_reason: submission.reject_reason || '',
-          };
-          patchIds.push(asset.task_id || asset.id);
-          setSelectedAsset((prev) =>
-            prev && (prev.task_id || prev.id) === (asset.task_id || asset.id)
-              ? { ...prev, ...patch }
-              : prev,
-          );
-          setAssets((prev) =>
-            prev.map((item) =>
-              (item.task_id || item.id) === (asset.task_id || asset.id)
-                ? { ...item, ...patch }
-                : item,
-            ),
-          );
-          successCount += 1;
-        }
-      });
-      if (patchIds.length > 0) {
-        setSelectedAssetIds((prev) => {
-          const next = new Set(prev);
-          patchIds.forEach((id) => next.delete(id));
-          return next;
-        });
-      }
-      if (successCount > 0) {
-        showSuccess(t('已提交到灵感审核'));
-      }
-      if (results.some((result) => result.status === 'rejected')) {
-        showError(t('部分提交失败'));
-      }
-    } catch (error) {
-      showError(error.message || t('提交失败'));
-    } finally {
-      setBatchSubmitting(false);
-    }
-  };
-
   const openSourceTask = (asset) => {
     navigate(`/canvas?task_id=${asset.task_id || asset.id}`);
-  };
-
-  const submitToInspiration = async () => {
-    if (
-      !selectedAsset?.task_id ||
-      selectedAsset.inspiration_submission_status
-    ) {
-      return;
-    }
-    const taskId = selectedAsset.task_id;
-    setInspirationSubmitting(true);
-    try {
-      const res = await API.post(
-        `/api/image-generation/assets/${taskId}/inspiration-submission`,
-      );
-      if (res.data.success) {
-        const submission = res.data.data || {};
-        const patch = {
-          inspiration_submission_id: submission.id,
-          inspiration_submission_status: submission.status,
-          inspiration_reject_reason: submission.reject_reason || '',
-        };
-        setSelectedAsset((prev) =>
-          prev?.task_id === taskId ? { ...prev, ...patch } : prev,
-        );
-        setAssets((prev) =>
-          prev.map((asset) =>
-            asset.task_id === taskId ? { ...asset, ...patch } : asset,
-          ),
-        );
-        showSuccess(t('已提交到灵感审核'));
-      } else {
-        showError(res.data.message || t('提交失败'));
-      }
-    } catch (error) {
-      showError(error.message || t('提交失败'));
-    } finally {
-      setInspirationSubmitting(false);
-    }
   };
 
   const submitSearch = () => {
@@ -1251,16 +1145,6 @@ const Assets = () => {
               >
                 {t('下载选中')}
               </Button>
-              <Button
-                size='small'
-                theme='outline'
-                type='primary'
-                icon={<IconImage />}
-                loading={batchSubmitting}
-                onClick={submitSelectedAssetsToInspiration}
-              >
-                {t('发布选中')}
-              </Button>
               <Popconfirm
                 title={t('确定要删除选中的')}
                 content={t('删除后无法恢复，请确认是否继续')}
@@ -1355,18 +1239,6 @@ const Assets = () => {
               </div>
 
               <div className='asset-detail-actions'>
-                <Button
-                  className='asset-submit-action'
-                  type='primary'
-                  icon={<IconImage />}
-                  loading={inspirationSubmitting}
-                  disabled={Boolean(
-                    selectedAsset.inspiration_submission_status,
-                  )}
-                  onClick={submitToInspiration}
-                >
-                  {t('提交到灵感')}
-                </Button>
                 <Button
                   theme='outline'
                   type='tertiary'

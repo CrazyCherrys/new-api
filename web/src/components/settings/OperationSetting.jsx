@@ -21,7 +21,6 @@ import React, { useEffect, useState } from 'react';
 import { Card, Spin } from '@douyinfe/semi-ui';
 import SettingsGeneral from '../../pages/Setting/Operation/SettingsGeneral';
 import SettingsHeaderNavModules from '../../pages/Setting/Operation/SettingsHeaderNavModules';
-import SettingsInspirationReview from '../../pages/Setting/Operation/SettingsInspirationReview';
 import SettingsSidebarModulesAdmin from '../../pages/Setting/Operation/SettingsSidebarModulesAdmin';
 import SettingsSensitiveWords from '../../pages/Setting/Operation/SettingsSensitiveWords';
 import SettingsLog from '../../pages/Setting/Operation/SettingsLog';
@@ -131,10 +130,7 @@ const OperationSetting = () => {
         <div style={{ marginTop: '10px' }}>
           <SettingsHeaderNavModules options={inputs} refresh={onRefresh} />
         </div>
-        {/* 灵感审核 */}
-        <Card style={{ marginTop: '10px' }}>
-          <SettingsInspirationReview />
-        </Card>
+        {/* 灵感/灵感审核入口已停用；后端与组件暂保留，观察多个版本后再彻底清理。 */}
         {/* 左侧边栏模块管理（管理员） */}
         <div style={{ marginTop: '10px' }}>
           <SettingsSidebarModulesAdmin options={inputs} refresh={onRefresh} />

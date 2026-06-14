@@ -49,7 +49,6 @@ export const DEFAULT_ADMIN_CONFIG = {
   admin: {
     enabled: true,
     channel: true,
-    'inspiration-review': true,
     'model-mapping': true,
     models: true,
     deployment: true,
@@ -67,9 +66,7 @@ const SIDEBAR_MODULE_ALIASES = {
     'image-generation': 'canvas',
     'ai-generation': 'canvas',
   },
-  admin: {
-    'creative-space-review': 'inspiration-review',
-  },
+  admin: {},
 };
 
 export const normalizeSidebarConfig = (config) => {
@@ -91,6 +88,8 @@ export const normalizeSidebarConfig = (config) => {
       delete section[legacyKey];
     });
   });
+  delete normalized.admin?.['creative-space-review'];
+  delete normalized.admin?.['inspiration-review'];
 
   return normalized;
 };
