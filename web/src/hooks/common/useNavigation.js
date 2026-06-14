@@ -28,11 +28,9 @@ const normalizeHeaderNavModules = (modules) => {
   ) {
     nextModules.canvas = nextModules.imageGeneration;
   }
-  if (nextModules.inspiration === undefined && nextModules.creativeSpace !== undefined) {
-    nextModules.inspiration = nextModules.creativeSpace;
-  }
   delete nextModules.imageGeneration;
   delete nextModules.creativeSpace;
+  delete nextModules.inspiration;
   return nextModules;
 };
 
@@ -43,7 +41,6 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
       home: true,
       console: true,
       canvas: true,
-      inspiration: true,
       pricing: true,
       docs: true,
       about: true,
@@ -70,11 +67,6 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
         text: t('画布'),
         itemKey: 'canvas',
         to: '/canvas',
-      },
-      {
-        text: t('灵感'),
-        itemKey: 'inspiration',
-        to: '/inspiration',
       },
       {
         text: t('模型广场'),

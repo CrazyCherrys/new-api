@@ -42,7 +42,6 @@ export default function SettingsHeaderNavModules(props) {
     home: true,
     console: true,
     canvas: true,
-    inspiration: true,
     pricing: {
       enabled: true,
       requireAuth: false, // 默认不需要登录鉴权
@@ -65,14 +64,9 @@ export default function SettingsHeaderNavModules(props) {
     ) {
       nextModules.canvas = nextModules.imageGeneration;
     }
-    if (
-      nextModules.inspiration === undefined &&
-      nextModules.creativeSpace !== undefined
-    ) {
-      nextModules.inspiration = nextModules.creativeSpace;
-    }
     delete nextModules.imageGeneration;
     delete nextModules.creativeSpace;
+    delete nextModules.inspiration;
     return nextModules;
   };
 
@@ -185,11 +179,6 @@ export default function SettingsHeaderNavModules(props) {
       key: 'canvas',
       title: t('画布'),
       description: t('画布入口，需要登录访问'),
-    },
-    {
-      key: 'inspiration',
-      title: t('灵感'),
-      description: t('公开展示审核通过的图片作品'),
     },
     {
       key: 'pricing',
