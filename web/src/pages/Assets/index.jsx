@@ -116,16 +116,6 @@ const Assets = () => {
     return dayjs(timestamp * 1000).format('YYYY/MM/DD HH:mm');
   }, []);
 
-  const parseJsonObject = useCallback((raw) => {
-    if (!raw) return {};
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (error) {
-      return {};
-    }
-  }, []);
-
   const parseSortValue = useCallback((value) => {
     const normalized = value || 'created_time_desc';
     const parts = normalized.split('_');
@@ -173,28 +163,6 @@ const Assets = () => {
     visibleSelectedCount > 0 && !allVisibleSelected;
 
   const currentDetailAsset = selectedAsset;
-  const selectedImageParams = useMemo(
-    () => parseJsonObject(currentDetailAsset?.params),
-    [currentDetailAsset?.params, parseJsonObject],
-  );
-  const selectedImageMetadata = useMemo(
-    () => parseJsonObject(currentDetailAsset?.image_metadata),
-    [currentDetailAsset?.image_metadata, parseJsonObject],
-  );
-
-  const selectedInspirationStatusMeta = useMemo(() => {
-    const statusMap = {
-      pending: { label: t('审核中'), color: 'orange' },
-      approved: { label: t('已展示'), color: 'green' },
-      rejected: { label: t('已驳回'), color: 'red' },
-    };
-    return (
-      statusMap[currentDetailAsset?.inspiration_submission_status || ''] || {
-        label: t('未提交'),
-        color: 'blue',
-      }
-    );
-  }, [currentDetailAsset?.inspiration_submission_status, t]);
 
   const getTimeRangeParams = useCallback((timeRange) => {
     if (!timeRange) {
@@ -797,11 +765,12 @@ const Assets = () => {
       <div className='asset-media asset-media-image'>
         <img src={asset.thumbnail_url || asset.image_url} alt={asset.prompt || 'Generated'} loading='lazy' />
       </div>
-      <div className='asset-card-overlay'>
-        <div className='asset-card-title'>{asset.prompt || t('暂无提示词')}</div>
-        <div className='asset-card-meta'>
-          <span>{asset.display_name || asset.model_id || '-'}</span>
-          <span>{asset.completed_time ? formatTime(asset.completed_time) : formatTime(asset.created_time)}</span>
+      <div className='asset-card-overlay asset-card-overlay-compact'>
+        <div className='asset-card-meta asset-card-meta-compact'>
+          <span className='asset-card-model'>{asset.display_name || asset.model_id || '-'}</span>
+          <span className='asset-card-time'>
+            {asset.completed_time ? formatTime(asset.completed_time) : formatTime(asset.created_time)}
+          </span>
         </div>
       </div>
     </button>
@@ -809,12 +778,39 @@ const Assets = () => {
 
   const renderVideoCard = (asset) => (
     <div key={asset.assetKey} className='asset-video-card-wrap'>
-      <VideoGenerationTaskCard
-        task={asset}
+      <button
+        type='button'
+        className='asset-card asset-card-video'
         onClick={() => openDetail(asset)}
-        selected={activeState.selectedIds.has(asset.assetKey)}
-        onSelectChange={(_, checked) => handleSelectAsset(asset, checked)}
-      />
+      >
+        <div className='asset-card-select' onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            checked={activeState.selectedIds.has(asset.assetKey)}
+            onChange={(e) => handleSelectAsset(asset, e.target.checked)}
+          />
+        </div>
+        <div className='asset-video-media'>
+          {asset.thumbnail_url ? (
+            <img
+              src={asset.thumbnail_url}
+              alt={asset.display_name || asset.model_id || 'Video'}
+              loading='lazy'
+            />
+          ) : (
+            <div className='asset-video-placeholder'>
+              <IconVideo size='extra-large' />
+            </div>
+          )}
+        </div>
+        <div className='asset-card-overlay asset-card-overlay-compact'>
+          <div className='asset-card-meta asset-card-meta-compact'>
+            <span className='asset-card-model'>{asset.display_name || asset.model_id || '-'}</span>
+            <span className='asset-card-time'>
+              {asset.completed_time ? formatTime(asset.completed_time) : formatTime(asset.created_time)}
+            </span>
+          </div>
+        </div>
+      </button>
     </div>
   );
 
@@ -931,19 +927,10 @@ const Assets = () => {
                       ) : null}
                     </>
                   ) : (
-                    <>
-                      <div><span>{t('灵感')}</span><strong><Tag color={selectedInspirationStatusMeta.color}>{selectedInspirationStatusMeta.label}</Tag></strong></div>
-                      {currentDetailAsset.inspiration_reject_reason ? (
-                        <div className='asset-detail-wide'><span>{t('驳回原因')}</span><strong>{currentDetailAsset.inspiration_reject_reason}</strong></div>
-                      ) : null}
-                      <div className='asset-detail-wide'><span>{t('提示词')}</span><Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{currentDetailAsset.prompt || '-'}</Paragraph></div>
-                      {Object.keys(selectedImageParams).length > 0 ? (
-                        <div className='asset-detail-wide'><span>{t('生成参数')}</span><pre>{JSON.stringify(selectedImageParams, null, 2)}</pre></div>
-                      ) : null}
-                      {Object.keys(selectedImageMetadata).length > 0 ? (
-                        <div className='asset-detail-wide'><span>{t('图片元数据')}</span><pre>{JSON.stringify(selectedImageMetadata, null, 2)}</pre></div>
-                      ) : null}
-                    </>
+                    <div className='asset-detail-wide'>
+                      <span>{t('说明')}</span>
+                      <strong>{t('已完成的图片作品会集中展示在这里。')}</strong>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1117,7 +1104,7 @@ const Assets = () => {
 
     return (
       <>
-        <div className={activeMediaType === MEDIA_VIDEO ? 'assets-grid assets-grid-video' : 'assets-grid'} style={{ columnCount: activeMediaType === MEDIA_IMAGE ? Math.max(1, Math.min(activeState.items.length || 1, shellWidth <= 420 ? 1 : shellWidth <= 780 ? 2 : shellWidth <= 1180 ? 3 : shellWidth <= 1540 ? 4 : 5)) : undefined }}>
+        <div className={activeMediaType === MEDIA_VIDEO ? 'assets-grid assets-grid-video' : 'assets-grid assets-grid-image'}>
           {activeState.items.map((asset) =>
             activeMediaType === MEDIA_VIDEO ? renderVideoCard(asset) : renderImageCard(asset),
           )}
@@ -1136,6 +1123,8 @@ const Assets = () => {
         .assets-page {
           width: 100%;
           min-height: calc(100vh - 112px);
+          padding-top: 40px;
+          box-sizing: border-box;
           color: var(--semi-color-text-0);
         }
         .assets-shell {
@@ -1272,14 +1261,16 @@ const Assets = () => {
           justify-content: flex-end;
         }
         .assets-grid {
-          column-gap: 8px;
+          display: grid;
           width: 100%;
+          gap: 12px;
+          justify-content: flex-start;
+        }
+        .assets-grid-image {
+          grid-template-columns: repeat(auto-fill, 220px);
         }
         .assets-grid-video {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-          gap: 12px;
-          column-gap: 12px;
+          grid-template-columns: repeat(auto-fill, 220px);
         }
         .asset-video-card-wrap {
           width: 100%;
@@ -1288,8 +1279,6 @@ const Assets = () => {
           position: relative;
           display: block;
           width: 100%;
-          break-inside: avoid;
-          margin: 0 0 8px;
           overflow: hidden;
           border: 0;
           border-radius: 16px;
@@ -1299,6 +1288,12 @@ const Assets = () => {
           text-align: left;
           box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
           transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+        .asset-card-image {
+          height: 284px;
+        }
+        .asset-card-video {
+          height: 184px;
         }
         .asset-card:hover {
           transform: translateY(-2px);
@@ -1321,23 +1316,30 @@ const Assets = () => {
           width: 100%;
           background: var(--semi-color-fill-0);
         }
-        .asset-media img {
+        .asset-media img,
+        .asset-video-media img {
           display: block;
           width: 100%;
-          height: auto;
+          height: 100%;
+          object-fit: cover;
         }
         .asset-media-image {
-          aspect-ratio: auto;
+          height: 100%;
         }
         .asset-video-media {
           position: relative;
           width: 100%;
-          aspect-ratio: 16 / 9;
+          height: 100%;
           overflow: hidden;
           background: var(--semi-color-fill-0);
         }
-        .asset-video-media video {
-          pointer-events: none;
+        .asset-video-placeholder {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--semi-color-text-2);
         }
         .asset-card-overlay {
           position: absolute;
@@ -1348,13 +1350,8 @@ const Assets = () => {
           background: linear-gradient(180deg, rgba(15, 23, 42, 0), rgba(15, 23, 42, 0.82));
           color: #fff;
         }
-        .asset-card-title {
-          font-size: 13px;
-          font-weight: 600;
-          line-height: 1.4;
-          overflow: hidden;
-          white-space: nowrap;
-          text-overflow: ellipsis;
+        .asset-card-overlay-compact {
+          padding-top: 32px;
         }
         .asset-card-meta {
           display: flex;
@@ -1363,6 +1360,28 @@ const Assets = () => {
           font-size: 12px;
           opacity: 0.8;
           margin-top: 4px;
+        }
+        .asset-card-meta-compact {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 2px;
+          margin-top: 0;
+        }
+        .asset-card-model,
+        .asset-card-time {
+          max-width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .asset-card-model {
+          font-size: 13px;
+          font-weight: 600;
+          line-height: 1.4;
+        }
+        .asset-card-time {
+          font-size: 12px;
+          line-height: 1.35;
         }
         .asset-loading {
           padding: 48px 0;
@@ -1494,12 +1513,23 @@ const Assets = () => {
         @media (max-width: 720px) {
           .assets-page {
             min-height: calc(100vh - 70px);
+            padding-top: 24px;
           }
           .assets-search,
           .assets-select,
           .assets-sort {
             width: 100%;
             flex: 1 1 100%;
+          }
+          .assets-grid-image,
+          .assets-grid-video {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          .asset-card-image {
+            height: 220px;
+          }
+          .asset-card-video {
+            height: 154px;
           }
           .asset-detail-shell {
             padding: 12px;
