@@ -980,6 +980,7 @@ const ImageGeneration = () => {
   const selectedCanvasSessionRef = useRef(null);
   const generationModeRef = useRef(generationMode);
   const selectedCanvasSessionIdsRef = useRef(selectedCanvasSessionIds);
+  const canvasImagePreviewRequestSeqRef = useRef(0);
   const [maxImageSize, setMaxImageSize] = useState(10); // MB，默认 10MB
   const [userCustomWorkerKeyEnabled, setUserCustomWorkerKeyEnabled] =
     useState(false);
@@ -7947,6 +7948,47 @@ const ImageGeneration = () => {
       objectFit: 'contain',
       display: 'block',
     },
+    canvasImagePreviewPanel: {
+      position: 'relative',
+      width: 'min(100%, 980px)',
+      maxHeight: 'calc(100vh - 48px)',
+      overflow: 'hidden',
+      borderRadius: 10,
+      border: '1px solid var(--canvas-border)',
+      background: 'var(--canvas-card-bg)',
+      boxShadow: 'var(--canvas-shadow-lg)',
+    },
+    canvasImagePreviewImage: {
+      width: '100%',
+      height: '100%',
+      maxHeight: 'calc(100vh - 48px)',
+      objectFit: 'contain',
+      display: 'block',
+      background: 'var(--canvas-toolbar-bg)',
+    },
+    canvasImagePreviewActions: {
+      position: 'absolute',
+      top: isMobile ? 10 : 12,
+      right: isMobile ? 10 : 12,
+      zIndex: 2,
+      display: 'flex',
+      gap: 8,
+    },
+    canvasImagePreviewActionBtn: {
+      width: isMobile ? 36 : 32,
+      height: isMobile ? 36 : 32,
+      borderRadius: 999,
+      border: '1px solid var(--canvas-media-control-border, rgba(255, 255, 255, 0.16))',
+      background: 'var(--canvas-media-control-bg, rgba(15, 23, 42, 0.58))',
+      color: 'var(--canvas-media-control-text, #fff)',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      cursor: 'pointer',
+      boxShadow: '0 8px 22px rgba(15, 23, 42, 0.18)',
+      backdropFilter: 'blur(8px)',
+      transition: 'transform 0.15s ease, background 0.15s ease',
+    },
     assetPreviewInfo: {
       padding: isMobile ? 12 : 16,
       display: 'flex',
@@ -8042,6 +8084,54 @@ const ImageGeneration = () => {
       </button>
     </div>
   );
+
+  const buildCanvasPreviewFilename = (taskId) => {
+    const normalizedTaskId = String(taskId || '').trim();
+    if (normalizedTaskId) {
+      return `image-${normalizedTaskId}.png`;
+    }
+    return `canvas-image-${Date.now()}.png`;
+  };
+
+  const buildCanvasImagePreviewState = ({
+    src = '',
+    downloadSrc = '',
+    taskId = '',
+    messageId = '',
+  } = {}) => {
+    const normalizedSrc = String(src || '').trim();
+    const normalizedDownloadSrc = String(downloadSrc || '').trim();
+    const normalizedTaskId = String(taskId || '').trim();
+    const normalizedMessageId = String(messageId || '').trim();
+
+    if (!normalizedSrc && !normalizedDownloadSrc) {
+      return null;
+    }
+
+    return {
+      src: normalizedSrc || normalizedDownloadSrc,
+      downloadSrc: normalizedDownloadSrc || normalizedSrc,
+      filename: buildCanvasPreviewFilename(normalizedTaskId),
+      taskId: normalizedTaskId,
+      messageId: normalizedMessageId,
+    };
+  };
+
+  const handleDownloadCanvasPreviewImage = (preview) => {
+    const href = String(preview?.downloadSrc || preview?.src || '').trim();
+    if (!href) {
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = preview?.filename || buildCanvasPreviewFilename('');
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const renderChatFileAttachmentChip = (file, onRemove = null) => (
     <div key={file.uid || file.name} style={styles.chatFileChip}>
@@ -9336,18 +9426,46 @@ const ImageGeneration = () => {
 
   const openCanvasImagePreview = async (message, media) => {
     const initialSrc = media?.previewSrc || media?.src || '';
-    if (initialSrc) {
-      setSelectedCanvasImagePreview({ src: initialSrc });
+    const task = message?.image_task || null;
+    const taskId = task?.id;
+    const messageId = message?.id;
+    const initialPreview = buildCanvasImagePreviewState({
+      src: initialSrc,
+      downloadSrc: task?.image_url || media?.src || initialSrc,
+      taskId,
+      messageId,
+    });
+    if (initialPreview) {
+      setSelectedCanvasImagePreview(initialPreview);
     }
 
-    const task = message?.image_task || null;
     if (!task?.id || task?.image_url) {
       return;
     }
 
+    const previewRequestSeq = canvasImagePreviewRequestSeqRef.current + 1;
+    canvasImagePreviewRequestSeqRef.current = previewRequestSeq;
     const detail = await loadCanvasMessageTaskDetail(message);
     const detailSrc = detail?.image_url || detail?.thumbnail_url || '';
     if (!detailSrc || detailSrc === initialSrc) {
+      setSelectedCanvasImagePreview((prev) => {
+        if (
+          !prev ||
+          prev.messageId !== String(messageId || '') ||
+          prev.taskId !== String(taskId || '') ||
+          previewRequestSeq !== canvasImagePreviewRequestSeqRef.current
+        ) {
+          return prev;
+        }
+        const nextDownloadSrc = detail?.image_url || prev.downloadSrc || prev.src;
+        if (nextDownloadSrc === prev.downloadSrc) {
+          return prev;
+        }
+        return {
+          ...prev,
+          downloadSrc: nextDownloadSrc,
+        };
+      });
       return;
     }
 
@@ -9359,7 +9477,23 @@ const ImageGeneration = () => {
         canvasMessageIndexesRef.current,
       ),
     );
-    setSelectedCanvasImagePreview({ src: detailSrc });
+    setSelectedCanvasImagePreview((prev) => {
+      if (
+        !prev ||
+        prev.messageId !== String(messageId || '') ||
+        prev.taskId !== String(taskId || '') ||
+        previewRequestSeq !== canvasImagePreviewRequestSeqRef.current
+      ) {
+        return prev;
+      }
+      const nextPreview = buildCanvasImagePreviewState({
+        src: detailSrc,
+        downloadSrc: detail?.image_url || detailSrc,
+        taskId,
+        messageId,
+      });
+      return nextPreview || prev;
+    });
   };
 
   const getCanvasBatchAspectRatio = (batch) => {
@@ -11188,6 +11322,9 @@ const ImageGeneration = () => {
     if (!selectedCanvasImagePreview?.src) {
       return null;
     }
+    const canDownload = !!(
+      selectedCanvasImagePreview.downloadSrc || selectedCanvasImagePreview.src
+    );
     return (
       <div
         style={styles.assetPreviewOverlay}
@@ -11198,6 +11335,22 @@ const ImageGeneration = () => {
           style={styles.canvasImagePreviewPanel}
           onClick={(event) => event.stopPropagation()}
         >
+          {canDownload ? (
+            <div style={styles.canvasImagePreviewActions}>
+              <button
+                type='button'
+                title={t('下载图片')}
+                aria-label={t('下载图片')}
+                style={styles.canvasImagePreviewActionBtn}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleDownloadCanvasPreviewImage(selectedCanvasImagePreview);
+                }}
+              >
+                <IconDownload size='small' />
+              </button>
+            </div>
+          ) : null}
           <img
             src={selectedCanvasImagePreview.src}
             alt=''
