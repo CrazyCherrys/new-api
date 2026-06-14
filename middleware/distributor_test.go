@@ -142,9 +142,11 @@ func TestGetUserCustomImageGenerationChannelFallsBackToDefaultBaseWhenBaseDisabl
 	cfg := worker_setting.GetWorkerSetting()
 	previousKeyEnabled := cfg.UserCustomKeyEnabled
 	previousBaseAllowed := cfg.UserCustomBaseURLAllowed
+	previousDefaultBaseURL := cfg.UserDefaultBaseURL
 	t.Cleanup(func() {
 		cfg.UserCustomKeyEnabled = previousKeyEnabled
 		cfg.UserCustomBaseURLAllowed = previousBaseAllowed
+		cfg.UserDefaultBaseURL = previousDefaultBaseURL
 	})
 	cfg.UserCustomKeyEnabled = true
 	cfg.UserCustomBaseURLAllowed = false
@@ -165,6 +167,49 @@ func TestGetUserCustomImageGenerationChannelFallsBackToDefaultBaseWhenBaseDisabl
 	}
 	if channel.GetBaseURL() != constant.ChannelBaseURLs[constant.ChannelTypeOpenAI] {
 		t.Fatalf("expected default OpenAI base URL, got %q", channel.GetBaseURL())
+	}
+}
+
+func TestGetUserCustomImageGenerationChannelUsesWorkerDefaultBaseWhenBaseDisabled(t *testing.T) {
+	db := setupDistributorTestDB(t)
+
+	user := &model.User{
+		Username: "middleware-worker-admin-default-base",
+		Password: "hashed-password",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	user.SetSetting(dto.UserSetting{
+		WorkerApiKey:  "sk-user-key",
+		WorkerApiBase: "https://custom.example.com/v1",
+	})
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousKeyEnabled := cfg.UserCustomKeyEnabled
+	previousBaseAllowed := cfg.UserCustomBaseURLAllowed
+	previousDefaultBaseURL := cfg.UserDefaultBaseURL
+	t.Cleanup(func() {
+		cfg.UserCustomKeyEnabled = previousKeyEnabled
+		cfg.UserCustomBaseURLAllowed = previousBaseAllowed
+		cfg.UserDefaultBaseURL = previousDefaultBaseURL
+	})
+	cfg.UserCustomKeyEnabled = true
+	cfg.UserCustomBaseURLAllowed = false
+	cfg.UserDefaultBaseURL = " https://worker-default.example.com/v1/ "
+
+	c := newImageGenerationRelayContext("/v1/images/generations", user.Id, "openai")
+	channel, err := getUserCustomImageGenerationChannel(c, &ModelRequest{Model: "gpt-image-1"})
+	if err != nil {
+		t.Fatalf("unexpected custom channel error: %v", err)
+	}
+	if channel == nil {
+		t.Fatalf("expected custom image generation channel")
+	}
+	if channel.GetBaseURL() != "https://worker-default.example.com/v1" {
+		t.Fatalf("expected worker default base URL, got %q", channel.GetBaseURL())
 	}
 }
 

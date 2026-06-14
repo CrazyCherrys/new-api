@@ -215,6 +215,56 @@ func TestUpdateOptionKeepsSplitWorkerS3SecretsWhenMaskedValueSubmitted(t *testin
 	}
 }
 
+func TestUpdateOptionValidatesAndNormalizesWorkerDefaultBaseURL(t *testing.T) {
+	setupImageGenerationControllerTestDB(t)
+	withOptionMap(t, map[string]string{})
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/option/", map[string]string{
+		"key":   "worker_setting.user_default_base_url",
+		"value": "https://custom.example.com/v1/",
+	}, 1)
+
+	UpdateOption(ctx)
+
+	var response optionMutationResponse
+	if err := common.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !response.Success {
+		t.Fatalf("expected success response, got message: %s", response.Message)
+	}
+
+	common.OptionMapRWMutex.RLock()
+	stored := common.OptionMap["worker_setting.user_default_base_url"]
+	common.OptionMapRWMutex.RUnlock()
+	if stored != "https://custom.example.com/v1" {
+		t.Fatalf("expected normalized worker default base URL, got %q", stored)
+	}
+}
+
+func TestUpdateOptionRejectsInvalidWorkerDefaultBaseURL(t *testing.T) {
+	setupImageGenerationControllerTestDB(t)
+	withOptionMap(t, map[string]string{})
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/option/", map[string]string{
+		"key":   "worker_setting.user_default_base_url",
+		"value": "ftp://custom.example.com",
+	}, 1)
+
+	UpdateOption(ctx)
+
+	var response optionMutationResponse
+	if err := common.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if response.Success {
+		t.Fatalf("expected failure response for invalid scheme")
+	}
+	if response.Message == "" {
+		t.Fatalf("expected validation error message")
+	}
+}
+
 func containsAny(value string, needles ...string) bool {
 	for _, needle := range needles {
 		if strings.Contains(value, needle) {

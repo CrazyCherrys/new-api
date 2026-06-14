@@ -16,6 +16,8 @@ type WorkerSetting struct {
 	UserCustomKeyEnabled bool `json:"user_custom_key_enabled"`
 	// UserCustomBaseURLAllowed 是否允许用户自定义 API 地址
 	UserCustomBaseURLAllowed bool `json:"user_custom_base_url_allowed"`
+	// UserDefaultBaseURL 管理员默认 API 地址，仅在允许自定义密钥但不允许自定义地址时生效
+	UserDefaultBaseURL string `json:"user_default_base_url"`
 
 	// StorageType 存储类型: local / s3
 	StorageType string `json:"storage_type"`
@@ -96,6 +98,7 @@ var workerSetting = WorkerSetting{
 	MaxWorkers:                   4,
 	UserCustomKeyEnabled:         false,
 	UserCustomBaseURLAllowed:     false,
+	UserDefaultBaseURL:           "",
 	StorageType:                  "local",
 	LocalStoragePath:             "",
 	S3Endpoint:                   "",
@@ -172,6 +175,13 @@ func (ws *WorkerSetting) EffectiveResultStorageType() string {
 		return "local"
 	}
 	return ws.effectiveStorageType(ws.fallbackString(ws.ResultStorageType, ws.StorageType))
+}
+
+func (ws *WorkerSetting) EffectiveUserDefaultBaseURL() string {
+	if ws == nil {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(ws.UserDefaultBaseURL), "/")
 }
 
 func (ws *WorkerSetting) EffectiveReferenceStorageType() string {

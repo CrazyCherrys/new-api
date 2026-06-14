@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -327,6 +328,26 @@ func UpdateOption(c *gin.Context) {
 				"message": err.Error(),
 			})
 			return
+		}
+	case "worker_setting.user_default_base_url":
+		baseURL := strings.TrimSpace(option.Value.(string))
+		if baseURL != "" {
+			parsedURL, parseErr := url.ParseRequestURI(baseURL)
+			if parseErr != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "默认 API 地址无效",
+				})
+				return
+			}
+			if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "默认 API 地址必须使用 http 或 https",
+				})
+				return
+			}
+			option.Value = strings.TrimRight(baseURL, "/")
 		}
 	}
 	err = model.UpdateOption(option.Key, option.Value.(string))

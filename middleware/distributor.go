@@ -208,6 +208,8 @@ func getUserCustomImageGenerationChannel(c *gin.Context, modelRequest *ModelRequ
 	}
 	if cfg.UserCustomBaseURLAllowed {
 		baseURL = strings.TrimRight(strings.TrimSpace(settings.WorkerApiBase), "/")
+	} else {
+		baseURL = cfg.EffectiveUserDefaultBaseURL()
 	}
 
 	channelType := constant.ChannelTypeOpenAI

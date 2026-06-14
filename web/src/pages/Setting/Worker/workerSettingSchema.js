@@ -23,6 +23,7 @@ export const WORKER_SETTING_DEFAULTS = Object.freeze({
   'worker_setting.max_workers': 4,
   'worker_setting.user_custom_key_enabled': false,
   'worker_setting.user_custom_base_url_allowed': false,
+  'worker_setting.user_default_base_url': '',
   'worker_setting.storage_type': 'local',
   'worker_setting.local_storage_path': '',
   'worker_setting.s3_endpoint': '',

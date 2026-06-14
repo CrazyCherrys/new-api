@@ -388,6 +388,20 @@ export default function SettingsWorker(props) {
                   )}
                 />
               </Col>
+              <Col xs={24} sm={24} md={16} lg={16} xl={16}>
+                <Form.Input
+                  field={'worker_setting.user_default_base_url'}
+                  label={t('默认 API 地址')}
+                  extraText={t(
+                    '仅当允许用户自定义 API 密钥、但未允许用户自定义 API 地址时生效；留空则继续使用渠道类型的内置默认地址。',
+                  )}
+                  placeholder='https://api.example.com'
+                  onChange={handleFieldChange(
+                    'worker_setting.user_default_base_url',
+                  )}
+                  showClear
+                />
+              </Col>
             </Row>
           </Form.Section>
 
