@@ -1895,9 +1895,6 @@ const ImageGeneration = () => {
           [CANVAS_MODE_VIDEO]: null,
         };
       });
-      if (generationMode !== CANVAS_MODE_CHAT) {
-        setGenerationMode(CANVAS_MODE_CHAT);
-      }
       return;
     }
     if (routeSyncInFlightRef.current) {
@@ -1953,7 +1950,6 @@ const ImageGeneration = () => {
     })();
   }, [
     findCanvasSessionByIdentifier,
-    generationMode,
     routeSessionIdNormalized,
     selectedCanvasSessionId,
   ]);

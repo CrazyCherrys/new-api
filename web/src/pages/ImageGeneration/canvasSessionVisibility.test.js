@@ -75,6 +75,26 @@ describe('canvasSessionVisibility', () => {
     ).toBe('');
   });
 
+  test('keeps image mode blank when there is no selected or routed session', () => {
+    expect(
+      getVisibleCanvasSessionId({
+        generationMode: 'image',
+        routeSessionId: '',
+        selectedCanvasSessionId: null,
+        canvasModes: CANVAS_MODES,
+      }),
+    ).toBe('');
+
+    expect(
+      getVisibleCanvasSession({
+        generationMode: 'image',
+        routeSessionId: '',
+        selectedCanvasSessionId: null,
+        canvasModes: CANVAS_MODES,
+      }),
+    ).toBeNull();
+  });
+
   test('old image route plus new chat session keeps optimistic messages visible', () => {
     const optimisticMessages = [
       { id: 'req-1-user', role: 'user', prompt: 'hello' },
