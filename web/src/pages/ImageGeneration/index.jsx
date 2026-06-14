@@ -1014,8 +1014,8 @@ const ImageGeneration = () => {
     }
     const normalizedMode = CANVAS_MODES.includes(mode) ? mode : '';
     if (normalizedMode) {
-      const directMatch = (canvasSessions[normalizedMode] || []).find(
-        (item) => canvasSessionMatchesIdentifier(item, target),
+      const directMatch = (canvasSessions[normalizedMode] || []).find((item) =>
+        canvasSessionMatchesIdentifier(item, target),
       );
       if (directMatch) {
         return directMatch;
@@ -1029,15 +1029,15 @@ const ImageGeneration = () => {
         return recentMatch;
       }
     }
-    const anyRecentMatch = recentCanvasSessions.items.find(
-      (item) => canvasSessionMatchesIdentifier(item, target),
+    const anyRecentMatch = recentCanvasSessions.items.find((item) =>
+      canvasSessionMatchesIdentifier(item, target),
     );
     if (anyRecentMatch) {
       return anyRecentMatch;
     }
     for (const canvasMode of CANVAS_MODES) {
-      const match = (canvasSessions[canvasMode] || []).find(
-        (item) => canvasSessionMatchesIdentifier(item, target),
+      const match = (canvasSessions[canvasMode] || []).find((item) =>
+        canvasSessionMatchesIdentifier(item, target),
       );
       if (match) {
         return match;
@@ -1220,10 +1220,7 @@ const ImageGeneration = () => {
     errorMessage,
   ) => {
     const sessionId = selectedCanvasSessionIds[CANVAS_MODE_CHAT];
-    const session = findCanvasSessionByIdentifier(
-      sessionId,
-      CANVAS_MODE_CHAT,
-    );
+    const session = findCanvasSessionByIdentifier(sessionId, CANVAS_MODE_CHAT);
     const sessionIdentifier = getCanvasSessionIdentifier(session);
     if (!sessionIdentifier || !updates || Object.keys(updates).length === 0) {
       return;
@@ -2107,7 +2104,9 @@ const ImageGeneration = () => {
       ? session.mode
       : CANVAS_MODE_IMAGE;
     setCanvasSessionsForMode(normalizedMode, (prev) =>
-      prev.filter((item) => !canvasSessionMatchesIdentifier(item, sessionIdentifier)),
+      prev.filter(
+        (item) => !canvasSessionMatchesIdentifier(item, sessionIdentifier),
+      ),
     );
     setRecentCanvasSessions((prev) => ({
       ...prev,
@@ -2321,11 +2320,14 @@ const ImageGeneration = () => {
       setCanvasMessagesLoading(true);
     }
     try {
-      const res = await API.get(buildCanvasSessionApiPath(sessionId, '/messages'), {
-        params: {
-          limit: DEFAULT_CANVAS_MESSAGE_PAGE_SIZE,
+      const res = await API.get(
+        buildCanvasSessionApiPath(sessionId, '/messages'),
+        {
+          params: {
+            limit: DEFAULT_CANVAS_MESSAGE_PAGE_SIZE,
+          },
         },
-      });
+      );
       if (
         requestSeq !== canvasMessagesRequestSeqRef.current ||
         !isCurrentCanvasMessageSession(sessionId)
@@ -2395,12 +2397,15 @@ const ImageGeneration = () => {
     const previousScrollHeight = container?.scrollHeight || 0;
     setCanvasMessagesLoadingMore(true);
     try {
-      const res = await API.get(buildCanvasSessionApiPath(sessionId, '/messages'), {
-        params: {
-          limit: DEFAULT_CANVAS_MESSAGE_PAGE_SIZE,
-          cursor: canvasMessagesNextCursor,
+      const res = await API.get(
+        buildCanvasSessionApiPath(sessionId, '/messages'),
+        {
+          params: {
+            limit: DEFAULT_CANVAS_MESSAGE_PAGE_SIZE,
+            cursor: canvasMessagesNextCursor,
+          },
         },
-      });
+      );
       if (!isCurrentCanvasMessageSession(sessionId)) {
         return [];
       }
@@ -2650,8 +2655,9 @@ const ImageGeneration = () => {
       getChatModelsWithPreservedCurrent(
         chatSessionSettingsDraft.model,
         t('当前会话模型，现不可用'),
-      ).find((item) => item?.request_model === chatSessionSettingsDraft.model) ||
-      null;
+      ).find(
+        (item) => item?.request_model === chatSessionSettingsDraft.model,
+      ) || null;
     const webSearchVisible = getCanvasChatWebSearchVisibility(
       selectedDraftModelOption,
     );
@@ -5155,7 +5161,10 @@ const ImageGeneration = () => {
       );
       const results = await Promise.allSettled(
         Array.from({ length: taskCount }, () =>
-          API.post(buildCanvasSessionApiPath(canvasSession, '/messages'), taskPayload),
+          API.post(
+            buildCanvasSessionApiPath(canvasSession, '/messages'),
+            taskPayload,
+          ),
         ),
       );
 
@@ -5235,7 +5244,10 @@ const ImageGeneration = () => {
       }
 
       if (createdTasks.length === 0) {
-        removeCanvasMessagesForRequest(canvasSessionIdentifier, clientRequestId);
+        removeCanvasMessagesForRequest(
+          canvasSessionIdentifier,
+          clientRequestId,
+        );
         showError(firstError || t('创建任务失败'));
       } else if (createdTasks.length < taskCount) {
         showError(
@@ -5395,7 +5407,10 @@ const ImageGeneration = () => {
         taskPayload,
       );
       if (!res.data.success) {
-        removeCanvasMessagesForRequest(canvasSessionIdentifier, clientRequestId);
+        removeCanvasMessagesForRequest(
+          canvasSessionIdentifier,
+          clientRequestId,
+        );
         showError(res.data.message || t('创建视频任务失败'));
         return;
       }
@@ -5434,7 +5449,10 @@ const ImageGeneration = () => {
     } catch (error) {
       const canvasSessionIdentifier = getCanvasSessionIdentifier(canvasSession);
       if (canvasSessionIdentifier && clientRequestId) {
-        removeCanvasMessagesForRequest(canvasSessionIdentifier, clientRequestId);
+        removeCanvasMessagesForRequest(
+          canvasSessionIdentifier,
+          clientRequestId,
+        );
       }
       showError(
         error.response?.data?.message || error.message || t('创建视频任务失败'),
@@ -5833,8 +5851,9 @@ const ImageGeneration = () => {
     const chatUploadVisibility = getCanvasChatUploadVisibility(
       activeChatModelOption,
     );
-    const webSearchVisible =
-      getCanvasChatWebSearchVisibility(activeChatModelOption);
+    const webSearchVisible = getCanvasChatWebSearchVisibility(
+      activeChatModelOption,
+    );
     if (chatImageAttachment && !chatUploadVisibility.showImageUpload) {
       showError(t('当前模型不支持图片上传'));
       return;
@@ -7978,7 +7997,8 @@ const ImageGeneration = () => {
       width: isMobile ? 36 : 32,
       height: isMobile ? 36 : 32,
       borderRadius: 999,
-      border: '1px solid var(--canvas-media-control-border, rgba(255, 255, 255, 0.16))',
+      border:
+        '1px solid var(--canvas-media-control-border, rgba(255, 255, 255, 0.16))',
       background: 'var(--canvas-media-control-bg, rgba(15, 23, 42, 0.58))',
       color: 'var(--canvas-media-control-text, #fff)',
       display: 'inline-flex',
@@ -9457,7 +9477,8 @@ const ImageGeneration = () => {
         ) {
           return prev;
         }
-        const nextDownloadSrc = detail?.image_url || prev.downloadSrc || prev.src;
+        const nextDownloadSrc =
+          detail?.image_url || prev.downloadSrc || prev.src;
         if (nextDownloadSrc === prev.downloadSrc) {
           return prev;
         }
@@ -10655,6 +10676,17 @@ const ImageGeneration = () => {
       : isVideoMode
         ? videoGenerating || !canGenerateVideo
         : generating || !canGenerate;
+    const isChatSubmitButtonStopState = isChatMode && chatStreaming;
+    const submitButtonDisabled = isChatSubmitButtonStopState
+      ? false
+      : submitDisabled;
+    const submitButtonLabel = isChatSubmitButtonStopState
+      ? t('停止回复')
+      : isChatMode
+        ? t('发送消息')
+        : isVideoMode
+          ? t('生成视频')
+          : t('生成图片');
     const submitEmphasis = promptHasContent ? 'primary' : 'idle';
     const placeholder = isChatMode
       ? t('输入消息...')
@@ -10675,6 +10707,13 @@ const ImageGeneration = () => {
         return;
       }
       handleGenerate();
+    };
+    const handleComposerActionButtonClick = () => {
+      if (isChatSubmitButtonStopState) {
+        stopChatStream();
+        return;
+      }
+      handleComposerSubmit();
     };
     const handleComposerKeyDown = (event) => {
       const nativeEvent = event.nativeEvent || {};
@@ -10914,13 +10953,9 @@ const ImageGeneration = () => {
               data-canvas-chat-drag-active={
                 isChatMode && chatComposerDragActive ? 'true' : 'false'
               }
-              onDragEnter={
-                isChatMode ? handleChatComposerDragEnter : undefined
-              }
+              onDragEnter={isChatMode ? handleChatComposerDragEnter : undefined}
               onDragOver={isChatMode ? handleChatComposerDragOver : undefined}
-              onDragLeave={
-                isChatMode ? handleChatComposerDragLeave : undefined
-              }
+              onDragLeave={isChatMode ? handleChatComposerDragLeave : undefined}
               onDrop={isChatMode ? handleChatComposerDrop : undefined}
             >
               {hasInlineReferenceThumbs ? (
@@ -11009,55 +11044,40 @@ const ImageGeneration = () => {
                   className='canvas-composer-controls-right'
                 >
                   <div style={styles.composerActionGroup}>
-                    {isChatMode && chatStreaming ? (
-                      <button
-                        className='canvas-composer-stop'
-                        aria-label={t('停止回复')}
-                        title={t('停止回复')}
-                        style={styles.generateStopBtnEmbedded}
-                        onClick={() => stopChatStream()}
-                        type='button'
-                      >
-                        <span style={styles.generateStopIcon} />
-                      </button>
-                    ) : null}
                     <button
                       className='canvas-composer-submit'
-                      aria-label={
-                        isChatMode
-                          ? t('发送消息')
-                          : isVideoMode
-                            ? t('生成视频')
-                            : t('生成图片')
+                      aria-label={submitButtonLabel}
+                      title={submitButtonLabel}
+                      style={
+                        isChatSubmitButtonStopState
+                          ? styles.generateStopBtnEmbedded
+                          : {
+                              ...styles.generateIconBtnEmbedded,
+                              '--canvas-submit-bg': promptHasContent
+                                ? 'var(--canvas-primary)'
+                                : 'var(--canvas-toolbar-bg)',
+                              '--canvas-submit-border': promptHasContent
+                                ? 'var(--canvas-primary)'
+                                : 'var(--canvas-border)',
+                              '--canvas-submit-color': promptHasContent
+                                ? 'var(--text-inverse)'
+                                : 'var(--canvas-text-muted)',
+                              '--canvas-submit-shadow': promptHasContent
+                                ? '0 10px 22px rgba(109, 93, 246, 0.16)'
+                                : 'none',
+                            }
                       }
-                      title={
-                        isChatMode
-                          ? t('发送消息')
-                          : isVideoMode
-                            ? t('生成视频')
-                            : t('生成图片')
-                      }
-                      style={{
-                        ...styles.generateIconBtnEmbedded,
-                        '--canvas-submit-bg': promptHasContent
-                          ? 'var(--canvas-primary)'
-                          : 'var(--canvas-toolbar-bg)',
-                        '--canvas-submit-border': promptHasContent
-                          ? 'var(--canvas-primary)'
-                          : 'var(--canvas-border)',
-                        '--canvas-submit-color': promptHasContent
-                          ? 'var(--text-inverse)'
-                          : 'var(--canvas-text-muted)',
-                        '--canvas-submit-shadow': promptHasContent
-                          ? '0 10px 22px rgba(109, 93, 246, 0.16)'
-                          : 'none',
-                      }}
                       data-submit-emphasis={submitEmphasis}
-                      onClick={handleComposerSubmit}
-                      disabled={submitDisabled}
+                      data-submit-state={
+                        isChatSubmitButtonStopState ? 'stop' : 'send'
+                      }
+                      onClick={handleComposerActionButtonClick}
+                      disabled={submitButtonDisabled}
                       type='button'
                     >
-                      {submitLoading ? (
+                      {isChatSubmitButtonStopState ? (
+                        <span style={styles.generateStopIcon} />
+                      ) : submitLoading ? (
                         <Spin size='small' />
                       ) : (
                         <IconSend size='small' />
@@ -11519,9 +11539,8 @@ const ImageGeneration = () => {
     const draftModelOption =
       availableChatModels.find((item) => item?.request_model === draft.model) ||
       null;
-    const showWebSearchToggle = getCanvasChatWebSearchVisibility(
-      draftModelOption,
-    );
+    const showWebSearchToggle =
+      getCanvasChatWebSearchVisibility(draftModelOption);
     const renderChatModelOption = (renderProps) => {
       const {
         disabled,
