@@ -21,7 +21,6 @@ const normalizeValue = (value) => String(value || '').trim();
 
 export const getRouteSelectionSyncAction = ({
   routeSessionId = '',
-  generationMode = '',
   selectedSessionIdsByMode = {},
   findCanvasSessionByIdentifier,
   getCanvasSessionIdentifier,
@@ -58,11 +57,7 @@ export const getRouteSelectionSyncAction = ({
   const normalizedSelectedId = normalizeValue(
     sessionMode ? selectedSessionIdsByMode?.[sessionMode] : '',
   );
-  if (
-    sessionMode &&
-    generationMode === sessionMode &&
-    normalizedSelectedId === sessionIdentifier
-  ) {
+  if (sessionMode && normalizedSelectedId === sessionIdentifier) {
     return {
       type: 'noop',
       session,

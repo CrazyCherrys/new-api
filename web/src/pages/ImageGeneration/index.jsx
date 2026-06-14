@@ -1913,7 +1913,6 @@ const ImageGeneration = () => {
 
     const routeSelectionAction = getRouteSelectionSyncAction({
       routeSessionId: nextRouteId,
-      generationMode,
       selectedSessionIdsByMode: selectedCanvasSessionIdsRef.current,
       findCanvasSessionByIdentifier,
       getCanvasSessionIdentifier,
@@ -1973,7 +1972,6 @@ const ImageGeneration = () => {
     })();
   }, [
     findCanvasSessionByIdentifier,
-    generationMode,
     routeSessionIdNormalized,
   ]);
 

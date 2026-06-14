@@ -144,4 +144,15 @@ describe('canvasSessionVisibility', () => {
       }),
     ).toBe('chat-6');
   });
+
+  test('keeps image mode blank after leaving a routed chat session', () => {
+    expect(
+      getVisibleCanvasSessionId({
+        generationMode: 'image',
+        routeSessionId: '',
+        selectedCanvasSessionId: null,
+        canvasModes: CANVAS_MODES,
+      }),
+    ).toBe('');
+  });
 });

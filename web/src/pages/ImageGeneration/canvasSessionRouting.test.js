@@ -79,6 +79,30 @@ describe('canvasSessionRouting', () => {
     });
   });
 
+  test('route selection stays noop when the routed session is already selected for its own mode even if generation mode changed locally', () => {
+    const findCanvasSessionByIdentifier = (sessionId) =>
+      sessionId === 'chat-2' ? { id: 22, public_id: 'chat-2', mode: 'chat' } : null;
+
+    expect(
+      getRouteSelectionSyncAction({
+        routeSessionId: 'chat-2',
+        selectedSessionIdsByMode: {
+          chat: 'chat-2',
+          image: null,
+          video: null,
+        },
+        findCanvasSessionByIdentifier,
+        getCanvasSessionIdentifier,
+        canvasModes: CANVAS_MODES,
+        defaultMode: 'image',
+      }),
+    ).toMatchObject({
+      type: 'noop',
+      sessionIdentifier: 'chat-2',
+      sessionMode: 'chat',
+    });
+  });
+
   test('route selection clears all mode selections when route is blank', () => {
     expect(
       getRouteSelectionSyncAction({
