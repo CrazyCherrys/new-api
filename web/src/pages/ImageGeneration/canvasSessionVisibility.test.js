@@ -129,4 +129,19 @@ describe('canvasSessionVisibility', () => {
       }),
     ).toEqual(optimisticMessages);
   });
+
+  test('prefers the selected chat session over an older route session', () => {
+    const findCanvasSessionByIdentifier = (sessionId) =>
+      sessionId === 'chat-6' ? { id: 66, public_id: 'chat-6', mode: 'chat' } : null;
+
+    expect(
+      getVisibleCanvasSessionId({
+        generationMode: 'chat',
+        routeSessionId: 'chat-5',
+        selectedCanvasSessionId: 'chat-6',
+        canvasModes: CANVAS_MODES,
+        findCanvasSessionByIdentifier,
+      }),
+    ).toBe('chat-6');
+  });
 });

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Brain } from 'lucide-react';
@@ -123,6 +123,10 @@ import {
   getVisibleCanvasSession,
   getVisibleCanvasSessionId,
 } from './canvasSessionVisibility';
+import {
+  getChatRouteSyncAction,
+  getRouteSelectionSyncAction,
+} from './canvasSessionRouting';
 import './canvas-theme.css';
 
 const { Text } = Typography;
@@ -1024,44 +1028,50 @@ const ImageGeneration = () => {
   const showsReliableTaskTotal = !canUseTaskCursorPagination;
   const hasNextTaskPage = taskHasMore;
   const selectedCanvasSessionId = selectedCanvasSessionIds[generationMode];
-  const findCanvasSessionByIdentifier = (sessionId, mode = '') => {
-    const target = String(sessionId || '').trim();
-    if (!target) {
-      return null;
-    }
-    const normalizedMode = CANVAS_MODES.includes(mode) ? mode : '';
-    if (normalizedMode) {
-      const directMatch = (canvasSessions[normalizedMode] || []).find((item) =>
-        canvasSessionMatchesIdentifier(item, target),
-      );
-      if (directMatch) {
-        return directMatch;
+  const selectedChatSessionId = String(
+    selectedCanvasSessionIds[CANVAS_MODE_CHAT] || '',
+  ).trim();
+  const findCanvasSessionByIdentifier = useCallback(
+    (sessionId, mode = '') => {
+      const target = String(sessionId || '').trim();
+      if (!target) {
+        return null;
       }
-      const recentMatch = recentCanvasSessions.items.find(
-        (item) =>
-          item.mode === normalizedMode &&
+      const normalizedMode = CANVAS_MODES.includes(mode) ? mode : '';
+      if (normalizedMode) {
+        const directMatch = (canvasSessions[normalizedMode] || []).find((item) =>
           canvasSessionMatchesIdentifier(item, target),
-      );
-      if (recentMatch) {
-        return recentMatch;
+        );
+        if (directMatch) {
+          return directMatch;
+        }
+        const recentMatch = recentCanvasSessions.items.find(
+          (item) =>
+            item.mode === normalizedMode &&
+            canvasSessionMatchesIdentifier(item, target),
+        );
+        if (recentMatch) {
+          return recentMatch;
+        }
       }
-    }
-    const anyRecentMatch = recentCanvasSessions.items.find((item) =>
-      canvasSessionMatchesIdentifier(item, target),
-    );
-    if (anyRecentMatch) {
-      return anyRecentMatch;
-    }
-    for (const canvasMode of CANVAS_MODES) {
-      const match = (canvasSessions[canvasMode] || []).find((item) =>
+      const anyRecentMatch = recentCanvasSessions.items.find((item) =>
         canvasSessionMatchesIdentifier(item, target),
       );
-      if (match) {
-        return match;
+      if (anyRecentMatch) {
+        return anyRecentMatch;
       }
-    }
-    return null;
-  };
+      for (const canvasMode of CANVAS_MODES) {
+        const match = (canvasSessions[canvasMode] || []).find((item) =>
+          canvasSessionMatchesIdentifier(item, target),
+        );
+        if (match) {
+          return match;
+        }
+      }
+      return null;
+    },
+    [canvasSessions, recentCanvasSessions.items],
+  );
   const visibleCanvasSessionId = getVisibleCanvasSessionId({
     generationMode,
     routeSessionId: routeSessionIdNormalized,
@@ -1901,13 +1911,26 @@ const ImageGeneration = () => {
       return;
     }
 
-    const session = findCanvasSessionByIdentifier(nextRouteId);
-    if (session) {
-      const sessionIdentifier = getCanvasSessionIdentifier(session);
-      const sessionMode = CANVAS_MODES.includes(session.mode)
-        ? session.mode
-        : CANVAS_MODE_IMAGE;
-      setGenerationMode(sessionMode);
+    const routeSelectionAction = getRouteSelectionSyncAction({
+      routeSessionId: nextRouteId,
+      generationMode,
+      selectedSessionIdsByMode: selectedCanvasSessionIdsRef.current,
+      findCanvasSessionByIdentifier,
+      getCanvasSessionIdentifier,
+      canvasModes: CANVAS_MODES,
+      defaultMode: CANVAS_MODE_IMAGE,
+    });
+    if (routeSelectionAction.type === 'noop') {
+      return;
+    }
+    if (routeSelectionAction.type === 'select-route-session') {
+      const {
+        sessionIdentifier,
+        sessionMode = CANVAS_MODE_IMAGE,
+      } = routeSelectionAction;
+      setGenerationMode((current) =>
+        current === sessionMode ? current : sessionMode,
+      );
       setSelectedCanvasSessionIds((prev) => {
         if (prev[sessionMode] === sessionIdentifier) {
           return prev;
@@ -1950,8 +1973,8 @@ const ImageGeneration = () => {
     })();
   }, [
     findCanvasSessionByIdentifier,
+    generationMode,
     routeSessionIdNormalized,
-    selectedCanvasSessionId,
   ]);
 
   useEffect(() => {
@@ -1975,30 +1998,25 @@ const ImageGeneration = () => {
     if (generationMode !== CANVAS_MODE_CHAT || routeSyncInFlightRef.current) {
       return;
     }
-    const selectedChatSessionId = String(
-      selectedCanvasSessionIds[CANVAS_MODE_CHAT] || '',
-    ).trim();
-    if (selectedChatSessionId) {
-      if (selectedChatSessionId !== routeSessionIdNormalized) {
-        syncCanvasRouteToSession(selectedChatSessionId, { replace: true });
-      }
+    const chatRouteAction = getChatRouteSyncAction({
+      generationMode,
+      chatMode: CANVAS_MODE_CHAT,
+      routeSessionId: routeSessionIdNormalized,
+      selectedChatSessionId,
+      findCanvasSessionByIdentifier,
+    });
+    if (chatRouteAction.type === 'sync-route-to-selected-chat') {
+      syncCanvasRouteToSession(chatRouteAction.sessionId, { replace: true });
       return;
     }
-    if (!routeSessionIdNormalized) {
-      return;
-    }
-    const routeSession = findCanvasSessionByIdentifier(routeSessionIdNormalized);
-    if (!routeSession) {
-      return;
-    }
-    if (routeSession.mode !== CANVAS_MODE_CHAT) {
+    if (chatRouteAction.type === 'sync-route-to-blank') {
       syncCanvasRouteToBlank({ replace: true });
     }
   }, [
     findCanvasSessionByIdentifier,
     generationMode,
     routeSessionIdNormalized,
-    selectedCanvasSessionIds,
+    selectedChatSessionId,
   ]);
 
   // 切换任意筛选/排序时回到第一页
@@ -5880,6 +5898,13 @@ const ImageGeneration = () => {
       : CANVAS_MODE_IMAGE;
     const sessionIdentifier = getCanvasSessionIdentifier(session);
     if (!sessionIdentifier) {
+      return;
+    }
+    if (
+      generationMode === mode &&
+      selectedCanvasSessionIds[mode] === sessionIdentifier &&
+      routeSessionIdNormalized === sessionIdentifier
+    ) {
       return;
     }
     setGenerationMode(mode);
