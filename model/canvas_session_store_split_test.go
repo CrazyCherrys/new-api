@@ -536,14 +536,21 @@ func TestDeleteCanvasChatSessionDataWithSessionDeletesAttachmentsInDedicatedChat
 		t.Fatalf("failed to reload deleted chat session: %v", err)
 	}
 	if reloadedSession != nil {
-		t.Fatalf("expected chat session to be soft deleted, got %#v", reloadedSession)
+		t.Fatalf("expected chat session to be deleted, got %#v", reloadedSession)
 	}
 	messageRefs, err := ListCanvasSessionMessageTaskRefsForMode(CanvasModeChat, 12, chatSession.Id)
 	if err != nil {
 		t.Fatalf("failed to list chat message refs after delete: %v", err)
 	}
 	if len(messageRefs) != 0 {
-		t.Fatalf("expected dedicated chat messages to be soft deleted, got %d", len(messageRefs))
+		t.Fatalf("expected dedicated chat messages to be deleted, got %d", len(messageRefs))
+	}
+	var messageCount int64
+	if err := childDBs[CanvasModeChat].Table(canvasChatMessagesTable).Where("user_id = ? AND session_id = ?", 12, chatSession.Id).Count(&messageCount).Error; err != nil {
+		t.Fatalf("failed to count dedicated chat messages after delete: %v", err)
+	}
+	if messageCount != 0 {
+		t.Fatalf("expected dedicated chat message rows to be deleted, got %d", messageCount)
 	}
 }
 
@@ -579,20 +586,20 @@ func TestDeleteCanvasChatSessionDataWithSessionRollsBackAttachmentDeleteOnSessio
 		t.Fatalf("failed to create chat assistant message: %v", err)
 	}
 
-	updateCallbackName := "fail_dedicated_canvas_chat_session_soft_delete"
-	if err := childDBs[CanvasModeChat].Callback().Update().Before("gorm:update").Register(updateCallbackName, func(tx *gorm.DB) {
+	deleteCallbackName := "fail_dedicated_canvas_chat_session_delete"
+	if err := childDBs[CanvasModeChat].Callback().Delete().Before("gorm:delete").Register(deleteCallbackName, func(tx *gorm.DB) {
 		if tx.Statement != nil && tx.Statement.Table == "canvas_sessions" {
 			tx.AddError(fmt.Errorf("boom"))
 		}
 	}); err != nil {
-		t.Fatalf("failed to register dedicated update callback: %v", err)
+		t.Fatalf("failed to register dedicated delete callback: %v", err)
 	}
 	defer func() {
-		_ = childDBs[CanvasModeChat].Callback().Update().Remove(updateCallbackName)
+		_ = childDBs[CanvasModeChat].Callback().Delete().Remove(deleteCallbackName)
 	}()
 
 	if err := DeleteCanvasSessionDataWithSession(13, chatSession, []int{userMessage.Id, assistantMessage.Id}, nil, nil, nil, 121); err == nil {
-		t.Fatal("expected dedicated chat delete to fail when session soft delete fails")
+		t.Fatal("expected dedicated chat delete to fail when session delete fails")
 	}
 
 	reloadedSession, err := GetCanvasSessionByID(13, chatSession.Id)

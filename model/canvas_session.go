@@ -345,6 +345,17 @@ func (s *canvasSessionStore) restore(userId int, id int) error {
 		}).Error
 }
 
+func (s *canvasSessionStore) deleteWithDB(db *gorm.DB, userId int, id int) error {
+	if db == nil {
+		db = s.db
+	}
+	if db == nil {
+		return fmt.Errorf("canvas session database is not initialized")
+	}
+	return db.Where("id = ? AND user_id = ? AND mode = ? AND deleted_time = 0", id, userId, s.mode).
+		Delete(&CanvasSession{}).Error
+}
+
 type CanvasMessage struct {
 	Id               int    `json:"id" gorm:"primaryKey;index:idx_canvas_messages_session_deleted_created,priority:4;index:idx_canvas_messages_session_status_deleted_created,priority:5"`
 	SessionId        int    `json:"session_id" gorm:"index:idx_canvas_messages_session_deleted_created,priority:1;index:idx_canvas_messages_session_status_deleted_created,priority:1;not null"`
@@ -621,6 +632,24 @@ func RestoreCanvasSessionByMode(mode string, userId int, id int) error {
 	return store.restore(userId, id)
 }
 
+func DeleteCanvasSessionWithSession(userId int, session *CanvasSession) error {
+	return DeleteCanvasSessionWithSessionAndDB(nil, userId, session)
+}
+
+func DeleteCanvasSessionWithSessionAndDB(db *gorm.DB, userId int, session *CanvasSession) error {
+	if session == nil {
+		return nil
+	}
+	if session.UserId != userId || session.Id <= 0 {
+		return fmt.Errorf("canvas session not found")
+	}
+	store, err := canvasSessionStoreForMode(session.Mode)
+	if err != nil {
+		return err
+	}
+	return store.deleteWithDB(db, userId, session.Id)
+}
+
 func CreateCanvasMessage(message *CanvasMessage) error {
 	if message == nil {
 		return nil
@@ -710,10 +739,11 @@ func DeleteCanvasSessionDataWithSession(userId int, session *CanvasSession, mess
 	if messageMode == "" {
 		return fmt.Errorf("invalid canvas mode")
 	}
-	if CanvasModeUsesDedicatedMessageDB(messageMode) {
-		return deleteCanvasSessionDataDedicated(userId, session, messageIDs, imageTaskIDs, videoTaskIDs, cleanupJobs, deletedTime)
+	db, err := canvasModeDataDB(messageMode)
+	if err != nil {
+		return err
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		if err := CreateCanvasAssetCleanupJobsWithDB(tx, cleanupJobs); err != nil {
 			return err
 		}
@@ -728,70 +758,9 @@ func DeleteCanvasSessionDataWithSession(userId int, session *CanvasSession, mess
 				return err
 			}
 		}
-		if err := SoftDeleteCanvasMessagesByIDsWithDB(tx, messageMode, userId, messageIDs, deletedTime); err != nil {
+		if err := DeleteCanvasMessagesByModeWithDB(tx, messageMode, userId, session.Id); err != nil {
 			return err
 		}
-		return SoftDeleteCanvasSessionWithSessionAndDB(tx, userId, session, deletedTime)
+		return DeleteCanvasSessionWithSessionAndDB(tx, userId, session)
 	})
-}
-
-func deleteCanvasSessionDataDedicated(userId int, session *CanvasSession, messageIDs []int, imageTaskIDs []int, videoTaskIDs []int64, cleanupJobs []*CanvasAssetCleanupJob, deletedTime int64) error {
-	messageMode := NormalizeCanvasMode(session.Mode)
-	if messageMode == CanvasModeChat {
-		chatDB, err := canvasModeDataDB(CanvasModeChat)
-		if err != nil {
-			return err
-		}
-		return chatDB.Transaction(func(tx *gorm.DB) error {
-			if err := DeleteCanvasChatMessageAttachmentsBySessionWithDB(tx, userId, session.Id); err != nil {
-				return err
-			}
-			if err := SoftDeleteCanvasMessagesByIDsWithDB(tx, messageMode, userId, messageIDs, deletedTime); err != nil {
-				return err
-			}
-			return SoftDeleteCanvasSessionWithSessionAndDB(tx, userId, session, deletedTime)
-		})
-	}
-	if err := SoftDeleteCanvasMessagesByIDs(messageMode, userId, messageIDs, deletedTime); err != nil {
-		return err
-	}
-	if err := SoftDeleteCanvasSessionWithSession(userId, session, deletedTime); err != nil {
-		restoreErr := RestoreCanvasMessagesByIDs(messageMode, userId, messageIDs)
-		return canvasDeleteCompensationError("failed to soft delete canvas session", err, nil, restoreErr, nil)
-	}
-	if err := CreateCanvasAssetCleanupJobs(cleanupJobs); err != nil {
-		restoreSessionErr := RestoreCanvasSessionByMode(messageMode, userId, session.Id)
-		restoreMessageErr := RestoreCanvasMessagesByIDs(messageMode, userId, messageIDs)
-		return canvasDeleteCompensationError("failed to create canvas cleanup jobs", err, restoreSessionErr, restoreMessageErr, nil)
-	}
-	if err := DeleteImageTasksByUserAndIDs(userId, imageTaskIDs); err != nil {
-		cleanupRollbackErr := DeleteCanvasAssetCleanupJobs(cleanupJobs)
-		restoreSessionErr := RestoreCanvasSessionByMode(messageMode, userId, session.Id)
-		restoreMessageErr := RestoreCanvasMessagesByIDs(messageMode, userId, messageIDs)
-		return canvasDeleteCompensationError("failed to delete image tasks", err, restoreSessionErr, restoreMessageErr, cleanupRollbackErr)
-	}
-	if err := DeleteCanvasVideoTasksByIDs(userId, videoTaskIDs, nil); err != nil {
-		cleanupRollbackErr := DeleteCanvasAssetCleanupJobs(cleanupJobs)
-		restoreSessionErr := RestoreCanvasSessionByMode(messageMode, userId, session.Id)
-		restoreMessageErr := RestoreCanvasMessagesByIDs(messageMode, userId, messageIDs)
-		return canvasDeleteCompensationError("failed to delete video tasks", err, restoreSessionErr, restoreMessageErr, cleanupRollbackErr)
-	}
-	return nil
-}
-
-func canvasDeleteCompensationError(prefix string, err error, restoreSessionErr error, restoreMessageErr error, cleanupRollbackErr error) error {
-	details := make([]string, 0, 3)
-	if cleanupRollbackErr != nil {
-		details = append(details, fmt.Sprintf("cleanup job rollback also failed: %v", cleanupRollbackErr))
-	}
-	if restoreSessionErr != nil {
-		details = append(details, fmt.Sprintf("session restore also failed: %v", restoreSessionErr))
-	}
-	if restoreMessageErr != nil {
-		details = append(details, fmt.Sprintf("message restore also failed: %v", restoreMessageErr))
-	}
-	if len(details) == 0 {
-		return fmt.Errorf("%s: %w", prefix, err)
-	}
-	return fmt.Errorf("%s: %w (%s)", prefix, err, strings.Join(details, "; "))
 }

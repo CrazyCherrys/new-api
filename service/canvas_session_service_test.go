@@ -2623,7 +2623,7 @@ func TestCanvasMessagesAreUserIsolated(t *testing.T) {
 	}
 }
 
-func TestDeleteCanvasSessionSoftDeletesSessionMessagesAndAssociatedTasks(t *testing.T) {
+func TestDeleteCanvasSessionDeletesSessionMessagesAndAssociatedTasks(t *testing.T) {
 	db := setupCanvasSessionServiceTestDB(t)
 
 	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage, Title: "delete me"})
@@ -2654,15 +2654,26 @@ func TestDeleteCanvasSessionSoftDeletesSessionMessagesAndAssociatedTasks(t *test
 	if err := DeleteCanvasSession(1, session.Id); err != nil {
 		t.Fatalf("failed to delete canvas session: %v", err)
 	}
-	if reloaded, err := model.GetCanvasSessionByID(1, session.Id); err != nil || reloaded != nil {
-		t.Fatalf("expected session to be soft deleted, got %#v err=%v", reloaded, err)
+	var sessionCount int64
+	if err := db.Model(&model.CanvasSession{}).Where("id = ? AND user_id = ? AND mode = ?", session.Id, 1, model.CanvasModeImage).Count(&sessionCount).Error; err != nil {
+		t.Fatalf("failed to count deleted session: %v", err)
+	}
+	if sessionCount != 0 {
+		t.Fatalf("expected session row to be deleted, count=%d", sessionCount)
 	}
 	messages, err := model.ListCanvasSessionMessageTaskRefsForMode(model.CanvasModeImage, 1, session.Id)
 	if err != nil {
 		t.Fatalf("failed to list message refs after delete: %v", err)
 	}
 	if len(messages) != 0 {
-		t.Fatalf("expected message refs to be soft deleted, got %d", len(messages))
+		t.Fatalf("expected message refs to be deleted, got %d", len(messages))
+	}
+	var messageCount int64
+	if err := db.Model(&model.CanvasMessage{}).Where("session_id = ? AND user_id = ? AND mode = ?", session.Id, 1, model.CanvasModeImage).Count(&messageCount).Error; err != nil {
+		t.Fatalf("failed to count deleted messages: %v", err)
+	}
+	if messageCount != 0 {
+		t.Fatalf("expected message rows to be deleted, count=%d", messageCount)
 	}
 
 	var imageTaskCount int64
@@ -2671,6 +2682,40 @@ func TestDeleteCanvasSessionSoftDeletesSessionMessagesAndAssociatedTasks(t *test
 	}
 	if imageTaskCount != 0 {
 		t.Fatalf("expected associated image task to be deleted, count=%d", imageTaskCount)
+	}
+}
+
+func TestDeleteCanvasSessionDeletesPreviouslySoftDeletedMessages(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage, Title: "delete all messages"})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	messages := []*model.CanvasMessage{
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleUser, Prompt: "active"},
+		{SessionId: session.Id, UserId: 1, Mode: model.CanvasModeImage, Role: model.CanvasMessageRoleAssistant, Prompt: "soft deleted"},
+	}
+	for _, message := range messages {
+		if err := model.CreateCanvasMessage(message); err != nil {
+			t.Fatalf("failed to create canvas message: %v", err)
+		}
+	}
+	if err := model.SoftDeleteCanvasMessagesByIDs(model.CanvasModeImage, 1, []int{messages[1].Id}, common.GetTimestamp()); err != nil {
+		t.Fatalf("failed to soft delete canvas message before session delete: %v", err)
+	}
+
+	if err := DeleteCanvasSession(1, session.Id); err != nil {
+		t.Fatalf("failed to delete canvas session: %v", err)
+	}
+
+	var messageCount int64
+	if err := db.Model(&model.CanvasMessage{}).Where("session_id = ? AND user_id = ? AND mode = ?", session.Id, 1, model.CanvasModeImage).Count(&messageCount).Error; err != nil {
+		t.Fatalf("failed to count deleted messages: %v", err)
+	}
+	if messageCount != 0 {
+		t.Fatalf("expected all message rows for the session to be deleted, count=%d", messageCount)
 	}
 }
 
@@ -2746,19 +2791,30 @@ func TestDeleteCanvasChatSessionDeletesStoredAttachments(t *testing.T) {
 		t.Fatalf("expected attachment rows to be deleted, got %d", afterCount)
 	}
 
-	if reloaded, err := model.GetCanvasSessionByID(1, session.Id); err != nil || reloaded != nil {
-		t.Fatalf("expected chat session to be soft deleted, got %#v err=%v", reloaded, err)
+	var sessionCount int64
+	if err := db.Model(&model.CanvasSession{}).Where("id = ? AND user_id = ? AND mode = ?", session.Id, 1, model.CanvasModeChat).Count(&sessionCount).Error; err != nil {
+		t.Fatalf("failed to count deleted chat session: %v", err)
+	}
+	if sessionCount != 0 {
+		t.Fatalf("expected chat session row to be deleted, count=%d", sessionCount)
 	}
 	messageRefs, err := model.ListCanvasSessionMessageTaskRefsForMode(model.CanvasModeChat, 1, session.Id)
 	if err != nil {
 		t.Fatalf("failed to list chat message refs after delete: %v", err)
 	}
 	if len(messageRefs) != 0 {
-		t.Fatalf("expected chat messages to be soft deleted, got %d", len(messageRefs))
+		t.Fatalf("expected chat messages to be deleted, got %d", len(messageRefs))
+	}
+	var messageCount int64
+	if err := db.Model(&model.CanvasMessage{}).Where("session_id = ? AND user_id = ? AND mode = ?", session.Id, 1, model.CanvasModeChat).Count(&messageCount).Error; err != nil {
+		t.Fatalf("failed to count deleted chat messages: %v", err)
+	}
+	if messageCount != 0 {
+		t.Fatalf("expected chat message rows to be deleted, count=%d", messageCount)
 	}
 }
 
-func TestDeleteCanvasSessionRollsBackWhenMessageSoftDeleteFails(t *testing.T) {
+func TestDeleteCanvasSessionRollsBackWhenMessageDeleteFails(t *testing.T) {
 	db := setupCanvasSessionServiceTestDB(t)
 
 	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeImage, Title: "rollback"})
@@ -2786,20 +2842,20 @@ func TestDeleteCanvasSessionRollsBackWhenMessageSoftDeleteFails(t *testing.T) {
 		}
 	}
 
-	updateCallbackName := "fail_canvas_message_soft_delete"
-	if err := db.Callback().Update().Before("gorm:update").Register(updateCallbackName, func(tx *gorm.DB) {
+	deleteCallbackName := "fail_canvas_message_delete"
+	if err := db.Callback().Delete().Before("gorm:delete").Register(deleteCallbackName, func(tx *gorm.DB) {
 		if tx.Statement != nil && tx.Statement.Table == "canvas_messages" {
 			tx.AddError(fmt.Errorf("boom"))
 		}
 	}); err != nil {
-		t.Fatalf("failed to register update callback: %v", err)
+		t.Fatalf("failed to register delete callback: %v", err)
 	}
 	defer func() {
-		_ = db.Callback().Update().Remove(updateCallbackName)
+		_ = db.Callback().Delete().Remove(deleteCallbackName)
 	}()
 
 	if err := DeleteCanvasSession(1, session.Id); err == nil {
-		t.Fatal("expected DeleteCanvasSession to fail when message soft delete fails")
+		t.Fatal("expected DeleteCanvasSession to fail when message delete fails")
 	}
 
 	reloadedSession, err := model.GetCanvasSessionByID(1, session.Id)
@@ -2873,20 +2929,20 @@ func TestDeleteCanvasChatSessionRollsBackAttachmentDeleteOnSessionFailure(t *tes
 		t.Fatalf("failed to create chat message: %v", err)
 	}
 
-	updateCallbackName := "fail_canvas_chat_session_soft_delete"
-	if err := db.Callback().Update().Before("gorm:update").Register(updateCallbackName, func(tx *gorm.DB) {
+	deleteCallbackName := "fail_canvas_chat_session_delete"
+	if err := db.Callback().Delete().Before("gorm:delete").Register(deleteCallbackName, func(tx *gorm.DB) {
 		if tx.Statement != nil && tx.Statement.Table == "canvas_sessions" {
 			tx.AddError(fmt.Errorf("boom"))
 		}
 	}); err != nil {
-		t.Fatalf("failed to register update callback: %v", err)
+		t.Fatalf("failed to register delete callback: %v", err)
 	}
 	defer func() {
-		_ = db.Callback().Update().Remove(updateCallbackName)
+		_ = db.Callback().Delete().Remove(deleteCallbackName)
 	}()
 
 	if err := DeleteCanvasSession(1, session.Id); err == nil {
-		t.Fatal("expected DeleteCanvasSession to fail when chat session soft delete fails")
+		t.Fatal("expected DeleteCanvasSession to fail when chat session delete fails")
 	}
 
 	reloadedSession, err := model.GetCanvasSessionByID(1, session.Id)
@@ -3113,15 +3169,26 @@ func TestDeleteCanvasSessionBatchesAssociatedTaskLookupsAndDeletes(t *testing.T)
 		t.Fatalf("expected one batched image task delete, got %d", imageTaskDeletes)
 	}
 
-	if reloaded, err := model.GetCanvasSessionByID(1, session.Id); err != nil || reloaded != nil {
-		t.Fatalf("expected session to be soft deleted, got %#v err=%v", reloaded, err)
+	var sessionCount int64
+	if err := db.Model(&model.CanvasSession{}).Where("id = ? AND user_id = ? AND mode = ?", session.Id, 1, model.CanvasModeImage).Count(&sessionCount).Error; err != nil {
+		t.Fatalf("failed to count deleted session: %v", err)
+	}
+	if sessionCount != 0 {
+		t.Fatalf("expected session row to be deleted, count=%d", sessionCount)
 	}
 	messages, err := model.ListCanvasSessionMessageTaskRefsForMode(model.CanvasModeImage, 1, session.Id)
 	if err != nil {
 		t.Fatalf("failed to list message refs after delete: %v", err)
 	}
 	if len(messages) != 0 {
-		t.Fatalf("expected message refs to be soft deleted, got %d", len(messages))
+		t.Fatalf("expected message refs to be deleted, got %d", len(messages))
+	}
+	var messageCount int64
+	if err := db.Model(&model.CanvasMessage{}).Where("session_id = ? AND user_id = ? AND mode = ?", session.Id, 1, model.CanvasModeImage).Count(&messageCount).Error; err != nil {
+		t.Fatalf("failed to count deleted messages: %v", err)
+	}
+	if messageCount != 0 {
+		t.Fatalf("expected message rows to be deleted, count=%d", messageCount)
 	}
 	var imageTaskCount int64
 	if err := db.Model(&model.ImageGenerationTask{}).Where("id IN ?", imageTaskIDs).Count(&imageTaskCount).Error; err != nil {

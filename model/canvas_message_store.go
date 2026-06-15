@@ -360,6 +360,23 @@ func (s *canvasMessageStore) softDeleteIDs(userId int, ids []int, deletedTime in
 	})
 }
 
+func (s *canvasMessageStore) deleteSession(userId int, sessionId int) error {
+	return s.query().
+		Where("user_id = ? AND session_id = ? AND mode = ?", userId, sessionId, s.mode).
+		Delete(&CanvasMessage{}).Error
+}
+
+func (s *canvasMessageStore) deleteIDs(userId int, ids []int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return forEachChunk(ids, func(chunk []int) error {
+		return s.query().
+			Where("user_id = ? AND id IN ? AND mode = ? AND deleted_time = 0", userId, chunk, s.mode).
+			Delete(&CanvasMessage{}).Error
+	})
+}
+
 func (s *canvasMessageStore) restoreIDs(userId int, ids []int) error {
 	if len(ids) == 0 {
 		return nil
@@ -579,6 +596,38 @@ func SoftDeleteCanvasMessagesByIDsWithDB(db *gorm.DB, mode string, userId int, i
 		return err
 	}
 	return store.softDeleteIDs(userId, ids, deletedTime)
+}
+
+func DeleteCanvasMessagesByMode(mode string, userId int, sessionId int) error {
+	store, err := canvasMessageStoreForMode(mode)
+	if err != nil {
+		return err
+	}
+	return store.deleteSession(userId, sessionId)
+}
+
+func DeleteCanvasMessagesByModeWithDB(db *gorm.DB, mode string, userId int, sessionId int) error {
+	store, err := canvasMessageStoreForModeWithDB(mode, db)
+	if err != nil {
+		return err
+	}
+	return store.deleteSession(userId, sessionId)
+}
+
+func DeleteCanvasMessagesByIDs(mode string, userId int, ids []int) error {
+	store, err := canvasMessageStoreForMode(mode)
+	if err != nil {
+		return err
+	}
+	return store.deleteIDs(userId, ids)
+}
+
+func DeleteCanvasMessagesByIDsWithDB(db *gorm.DB, mode string, userId int, ids []int) error {
+	store, err := canvasMessageStoreForModeWithDB(mode, db)
+	if err != nil {
+		return err
+	}
+	return store.deleteIDs(userId, ids)
 }
 
 func RestoreCanvasMessagesByIDs(mode string, userId int, ids []int) error {
