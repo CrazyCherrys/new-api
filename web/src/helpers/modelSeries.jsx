@@ -24,7 +24,7 @@ const MODEL_SERIES_DEFINITIONS = [
   {
     key: 'openai',
     aliases: ['openai', 'dalle'],
-    displayName: 'OpenAI / DALL-E',
+    displayName: 'OpenAI',
     shortLabel: 'OA',
     background:
       'linear-gradient(135deg, rgba(16, 163, 127, 0.96), rgba(5, 122, 85, 0.96))',

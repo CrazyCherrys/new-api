@@ -96,7 +96,7 @@ const EditModelMappingModal = ({
     { value: 'openai', label: 'OpenAI (/v1/chat/completions)' },
     {
       value: 'openai-response',
-      label: 'OpenAI Responses compatibility (/v1/chat/completions -> /v1/responses)',
+      label: 'OpenAI Responses (/v1/responses)',
     },
     { value: 'anthropic', label: 'Claude (/v1/messages)' },
     {

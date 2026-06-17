@@ -274,8 +274,7 @@ const ModelMappingTable = ({
     if (modelType === 1) {
       const endpointMap = {
         openai: 'OpenAI (/v1/chat/completions)',
-        'openai-response':
-          'OpenAI Responses compatibility (/v1/chat/completions -> /v1/responses)',
+        'openai-response': 'OpenAI Responses (/v1/responses)',
         anthropic: 'Claude (/v1/messages)',
         gemini: 'Gemini (/v1beta/models/{model}:generateContent)',
       };
