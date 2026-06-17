@@ -1161,6 +1161,26 @@ const ImageGeneration = () => {
   const isCurrentCanvasMessageSession = (sessionId) =>
     String(canvasMessagesSessionIdRef.current || '') ===
     String(sessionId || '');
+  const ensureCanvasMessagesSessionForSend = (sessionId) => {
+    const normalizedSessionId = String(sessionId || '').trim();
+    if (!normalizedSessionId) {
+      return;
+    }
+    canvasMessagesRequestSeqRef.current += 1;
+    if (isCurrentCanvasMessageSession(normalizedSessionId)) {
+      setCanvasMessagesLoading(false);
+      setCanvasMessagesLoadingMore(false);
+      return;
+    }
+    canvasMessagesSessionIdRef.current = normalizedSessionId;
+    setCanvasMessagesSessionId(normalizedSessionId);
+    setCanvasMessages([]);
+    setCanvasMessagesHasMore(false);
+    setCanvasMessagesNextCursor('');
+    setCanvasMessagesError('');
+    setCanvasMessagesLoading(false);
+    setCanvasMessagesLoadingMore(false);
+  };
   const setCanvasAutoFollowEnabledState = (nextValue) => {
     canvasAutoFollowEnabledRef.current = nextValue;
     setCanvasAutoFollowEnabled((current) =>
@@ -6092,6 +6112,7 @@ const ImageGeneration = () => {
       const canvasSession = await ensureCanvasSession(CANVAS_MODE_CHAT);
       activeSessionId = getCanvasSessionIdentifier(canvasSession);
       clientRequestId = generateCanvasClientRequestId();
+      ensureCanvasMessagesSessionForSend(activeSessionId);
       replaceCanvasMessagesForSession(
         activeSessionId,
         clientRequestId,
@@ -6287,18 +6308,25 @@ const ImageGeneration = () => {
       setChatStreaming(false);
       if (activeSessionId) {
         refreshRecentCanvasSessions({ silent: true });
+        const normalizedActiveSessionId = String(activeSessionId || '').trim();
         if (
           generationModeRef.current === CANVAS_MODE_CHAT &&
-          selectedCanvasSessionIdsRef.current?.[CANVAS_MODE_CHAT] ===
-            activeSessionId
+          (String(
+            selectedCanvasSessionIdsRef.current?.[CANVAS_MODE_CHAT] || '',
+          ).trim() === normalizedActiveSessionId ||
+            String(canvasMessagesSessionIdRef.current || '').trim() ===
+              normalizedActiveSessionId)
         ) {
           window.setTimeout(() => {
             if (
               generationModeRef.current === CANVAS_MODE_CHAT &&
-              selectedCanvasSessionIdsRef.current?.[CANVAS_MODE_CHAT] ===
-                activeSessionId
+              (String(
+                selectedCanvasSessionIdsRef.current?.[CANVAS_MODE_CHAT] || '',
+              ).trim() === normalizedActiveSessionId ||
+                String(canvasMessagesSessionIdRef.current || '').trim() ===
+                  normalizedActiveSessionId)
             ) {
-              loadCanvasMessages(activeSessionId, { silent: true });
+              loadCanvasMessages(normalizedActiveSessionId, { silent: true });
             }
           }, 200);
         }
