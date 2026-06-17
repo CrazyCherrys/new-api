@@ -992,6 +992,7 @@ const ImageGeneration = () => {
   const chatComposerDragDepthRef = useRef(0);
   const canvasChatCopiedMessageTimerRef = useRef(null);
   const canvasChatReasoningAutoCollapseTimersRef = useRef(new Map());
+  const previousRouteSessionIdRef = useRef(routeSessionIdNormalized);
   const chatStreamingNoticeAtRef = useRef(0);
   const chatModelsRequestRef = useRef(null);
   const chatModelsRequestNotifyRef = useRef(false);
@@ -1909,7 +1910,21 @@ const ImageGeneration = () => {
   useEffect(() => {
     const nextRouteId = routeSessionIdNormalized;
     routeSessionLookupTargetRef.current = nextRouteId;
-    if (!nextRouteId) {
+    const previousRouteId = previousRouteSessionIdRef.current;
+    const routeSelectionAction = getRouteSelectionSyncAction({
+      routeSessionId: nextRouteId,
+      previousRouteSessionId: previousRouteId,
+      selectedSessionIdsByMode: selectedCanvasSessionIdsRef.current,
+      findCanvasSessionByIdentifier,
+      getCanvasSessionIdentifier,
+      canvasModes: CANVAS_MODES,
+      defaultMode: CANVAS_MODE_IMAGE,
+    });
+    previousRouteSessionIdRef.current = nextRouteId;
+    if (routeSelectionAction.type === 'noop') {
+      return;
+    }
+    if (routeSelectionAction.type === 'clear-selection') {
       setSelectedCanvasSessionIds((prev) => {
         if (
           prev[CANVAS_MODE_CHAT] === null &&
@@ -1928,18 +1943,6 @@ const ImageGeneration = () => {
       return;
     }
     if (routeSyncInFlightRef.current) {
-      return;
-    }
-
-    const routeSelectionAction = getRouteSelectionSyncAction({
-      routeSessionId: nextRouteId,
-      selectedSessionIdsByMode: selectedCanvasSessionIdsRef.current,
-      findCanvasSessionByIdentifier,
-      getCanvasSessionIdentifier,
-      canvasModes: CANVAS_MODES,
-      defaultMode: CANVAS_MODE_IMAGE,
-    });
-    if (routeSelectionAction.type === 'noop') {
       return;
     }
     if (routeSelectionAction.type === 'select-route-session') {
@@ -6107,6 +6110,11 @@ const ImageGeneration = () => {
     let activeSessionId = null;
     let clientRequestId = '';
     let hasServerSnapshot = false;
+    if (!promptOverride) {
+      setChatPrompt('');
+      setChatImageAttachment(null);
+      setChatFileAttachment(null);
+    }
 
     try {
       const canvasSession = await ensureCanvasSession(CANVAS_MODE_CHAT);
@@ -6123,11 +6131,6 @@ const ImageGeneration = () => {
           submittedAt: Math.floor(Date.now() / 1000),
         }),
       );
-      setChatPrompt('');
-      if (!promptOverride) {
-        setChatImageAttachment(null);
-        setChatFileAttachment(null);
-      }
       const requestURL = buildCanvasStreamRequestUrl(
         buildCanvasSessionApiPath(activeSessionId, '/messages'),
       );
@@ -6291,11 +6294,11 @@ const ImageGeneration = () => {
     } catch (error) {
       if (activeSessionId && clientRequestId && !hasServerSnapshot) {
         removeCanvasMessagesForRequest(activeSessionId, clientRequestId);
-        if (!promptOverride) {
-          setChatPrompt(previousChatPrompt);
-          setChatImageAttachment(previousChatImageAttachment);
-          setChatFileAttachment(previousChatFileAttachment);
-        }
+      }
+      if (!promptOverride && !hasServerSnapshot) {
+        setChatPrompt(previousChatPrompt);
+        setChatImageAttachment(previousChatImageAttachment);
+        setChatFileAttachment(previousChatFileAttachment);
       }
       if (error?.name === 'AbortError') {
         return;

@@ -107,6 +107,7 @@ describe('canvasSessionRouting', () => {
     expect(
       getRouteSelectionSyncAction({
         routeSessionId: '',
+        previousRouteSessionId: 'chat-1',
         generationMode: 'chat',
         selectedSessionIdsByMode: {
           chat: 'chat-1',
@@ -120,6 +121,26 @@ describe('canvasSessionRouting', () => {
       }),
     ).toEqual({
       type: 'clear-selection',
+    });
+  });
+
+  test('route selection stays noop when local state updates while route is still initially blank', () => {
+    expect(
+      getRouteSelectionSyncAction({
+        routeSessionId: '',
+        previousRouteSessionId: '',
+        selectedSessionIdsByMode: {
+          chat: 'chat-1',
+          image: null,
+          video: null,
+        },
+        findCanvasSessionByIdentifier: () => null,
+        getCanvasSessionIdentifier,
+        canvasModes: CANVAS_MODES,
+        defaultMode: 'image',
+      }),
+    ).toEqual({
+      type: 'noop',
     });
   });
 

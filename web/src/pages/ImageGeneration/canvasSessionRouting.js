@@ -21,6 +21,7 @@ const normalizeValue = (value) => String(value || '').trim();
 
 export const getRouteSelectionSyncAction = ({
   routeSessionId = '',
+  previousRouteSessionId = '',
   selectedSessionIdsByMode = {},
   findCanvasSessionByIdentifier,
   getCanvasSessionIdentifier,
@@ -29,6 +30,11 @@ export const getRouteSelectionSyncAction = ({
 }) => {
   const normalizedRouteId = normalizeValue(routeSessionId);
   if (!normalizedRouteId) {
+    if (!normalizeValue(previousRouteSessionId)) {
+      return {
+        type: 'noop',
+      };
+    }
     return {
       type: 'clear-selection',
     };
