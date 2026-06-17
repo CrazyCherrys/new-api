@@ -1,6 +1,10 @@
 package service
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -9,6 +13,12 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 )
+
+type canvasChatRelayRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn canvasChatRelayRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
 
 func seedCanvasChatModelAbility(
 	t *testing.T,
@@ -563,6 +573,401 @@ func TestDiagnoseCanvasChatModelMappingWarnings(t *testing.T) {
 		}
 		if len(diagnostic.WarningMessages) != 0 || !diagnostic.VisibleInCanvas {
 			t.Fatalf("expected reachable mapping without warnings, got %#v", diagnostic)
+		}
+	})
+}
+
+func TestCanvasChatResponseMetadataUpstreamResponseIDRoundTrip(t *testing.T) {
+	metadata, err := buildCanvasChatResponseMetadata(nil, "gpt-4.1", "default", nil, 8, true, nil, "resp_123")
+	if err != nil {
+		t.Fatalf("failed to build response metadata: %v", err)
+	}
+	if got := extractCanvasChatUpstreamResponseID(metadata); got != "resp_123" {
+		t.Fatalf("expected upstream response id round trip, got %q", got)
+	}
+}
+
+func TestBuildCanvasChatResponsesRequest(t *testing.T) {
+	setupCanvasSessionServiceTestDB(t)
+
+	systemPrompt := "system prompt"
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{
+		Mode:         model.CanvasModeChat,
+		SystemPrompt: &systemPrompt,
+	})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	buildPrepared := func(prompt string, metadata string, webSearch bool) *canvasChatPreparedRequest {
+		temperature := 0.25
+		return &canvasChatPreparedRequest{
+			UserId:             1,
+			Session:            session,
+			Prompt:             prompt,
+			FinalModel:         "gpt-4.1",
+			RequestEndpoint:    "openai-response",
+			FinalGroup:         "default",
+			Temperature:        &temperature,
+			ContextCount:       8,
+			WebSearchEnabled:   webSearch,
+			PreviousResponseID: "resp_prev_001",
+			UserMessage: &model.CanvasMessage{
+				Id:       11,
+				Role:     model.CanvasMessageRoleUser,
+				Prompt:   prompt,
+				Metadata: metadata,
+			},
+		}
+	}
+
+	t.Run("plain text", func(t *testing.T) {
+		req, err := buildCanvasChatResponsesRequest(buildPrepared("hello", "", false))
+		if err != nil {
+			t.Fatalf("failed to build responses request: %v", err)
+		}
+		if req.Model != "gpt-4.1" || req.PreviousResponseID != "resp_prev_001" {
+			t.Fatalf("unexpected request envelope: %#v", req)
+		}
+		if req.Stream == nil || !*req.Stream {
+			t.Fatalf("expected stream true, got %#v", req.Stream)
+		}
+		if len(req.ToolChoice) != 0 {
+			t.Fatalf("expected tool_choice empty without web search, got %s", string(req.ToolChoice))
+		}
+		var input []map[string]any
+		if err := common.Unmarshal(req.Input, &input); err != nil {
+			t.Fatalf("failed to decode input: %v", err)
+		}
+		if len(input) != 1 {
+			t.Fatalf("expected one input item, got %#v", input)
+		}
+		content := input[0]["content"].([]any)
+		if len(content) != 1 || content[0].(map[string]any)["type"] != "input_text" || content[0].(map[string]any)["text"] != "hello" {
+			t.Fatalf("expected plain text input, got %#v", input)
+		}
+	})
+
+	t.Run("text plus image", func(t *testing.T) {
+		req, err := buildCanvasChatResponsesRequest(buildPrepared(
+			"look",
+			`{"attachments":[{"kind":"image","name":"ref.png","mime_type":"image/png","data":"data:image/png;base64,Zm9v"}]}`,
+			false,
+		))
+		if err != nil {
+			t.Fatalf("failed to build responses request: %v", err)
+		}
+		var input []map[string]any
+		if err := common.Unmarshal(req.Input, &input); err != nil {
+			t.Fatalf("failed to decode input: %v", err)
+		}
+		if len(input) != 1 {
+			t.Fatalf("expected one input item, got %#v", input)
+		}
+		content := input[0]["content"].([]any)
+		if len(content) != 2 {
+			t.Fatalf("expected text + image content, got %#v", content)
+		}
+		if content[0].(map[string]any)["type"] != "input_text" || content[1].(map[string]any)["type"] != "input_image" {
+			t.Fatalf("unexpected content shape: %#v", content)
+		}
+	})
+
+	t.Run("text plus file", func(t *testing.T) {
+		req, err := buildCanvasChatResponsesRequest(buildPrepared(
+			"read this",
+			`{"attachments":[{"kind":"file","name":"notes.txt","mime_type":"text/plain","data":"data:text/plain;base64,YmFy"}]}`,
+			false,
+		))
+		if err != nil {
+			t.Fatalf("failed to build responses request: %v", err)
+		}
+		var input []map[string]any
+		if err := common.Unmarshal(req.Input, &input); err != nil {
+			t.Fatalf("failed to decode input: %v", err)
+		}
+		if len(input) != 1 {
+			t.Fatalf("expected one input item, got %#v", input)
+		}
+		content := input[0]["content"].([]any)
+		if len(content) != 2 {
+			t.Fatalf("expected text + file content, got %#v", content)
+		}
+		if content[0].(map[string]any)["type"] != "input_text" || content[1].(map[string]any)["type"] != "input_file" {
+			t.Fatalf("unexpected content shape: %#v", content)
+		}
+	})
+
+	t.Run("web search", func(t *testing.T) {
+		req, err := buildCanvasChatResponsesRequest(buildPrepared("search", "", true))
+		if err != nil {
+			t.Fatalf("failed to build responses request: %v", err)
+		}
+		if string(req.ToolChoice) != "\"auto\"" {
+			t.Fatalf("expected tool_choice auto, got %s", string(req.ToolChoice))
+		}
+		tools := req.GetToolsMap()
+		if len(tools) != 1 || tools[0]["type"] != dto.BuildInToolWebSearch {
+			t.Fatalf("expected official web_search tool, got %#v", tools)
+		}
+		var instructions string
+		if err := common.Unmarshal(req.Instructions, &instructions); err != nil {
+			t.Fatalf("failed to decode instructions: %v", err)
+		}
+		if instructions != systemPrompt {
+			t.Fatalf("expected system prompt in instructions, got %q", instructions)
+		}
+	})
+
+	t.Run("reasoning and max_output_tokens from params", func(t *testing.T) {
+		prepared := buildPrepared("think", "", false)
+		prepared.ResponsesOptions = &canvasChatResponsesOptions{
+			Reasoning: &dto.Reasoning{
+				Effort:  "medium",
+				Summary: "auto",
+			},
+			MaxOutputTokens:   common.GetPointer(uint(256)),
+			Store:             common.GetPointer(true),
+			ParallelToolCalls: common.GetPointer(false),
+		}
+		req, err := buildCanvasChatResponsesRequest(prepared)
+		if err != nil {
+			t.Fatalf("failed to build responses request: %v", err)
+		}
+		if req.Reasoning == nil || req.Reasoning.Effort != "medium" || req.Reasoning.Summary != "auto" {
+			t.Fatalf("expected reasoning to persist, got %#v", req.Reasoning)
+		}
+		if req.MaxOutputTokens == nil || *req.MaxOutputTokens != 256 {
+			t.Fatalf("expected max_output_tokens 256, got %#v", req.MaxOutputTokens)
+		}
+		var store bool
+		if err := common.Unmarshal(req.Store, &store); err != nil {
+			t.Fatalf("failed to decode store: %v", err)
+		}
+		if !store {
+			t.Fatalf("expected store=true, got %v", store)
+		}
+		var parallel bool
+		if err := common.Unmarshal(req.ParallelToolCalls, &parallel); err != nil {
+			t.Fatalf("failed to decode parallel_tool_calls: %v", err)
+		}
+		if parallel {
+			t.Fatalf("expected parallel_tool_calls=false, got %v", parallel)
+		}
+	})
+}
+
+func TestParseCanvasResponsesBody(t *testing.T) {
+	body, err := common.Marshal(dto.OpenAIResponsesResponse{
+		ID:    "resp_abc",
+		Model: "gpt-4.1",
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "output_text", Text: "final answer"},
+				},
+			},
+		},
+		Reasoning: &dto.Reasoning{
+			Summary: "reasoning summary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal responses body: %v", err)
+	}
+	result, err := parseCanvasResponsesBody(body, nil)
+	if err != nil {
+		t.Fatalf("failed to parse responses body: %v", err)
+	}
+	if result.Text != "final answer" {
+		t.Fatalf("expected output text, got %q", result.Text)
+	}
+	if result.ReasoningContent != "reasoning summary" {
+		t.Fatalf("expected reasoning summary, got %q", result.ReasoningContent)
+	}
+	if result.UpstreamResponseID != "resp_abc" {
+		t.Fatalf("expected upstream response id, got %q", result.UpstreamResponseID)
+	}
+}
+
+func TestParseCanvasResponsesStreamResponse(t *testing.T) {
+	tests := []struct {
+		name            string
+		payload         string
+		wantContent     string
+		wantReasoning   string
+		wantResponseID  string
+		wantCompletedID string
+		wantEmit        bool
+	}{
+		{
+			name:           "created",
+			payload:        `{"type":"response.created","response":{"id":"resp_1"}}`,
+			wantResponseID: "resp_1",
+		},
+		{
+			name:        "text delta",
+			payload:     `{"type":"response.output_text.delta","delta":"hello"}`,
+			wantContent: "hello",
+			wantEmit:    true,
+		},
+		{
+			name:          "reasoning delta",
+			payload:       `{"type":"response.reasoning_summary_text.delta","delta":"step 1"}`,
+			wantReasoning: "step 1",
+			wantEmit:      true,
+		},
+		{
+			name:            "completed",
+			payload:         `{"type":"response.completed","response":{"id":"resp_done"}}`,
+			wantResponseID:  "resp_done",
+			wantCompletedID: "resp_done",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			delta, responseID, completedID, emitDelta, err := parseCanvasResponsesStreamResponse(tc.payload)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if delta.Content != tc.wantContent || delta.ReasoningContent != tc.wantReasoning {
+				t.Fatalf("unexpected delta: %#v", delta)
+			}
+			if responseID != tc.wantResponseID {
+				t.Fatalf("expected response id %q, got %q", tc.wantResponseID, responseID)
+			}
+			if completedID != tc.wantCompletedID {
+				t.Fatalf("expected completed id %q, got %q", tc.wantCompletedID, completedID)
+			}
+			if emitDelta != tc.wantEmit {
+				t.Fatalf("expected emit=%v, got %v", tc.wantEmit, emitDelta)
+			}
+		})
+	}
+}
+
+func TestDefaultCallCanvasChatRelayRoutesByRequestEndpoint(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	previousClient := canvasChatHTTPClient
+	t.Cleanup(func() {
+		canvasChatHTTPClient = previousClient
+	})
+
+	var capturedPath string
+	var capturedCompatHeader string
+	var capturedBody string
+	canvasChatHTTPClient = &http.Client{
+		Transport: canvasChatRelayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body, _ := io.ReadAll(req.Body)
+			capturedPath = req.URL.Path
+			capturedCompatHeader = req.Header.Get(constant.HeaderCanvasChatResponsesCompat)
+			capturedBody = string(body)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": []string{"text/event-stream"},
+				},
+				Body: io.NopCloser(bytes.NewBufferString("data: [DONE]\n\n")),
+			}, nil
+		}),
+	}
+
+	t.Run("openai chat completions", func(t *testing.T) {
+		capturedPath = ""
+		capturedCompatHeader = ""
+		capturedBody = ""
+		_, err := defaultCallCanvasChatRelay(context.Background(), canvasChatRelayRequest{
+			UserId:           1,
+			UserGroup:        "default",
+			ModelId:          "gpt-chat-test",
+			RequestEndpoint:  "openai",
+			Group:            "default",
+			Messages:         []dto.Message{{Role: "user", Content: "hello"}},
+			WebSearchEnabled: false,
+		}, nil)
+		if err != nil {
+			t.Fatalf("defaultCallCanvasChatRelay returned error: %v", err)
+		}
+		if capturedPath != "/v1/chat/completions" {
+			t.Fatalf("expected chat completions path, got %q", capturedPath)
+		}
+		if capturedCompatHeader != "" {
+			t.Fatalf("expected no compat header for ordinary chat, got %q", capturedCompatHeader)
+		}
+	})
+
+	t.Run("openai responses", func(t *testing.T) {
+		capturedPath = ""
+		capturedCompatHeader = ""
+		capturedBody = ""
+		_, err := defaultCallCanvasChatRelay(context.Background(), canvasChatRelayRequest{
+			UserId:             1,
+			UserGroup:          "default",
+			ModelId:            "gpt-chat-test",
+			RequestEndpoint:    "openai-response",
+			Group:              "default",
+			Messages:           []dto.Message{{Role: "user", Content: "hello"}},
+			WebSearchEnabled:   true,
+			PreviousResponseID: "resp_prev_123",
+		}, nil)
+		if err != nil {
+			t.Fatalf("defaultCallCanvasChatRelay returned error: %v", err)
+		}
+		if capturedPath != "/v1/responses" {
+			t.Fatalf("expected responses path, got %q", capturedPath)
+		}
+		if capturedCompatHeader != "" {
+			t.Fatalf("expected no compat header for native responses path, got %q", capturedCompatHeader)
+		}
+		if !strings.Contains(capturedBody, `"previous_response_id":"resp_prev_123"`) {
+			t.Fatalf("expected previous_response_id in request body, got %s", capturedBody)
+		}
+		if !strings.Contains(capturedBody, `"type":"web_search"`) {
+			t.Fatalf("expected official web_search tool in request body, got %s", capturedBody)
+		}
+	})
+
+	t.Run("openai responses forwards responses options", func(t *testing.T) {
+		capturedPath = ""
+		capturedCompatHeader = ""
+		capturedBody = ""
+		_, err := defaultCallCanvasChatRelay(context.Background(), canvasChatRelayRequest{
+			UserId:             1,
+			UserGroup:          "default",
+			ModelId:            "gpt-chat-test",
+			RequestEndpoint:    "openai-response",
+			Group:              "default",
+			Messages:           []dto.Message{{Role: "user", Content: "hello"}},
+			PreviousResponseID: "resp_prev_456",
+			ResponsesOptions: &canvasChatResponsesOptions{
+				Reasoning: &dto.Reasoning{
+					Effort:  "high",
+					Summary: "detailed",
+				},
+				MaxOutputTokens:   common.GetPointer(uint(128)),
+				Store:             common.GetPointer(true),
+				ParallelToolCalls: common.GetPointer(false),
+			},
+		}, nil)
+		if err != nil {
+			t.Fatalf("defaultCallCanvasChatRelay returned error: %v", err)
+		}
+		if !strings.Contains(capturedBody, `"max_output_tokens":128`) {
+			t.Fatalf("expected max_output_tokens in request body, got %s", capturedBody)
+		}
+		if !strings.Contains(capturedBody, `"store":true`) {
+			t.Fatalf("expected store in request body, got %s", capturedBody)
+		}
+		if !strings.Contains(capturedBody, `"parallel_tool_calls":false`) {
+			t.Fatalf("expected parallel_tool_calls in request body, got %s", capturedBody)
+		}
+		if !strings.Contains(capturedBody, `"reasoning":{"effort":"high","summary":"detailed"}`) {
+			t.Fatalf("expected reasoning in request body, got %s", capturedBody)
 		}
 	})
 }

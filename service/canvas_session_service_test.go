@@ -1312,6 +1312,219 @@ func TestCreateCanvasChatMessagePersistsReasoningContentFromMixedDeltas(t *testi
 	}
 }
 
+func TestCreateCanvasChatMessagePersistsAndReusesPreviousResponseID(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	capturedPreviousResponseIDs := make([]string, 0, 2)
+	replyIndex := 0
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
+		capturedPreviousResponseIDs = append(capturedPreviousResponseIDs, request.PreviousResponseID)
+		replyIndex++
+		reply := fmt.Sprintf("assistant-%d", replyIndex)
+		if onDelta != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: reply}); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{
+			Text:               reply,
+			UpstreamResponseID: fmt.Sprintf("resp-%d", replyIndex),
+		}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	first, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "first",
+		ModelId: "gpt-chat-test",
+	})
+	if err != nil {
+		t.Fatalf("failed to create first chat message: %v", err)
+	}
+	if got := extractCanvasChatUpstreamResponseID(first[1].Metadata); got != "resp-1" {
+		t.Fatalf("expected first assistant metadata to persist response id, got %q", got)
+	}
+
+	second, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "second",
+		ModelId: "gpt-chat-test",
+	})
+	if err != nil {
+		t.Fatalf("failed to create second chat message: %v", err)
+	}
+	if got := extractCanvasChatUpstreamResponseID(second[1].Metadata); got != "resp-2" {
+		t.Fatalf("expected second assistant metadata to persist response id, got %q", got)
+	}
+
+	if len(capturedPreviousResponseIDs) != 2 {
+		t.Fatalf("expected two relay calls, got %#v", capturedPreviousResponseIDs)
+	}
+	if capturedPreviousResponseIDs[0] != "" {
+		t.Fatalf("expected first call to have empty previous_response_id, got %q", capturedPreviousResponseIDs[0])
+	}
+	if capturedPreviousResponseIDs[1] != "resp-1" {
+		t.Fatalf("expected second call to reuse previous_response_id resp-1, got %q", capturedPreviousResponseIDs[1])
+	}
+}
+
+func TestCreateCanvasChatMessageDoesNotReusePreviousResponseIDAcrossClearContext(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	capturedPreviousResponseIDs := make([]string, 0, 2)
+	replyIndex := 0
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
+		capturedPreviousResponseIDs = append(capturedPreviousResponseIDs, request.PreviousResponseID)
+		replyIndex++
+		reply := fmt.Sprintf("assistant-%d", replyIndex)
+		if onDelta != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: reply}); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{
+			Text:               reply,
+			UpstreamResponseID: fmt.Sprintf("resp-%d", replyIndex),
+		}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	first, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "first",
+		ModelId: "gpt-chat-test",
+	})
+	if err != nil {
+		t.Fatalf("failed to create first chat message: %v", err)
+	}
+
+	cleared, err := UpdateCanvasSession(1, session.Id, UpdateCanvasSessionInput{
+		ClearContextMessageId: common.GetPointer(first[1].Id),
+	})
+	if err != nil {
+		t.Fatalf("failed to update clear context: %v", err)
+	}
+	if cleared.ClearContextMessageId != first[1].Id {
+		t.Fatalf("expected clear_context_message_id %d, got %d", first[1].Id, cleared.ClearContextMessageId)
+	}
+
+	if _, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "second",
+		ModelId: "gpt-chat-test",
+	}); err != nil {
+		t.Fatalf("failed to create second chat message: %v", err)
+	}
+
+	if len(capturedPreviousResponseIDs) != 2 {
+		t.Fatalf("expected two relay calls, got %#v", capturedPreviousResponseIDs)
+	}
+	if capturedPreviousResponseIDs[0] != "" {
+		t.Fatalf("expected first call previous_response_id empty, got %q", capturedPreviousResponseIDs[0])
+	}
+	if capturedPreviousResponseIDs[1] != "" {
+		t.Fatalf("expected second call previous_response_id to be cleared, got %q", capturedPreviousResponseIDs[1])
+	}
+}
+
+func TestCreateCanvasChatMessageDoesNotReusePreviousResponseIDWhenContextCountZero(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+
+	capturedPreviousResponseIDs := make([]string, 0, 2)
+	replyIndex := 0
+	callCanvasChatRelay = func(ctx context.Context, request canvasChatRelayRequest, onDelta func(delta canvasChatRelayDelta) error) (*canvasChatRelayResult, error) {
+		capturedPreviousResponseIDs = append(capturedPreviousResponseIDs, request.PreviousResponseID)
+		replyIndex++
+		reply := fmt.Sprintf("assistant-%d", replyIndex)
+		if onDelta != nil {
+			if err := onDelta(canvasChatRelayDelta{Content: reply}); err != nil {
+				return nil, err
+			}
+		}
+		return &canvasChatRelayResult{
+			Text:               reply,
+			UpstreamResponseID: fmt.Sprintf("resp-%d", replyIndex),
+		}, nil
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	if _, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:  "first",
+		ModelId: "gpt-chat-test",
+	}); err != nil {
+		t.Fatalf("failed to create first chat message: %v", err)
+	}
+
+	zeroContextCount := 0
+	if _, err := CreateCanvasMessage(1, session.Id, CreateCanvasMessageInput{
+		Prompt:       "second",
+		ModelId:      "gpt-chat-test",
+		ContextCount: &zeroContextCount,
+	}); err != nil {
+		t.Fatalf("failed to create second chat message: %v", err)
+	}
+
+	if len(capturedPreviousResponseIDs) != 2 {
+		t.Fatalf("expected two relay calls, got %#v", capturedPreviousResponseIDs)
+	}
+	if capturedPreviousResponseIDs[0] != "" {
+		t.Fatalf("expected first call previous_response_id empty, got %q", capturedPreviousResponseIDs[0])
+	}
+	if capturedPreviousResponseIDs[1] != "" {
+		t.Fatalf("expected second call previous_response_id empty with context_count=0, got %q", capturedPreviousResponseIDs[1])
+	}
+}
+
+func TestPrepareCanvasChatMessageParsesResponsesOptionsFromParams(t *testing.T) {
+	db := setupCanvasSessionServiceTestDB(t)
+	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")
+	if err := db.Model(&model.ModelMapping{}).
+		Where("request_model = ?", "gpt-chat-test").
+		Update("request_endpoint", "openai-response").Error; err != nil {
+		t.Fatalf("failed to update seeded chat mapping: %v", err)
+	}
+
+	session, err := CreateCanvasSession(1, CreateCanvasSessionInput{Mode: model.CanvasModeChat})
+	if err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	prepared, err := prepareCanvasChatMessage(1, session.Id, session, CreateCanvasMessageInput{
+		Prompt:  "hello",
+		ModelId: "gpt-chat-test",
+		Params:  `{"reasoning":{"effort":"high","summary":"detailed"},"max_output_tokens":128,"store":true,"parallel_tool_calls":false}`,
+	})
+	if err != nil {
+		t.Fatalf("failed to prepare chat message: %v", err)
+	}
+	if prepared.ResponsesOptions == nil {
+		t.Fatal("expected responses options to be parsed")
+	}
+	if prepared.ResponsesOptions.Reasoning == nil || prepared.ResponsesOptions.Reasoning.Effort != "high" || prepared.ResponsesOptions.Reasoning.Summary != "detailed" {
+		t.Fatalf("unexpected reasoning options: %#v", prepared.ResponsesOptions.Reasoning)
+	}
+	if prepared.ResponsesOptions.MaxOutputTokens == nil || *prepared.ResponsesOptions.MaxOutputTokens != 128 {
+		t.Fatalf("unexpected max_output_tokens: %#v", prepared.ResponsesOptions.MaxOutputTokens)
+	}
+	if prepared.ResponsesOptions.Store == nil || !*prepared.ResponsesOptions.Store {
+		t.Fatalf("unexpected store option: %#v", prepared.ResponsesOptions.Store)
+	}
+	if prepared.ResponsesOptions.ParallelToolCalls == nil || *prepared.ResponsesOptions.ParallelToolCalls {
+		t.Fatalf("unexpected parallel_tool_calls option: %#v", prepared.ResponsesOptions.ParallelToolCalls)
+	}
+}
+
 func TestCanvasChatSummaryDisabledSkipsBackgroundSummary(t *testing.T) {
 	db := setupCanvasSessionServiceTestDB(t)
 	seedCanvasChatCapability(t, db, 1, "default", "default", "default", "gpt-chat-test")

@@ -150,7 +150,11 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 
 	var dWebSearchQuota decimal.Decimal
 	if relayInfo.ResponsesUsageInfo != nil {
-		if webSearchTool, exists := relayInfo.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]; exists && webSearchTool.CallCount > 0 {
+		webSearchTool, exists := relayInfo.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearch]
+		if (!exists || webSearchTool == nil || webSearchTool.CallCount == 0) && relayInfo.ResponsesUsageInfo.BuiltInTools != nil {
+			webSearchTool, exists = relayInfo.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]
+		}
+		if exists && webSearchTool != nil && webSearchTool.CallCount > 0 {
 			summary.WebSearchCallCount = webSearchTool.CallCount
 			summary.WebSearchPrice = operation_setting.GetWebSearchPricePerThousand(summary.ModelName, webSearchTool.SearchContextSize)
 			dWebSearchQuota = decimal.NewFromFloat(summary.WebSearchPrice).
