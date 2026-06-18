@@ -23,6 +23,7 @@ type imageTaskDetailResponse struct {
 	DisplayName    string `json:"display_name"`
 	SelectedGroup  string `json:"selected_group"`
 	StartedTime    int64  `json:"started_time"`
+	ResultAssetStatus string `json:"result_asset_status"`
 	OutputWidth    int    `json:"output_width"`
 	OutputHeight   int    `json:"output_height"`
 	OutputSizeText string `json:"output_size_text"`
@@ -218,6 +219,7 @@ func TestGetImageGenerationTaskDetailReturnsComputedDetailFields(t *testing.T) {
 		Prompt:          "detail prompt",
 		RequestEndpoint: "openai",
 		Status:          model.ImageTaskStatusSuccess,
+		ResultAssetStatus: model.ImageTaskResultAssetStatusExpiredCleaned,
 		Params:          `{"aspect_ratio":"16:9","resolution":"2K","quality":"hd","style":"natural","n":3}`,
 		ImageMetadata:   `{"width":2048,"height":1152}`,
 		ImageUrl:        "https://example.com/detail.png",
@@ -252,6 +254,9 @@ func TestGetImageGenerationTaskDetailReturnsComputedDetailFields(t *testing.T) {
 	}
 	if detail.StartedTime != task.CreatedTime {
 		t.Fatalf("expected started time %d, got %d", task.CreatedTime, detail.StartedTime)
+	}
+	if detail.ResultAssetStatus != model.ImageTaskResultAssetStatusExpiredCleaned {
+		t.Fatalf("expected result asset status %q, got %q", model.ImageTaskResultAssetStatusExpiredCleaned, detail.ResultAssetStatus)
 	}
 	if detail.OutputWidth != 2048 || detail.OutputHeight != 1152 {
 		t.Fatalf("expected output size 2048x1152, got %dx%d", detail.OutputWidth, detail.OutputHeight)
@@ -368,6 +373,8 @@ func TestGetImageGenerationFileAllowsOwnerReferenceAssetFromTaskParams(t *testin
 	cfg.LocalStoragePath = t.TempDir()
 	cfg.ReferenceStorageType = "local"
 	cfg.ReferenceLocalStoragePath = t.TempDir()
+	t.Setenv(worker_setting.DefaultResultLocalStoragePathEnv, cfg.LocalStoragePath)
+	t.Setenv(worker_setting.DefaultReferenceLocalStoragePathEnv, cfg.ReferenceLocalStoragePath)
 
 	objectKey := "image-generation/ref/20260522/controller-reference.png"
 	assetURL := "/api/image-generation/files/" + objectKey

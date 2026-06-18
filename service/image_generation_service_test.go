@@ -24,6 +24,18 @@ import (
 	"gorm.io/gorm"
 )
 
+func setTestImageGenerationStorageEnv(t *testing.T, resultPath string, referencePath string) {
+	t.Helper()
+	if strings.TrimSpace(resultPath) == "" {
+		resultPath = t.TempDir()
+	}
+	if strings.TrimSpace(referencePath) == "" {
+		referencePath = resultPath
+	}
+	t.Setenv(worker_setting.DefaultResultLocalStoragePathEnv, resultPath)
+	t.Setenv(worker_setting.DefaultReferenceLocalStoragePathEnv, referencePath)
+}
+
 func setupImageGenerationServiceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -516,6 +528,7 @@ func TestRunImageCleanupTaskOnceReadsLatestConfig(t *testing.T) {
 	previousRetentionDays := cfg.RetentionDays
 	previousStorageType := cfg.StorageType
 	previousLocalPath := cfg.LocalStoragePath
+	previousCleanupIntervalHours := cfg.CleanupIntervalHours
 	previousLastRun := imageCleanupLastRun.Load()
 	imageCleanupTaskRunning.Store(false)
 	t.Cleanup(func() {
@@ -523,15 +536,33 @@ func TestRunImageCleanupTaskOnceReadsLatestConfig(t *testing.T) {
 		cfg.RetentionDays = previousRetentionDays
 		cfg.StorageType = previousStorageType
 		cfg.LocalStoragePath = previousLocalPath
+		cfg.CleanupIntervalHours = previousCleanupIntervalHours
 		imageCleanupLastRun.Store(previousLastRun)
 		imageCleanupTaskRunning.Store(false)
 	})
 
 	cfg.StorageType = "local"
 	cfg.LocalStoragePath = t.TempDir()
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
 	cfg.AutoCleanupEnabled = false
 	cfg.RetentionDays = 1
+	cfg.CleanupIntervalHours = 1
 	imageCleanupLastRun.Store(0)
+
+	taskImagePath := filepath.Join(cfg.LocalStoragePath, "image-generation", "20260617", "cleanup.png")
+	if err := os.MkdirAll(filepath.Dir(taskImagePath), 0o755); err != nil {
+		t.Fatalf("failed to create result directory: %v", err)
+	}
+	if err := os.WriteFile(taskImagePath, []byte("image"), 0o644); err != nil {
+		t.Fatalf("failed to create result image file: %v", err)
+	}
+	taskThumbPath := filepath.Join(cfg.LocalStoragePath, "image-generation", "thumb", "20260617", "cleanup-thumb.jpg")
+	if err := os.MkdirAll(filepath.Dir(taskThumbPath), 0o755); err != nil {
+		t.Fatalf("failed to create thumbnail directory: %v", err)
+	}
+	if err := os.WriteFile(taskThumbPath, []byte("thumb"), 0o644); err != nil {
+		t.Fatalf("failed to create thumbnail file: %v", err)
+	}
 
 	task := &model.ImageGenerationTask{
 		UserId:          1,
@@ -539,6 +570,9 @@ func TestRunImageCleanupTaskOnceReadsLatestConfig(t *testing.T) {
 		Prompt:          "cleanup prompt",
 		RequestEndpoint: "openai",
 		Status:          model.ImageTaskStatusSuccess,
+		ImageUrl:        buildImageGenerationLocalObjectURL("image-generation/20260617/cleanup.png"),
+		ThumbnailUrl:    buildImageGenerationLocalObjectURL("image-generation/thumb/20260617/cleanup-thumb.jpg"),
+		ResultAssetStatus: model.ImageTaskResultAssetStatusAvailable,
 		CreatedTime:     common.GetTimestamp() - 10*24*60*60,
 	}
 	if err := db.Create(task).Error; err != nil {
@@ -553,6 +587,9 @@ func TestRunImageCleanupTaskOnceReadsLatestConfig(t *testing.T) {
 	if reloaded == nil {
 		t.Fatal("expected task to remain when cleanup is disabled")
 	}
+	if reloaded.ResultAssetStatus != model.ImageTaskResultAssetStatusAvailable {
+		t.Fatalf("expected task assets to stay available when cleanup disabled, got %q", reloaded.ResultAssetStatus)
+	}
 
 	cfg.AutoCleanupEnabled = true
 	runImageCleanupTaskOnce(time.Now())
@@ -560,8 +597,102 @@ func TestRunImageCleanupTaskOnceReadsLatestConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to reload task after enabling cleanup: %v", err)
 	}
-	if reloaded != nil {
-		t.Fatal("expected task to be cleaned up after enabling cleanup")
+	if reloaded == nil {
+		t.Fatal("expected task record to remain after scheduled cleanup")
+	}
+	if reloaded.ResultAssetStatus != model.ImageTaskResultAssetStatusExpiredCleaned {
+		t.Fatalf("expected task assets to be marked expired_cleaned, got %q", reloaded.ResultAssetStatus)
+	}
+	if strings.TrimSpace(reloaded.ImageUrl) != "" || strings.TrimSpace(reloaded.ThumbnailUrl) != "" {
+		t.Fatalf("expected task image URLs to be cleared after scheduled cleanup, got image=%q thumb=%q", reloaded.ImageUrl, reloaded.ThumbnailUrl)
+	}
+	if _, err := os.Stat(taskImagePath); !os.IsNotExist(err) {
+		t.Fatalf("expected result asset file to be deleted, stat err=%v", err)
+	}
+	if _, err := os.Stat(taskThumbPath); !os.IsNotExist(err) {
+		t.Fatalf("expected thumbnail asset file to be deleted, stat err=%v", err)
+	}
+}
+
+func TestShouldRunImageCleanupUsesConfiguredInterval(t *testing.T) {
+	cfg := worker_setting.GetWorkerSetting()
+	previousCleanupIntervalHours := cfg.CleanupIntervalHours
+	previousLastRun := imageCleanupLastRun.Load()
+	t.Cleanup(func() {
+		cfg.CleanupIntervalHours = previousCleanupIntervalHours
+		imageCleanupLastRun.Store(previousLastRun)
+	})
+
+	cfg.CleanupIntervalHours = 6
+	now := time.Now()
+	imageCleanupLastRun.Store(now.Add(-5 * time.Hour).Unix())
+	if shouldRunImageCleanup(now) {
+		t.Fatal("expected cleanup to wait until configured interval elapses")
+	}
+	imageCleanupLastRun.Store(now.Add(-6 * time.Hour).Unix())
+	if !shouldRunImageCleanup(now) {
+		t.Fatal("expected cleanup to run once configured interval elapses")
+	}
+}
+
+func TestCleanupExpiredTaskResultAssetsPreservesTaskRecord(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+	})
+	cfg.StorageType = "local"
+	cfg.LocalStoragePath = t.TempDir()
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
+
+	objectKey := "image-generation/20260617/expire-only.png"
+	imagePath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindResult)
+	if err != nil {
+		t.Fatalf("failed to resolve image path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(imagePath), 0o755); err != nil {
+		t.Fatalf("failed to create image dir: %v", err)
+	}
+	if err := os.WriteFile(imagePath, []byte("asset"), 0o644); err != nil {
+		t.Fatalf("failed to write image asset: %v", err)
+	}
+
+	task := &model.ImageGenerationTask{
+		UserId:            1,
+		ModelId:           "expire-only-model",
+		Prompt:            "expire prompt",
+		RequestEndpoint:   "openai",
+		Status:            model.ImageTaskStatusSuccess,
+		ImageUrl:          buildImageGenerationLocalObjectURL(objectKey),
+		ResultAssetStatus: model.ImageTaskResultAssetStatusAvailable,
+		CreatedTime:       common.GetTimestamp() - 10*24*60*60,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	if err := cleanupExpiredTaskResultAssets(task, cfg); err != nil {
+		t.Fatalf("cleanupExpiredTaskResultAssets failed: %v", err)
+	}
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("expected task record to remain after result cleanup")
+	}
+	if reloaded.ResultAssetStatus != model.ImageTaskResultAssetStatusExpiredCleaned {
+		t.Fatalf("expected expired_cleaned status, got %q", reloaded.ResultAssetStatus)
+	}
+	if reloaded.ImageUrl != "" {
+		t.Fatalf("expected image URL to be cleared, got %q", reloaded.ImageUrl)
+	}
+	if _, err := os.Stat(imagePath); !os.IsNotExist(err) {
+		t.Fatalf("expected image file to be deleted, stat err=%v", err)
 	}
 }
 
@@ -1422,6 +1553,7 @@ func TestCreateImageGenerationTaskStoresReferenceImagesOutsideDatabase(t *testin
 	})
 	cfg.StorageType = "local"
 	cfg.LocalStoragePath = t.TempDir()
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
 
 	user := &model.User{
 		Username: "image-storage-user",
@@ -1515,6 +1647,7 @@ func TestCreateImageGenerationTaskStoresRemoteReferenceImagesOutsideDatabase(t *
 	})
 	cfg.StorageType = "local"
 	cfg.LocalStoragePath = t.TempDir()
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
 
 	previousLoader := loadImageGenerationReferenceAssetFn
 	t.Cleanup(func() {
@@ -1738,6 +1871,7 @@ func TestCreateImageGenerationTaskStoresMaskOutsideDatabase(t *testing.T) {
 	})
 	cfg.StorageType = "local"
 	cfg.LocalStoragePath = t.TempDir()
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
 
 	user := &model.User{
 		Username: "image-mask-user",
@@ -1828,6 +1962,7 @@ func TestCreateImageGenerationTaskAllowsMaskForOpenAIResponsesEndpoint(t *testin
 	})
 	cfg.StorageType = "local"
 	cfg.LocalStoragePath = t.TempDir()
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
 
 	user := &model.User{
 		Username: "image-response-mask-user",
@@ -1904,6 +2039,7 @@ func TestCreateImageGenerationTaskDeduplicatesReferenceAssets(t *testing.T) {
 	cfg.LocalStoragePath = t.TempDir()
 	cfg.ReferenceStorageType = "local"
 	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.ReferenceLocalStoragePath)
 
 	user := &model.User{
 		Username: "image-dedupe-user",
@@ -2009,6 +2145,7 @@ func TestDeleteImageGenerationTaskKeepsSharedReferenceAssetUntilLastReference(t 
 	cfg.LocalStoragePath = t.TempDir()
 	cfg.ReferenceStorageType = "local"
 	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.ReferenceLocalStoragePath)
 
 	user := &model.User{
 		Username: "image-delete-shared-ref-user",
@@ -2126,6 +2263,7 @@ func TestCreateImageGenerationTaskRollsBackStoredReferencesWhenTaskUpdateFails(t
 	cfg.LocalStoragePath = t.TempDir()
 	cfg.ReferenceStorageType = "local"
 	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.ReferenceLocalStoragePath)
 
 	user := &model.User{
 		Username: "image-create-rollback-user",
@@ -2259,6 +2397,7 @@ func TestCleanupExpiredReferenceAssetsRemovesUnreferencedLocalFiles(t *testing.T
 	cfg.LocalStoragePath = t.TempDir()
 	cfg.ReferenceStorageType = "local"
 	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.ReferenceLocalStoragePath)
 	cfg.ReferenceAutoCleanupEnabled = true
 	cfg.ReferenceRetentionDays = 7
 
@@ -2362,6 +2501,7 @@ func TestDeleteImageGenerationTaskWithoutLinksDoesNotDeleteTrackedSharedReferenc
 	cfg.LocalStoragePath = t.TempDir()
 	cfg.ReferenceStorageType = "local"
 	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.ReferenceLocalStoragePath)
 
 	objectKey := "image-generation/ref/20260522/shared-ref.png"
 	referenceURL := buildImageGenerationLocalObjectURL(objectKey)
@@ -2444,6 +2584,7 @@ func TestReleaseTaskReferenceAssetsWithoutLinksDeletesUnreferencedTrackedAssetIm
 	cfg.LocalStoragePath = t.TempDir()
 	cfg.ReferenceStorageType = "local"
 	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.ReferenceLocalStoragePath)
 
 	objectKey := "image-generation/ref/20260522/orphan-ref.png"
 	referenceURL := buildImageGenerationLocalObjectURL(objectKey)

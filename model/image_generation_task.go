@@ -22,6 +22,7 @@ type ImageGenerationTask struct {
 	Params          string `json:"params" gorm:"type:text"`                                                        // JSON: size, quality, style, n, etc.
 	ImageUrl        string `json:"image_url" gorm:"type:text"`                                                     // 生成的图片URL
 	ThumbnailUrl    string `json:"thumbnail_url" gorm:"type:text"`                                                 // 列表页缩略图 URL
+	ResultAssetStatus string `json:"result_asset_status" gorm:"size:32;not null;default:'available'"`            // 结果图资产状态
 	ImageMetadata   string `json:"image_metadata" gorm:"type:text"`                                                // JSON: revised_prompt, etc.
 	ErrorMessage    string `json:"error_message" gorm:"type:text"`                                                 // 错误信息
 	Cost            int    `json:"cost" gorm:"default:0"`                                                          // 消耗的配额
@@ -69,6 +70,11 @@ const (
 	ImageTaskStatusFailed     = "failed"
 )
 
+const (
+	ImageTaskResultAssetStatusAvailable      = "available"
+	ImageTaskResultAssetStatusExpiredCleaned = "expired_cleaned"
+)
+
 // Insert 插入新任务
 func (task *ImageGenerationTask) Insert() error {
 	store, err := imageTaskStoreForCanvas()
@@ -81,6 +87,9 @@ func (task *ImageGenerationTask) Insert() error {
 	}
 	if task.Status == "" {
 		task.Status = ImageTaskStatusPending
+	}
+	if strings.TrimSpace(task.ResultAssetStatus) == "" {
+		task.ResultAssetStatus = ImageTaskResultAssetStatusAvailable
 	}
 	return store.db.Create(task).Error
 }
@@ -238,6 +247,7 @@ type ImageGenerationTaskSummary struct {
 	Status        string `json:"status"`
 	ImageUrl      string `json:"image_url"`
 	ThumbnailUrl  string `json:"thumbnail_url"`
+	ResultAssetStatus string `json:"result_asset_status"`
 	ErrorMessage  string `json:"error_message"`
 	CreatedTime   int64  `json:"created_time"`
 	StartedTime   int64  `json:"started_time"`
@@ -255,6 +265,7 @@ type ImageGenerationTaskDetail struct {
 	Params          string `json:"params"`
 	ImageUrl        string `json:"image_url"`
 	ThumbnailUrl    string `json:"thumbnail_url"`
+	ResultAssetStatus string `json:"result_asset_status"`
 	ImageMetadata   string `json:"image_metadata"`
 	ErrorMessage    string `json:"error_message"`
 	Cost            int    `json:"cost"`
@@ -479,7 +490,7 @@ func ListExpiredImageTasksBefore(expirationTime int64) ([]*ImageGenerationTask, 
 		return nil, err
 	}
 	var tasks []*ImageGenerationTask
-	err = store.db.Where("created_time < ?", expirationTime).Find(&tasks).Error
+	err = store.db.Where("status = ? AND created_time < ?", ImageTaskStatusSuccess, expirationTime).Find(&tasks).Error
 	return tasks, err
 }
 
@@ -754,7 +765,7 @@ func GetImageTaskUpdatesByUserID(userId int, completedSince int64, limit int) ([
 	var tasks []*ImageGenerationTask
 	activeStatuses := []string{ImageTaskStatusPending, ImageTaskStatusGenerating}
 	query := store.model().
-		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, error_message, created_time, started_time, completed_time").
+		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, result_asset_status, error_message, created_time, started_time, completed_time").
 		Where("user_id = ? AND status IN ?", userId, activeStatuses).
 		Order("id DESC").
 		Limit(limit)
@@ -769,7 +780,7 @@ func GetImageTaskUpdatesByUserID(userId int, completedSince int64, limit int) ([
 	var terminalTasks []*ImageGenerationTask
 	remaining := limit - len(tasks)
 	err = store.model().
-		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, error_message, created_time, started_time, completed_time").
+		Select("id, user_id, model_id, prompt, status, image_url, thumbnail_url, result_asset_status, error_message, created_time, started_time, completed_time").
 		Where("user_id = ? AND status NOT IN ? AND completed_time >= ?", userId, activeStatuses, completedSince).
 		Order("id DESC").
 		Limit(remaining).
@@ -794,6 +805,7 @@ func BuildImageGenerationTaskSummary(task *ImageGenerationTask) *ImageGeneration
 		Status:        task.Status,
 		ImageUrl:      task.ImageUrl,
 		ThumbnailUrl:  task.ThumbnailUrl,
+		ResultAssetStatus: NormalizeImageTaskResultAssetStatus(task.ResultAssetStatus),
 		ErrorMessage:  task.ErrorMessage,
 		CreatedTime:   task.CreatedTime,
 		StartedTime:   task.EffectiveStartedTime(),
@@ -816,6 +828,7 @@ func BuildImageGenerationTaskDetail(task *ImageGenerationTask, displayName strin
 		Params:          task.Params,
 		ImageUrl:        task.ImageUrl,
 		ThumbnailUrl:    task.ThumbnailUrl,
+		ResultAssetStatus: NormalizeImageTaskResultAssetStatus(task.ResultAssetStatus),
 		ImageMetadata:   task.ImageMetadata,
 		ErrorMessage:    task.ErrorMessage,
 		Cost:            task.Cost,
@@ -1157,6 +1170,7 @@ func UpdateImageTaskResult(id int, imageUrl string, thumbnailUrl string, imageMe
 		"status":         ImageTaskStatusSuccess,
 		"image_url":      imageUrl,
 		"thumbnail_url":  thumbnailUrl,
+		"result_asset_status": ImageTaskResultAssetStatusAvailable,
 		"image_metadata": imageMetadata,
 		"cost":           cost,
 		"completed_time": common.GetTimestamp(),
@@ -1173,6 +1187,7 @@ func UpdateImageTaskResultClaimed(id int, workerNode string, imageUrl string, th
 		"status":           ImageTaskStatusSuccess,
 		"image_url":        imageUrl,
 		"thumbnail_url":    thumbnailUrl,
+		"result_asset_status": ImageTaskResultAssetStatusAvailable,
 		"image_metadata":   imageMetadata,
 		"cost":             cost,
 		"completed_time":   common.GetTimestamp(),
@@ -1211,6 +1226,24 @@ func UpdateImageTaskTerminalStatusClaimed(id int, workerNode string, status stri
 	return result.RowsAffected > 0, nil
 }
 
+func ExpireImageTaskResultAssets(id int) (bool, error) {
+	store, err := imageTaskStoreForCanvas()
+	if err != nil {
+		return false, err
+	}
+	result := store.model().
+		Where("id = ? AND status = ? AND result_asset_status <> ?", id, ImageTaskStatusSuccess, ImageTaskResultAssetStatusExpiredCleaned).
+		Updates(map[string]interface{}{
+			"image_url":           "",
+			"thumbnail_url":       "",
+			"result_asset_status": ImageTaskResultAssetStatusExpiredCleaned,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 func RenewImageTaskLease(id int, workerNode string, leaseExpiresAt int64) (bool, error) {
 	if leaseExpiresAt <= 0 {
 		return false, nil
@@ -1226,6 +1259,15 @@ func RenewImageTaskLease(id int, workerNode string, leaseExpiresAt int64) (bool,
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+func NormalizeImageTaskResultAssetStatus(status string) string {
+	switch strings.TrimSpace(status) {
+	case ImageTaskResultAssetStatusExpiredCleaned:
+		return ImageTaskResultAssetStatusExpiredCleaned
+	default:
+		return ImageTaskResultAssetStatusAvailable
+	}
 }
 
 func FailExpiredGeneratingImageTasks(expiredBefore int64, errorMessage string, limit int) (int64, error) {

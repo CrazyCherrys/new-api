@@ -1900,7 +1900,7 @@ func CleanupExpiredImageTasks() error {
 	}
 	expirationTime := common.GetTimestamp() - int64(retentionDays*24*60*60)
 
-	common.SysLog(fmt.Sprintf("Starting image cleanup: retention_days=%d, expiration_time=%d", retentionDays, expirationTime))
+	common.SysLog(fmt.Sprintf("Starting image result asset cleanup: retention_days=%d, expiration_time=%d", retentionDays, expirationTime))
 
 	// 查询过期任务
 	expiredTasks, err := model.ListExpiredImageTasksBefore(expirationTime)
@@ -1913,21 +1913,21 @@ func CleanupExpiredImageTasks() error {
 		return nil
 	}
 
-	common.SysLog(fmt.Sprintf("Found %d expired image tasks to clean up", len(expiredTasks)))
+	common.SysLog(fmt.Sprintf("Found %d expired image tasks to evaluate for result asset cleanup", len(expiredTasks)))
 
 	// 清理每个任务
 	successCount := 0
 	failCount := 0
 	for _, task := range expiredTasks {
-		if err := cleanupSingleTask(task, cfg); err != nil {
-			common.SysLog(fmt.Sprintf("Failed to cleanup task %d: %v", task.Id, err))
+		if err := cleanupExpiredTaskResultAssets(task, cfg); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to cleanup expired result assets for task %d: %v", task.Id, err))
 			failCount++
 		} else {
 			successCount++
 		}
 	}
 
-	common.SysLog(fmt.Sprintf("Image cleanup completed: success=%d, failed=%d", successCount, failCount))
+	common.SysLog(fmt.Sprintf("Image result asset cleanup completed: success=%d, failed=%d", successCount, failCount))
 	return nil
 }
 
@@ -1975,7 +1975,11 @@ func shouldRunImageCleanup(now time.Time) bool {
 		return true
 	}
 	lastRun := time.Unix(lastRunUnix, 0)
-	return now.Sub(lastRun) >= 24*time.Hour
+	interval := time.Duration(worker_setting.GetWorkerSetting().EffectiveCleanupIntervalHours()) * time.Hour
+	if interval <= 0 {
+		interval = 24 * time.Hour
+	}
+	return now.Sub(lastRun) >= interval
 }
 
 func runImageCleanupTaskOnce(now time.Time) {
@@ -2020,6 +2024,48 @@ func DeleteImageGenerationTaskAssets(task *model.ImageGenerationTask, cfg *worke
 			common.SysLog(fmt.Sprintf("Failed to release reference images for task %d: %v", task.Id, err))
 		}
 	}
+}
+
+func cleanupExpiredTaskResultAssets(task *model.ImageGenerationTask, cfg *worker_setting.WorkerSetting) error {
+	if task == nil || cfg == nil {
+		return nil
+	}
+	if task.Status != model.ImageTaskStatusSuccess {
+		return nil
+	}
+	if model.NormalizeImageTaskResultAssetStatus(task.ResultAssetStatus) == model.ImageTaskResultAssetStatusExpiredCleaned {
+		return nil
+	}
+
+	if strings.TrimSpace(task.ImageUrl) == "" && strings.TrimSpace(task.ThumbnailUrl) == "" {
+		updated, err := model.ExpireImageTaskResultAssets(task.Id)
+		if err != nil {
+			return fmt.Errorf("failed to mark empty result assets expired: %w", err)
+		}
+		if updated {
+			publishImageGenerationTaskUpdateByID(task.Id)
+		}
+		return nil
+	}
+
+	if task.ImageUrl != "" {
+		if err := deleteImageFileByKind(task.ImageUrl, cfg, imageGenerationAssetKindResult); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(task.ThumbnailUrl) != "" && task.ThumbnailUrl != task.ImageUrl {
+		if err := deleteImageFileByKind(task.ThumbnailUrl, cfg, imageGenerationAssetKindResult); err != nil {
+			return err
+		}
+	}
+	updated, err := model.ExpireImageTaskResultAssets(task.Id)
+	if err != nil {
+		return fmt.Errorf("failed to persist expired result asset status: %w", err)
+	}
+	if updated {
+		publishImageGenerationTaskUpdateByID(task.Id)
+	}
+	return nil
 }
 
 // cleanupSingleTask 清理单个任务

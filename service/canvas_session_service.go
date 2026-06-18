@@ -23,6 +23,7 @@ type CanvasImageMessageTask struct {
 	Params          string `json:"params"`
 	ImageUrl        string `json:"image_url"`
 	ThumbnailUrl    string `json:"thumbnail_url"`
+	ResultAssetStatus string `json:"result_asset_status"`
 	ImageMetadata   string `json:"image_metadata"`
 	ErrorMessage    string `json:"error_message"`
 	CreatedTime     int64  `json:"created_time"`
@@ -797,6 +798,7 @@ func buildCanvasImageMessageTask(task *model.ImageGenerationTask) *CanvasImageMe
 		Params:          task.Params,
 		ImageUrl:        task.ImageUrl,
 		ThumbnailUrl:    task.ThumbnailUrl,
+		ResultAssetStatus: model.NormalizeImageTaskResultAssetStatus(task.ResultAssetStatus),
 		ImageMetadata:   task.ImageMetadata,
 		ErrorMessage:    task.ErrorMessage,
 		CreatedTime:     task.CreatedTime,

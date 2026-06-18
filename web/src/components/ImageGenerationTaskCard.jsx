@@ -44,6 +44,7 @@ const ImageGenerationTaskCard = ({
 
   const isSuccess = task.status === 'success';
   const isFailed = task.status === 'failed';
+  const isExpiredCleaned = task.result_asset_status === 'expired_cleaned';
   const isPending = task.status === 'pending';
   const isGenerating = task.status === 'generating';
   const isActive = isPending || isGenerating;
@@ -80,6 +81,11 @@ const ImageGenerationTaskCard = ({
       return {
         color: 'var(--canvas-success, var(--semi-color-success))',
         text: t('已完成'),
+      };
+    if (isExpiredCleaned)
+      return {
+        color: 'var(--canvas-warning, var(--semi-color-warning))',
+        text: t('已过期并清理'),
       };
     if (isFailed)
       return {
@@ -299,7 +305,7 @@ const ImageGenerationTaskCard = ({
   };
 
   const renderCenterState = () => {
-    if (isSuccess && previewUrl) {
+    if ((isSuccess && previewUrl) || isExpiredCleaned) {
       return null;
     }
     if (isFailed) {
@@ -397,6 +403,17 @@ const ImageGenerationTaskCard = ({
             <IconDownload size='small' />
           </a>
         ) : null}
+        {isExpiredCleaned ? (
+          <button
+            type='button'
+            style={styles.actionBtn}
+            title={t('已过期并清理')}
+            onClick={(event) => event.stopPropagation()}
+            disabled
+          >
+            <IconAlertTriangle size='small' />
+          </button>
+        ) : null}
         {isFailed ? (
           <button
             type='button'
@@ -422,6 +439,7 @@ ImageGenerationTaskCard.propTypes = {
       .isRequired,
     image_url: PropTypes.string,
     thumbnail_url: PropTypes.string,
+    result_asset_status: PropTypes.string,
     prompt: PropTypes.string,
     progress: PropTypes.number,
     error_message: PropTypes.string,
@@ -447,6 +465,7 @@ export default memo(ImageGenerationTaskCard, (prev, next) => (
   prev.task.status === next.task.status &&
   prev.task.image_url === next.task.image_url &&
   prev.task.thumbnail_url === next.task.thumbnail_url &&
+  prev.task.result_asset_status === next.task.result_asset_status &&
   prev.task.progress === next.task.progress &&
   prev.task.error_message === next.task.error_message
 ));

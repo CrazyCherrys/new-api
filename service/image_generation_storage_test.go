@@ -17,6 +17,18 @@ import (
 	"github.com/QuantumNous/new-api/setting/worker_setting"
 )
 
+func setTestImageGenerationLocalStorageEnv(t *testing.T, resultPath string, referencePath string) {
+	t.Helper()
+	if strings.TrimSpace(resultPath) == "" {
+		resultPath = t.TempDir()
+	}
+	if strings.TrimSpace(referencePath) == "" {
+		referencePath = resultPath
+	}
+	t.Setenv(worker_setting.DefaultResultLocalStoragePathEnv, resultPath)
+	t.Setenv(worker_setting.DefaultReferenceLocalStoragePathEnv, referencePath)
+}
+
 func buildTestImageGenerationPNG(t *testing.T) []byte {
 	t.Helper()
 
@@ -40,6 +52,7 @@ func TestStoreImageGenerationResultLocally(t *testing.T) {
 
 	cfg.StorageType = "local"
 	cfg.LocalStoragePath = t.TempDir()
+	setTestImageGenerationLocalStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
 
 	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	img.Set(0, 0, color.RGBA{R: 255, A: 255})
@@ -145,6 +158,7 @@ func TestReferenceImageAsDataURLSupportsAbsoluteLocalAssetURL(t *testing.T) {
 	cfg.LocalStoragePath = t.TempDir()
 	cfg.ReferenceStorageType = "local"
 	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+	setTestImageGenerationLocalStorageEnv(t, cfg.LocalStoragePath, cfg.ReferenceLocalStoragePath)
 
 	objectKey := "image-generation/ref/20260531/absolute-reference.png"
 	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
@@ -216,6 +230,7 @@ func TestStoreTransparentImageGenerationThumbnailLocally(t *testing.T) {
 
 	cfg.StorageType = "local"
 	cfg.LocalStoragePath = t.TempDir()
+	setTestImageGenerationLocalStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
 
 	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
 	img.Set(0, 0, color.RGBA{R: 255, A: 0})
@@ -437,6 +452,7 @@ func TestOpenImageGenerationLocalAssetFallsBackToReferenceStorage(t *testing.T) 
 	cfg.LocalStoragePath = t.TempDir()
 	cfg.ReferenceStorageType = "local"
 	cfg.ReferenceLocalStoragePath = t.TempDir()
+	setTestImageGenerationLocalStorageEnv(t, cfg.LocalStoragePath, cfg.ReferenceLocalStoragePath)
 
 	objectKey := "image-generation/ref/20260428/126-reference.png"
 	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
@@ -593,6 +609,7 @@ func TestDeleteImageGenerationTaskRemovesStoredReferenceImages(t *testing.T) {
 	})
 	cfg.StorageType = "local"
 	cfg.LocalStoragePath = t.TempDir()
+	setTestImageGenerationLocalStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
 
 	objectKey := "image-generation/ref/20260428/123-reference.png"
 	referenceURL := buildImageGenerationLocalObjectURL(objectKey)
@@ -663,6 +680,7 @@ func TestDeleteImageGenerationTaskRemovesStoredMaskImages(t *testing.T) {
 	})
 	cfg.StorageType = "local"
 	cfg.LocalStoragePath = t.TempDir()
+	setTestImageGenerationLocalStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
 
 	objectKey := "image-generation/ref/20260428/124-mask.png"
 	maskURL := buildImageGenerationLocalObjectURL(objectKey)

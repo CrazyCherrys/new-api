@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/setting/worker_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -36,6 +37,11 @@ var maskedWorkerS3OptionKeys = map[string]struct{}{
 	"worker_setting.result_s3_secret_key":    {},
 	"worker_setting.reference_s3_access_key": {},
 	"worker_setting.reference_s3_secret_key": {},
+}
+
+var readonlyWorkerSettingOptionKeys = map[string]struct{}{
+	"worker_setting.effective_result_local_storage_path":    {},
+	"worker_setting.effective_reference_local_storage_path": {},
 }
 
 func isMaskedWorkerS3OptionValue(value string) bool {
@@ -73,6 +79,23 @@ func buildCompletionRatioMetaValue(optionValues map[string]string) string {
 		return "{}"
 	}
 	return string(jsonBytes)
+}
+
+func appendWorkerSettingRuntimeOptions(options []*model.Option) []*model.Option {
+	cfg := worker_setting.GetWorkerSetting()
+	if cfg == nil {
+		return options
+	}
+	return append(options,
+		&model.Option{
+			Key:   "worker_setting.effective_result_local_storage_path",
+			Value: cfg.EffectiveResultLocalStoragePath(),
+		},
+		&model.Option{
+			Key:   "worker_setting.effective_reference_local_storage_path",
+			Value: cfg.EffectiveReferenceLocalStoragePath(),
+		},
+	)
 }
 
 func GetOptions(c *gin.Context) {
@@ -114,6 +137,7 @@ func GetOptions(c *gin.Context) {
 		Key:   "CompletionRatioMeta",
 		Value: buildCompletionRatioMetaValue(optionValues),
 	})
+	options = appendWorkerSettingRuntimeOptions(options)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -148,6 +172,13 @@ func UpdateOption(c *gin.Context) {
 		option.Value = fmt.Sprintf("%v", option.Value)
 	}
 	if _, ok := maskedWorkerS3OptionKeys[option.Key]; ok && isMaskedWorkerS3OptionValue(option.Value.(string)) {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+		})
+		return
+	}
+	if _, ok := readonlyWorkerSettingOptionKeys[option.Key]; ok {
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",

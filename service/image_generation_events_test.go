@@ -16,9 +16,10 @@ func TestImageGenerationTaskBroadcasterDeliversLatestUpdate(t *testing.T) {
 		Status: "pending",
 	}
 	second := ImageGenerationTaskUpdate{
-		Id:     1,
-		UserId: 7,
-		Status: "success",
+		Id:                1,
+		UserId:            7,
+		Status:            "success",
+		ResultAssetStatus: "expired_cleaned",
 	}
 
 	broadcaster.Publish(first)
@@ -28,6 +29,9 @@ func TestImageGenerationTaskBroadcasterDeliversLatestUpdate(t *testing.T) {
 	case got := <-ch:
 		if got.Status != "success" {
 			t.Fatalf("expected latest update status success, got %q", got.Status)
+		}
+		if got.ResultAssetStatus != "expired_cleaned" {
+			t.Fatalf("expected latest result asset status expired_cleaned, got %q", got.ResultAssetStatus)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for broadcast update")

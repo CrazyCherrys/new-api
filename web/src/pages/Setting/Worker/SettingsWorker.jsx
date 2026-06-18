@@ -55,7 +55,6 @@ function renderStorageConfigSection({
   inputs,
   effectiveValues,
   typeField,
-  localPathField,
   endpointField,
   bucketField,
   regionField,
@@ -83,23 +82,18 @@ function renderStorageConfigSection({
         </Col>
       </Row>
 
-	      {storageType === 'local' && (
-	        <Row gutter={16}>
-	          <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-	            <Form.Input
-	              field={localPathField}
-	              label={localPathLabel}
-	              extraText={
-	                !inputs[localPathField] && effectiveValues?.localPath
-	                  ? t('当前生效值：{{value}}；留空使用系统临时目录', {
-	                      value: effectiveValues.localPath,
-	                    })
-	                  : t('留空使用系统临时目录')
-	              }
-	              placeholder={t('例如 /var/data/worker')}
-	              onChange={onChange(localPathField)}
-	              showClear
-	            />
+      {storageType === 'local' && (
+        <Row gutter={16}>
+          <Col xs={24} sm={24} md={16} lg={16} xl={16}>
+            <Form.Input
+              field={`${typeField}__readonly_local_path`}
+              label={localPathLabel}
+              initValue={effectiveValues?.localPath || ''}
+              value={effectiveValues?.localPath || ''}
+              extraText={t('Docker 部署请挂载该固定目录；运行时不再读取历史路径配置字段')}
+              readonly
+              disabled
+            />
           </Col>
         </Row>
       )}
@@ -414,7 +408,6 @@ export default function SettingsWorker(props) {
                 publicBaseURL: effectiveStorageInputs.resultS3PublicBaseURL,
               },
               typeField: 'worker_setting.result_storage_type',
-              localPathField: 'worker_setting.result_local_storage_path',
               endpointField: 'worker_setting.result_s3_endpoint',
               bucketField: 'worker_setting.result_s3_bucket',
               regionField: 'worker_setting.result_s3_region',
@@ -423,7 +416,7 @@ export default function SettingsWorker(props) {
               pathPrefixField: 'worker_setting.result_s3_path_prefix',
               urlModeField: 'worker_setting.result_s3_url_mode',
               publicBaseURLField: 'worker_setting.result_s3_public_base_url',
-              localPathLabel: t('结果图本地存储路径'),
+              localPathLabel: t('结果图本地目录'),
             })}
           </Form.Section>
 
@@ -450,7 +443,6 @@ export default function SettingsWorker(props) {
                 publicBaseURL: effectiveStorageInputs.referenceS3PublicBaseURL,
               },
               typeField: 'worker_setting.reference_storage_type',
-              localPathField: 'worker_setting.reference_local_storage_path',
               endpointField: 'worker_setting.reference_s3_endpoint',
               bucketField: 'worker_setting.reference_s3_bucket',
               regionField: 'worker_setting.reference_s3_region',
@@ -459,13 +451,13 @@ export default function SettingsWorker(props) {
               pathPrefixField: 'worker_setting.reference_s3_path_prefix',
               urlModeField: 'worker_setting.reference_s3_url_mode',
               publicBaseURLField: 'worker_setting.reference_s3_public_base_url',
-              localPathLabel: t('参考图本地存储路径'),
+              localPathLabel: t('参考图本地目录'),
             })}
             <Row gutter={16}>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Switch
                   field={'worker_setting.reference_auto_cleanup_enabled'}
-                  label={t('启用参考图自动清理')}
+                  label={t('参考图自动清理开关')}
                   checkedText={t('开')}
                   uncheckedText={t('关')}
                   onChange={handleFieldChange(
@@ -582,10 +574,22 @@ export default function SettingsWorker(props) {
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'worker_setting.cleanup_interval_hours'}
+                  label={t('清理间隔（小时）')}
+                  extraText={t('结果图与参考图共用该调度间隔')}
+                  min={1}
+                  max={720}
+                  onChange={handleFieldChange(
+                    'worker_setting.cleanup_interval_hours',
+                  )}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Switch
                   field={'worker_setting.auto_cleanup_enabled'}
-                  label={t('自动清理开关')}
-                  extraText={t('是否自动清理过期的任务和文件')}
+                  label={t('结果图自动清理开关')}
+                  extraText={t('是否自动清理过期结果图文件并保留任务记录')}
                   onChange={handleFieldChange(
                     'worker_setting.auto_cleanup_enabled',
                   )}
@@ -594,8 +598,8 @@ export default function SettingsWorker(props) {
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
                   field={'worker_setting.retention_days'}
-                  label={t('保留天数')}
-                  extraText={t('任务和文件的保留天数，超过后自动清理')}
+                  label={t('结果图保留天数')}
+                  extraText={t('仅控制结果图文件清理，不删除任务记录')}
                   min={1}
                   max={365}
                   onChange={handleFieldChange('worker_setting.retention_days')}

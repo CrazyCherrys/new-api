@@ -62,9 +62,10 @@ const ImageGenerationTaskModal = ({
 
   const isSuccess = task?.status === 'success';
   const isFailed = task?.status === 'failed';
+  const isExpiredCleaned = task?.result_asset_status === 'expired_cleaned';
   const isPending = task?.status === 'pending';
   const isGenerating = task?.status === 'generating';
-  const canDelete = isSuccess || isFailed;
+  const canDelete = isSuccess || isFailed || isExpiredCleaned;
 
   const resolvedOutputWidth = Number(task?.output_width) || 0;
   const resolvedOutputHeight = Number(task?.output_height) || 0;
@@ -159,6 +160,11 @@ const ImageGenerationTaskModal = ({
       return {
         color: 'var(--canvas-success, var(--semi-color-success))',
         text: t('生成成功'),
+      };
+    if (isExpiredCleaned)
+      return {
+        color: 'var(--canvas-warning, var(--semi-color-warning))',
+        text: t('已过期并清理'),
       };
     if (isFailed)
       return {
@@ -447,6 +453,23 @@ const ImageGenerationTaskModal = ({
         </div>
       );
     }
+    if (isExpiredCleaned) {
+      return (
+        <div
+          style={{
+            color: 'var(--canvas-text-muted, var(--semi-color-text-3))',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 12,
+          }}
+        >
+          <IconAlertTriangle size='extra-large' />
+          <Text type='tertiary' size='small'>{t('已过期并清理')}</Text>
+        </div>
+      );
+    }
     if (isGenerating || isPending) {
       return (
         <div
@@ -600,6 +623,16 @@ const ImageGenerationTaskModal = ({
                     <IconDownload size='small' />
                   </button>
                 )}
+                {isExpiredCleaned && (
+                  <button
+                    type='button'
+                    style={styles.actionIconBtn}
+                    title={t('已过期并清理')}
+                    disabled
+                  >
+                    <IconAlertTriangle size='small' />
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -747,18 +780,18 @@ const ImageGenerationTaskModal = ({
             >
               {t('复制提示词')}
             </Button>
-            <Button
-              theme='outline'
-              type='tertiary'
-              icon={<IconDownload />}
-              style={styles.sideActionBtn}
-              onClick={handleDownload}
-              disabled={!isSuccess || !task.image_url}
-            >
-              {t('下载图片')}
-            </Button>
-            <Button
-              theme='outline'
+              <Button
+                theme='outline'
+                type='tertiary'
+                icon={<IconDownload />}
+                style={styles.sideActionBtn}
+                onClick={handleDownload}
+              disabled={!isSuccess || !task.image_url || isExpiredCleaned}
+              >
+                {t('下载图片')}
+              </Button>
+              <Button
+                theme='outline'
               type='tertiary'
               icon={<IconRefresh />}
               style={styles.sideActionBtn}

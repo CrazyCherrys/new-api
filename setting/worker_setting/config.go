@@ -1,10 +1,18 @@
 package worker_setting
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
+)
+
+const (
+	DefaultResultLocalStoragePathEnv    = "IMAGE_GENERATION_RESULT_LOCAL_STORAGE_PATH"
+	DefaultReferenceLocalStoragePathEnv = "IMAGE_GENERATION_REFERENCE_LOCAL_STORAGE_PATH"
+	DefaultResultLocalStoragePath       = "/data/image-generation/results"
+	DefaultReferenceLocalStoragePath    = "/data/image-generation/references"
 )
 
 // WorkerSetting Worker 相关配置
@@ -19,7 +27,7 @@ type WorkerSetting struct {
 
 	// StorageType 存储类型: local / s3
 	StorageType string `json:"storage_type"`
-	// LocalStoragePath 本地存储路径（空使用系统临时目录）
+	// LocalStoragePath 本地存储路径（历史字段，运行时忽略）
 	LocalStoragePath string `json:"local_storage_path"`
 
 	// S3 对象存储配置
@@ -34,7 +42,7 @@ type WorkerSetting struct {
 
 	// ResultStorageType 结果图存储类型: local / s3
 	ResultStorageType string `json:"result_storage_type"`
-	// ResultLocalStoragePath 结果图本地存储路径（空使用系统临时目录）
+	// ResultLocalStoragePath 结果图本地存储路径（历史字段，运行时忽略）
 	ResultLocalStoragePath string `json:"result_local_storage_path"`
 
 	// ResultS3 对象存储配置
@@ -49,7 +57,7 @@ type WorkerSetting struct {
 
 	// ReferenceStorageType 参考图存储类型: local / s3
 	ReferenceStorageType string `json:"reference_storage_type"`
-	// ReferenceLocalStoragePath 参考图本地存储路径（空使用系统临时目录）
+	// ReferenceLocalStoragePath 参考图本地存储路径（历史字段，运行时忽略）
 	ReferenceLocalStoragePath string `json:"reference_local_storage_path"`
 
 	// ReferenceS3 对象存储配置
@@ -86,6 +94,8 @@ type WorkerSetting struct {
 	ReferenceAutoCleanupEnabled bool `json:"reference_auto_cleanup_enabled"`
 	// ReferenceRetentionDays 参考图保留天数
 	ReferenceRetentionDays int `json:"reference_retention_days"`
+	// CleanupIntervalHours 清理调度间隔（小时）
+	CleanupIntervalHours int `json:"cleanup_interval_hours"`
 
 	// MaxImageSize 单张参考图片最大大小（MB）
 	MaxImageSize int `json:"max_image_size"`
@@ -137,6 +147,7 @@ var workerSetting = WorkerSetting{
 	RetentionDays:                30,
 	ReferenceAutoCleanupEnabled:  false,
 	ReferenceRetentionDays:       7,
+	CleanupIntervalHours:         24,
 	MaxImageSize:                 10,
 }
 
@@ -182,10 +193,9 @@ func (ws *WorkerSetting) EffectiveReferenceStorageType() string {
 }
 
 func (ws *WorkerSetting) EffectiveResultLocalStoragePath() string {
-	if ws == nil {
-		return ""
-	}
-	return ws.fallbackString(ws.ResultLocalStoragePath, ws.LocalStoragePath)
+	return effectiveImageGenerationLocalStoragePath(
+		common.GetEnvOrDefaultString(DefaultResultLocalStoragePathEnv, DefaultResultLocalStoragePath),
+	)
 }
 
 func (ws *WorkerSetting) EffectiveResultS3Endpoint() string {
@@ -245,10 +255,24 @@ func (ws *WorkerSetting) EffectiveResultS3PublicBaseURL() string {
 }
 
 func (ws *WorkerSetting) EffectiveReferenceLocalStoragePath() string {
-	if ws == nil {
+	return effectiveImageGenerationLocalStoragePath(
+		common.GetEnvOrDefaultString(DefaultReferenceLocalStoragePathEnv, DefaultReferenceLocalStoragePath),
+	)
+}
+
+func (ws *WorkerSetting) EffectiveCleanupIntervalHours() int {
+	if ws == nil || ws.CleanupIntervalHours <= 0 {
+		return 24
+	}
+	return ws.CleanupIntervalHours
+}
+
+func effectiveImageGenerationLocalStoragePath(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
 		return ""
 	}
-	return ws.fallbackString(ws.ReferenceLocalStoragePath, ws.ResultLocalStoragePath, ws.LocalStoragePath)
+	return filepath.Clean(trimmed)
 }
 
 func (ws *WorkerSetting) EffectiveReferenceS3Endpoint() string {

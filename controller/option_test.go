@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/worker_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -102,6 +103,12 @@ func TestGetOptionsMasksWorkerS3SecretFields(t *testing.T) {
 	}
 	if values["worker_setting.s3_path_prefix"] != "worker/output" {
 		t.Fatalf("expected path prefix to be returned normally, got %q", values["worker_setting.s3_path_prefix"])
+	}
+	if values["worker_setting.effective_result_local_storage_path"] != worker_setting.DefaultResultLocalStoragePath {
+		t.Fatalf("expected effective result local storage path to be returned, got %q", values["worker_setting.effective_result_local_storage_path"])
+	}
+	if values["worker_setting.effective_reference_local_storage_path"] != worker_setting.DefaultReferenceLocalStoragePath {
+		t.Fatalf("expected effective reference local storage path to be returned, got %q", values["worker_setting.effective_reference_local_storage_path"])
 	}
 	if string(recorder.Body.Bytes()) == "" ||
 		containsAny(
@@ -211,6 +218,37 @@ func TestUpdateOptionKeepsSplitWorkerS3SecretsWhenMaskedValueSubmitted(t *testin
 		common.OptionMapRWMutex.RUnlock()
 		if stored != "raw-secret-key" {
 			t.Fatalf("expected masked submit to keep existing secret for %s, got %q", key, stored)
+		}
+	}
+}
+
+func TestUpdateOptionIgnoresReadonlyWorkerRuntimePaths(t *testing.T) {
+	for _, key := range []string{
+		"worker_setting.effective_result_local_storage_path",
+		"worker_setting.effective_reference_local_storage_path",
+	} {
+		withOptionMap(t, map[string]string{})
+
+		ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/option/", map[string]string{
+			"key":   key,
+			"value": "/tmp/should-not-persist",
+		}, 1)
+
+		UpdateOption(ctx)
+
+		var response optionMutationResponse
+		if err := common.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if !response.Success {
+			t.Fatalf("expected success response, got message: %s", response.Message)
+		}
+
+		common.OptionMapRWMutex.RLock()
+		_, exists := common.OptionMap[key]
+		common.OptionMapRWMutex.RUnlock()
+		if exists {
+			t.Fatalf("expected readonly runtime key %s to remain non-persistent", key)
 		}
 	}
 }

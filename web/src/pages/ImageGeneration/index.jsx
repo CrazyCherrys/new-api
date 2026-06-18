@@ -299,6 +299,7 @@ const areTasksVisuallyEquivalent = (oldTask, newTask) =>
   oldTask.status === newTask.status &&
   oldTask.image_url === newTask.image_url &&
   oldTask.thumbnail_url === newTask.thumbnail_url &&
+  oldTask.result_asset_status === newTask.result_asset_status &&
   oldTask.completed_time === newTask.completed_time &&
   oldTask.started_time === newTask.started_time &&
   oldTask.progress === newTask.progress &&
@@ -3474,13 +3475,16 @@ const ImageGeneration = () => {
     const taskType = getCanvasMessageTaskType(message);
     if (taskType === 'image_generation') {
       const task = message.image_task || {};
+      const isExpiredCleaned = task.result_asset_status === 'expired_cleaned';
       return {
         kind: 'image',
-        status: task.status || message.status,
-        src: task.thumbnail_url || task.image_url || '',
-        previewSrc: task.image_url || task.thumbnail_url || '',
+        status: isExpiredCleaned ? 'expired_cleaned' : task.status || message.status,
+        src: isExpiredCleaned ? '' : task.thumbnail_url || task.image_url || '',
+        previewSrc: isExpiredCleaned ? '' : task.image_url || task.thumbnail_url || '',
         error:
-          task.error_message || task.fail_reason || message.error_message || '',
+          isExpiredCleaned
+            ? t('已过期并清理')
+            : task.error_message || task.fail_reason || message.error_message || '',
       };
     }
     if (taskType === 'video_generation') {
@@ -9841,6 +9845,7 @@ const ImageGeneration = () => {
     const isDone =
       (isVideo && (status === 'completed' || status === 'success')) ||
       (!isVideo && status === 'success');
+    const isExpiredCleaned = !isVideo && status === 'expired_cleaned';
     const isFailed = status === 'failed';
     const normalizedStatus = String(status || '').toLowerCase();
     const isQueued = ['queued', 'pending', 'submitted'].includes(
@@ -9852,6 +9857,8 @@ const ImageGeneration = () => {
     const errorText = media?.error || message.error_message || t('生成失败');
     const statusLabel = isFailed
       ? errorText
+      : isExpiredCleaned
+        ? t('已过期并清理')
       : isQueued
         ? t('排队中')
         : isVideo
@@ -9902,6 +9909,15 @@ const ImageGeneration = () => {
             </div>
           </div>
         </>
+      );
+    } else if (isExpiredCleaned) {
+      content = (
+        <div style={styles.canvasMediaStatusBody}>
+          <IconAlertTriangle size='small' />
+          <Text type='tertiary' size='small'>
+            {t('已过期并清理')}
+          </Text>
+        </div>
       );
     } else if (isFailed) {
       content = (
@@ -10070,6 +10086,20 @@ const ImageGeneration = () => {
                 />
               </div>
             </div>
+          </div>
+        );
+      }
+      if (media.status === 'expired_cleaned') {
+        return (
+          <div
+            style={{
+              ...styles.canvasChatInlineStatus,
+              ...styles.canvasChatInlineStatusError,
+              ...styles.canvasChatErrorText,
+            }}
+            className='canvas-chat-inline-status canvas-chat-inline-status--error'
+          >
+            <span>{t('已过期并清理')}</span>
           </div>
         );
       }
