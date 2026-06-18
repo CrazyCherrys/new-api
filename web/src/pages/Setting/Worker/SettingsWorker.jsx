@@ -91,7 +91,7 @@ function renderStorageConfigSection({
               initValue={effectiveValues?.localPath || ''}
               value={effectiveValues?.localPath || ''}
               extraText={t(
-                'Docker 部署请挂载该固定目录；运行时不再读取历史路径配置字段',
+                'Docker 部署请挂载该固定目录；运行时不再读取历史路径配置字段。本地存储返回的是站内文件路由，不会在图片 URL 中直接写出源站 IP；如需真正隐藏源站，请确保站点与该文件路由统一经过 CDN 或反向代理，且源站不可被外部直连。',
               )}
               readonly
               disabled

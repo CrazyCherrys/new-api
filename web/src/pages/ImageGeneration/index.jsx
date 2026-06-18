@@ -32,6 +32,7 @@ import {
   Dropdown,
   Button,
   Upload,
+  Modal,
   Spin,
   Typography,
   TextArea,
@@ -3138,6 +3139,27 @@ const ImageGeneration = () => {
     } finally {
       setDeletingCanvasSession(false);
     }
+  };
+
+  const confirmDeleteCanvasSession = (session) => {
+    if (deletingCanvasSession) {
+      return;
+    }
+    Modal.confirm({
+      title: t('确认删除该会话？'),
+      content: t('删除后无法恢复，请确认是否继续'),
+      okText: t('删除'),
+      cancelText: t('取消'),
+      okButtonProps: {
+        type: 'danger',
+        loading: deletingCanvasSession,
+        disabled: deletingCanvasSession,
+      },
+      cancelButtonProps: {
+        disabled: deletingCanvasSession,
+      },
+      onOk: () => deleteCanvasSession(session),
+    });
   };
 
   useEffect(() => {
@@ -9302,9 +9324,7 @@ const ImageGeneration = () => {
         }}
         onClick={(event) => {
           event?.domEvent?.stopPropagation?.();
-          if (window.confirm(t('确认删除该会话？'))) {
-            deleteCanvasSession(session);
-          }
+          confirmDeleteCanvasSession(session);
         }}
       >
         {t('删除')}
