@@ -41,6 +41,9 @@ import { useLocation } from 'react-router-dom';
 import { normalizeLanguage } from '../../i18n/language';
 const { Sider, Content, Header } = Layout;
 
+const isCanvasPath = (pathname = '') =>
+  pathname === '/canvas' || pathname.startsWith('/canvas/');
+
 const PageLayout = () => {
   const [userState, userDispatch] = useContext(UserContext);
   const [, statusDispatch] = useContext(StatusContext);
@@ -49,6 +52,7 @@ const PageLayout = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { i18n } = useTranslation();
   const location = useLocation();
+  const isCanvasRoute = isCanvasPath(location.pathname);
 
   const cardProPages = [
     '/console/channel',
@@ -61,10 +65,10 @@ const PageLayout = () => {
     '/console/models',
     '/console/assets',
     '/pricing',
-    '/canvas',
   ];
 
-  const shouldHideFooter = cardProPages.includes(location.pathname);
+  const shouldHideFooter =
+    isCanvasRoute || cardProPages.includes(location.pathname);
 
   const shouldInnerPadding =
     location.pathname.includes('/console') &&
@@ -152,7 +156,7 @@ const PageLayout = () => {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        overflow: isMobile ? 'visible' : 'hidden',
+        overflow: isCanvasRoute ? 'hidden' : isMobile ? 'visible' : 'hidden',
       }}
     >
       <Header
@@ -173,9 +177,11 @@ const PageLayout = () => {
       </Header>
       <Layout
         style={{
-          overflow: isMobile ? 'visible' : 'auto',
+          overflow: isCanvasRoute ? 'hidden' : isMobile ? 'visible' : 'auto',
           display: 'flex',
           flexDirection: 'column',
+          flex: '1 1 auto',
+          minHeight: 0,
         }}
       >
         {showSider && (
@@ -206,14 +212,21 @@ const PageLayout = () => {
                 ? 'var(--sidebar-current-width)'
                 : '0',
             flex: '1 1 auto',
+            minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
+            overflow: isCanvasRoute ? 'hidden' : 'visible',
           }}
         >
           <Content
             style={{
-              flex: '1 0 auto',
-              overflowY: isMobile ? 'visible' : 'hidden',
+              flex: '1 1 auto',
+              minHeight: 0,
+              overflowY: isCanvasRoute
+                ? 'hidden'
+                : isMobile
+                  ? 'visible'
+                  : 'hidden',
               WebkitOverflowScrolling: 'touch',
               padding: shouldInnerPadding ? (isMobile ? '5px' : '24px') : '0',
               position: 'relative',

@@ -217,6 +217,8 @@ html.dark body.canvas-theme-route {
 body.canvas-theme-route {
   background: var(--canvas-page-bg);
   color: var(--canvas-text-primary);
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body.canvas-theme-route [data-canvas-theme-scope='true'] {
@@ -232,6 +234,18 @@ body.canvas-theme-route [data-canvas-theme-scope='true'] {
 body.canvas-theme-route .canvas-workspace-body,
 body.canvas-theme-route .canvas-workspace-scroll-panel {
   background: transparent;
+}
+
+body.canvas-theme-route .canvas-workspace-body,
+body.canvas-theme-route .canvas-workspace-scroll-panel,
+body.canvas-theme-route .canvas-sidebar-session-list {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+body.canvas-theme-route .canvas-workspace-scroll-panel,
+body.canvas-theme-route .canvas-sidebar-session-list {
+  -webkit-overflow-scrolling: touch;
 }
 
 body.canvas-theme-route .canvas-chat-stream {

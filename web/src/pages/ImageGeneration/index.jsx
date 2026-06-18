@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+} from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Brain } from 'lucide-react';
@@ -1040,8 +1046,8 @@ const ImageGeneration = () => {
       }
       const normalizedMode = CANVAS_MODES.includes(mode) ? mode : '';
       if (normalizedMode) {
-        const directMatch = (canvasSessions[normalizedMode] || []).find((item) =>
-          canvasSessionMatchesIdentifier(item, target),
+        const directMatch = (canvasSessions[normalizedMode] || []).find(
+          (item) => canvasSessionMatchesIdentifier(item, target),
         );
         if (directMatch) {
           return directMatch;
@@ -1097,11 +1103,7 @@ const ImageGeneration = () => {
         canvasMessagesSessionId,
         canvasMessages,
       }),
-    [
-      canvasMessages,
-      canvasMessagesSessionId,
-      visibleCanvasSessionId,
-    ],
+    [canvasMessages, canvasMessagesSessionId, visibleCanvasSessionId],
   );
   const renderableCanvasMessages = useMemo(
     () => getRenderableCanvasMessages(displayedCanvasMessages),
@@ -1946,10 +1948,8 @@ const ImageGeneration = () => {
       return;
     }
     if (routeSelectionAction.type === 'select-route-session') {
-      const {
-        sessionIdentifier,
-        sessionMode = CANVAS_MODE_IMAGE,
-      } = routeSelectionAction;
+      const { sessionIdentifier, sessionMode = CANVAS_MODE_IMAGE } =
+        routeSelectionAction;
       setGenerationMode((current) =>
         current === sessionMode ? current : sessionMode,
       );
@@ -1993,10 +1993,7 @@ const ImageGeneration = () => {
         };
       });
     })();
-  }, [
-    findCanvasSessionByIdentifier,
-    routeSessionIdNormalized,
-  ]);
+  }, [findCanvasSessionByIdentifier, routeSessionIdNormalized]);
 
   useEffect(() => {
     const targetSessionId = visibleCanvasSessionId;
@@ -6479,8 +6476,8 @@ const ImageGeneration = () => {
   const styles = {
     container: {
       display: 'flex',
-      height: 'calc(100vh - 60px)',
-      marginTop: 60,
+      height: 'calc(100dvh - 64px)',
+      marginTop: 64,
       overflow: 'hidden',
       background: 'var(--canvas-page-bg)',
     },
@@ -6611,6 +6608,12 @@ const ImageGeneration = () => {
       flexDirection: 'column',
       gap: 4,
       padding: '0 12px 10px',
+    },
+    scrollPanel: {
+      minHeight: 0,
+      overflowY: 'auto',
+      overscrollBehavior: 'contain',
+      WebkitOverflowScrolling: 'touch',
     },
     taskListItem: {
       width: '100%',
@@ -7467,6 +7470,8 @@ const ImageGeneration = () => {
       display: 'flex',
       flexDirection: 'column',
       background: 'var(--canvas-page-bg)',
+      overscrollBehavior: 'contain',
+      WebkitOverflowScrolling: 'touch',
     },
     mainViewport: {
       width: '100%',
@@ -9353,7 +9358,11 @@ const ImageGeneration = () => {
     <Spin
       spinning={recentCanvasSessions.initialLoading || deletingCanvasSession}
     >
-      <div style={styles.taskList} onScroll={handleRecentCanvasSessionsScroll}>
+      <div
+        style={{ ...styles.taskList, ...styles.scrollPanel }}
+        className='canvas-scroll-panel canvas-sidebar-session-list'
+        onScroll={handleRecentCanvasSessionsScroll}
+      >
         {recentCanvasSessions.error &&
         recentCanvasSessions.items.length === 0 ? (
           renderSidebarEmpty(
@@ -12016,7 +12025,7 @@ const ImageGeneration = () => {
         <div
           ref={canvasMessageViewportRef}
           style={styles.workspaceScrollPanel}
-          className='canvas-workspace-scroll-panel'
+          className='canvas-workspace-scroll-panel canvas-scroll-panel'
           onScroll={handleCanvasWorkspaceScroll}
         >
           <div style={styles.mainViewport}>
