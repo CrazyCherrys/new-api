@@ -55,7 +55,6 @@ function renderStorageConfigSection({
   inputs,
   effectiveValues,
   typeField,
-  localPathField,
   endpointField,
   bucketField,
   regionField,
@@ -83,23 +82,20 @@ function renderStorageConfigSection({
         </Col>
       </Row>
 
-	      {storageType === 'local' && (
-	        <Row gutter={16}>
-	          <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-	            <Form.Input
-	              field={localPathField}
-	              label={localPathLabel}
-	              extraText={
-	                !inputs[localPathField] && effectiveValues?.localPath
-	                  ? t('当前生效值：{{value}}；留空使用系统临时目录', {
-	                      value: effectiveValues.localPath,
-	                    })
-	                  : t('留空使用系统临时目录')
-	              }
-	              placeholder={t('例如 /var/data/worker')}
-	              onChange={onChange(localPathField)}
-	              showClear
-	            />
+      {storageType === 'local' && (
+        <Row gutter={16}>
+          <Col xs={24} sm={24} md={16} lg={16} xl={16}>
+            <Form.Input
+              field={`${typeField}__readonly_local_path`}
+              label={localPathLabel}
+              initValue={effectiveValues?.localPath || ''}
+              value={effectiveValues?.localPath || ''}
+              extraText={t(
+                'Docker 部署请挂载该固定目录；运行时不再读取历史路径配置字段',
+              )}
+              readonly
+              disabled
+            />
           </Col>
         </Row>
       )}
@@ -107,52 +103,52 @@ function renderStorageConfigSection({
       {storageType === 's3' && (
         <>
           <Row gutter={16}>
-	            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-	              <Form.Input
-	                field={endpointField}
-	                label={t('S3 上传端点地址')}
-	                extraText={t(
-	                  !inputs[endpointField] && effectiveValues?.endpoint
-	                    ? '服务端上传、读取和删除对象时使用的 S3 兼容端点 URL，可填写 OSS 内网 Endpoint。当前生效值：{{value}}'
-	                    : '服务端上传、读取和删除对象时使用的 S3 兼容端点 URL，可填写 OSS 内网 Endpoint',
-	                  { value: effectiveValues?.endpoint || '' },
-	                )}
-	                placeholder='https://oss-cn-hongkong-internal.aliyuncs.com'
-	                onChange={onChange(endpointField)}
-	                showClear
+            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+              <Form.Input
+                field={endpointField}
+                label={t('S3 上传端点地址')}
+                extraText={t(
+                  !inputs[endpointField] && effectiveValues?.endpoint
+                    ? '服务端上传、读取和删除对象时使用的 S3 兼容端点 URL，可填写 OSS 内网 Endpoint。当前生效值：{{value}}'
+                    : '服务端上传、读取和删除对象时使用的 S3 兼容端点 URL，可填写 OSS 内网 Endpoint',
+                  { value: effectiveValues?.endpoint || '' },
+                )}
+                placeholder='https://oss-cn-hongkong-internal.aliyuncs.com'
+                onChange={onChange(endpointField)}
+                showClear
               />
             </Col>
-	            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-	              <Form.Input
-	                field={bucketField}
-	                label={t('S3 桶名')}
-	                extraText={
-	                  !inputs[bucketField] && effectiveValues?.bucket
-	                    ? t('存储桶名称；当前生效值：{{value}}', {
-	                        value: effectiveValues.bucket,
-	                      })
-	                    : t('存储桶名称')
-	                }
-	                placeholder='my-bucket'
-	                onChange={onChange(bucketField)}
-	                showClear
-	              />
+            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+              <Form.Input
+                field={bucketField}
+                label={t('S3 桶名')}
+                extraText={
+                  !inputs[bucketField] && effectiveValues?.bucket
+                    ? t('存储桶名称；当前生效值：{{value}}', {
+                        value: effectiveValues.bucket,
+                      })
+                    : t('存储桶名称')
+                }
+                placeholder='my-bucket'
+                onChange={onChange(bucketField)}
+                showClear
+              />
             </Col>
-	            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-	              <Form.Input
-	                field={regionField}
-	                label={t('S3 区域')}
-	                extraText={
-	                  !inputs[regionField] && effectiveValues?.region
-	                    ? t('存储桶所在区域；当前生效值：{{value}}', {
-	                        value: effectiveValues.region,
-	                      })
-	                    : t('存储桶所在区域')
-	                }
-	                placeholder='us-east-1'
-	                onChange={onChange(regionField)}
-	                showClear
-	              />
+            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+              <Form.Input
+                field={regionField}
+                label={t('S3 区域')}
+                extraText={
+                  !inputs[regionField] && effectiveValues?.region
+                    ? t('存储桶所在区域；当前生效值：{{value}}', {
+                        value: effectiveValues.region,
+                      })
+                    : t('存储桶所在区域')
+                }
+                placeholder='us-east-1'
+                onChange={onChange(regionField)}
+                showClear
+              />
             </Col>
           </Row>
           <Row gutter={16}>
@@ -179,53 +175,56 @@ function renderStorageConfigSection({
                 showClear
               />
             </Col>
-	            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-	              <Form.Input
-	                field={pathPrefixField}
-	                label={t('S3 路径前缀')}
-	                extraText={
-	                  !inputs[pathPrefixField] && effectiveValues?.pathPrefix
-	                    ? t('对象存储路径前缀，留空则存储在根目录；当前生效值：{{value}}', {
-	                        value: effectiveValues.pathPrefix,
-	                      })
-	                    : t('对象存储路径前缀，留空则存储在根目录')
-	                }
-	                placeholder='worker/output'
-	                onChange={onChange(pathPrefixField)}
-	                showClear
-	              />
+            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+              <Form.Input
+                field={pathPrefixField}
+                label={t('S3 路径前缀')}
+                extraText={
+                  !inputs[pathPrefixField] && effectiveValues?.pathPrefix
+                    ? t(
+                        '对象存储路径前缀，留空则存储在根目录；当前生效值：{{value}}',
+                        {
+                          value: effectiveValues.pathPrefix,
+                        },
+                      )
+                    : t('对象存储路径前缀，留空则存储在根目录')
+                }
+                placeholder='worker/output'
+                onChange={onChange(pathPrefixField)}
+                showClear
+              />
             </Col>
           </Row>
           <Row gutter={16}>
-	            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-	              <Form.Select
-	                field={urlModeField}
-	                label={t('图片访问地址模式')}
-	                extraText={t(
-	                  !inputs[urlModeField] && effectiveValues?.urlMode
-	                    ? '控制返回给前端的图片链接是直连对象存储，还是使用 CDN 域名。当前生效值：{{value}}'
-	                    : '控制返回给前端的图片链接是直连对象存储，还是使用 CDN 域名',
-	                  { value: effectiveValues?.urlMode || '' },
-	                )}
-	                onChange={onChange(urlModeField)}
-	                optionList={[
+            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+              <Form.Select
+                field={urlModeField}
+                label={t('图片访问地址模式')}
+                extraText={t(
+                  !inputs[urlModeField] && effectiveValues?.urlMode
+                    ? '控制返回给前端的图片链接是直连对象存储，还是使用 CDN 域名。当前生效值：{{value}}'
+                    : '控制返回给前端的图片链接是直连对象存储，还是使用 CDN 域名',
+                  { value: effectiveValues?.urlMode || '' },
+                )}
+                onChange={onChange(urlModeField)}
+                optionList={[
                   { value: 'direct', label: t('直连对象存储') },
                   { value: 'cdn', label: t('CDN 域名') },
                 ]}
               />
             </Col>
-	            <Col xs={24} sm={12} md={16} lg={16} xl={16}>
-	              <Form.Input
-	                field={publicBaseURLField}
-	                label={t('对外访问基础地址')}
-	                extraText={t(
-	                  !inputs[publicBaseURLField] && effectiveValues?.publicBaseURL
-	                    ? '当图片访问地址模式为 CDN 时填写 CDN 域名；留空时回退为直连对象存储地址。当前生效值：{{value}}'
-	                    : '当图片访问地址模式为 CDN 时填写 CDN 域名；留空时回退为直连对象存储地址',
-	                  { value: effectiveValues?.publicBaseURL || '' },
-	                )}
-	                placeholder='https://img.example.com'
-	                onChange={onChange(publicBaseURLField)}
+            <Col xs={24} sm={12} md={16} lg={16} xl={16}>
+              <Form.Input
+                field={publicBaseURLField}
+                label={t('对外访问基础地址')}
+                extraText={t(
+                  !inputs[publicBaseURLField] && effectiveValues?.publicBaseURL
+                    ? '当图片访问地址模式为 CDN 时填写 CDN 域名；留空时回退为直连对象存储地址。当前生效值：{{value}}'
+                    : '当图片访问地址模式为 CDN 时填写 CDN 域名；留空时回退为直连对象存储地址',
+                  { value: effectiveValues?.publicBaseURL || '' },
+                )}
+                placeholder='https://img.example.com'
+                onChange={onChange(publicBaseURLField)}
                 showClear
               />
             </Col>
@@ -428,7 +427,6 @@ export default function SettingsWorker(props) {
                 publicBaseURL: effectiveStorageInputs.resultS3PublicBaseURL,
               },
               typeField: 'worker_setting.result_storage_type',
-              localPathField: 'worker_setting.result_local_storage_path',
               endpointField: 'worker_setting.result_s3_endpoint',
               bucketField: 'worker_setting.result_s3_bucket',
               regionField: 'worker_setting.result_s3_region',
@@ -437,7 +435,7 @@ export default function SettingsWorker(props) {
               pathPrefixField: 'worker_setting.result_s3_path_prefix',
               urlModeField: 'worker_setting.result_s3_url_mode',
               publicBaseURLField: 'worker_setting.result_s3_public_base_url',
-              localPathLabel: t('结果图本地存储路径'),
+              localPathLabel: t('结果图本地目录'),
             })}
           </Form.Section>
 
@@ -464,7 +462,6 @@ export default function SettingsWorker(props) {
                 publicBaseURL: effectiveStorageInputs.referenceS3PublicBaseURL,
               },
               typeField: 'worker_setting.reference_storage_type',
-              localPathField: 'worker_setting.reference_local_storage_path',
               endpointField: 'worker_setting.reference_s3_endpoint',
               bucketField: 'worker_setting.reference_s3_bucket',
               regionField: 'worker_setting.reference_s3_region',
@@ -473,13 +470,13 @@ export default function SettingsWorker(props) {
               pathPrefixField: 'worker_setting.reference_s3_path_prefix',
               urlModeField: 'worker_setting.reference_s3_url_mode',
               publicBaseURLField: 'worker_setting.reference_s3_public_base_url',
-              localPathLabel: t('参考图本地存储路径'),
+              localPathLabel: t('参考图本地目录'),
             })}
             <Row gutter={16}>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Switch
                   field={'worker_setting.reference_auto_cleanup_enabled'}
-                  label={t('启用参考图自动清理')}
+                  label={t('参考图自动清理开关')}
                   checkedText={t('开')}
                   uncheckedText={t('关')}
                   onChange={handleFieldChange(
@@ -575,7 +572,9 @@ export default function SettingsWorker(props) {
                 <Form.InputNumber
                   field={'worker_setting.inspiration_page_cache_ttl'}
                   label={t('灵感后续页缓存（秒）')}
-                  extraText={t('控制 /inspiration 非首页游标页缓存时长，0 表示关闭缓存')}
+                  extraText={t(
+                    '控制 /inspiration 非首页游标页缓存时长，0 表示关闭缓存',
+                  )}
                   min={0}
                   max={86400}
                   onChange={handleFieldChange(
@@ -587,7 +586,9 @@ export default function SettingsWorker(props) {
                 <Form.InputNumber
                   field={'worker_setting.inspiration_first_page_cache_ttl'}
                   label={t('灵感首页缓存（秒）')}
-                  extraText={t('控制 /inspiration 首页缓存时长，0 表示关闭缓存')}
+                  extraText={t(
+                    '控制 /inspiration 首页缓存时长，0 表示关闭缓存',
+                  )}
                   min={0}
                   max={86400}
                   onChange={handleFieldChange(
@@ -596,10 +597,22 @@ export default function SettingsWorker(props) {
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'worker_setting.cleanup_interval_hours'}
+                  label={t('清理间隔（小时）')}
+                  extraText={t('结果图与参考图共用该调度间隔')}
+                  min={1}
+                  max={720}
+                  onChange={handleFieldChange(
+                    'worker_setting.cleanup_interval_hours',
+                  )}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Switch
                   field={'worker_setting.auto_cleanup_enabled'}
-                  label={t('自动清理开关')}
-                  extraText={t('是否自动清理过期的任务和文件')}
+                  label={t('结果图自动清理开关')}
+                  extraText={t('是否自动清理过期结果图文件并保留任务记录')}
                   onChange={handleFieldChange(
                     'worker_setting.auto_cleanup_enabled',
                   )}
@@ -608,8 +621,8 @@ export default function SettingsWorker(props) {
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
                   field={'worker_setting.retention_days'}
-                  label={t('保留天数')}
-                  extraText={t('任务和文件的保留天数，超过后自动清理')}
+                  label={t('结果图保留天数')}
+                  extraText={t('仅控制结果图文件清理，不删除任务记录')}
                   min={1}
                   max={365}
                   onChange={handleFieldChange('worker_setting.retention_days')}

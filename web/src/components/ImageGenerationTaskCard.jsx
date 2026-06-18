@@ -44,6 +44,7 @@ const ImageGenerationTaskCard = ({
 
   const isSuccess = task.status === 'success';
   const isFailed = task.status === 'failed';
+  const isExpiredCleaned = task.result_asset_status === 'expired_cleaned';
   const isPending = task.status === 'pending';
   const isGenerating = task.status === 'generating';
   const isActive = isPending || isGenerating;
@@ -58,15 +59,14 @@ const ImageGenerationTaskCard = ({
     return () => window.clearInterval(timer);
   }, [isActive]);
 
-  const waitTime =
-    isActive
-      ? Math.max(
-          0,
-          Math.floor(
-            (waitNow - (task.started_time || task.created_time) * 1000) / 1000,
-          ),
-        )
-      : 0;
+  const waitTime = isActive
+    ? Math.max(
+        0,
+        Math.floor(
+          (waitNow - (task.started_time || task.created_time) * 1000) / 1000,
+        ),
+      )
+    : 0;
 
   const formatWaitTime = (seconds) => {
     if (seconds < 60) return `${seconds}${t('秒')}`;
@@ -80,6 +80,11 @@ const ImageGenerationTaskCard = ({
       return {
         color: 'var(--canvas-success, var(--semi-color-success))',
         text: t('已完成'),
+      };
+    if (isExpiredCleaned)
+      return {
+        color: 'var(--canvas-warning, var(--semi-color-warning))',
+        text: t('已过期并清理'),
       };
     if (isFailed)
       return {
@@ -116,7 +121,8 @@ const ImageGenerationTaskCard = ({
         ? 'var(--canvas-card-shadow-hover, 0 10px 24px rgba(15, 23, 42, 0.12))'
         : 'var(--canvas-card-shadow, 0 1px 2px rgba(15, 23, 42, 0.04))',
       transform: hovered ? 'translateY(-1px)' : 'translateY(0)',
-      transition: 'border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease',
+      transition:
+        'border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease',
     },
     media: {
       position: 'absolute',
@@ -198,12 +204,10 @@ const ImageGenerationTaskCard = ({
       maxWidth: '86%',
       padding: '12px 14px',
       borderRadius: 10,
-      background:
-        'var(--canvas-media-panel-bg, rgba(15, 23, 42, 0.74))',
+      background: 'var(--canvas-media-panel-bg, rgba(15, 23, 42, 0.74))',
       border:
         '1px solid var(--canvas-media-panel-border, rgba(255, 255, 255, 0.14))',
-      boxShadow:
-        'var(--canvas-shadow-md, 0 8px 24px rgba(15, 23, 42, 0.10))',
+      boxShadow: 'var(--canvas-shadow-md, 0 8px 24px rgba(15, 23, 42, 0.10))',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -299,14 +303,17 @@ const ImageGenerationTaskCard = ({
   };
 
   const renderCenterState = () => {
-    if (isSuccess && previewUrl) {
+    if ((isSuccess && previewUrl) || isExpiredCleaned) {
       return null;
     }
     if (isFailed) {
       return (
         <div style={styles.center}>
           <div style={styles.centerState}>
-            <IconAlertTriangle size='large' style={{ color: statusMeta.color }} />
+            <IconAlertTriangle
+              size='large'
+              style={{ color: statusMeta.color }}
+            />
             <Text type='tertiary' size='small' style={styles.errorText}>
               {task.error_message || t('生成失败')}
             </Text>
@@ -353,7 +360,10 @@ const ImageGenerationTaskCard = ({
       <div style={styles.topMask} />
       {renderCenterState()}
 
-      <div style={styles.checkboxWrap} onClick={(event) => event.stopPropagation()}>
+      <div
+        style={styles.checkboxWrap}
+        onClick={(event) => event.stopPropagation()}
+      >
         <Checkbox
           checked={selected}
           onChange={(event) => onSelectChange(task.id, event.target.checked)}
@@ -397,6 +407,17 @@ const ImageGenerationTaskCard = ({
             <IconDownload size='small' />
           </a>
         ) : null}
+        {isExpiredCleaned ? (
+          <button
+            type='button'
+            style={styles.actionBtn}
+            title={t('已过期并清理')}
+            onClick={(event) => event.stopPropagation()}
+            disabled
+          >
+            <IconAlertTriangle size='small' />
+          </button>
+        ) : null}
         {isFailed ? (
           <button
             type='button'
@@ -422,6 +443,7 @@ ImageGenerationTaskCard.propTypes = {
       .isRequired,
     image_url: PropTypes.string,
     thumbnail_url: PropTypes.string,
+    result_asset_status: PropTypes.string,
     prompt: PropTypes.string,
     progress: PropTypes.number,
     error_message: PropTypes.string,
@@ -441,12 +463,15 @@ ImageGenerationTaskCard.defaultProps = {
   onSelectChange: () => {},
 };
 
-export default memo(ImageGenerationTaskCard, (prev, next) => (
-  prev.selected === next.selected &&
-  prev.task.id === next.task.id &&
-  prev.task.status === next.task.status &&
-  prev.task.image_url === next.task.image_url &&
-  prev.task.thumbnail_url === next.task.thumbnail_url &&
-  prev.task.progress === next.task.progress &&
-  prev.task.error_message === next.task.error_message
-));
+export default memo(
+  ImageGenerationTaskCard,
+  (prev, next) =>
+    prev.selected === next.selected &&
+    prev.task.id === next.task.id &&
+    prev.task.status === next.task.status &&
+    prev.task.image_url === next.task.image_url &&
+    prev.task.thumbnail_url === next.task.thumbnail_url &&
+    prev.task.result_asset_status === next.task.result_asset_status &&
+    prev.task.progress === next.task.progress &&
+    prev.task.error_message === next.task.error_message,
+);

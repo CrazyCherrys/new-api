@@ -14,23 +14,24 @@ import (
 )
 
 type CanvasImageMessageTask struct {
-	Id              int    `json:"id"`
-	ModelId         string `json:"model_id"`
-	SelectedGroup   string `json:"selected_group"`
-	Prompt          string `json:"prompt"`
-	Status          string `json:"status"`
-	RequestEndpoint string `json:"request_endpoint"`
-	Params          string `json:"params"`
-	ImageUrl        string `json:"image_url"`
-	ThumbnailUrl    string `json:"thumbnail_url"`
-	ImageMetadata   string `json:"image_metadata"`
-	ErrorMessage    string `json:"error_message"`
-	CreatedTime     int64  `json:"created_time"`
-	StartedTime     int64  `json:"started_time"`
-	CompletedTime   int64  `json:"completed_time"`
-	RequestType     string `json:"request_type"`
-	ReferenceCount  int    `json:"reference_count"`
-	HasMask         bool   `json:"has_mask"`
+	Id                int    `json:"id"`
+	ModelId           string `json:"model_id"`
+	SelectedGroup     string `json:"selected_group"`
+	Prompt            string `json:"prompt"`
+	Status            string `json:"status"`
+	RequestEndpoint   string `json:"request_endpoint"`
+	Params            string `json:"params"`
+	ImageUrl          string `json:"image_url"`
+	ThumbnailUrl      string `json:"thumbnail_url"`
+	ResultAssetStatus string `json:"result_asset_status"`
+	ImageMetadata     string `json:"image_metadata"`
+	ErrorMessage      string `json:"error_message"`
+	CreatedTime       int64  `json:"created_time"`
+	StartedTime       int64  `json:"started_time"`
+	CompletedTime     int64  `json:"completed_time"`
+	RequestType       string `json:"request_type"`
+	ReferenceCount    int    `json:"reference_count"`
+	HasMask           bool   `json:"has_mask"`
 }
 
 type CanvasVideoMessageTask struct {
@@ -788,23 +789,24 @@ func buildCanvasImageMessageTask(task *model.ImageGenerationTask) *CanvasImageMe
 		return nil
 	}
 	return &CanvasImageMessageTask{
-		Id:              task.Id,
-		ModelId:         task.ModelId,
-		SelectedGroup:   task.SelectedGroup,
-		Prompt:          task.Prompt,
-		Status:          task.Status,
-		RequestEndpoint: task.RequestEndpoint,
-		Params:          task.Params,
-		ImageUrl:        task.ImageUrl,
-		ThumbnailUrl:    task.ThumbnailUrl,
-		ImageMetadata:   task.ImageMetadata,
-		ErrorMessage:    task.ErrorMessage,
-		CreatedTime:     task.CreatedTime,
-		StartedTime:     task.EffectiveStartedTime(),
-		CompletedTime:   task.CompletedTime,
-		RequestType:     task.RequestType,
-		ReferenceCount:  task.ReferenceCount,
-		HasMask:         task.HasMask,
+		Id:                task.Id,
+		ModelId:           task.ModelId,
+		SelectedGroup:     task.SelectedGroup,
+		Prompt:            task.Prompt,
+		Status:            task.Status,
+		RequestEndpoint:   task.RequestEndpoint,
+		Params:            task.Params,
+		ImageUrl:          task.ImageUrl,
+		ThumbnailUrl:      task.ThumbnailUrl,
+		ResultAssetStatus: model.NormalizeImageTaskResultAssetStatus(task.ResultAssetStatus),
+		ImageMetadata:     task.ImageMetadata,
+		ErrorMessage:      task.ErrorMessage,
+		CreatedTime:       task.CreatedTime,
+		StartedTime:       task.EffectiveStartedTime(),
+		CompletedTime:     task.CompletedTime,
+		RequestType:       task.RequestType,
+		ReferenceCount:    task.ReferenceCount,
+		HasMask:           task.HasMask,
 	}
 }
 

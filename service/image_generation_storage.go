@@ -1103,7 +1103,12 @@ func imageGenerationLocalStorageBasePath(cfg *worker_setting.WorkerSetting, kind
 			}
 		}
 	}
-	return filepath.Join(os.TempDir(), "new-api-image-generation")
+	switch kind {
+	case imageGenerationAssetKindReference:
+		return worker_setting.DefaultReferenceLocalStoragePath
+	default:
+		return worker_setting.DefaultResultLocalStoragePath
+	}
 }
 
 func sanitizeImageGenerationLocalAssetPath(raw string) (string, error) {

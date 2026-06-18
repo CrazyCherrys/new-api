@@ -18,17 +18,18 @@ import (
 )
 
 type imageTaskDetailResponse struct {
-	ID             int    `json:"id"`
-	ModelID        string `json:"model_id"`
-	DisplayName    string `json:"display_name"`
-	SelectedGroup  string `json:"selected_group"`
-	StartedTime    int64  `json:"started_time"`
-	OutputWidth    int    `json:"output_width"`
-	OutputHeight   int    `json:"output_height"`
-	OutputSizeText string `json:"output_size_text"`
-	SizeText       string `json:"size_text"`
-	QualityText    string `json:"quality_text"`
-	Quantity       int    `json:"quantity"`
+	ID                int    `json:"id"`
+	ModelID           string `json:"model_id"`
+	DisplayName       string `json:"display_name"`
+	SelectedGroup     string `json:"selected_group"`
+	StartedTime       int64  `json:"started_time"`
+	ResultAssetStatus string `json:"result_asset_status"`
+	OutputWidth       int    `json:"output_width"`
+	OutputHeight      int    `json:"output_height"`
+	OutputSizeText    string `json:"output_size_text"`
+	SizeText          string `json:"size_text"`
+	QualityText       string `json:"quality_text"`
+	Quantity          int    `json:"quantity"`
 }
 
 type imageGenerationModelResponse struct {
@@ -212,18 +213,19 @@ func TestGetImageGenerationTaskDetailReturnsComputedDetailFields(t *testing.T) {
 	}
 
 	task := &model.ImageGenerationTask{
-		UserId:          42,
-		ModelId:         "gpt-image-detail",
-		SelectedGroup:   "vip",
-		Prompt:          "detail prompt",
-		RequestEndpoint: "openai",
-		Status:          model.ImageTaskStatusSuccess,
-		Params:          `{"aspect_ratio":"16:9","resolution":"2K","quality":"hd","style":"natural","n":3}`,
-		ImageMetadata:   `{"width":2048,"height":1152}`,
-		ImageUrl:        "https://example.com/detail.png",
-		ThumbnailUrl:    "https://example.com/detail-thumb.png",
-		CreatedTime:     100,
-		CompletedTime:   130,
+		UserId:            42,
+		ModelId:           "gpt-image-detail",
+		SelectedGroup:     "vip",
+		Prompt:            "detail prompt",
+		RequestEndpoint:   "openai",
+		Status:            model.ImageTaskStatusSuccess,
+		ResultAssetStatus: model.ImageTaskResultAssetStatusExpiredCleaned,
+		Params:            `{"aspect_ratio":"16:9","resolution":"2K","quality":"hd","style":"natural","n":3}`,
+		ImageMetadata:     `{"width":2048,"height":1152}`,
+		ImageUrl:          "https://example.com/detail.png",
+		ThumbnailUrl:      "https://example.com/detail-thumb.png",
+		CreatedTime:       100,
+		CompletedTime:     130,
 	}
 	if err := db.Create(task).Error; err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -252,6 +254,9 @@ func TestGetImageGenerationTaskDetailReturnsComputedDetailFields(t *testing.T) {
 	}
 	if detail.StartedTime != task.CreatedTime {
 		t.Fatalf("expected started time %d, got %d", task.CreatedTime, detail.StartedTime)
+	}
+	if detail.ResultAssetStatus != model.ImageTaskResultAssetStatusExpiredCleaned {
+		t.Fatalf("expected result asset status %q, got %q", model.ImageTaskResultAssetStatusExpiredCleaned, detail.ResultAssetStatus)
 	}
 	if detail.OutputWidth != 2048 || detail.OutputHeight != 1152 {
 		t.Fatalf("expected output size 2048x1152, got %dx%d", detail.OutputWidth, detail.OutputHeight)
@@ -368,6 +373,8 @@ func TestGetImageGenerationFileAllowsOwnerReferenceAssetFromTaskParams(t *testin
 	cfg.LocalStoragePath = t.TempDir()
 	cfg.ReferenceStorageType = "local"
 	cfg.ReferenceLocalStoragePath = t.TempDir()
+	t.Setenv(worker_setting.DefaultResultLocalStoragePathEnv, cfg.LocalStoragePath)
+	t.Setenv(worker_setting.DefaultReferenceLocalStoragePathEnv, cfg.ReferenceLocalStoragePath)
 
 	objectKey := "image-generation/ref/20260522/controller-reference.png"
 	assetURL := "/api/image-generation/files/" + objectKey

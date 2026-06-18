@@ -1153,16 +1153,17 @@ func GetImageGenerationModels(c *gin.Context) {
 
 func writeImageGenerationSSETaskUpdate(c *gin.Context, task *model.ImageGenerationTask) bool {
 	data, err := common.Marshal(gin.H{
-		"id":             task.Id,
-		"model_id":       task.ModelId,
-		"prompt":         task.Prompt,
-		"status":         task.Status,
-		"image_url":      task.ImageUrl,
-		"thumbnail_url":  task.ThumbnailUrl,
-		"error_message":  task.ErrorMessage,
-		"created_time":   task.CreatedTime,
-		"started_time":   task.EffectiveStartedTime(),
-		"completed_time": task.CompletedTime,
+		"id":                  task.Id,
+		"model_id":            task.ModelId,
+		"prompt":              task.Prompt,
+		"status":              task.Status,
+		"image_url":           task.ImageUrl,
+		"thumbnail_url":       task.ThumbnailUrl,
+		"result_asset_status": model.NormalizeImageTaskResultAssetStatus(task.ResultAssetStatus),
+		"error_message":       task.ErrorMessage,
+		"created_time":        task.CreatedTime,
+		"started_time":        task.EffectiveStartedTime(),
+		"completed_time":      task.CompletedTime,
 	})
 	if err != nil {
 		return false
@@ -1175,16 +1176,17 @@ func writeImageGenerationSSETaskUpdate(c *gin.Context, task *model.ImageGenerati
 
 func writeImageGenerationSSETaskUpdatePayload(c *gin.Context, update service.ImageGenerationTaskUpdate) bool {
 	data, err := common.Marshal(gin.H{
-		"id":             update.Id,
-		"model_id":       update.ModelId,
-		"prompt":         update.Prompt,
-		"status":         update.Status,
-		"image_url":      update.ImageUrl,
-		"thumbnail_url":  update.ThumbnailUrl,
-		"error_message":  update.ErrorMessage,
-		"created_time":   update.CreatedTime,
-		"started_time":   update.StartedTime,
-		"completed_time": update.CompletedTime,
+		"id":                  update.Id,
+		"model_id":            update.ModelId,
+		"prompt":              update.Prompt,
+		"status":              update.Status,
+		"image_url":           update.ImageUrl,
+		"thumbnail_url":       update.ThumbnailUrl,
+		"result_asset_status": model.NormalizeImageTaskResultAssetStatus(update.ResultAssetStatus),
+		"error_message":       update.ErrorMessage,
+		"created_time":        update.CreatedTime,
+		"started_time":        update.StartedTime,
+		"completed_time":      update.CompletedTime,
 	})
 	if err != nil {
 		return false

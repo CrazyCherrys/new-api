@@ -14,17 +14,18 @@ const imageGenerationTaskUpdateRedisChannel = "new-api:image_generation_task_upd
 var imageGenerationTaskUpdateRelayOnce sync.Once
 
 type ImageGenerationTaskUpdate struct {
-	Id            int    `json:"id"`
-	UserId        int    `json:"user_id"`
-	ModelId       string `json:"model_id"`
-	Prompt        string `json:"prompt"`
-	Status        string `json:"status"`
-	ImageUrl      string `json:"image_url"`
-	ThumbnailUrl  string `json:"thumbnail_url"`
-	ErrorMessage  string `json:"error_message"`
-	CreatedTime   int64  `json:"created_time"`
-	StartedTime   int64  `json:"started_time"`
-	CompletedTime int64  `json:"completed_time"`
+	Id                int    `json:"id"`
+	UserId            int    `json:"user_id"`
+	ModelId           string `json:"model_id"`
+	Prompt            string `json:"prompt"`
+	Status            string `json:"status"`
+	ImageUrl          string `json:"image_url"`
+	ThumbnailUrl      string `json:"thumbnail_url"`
+	ResultAssetStatus string `json:"result_asset_status"`
+	ErrorMessage      string `json:"error_message"`
+	CreatedTime       int64  `json:"created_time"`
+	StartedTime       int64  `json:"started_time"`
+	CompletedTime     int64  `json:"completed_time"`
 }
 
 type imageGenerationTaskBroadcaster struct {
@@ -164,17 +165,18 @@ func buildImageGenerationTaskUpdate(task *model.ImageGenerationTask) ImageGenera
 		return ImageGenerationTaskUpdate{}
 	}
 	return ImageGenerationTaskUpdate{
-		Id:            task.Id,
-		UserId:        task.UserId,
-		ModelId:       task.ModelId,
-		Prompt:        task.Prompt,
-		Status:        task.Status,
-		ImageUrl:      task.ImageUrl,
-		ThumbnailUrl:  task.ThumbnailUrl,
-		ErrorMessage:  task.ErrorMessage,
-		CreatedTime:   task.CreatedTime,
-		StartedTime:   task.EffectiveStartedTime(),
-		CompletedTime: task.CompletedTime,
+		Id:                task.Id,
+		UserId:            task.UserId,
+		ModelId:           task.ModelId,
+		Prompt:            task.Prompt,
+		Status:            task.Status,
+		ImageUrl:          task.ImageUrl,
+		ThumbnailUrl:      task.ThumbnailUrl,
+		ResultAssetStatus: model.NormalizeImageTaskResultAssetStatus(task.ResultAssetStatus),
+		ErrorMessage:      task.ErrorMessage,
+		CreatedTime:       task.CreatedTime,
+		StartedTime:       task.EffectiveStartedTime(),
+		CompletedTime:     task.CompletedTime,
 	}
 }
 

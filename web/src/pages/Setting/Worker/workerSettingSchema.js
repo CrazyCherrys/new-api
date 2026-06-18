@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { toBoolean } from '../../../helpers';
+import { toBoolean } from '../../../helpers/boolean.js';
 
 export const WORKER_SETTING_DEFAULTS = Object.freeze({
   'worker_setting.max_workers': 4,
@@ -65,11 +65,23 @@ export const WORKER_SETTING_DEFAULTS = Object.freeze({
   'worker_setting.retention_days': 30,
   'worker_setting.reference_auto_cleanup_enabled': false,
   'worker_setting.reference_retention_days': 7,
+  'worker_setting.cleanup_interval_hours': 24,
   'worker_setting.max_image_size': 10,
+});
+
+export const WORKER_SETTING_LOCAL_PATHS = Object.freeze({
+  result: '/data/image-generation/results',
+  reference: '/data/image-generation/references',
 });
 
 export function getWorkerSettingEffectiveDisplayInputs(rawOptions = {}) {
   const nextInputs = normalizeWorkerSettingInputs(rawOptions);
+  const effectiveResultLocalStoragePath =
+    nextInputs['worker_setting.effective_result_local_storage_path'] ||
+    WORKER_SETTING_LOCAL_PATHS.result;
+  const effectiveReferenceLocalStoragePath =
+    nextInputs['worker_setting.effective_reference_local_storage_path'] ||
+    WORKER_SETTING_LOCAL_PATHS.reference;
 
   const resultStorageType =
     nextInputs['worker_setting.result_storage_type'] ||
@@ -80,10 +92,7 @@ export function getWorkerSettingEffectiveDisplayInputs(rawOptions = {}) {
     nextInputs['worker_setting.result_storage_type'] ||
     nextInputs['worker_setting.storage_type'] ||
     'local';
-  const resultLocalStoragePath =
-    nextInputs['worker_setting.result_local_storage_path'] ||
-    nextInputs['worker_setting.local_storage_path'] ||
-    '';
+  const resultLocalStoragePath = effectiveResultLocalStoragePath;
   const resultS3Endpoint =
     nextInputs['worker_setting.result_s3_endpoint'] ||
     nextInputs['worker_setting.s3_endpoint'] ||
@@ -108,11 +117,7 @@ export function getWorkerSettingEffectiveDisplayInputs(rawOptions = {}) {
     nextInputs['worker_setting.result_s3_public_base_url'] ||
     nextInputs['worker_setting.s3_public_base_url'] ||
     '';
-  const referenceLocalStoragePath =
-    nextInputs['worker_setting.reference_local_storage_path'] ||
-    nextInputs['worker_setting.result_local_storage_path'] ||
-    nextInputs['worker_setting.local_storage_path'] ||
-    '';
+  const referenceLocalStoragePath = effectiveReferenceLocalStoragePath;
   const referenceS3Endpoint =
     nextInputs['worker_setting.reference_s3_endpoint'] ||
     nextInputs['worker_setting.result_s3_endpoint'] ||
@@ -164,6 +169,22 @@ export function getWorkerSettingEffectiveDisplayInputs(rawOptions = {}) {
   };
 }
 
+export function getWorkerStorageDisplayConfig(rawOptions = {}) {
+  const effectiveInputs = getWorkerSettingEffectiveDisplayInputs(rawOptions);
+  return {
+    result: {
+      storageType: effectiveInputs.resultStorageType,
+      localPath: effectiveInputs.resultLocalStoragePath,
+      localPathReadonly: effectiveInputs.resultStorageType === 'local',
+    },
+    reference: {
+      storageType: effectiveInputs.referenceStorageType,
+      localPath: effectiveInputs.referenceLocalStoragePath,
+      localPathReadonly: effectiveInputs.referenceStorageType === 'local',
+    },
+  };
+}
+
 function normalizeWorkerSettingValue(key, value) {
   const defaultValue = WORKER_SETTING_DEFAULTS[key];
   if (typeof defaultValue === 'boolean') {
@@ -178,6 +199,14 @@ function normalizeWorkerSettingValue(key, value) {
 
 export function normalizeWorkerSettingInputs(rawOptions = {}) {
   const nextInputs = { ...WORKER_SETTING_DEFAULTS };
+  [
+    'worker_setting.effective_result_local_storage_path',
+    'worker_setting.effective_reference_local_storage_path',
+  ].forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(rawOptions, key)) {
+      nextInputs[key] = rawOptions[key];
+    }
+  });
   Object.keys(WORKER_SETTING_DEFAULTS).forEach((key) => {
     if (!Object.prototype.hasOwnProperty.call(rawOptions, key)) {
       return;
@@ -190,7 +219,8 @@ export function normalizeWorkerSettingInputs(rawOptions = {}) {
       rawOptions,
       'worker_setting.result_storage_type',
     ) &&
-    String(rawOptions['worker_setting.result_storage_type'] || '').trim() !== '';
+    String(rawOptions['worker_setting.result_storage_type'] || '').trim() !==
+      '';
   const hasExplicitReferenceStorageType =
     Object.prototype.hasOwnProperty.call(
       rawOptions,

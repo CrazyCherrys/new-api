@@ -62,14 +62,17 @@ const ImageGenerationTaskModal = ({
 
   const isSuccess = task?.status === 'success';
   const isFailed = task?.status === 'failed';
+  const isExpiredCleaned = task?.result_asset_status === 'expired_cleaned';
   const isPending = task?.status === 'pending';
   const isGenerating = task?.status === 'generating';
-  const canDelete = isSuccess || isFailed;
+  const canDelete = isSuccess || isFailed || isExpiredCleaned;
 
   const resolvedOutputWidth = Number(task?.output_width) || 0;
   const resolvedOutputHeight = Number(task?.output_height) || 0;
-  const effectiveOutputWidth = resolvedOutputWidth || loadedOutputDimensions.width;
-  const effectiveOutputHeight = resolvedOutputHeight || loadedOutputDimensions.height;
+  const effectiveOutputWidth =
+    resolvedOutputWidth || loadedOutputDimensions.width;
+  const effectiveOutputHeight =
+    resolvedOutputHeight || loadedOutputDimensions.height;
   const imageAspectRatio =
     effectiveOutputWidth > 0 && effectiveOutputHeight > 0
       ? effectiveOutputWidth / effectiveOutputHeight
@@ -104,7 +107,13 @@ const ImageGenerationTaskModal = ({
     return () => {
       cancelled = true;
     };
-  }, [resolvedOutputHeight, resolvedOutputWidth, task?.id, task?.image_url, visible]);
+  }, [
+    resolvedOutputHeight,
+    resolvedOutputWidth,
+    task?.id,
+    task?.image_url,
+    visible,
+  ]);
 
   if (!task) return null;
 
@@ -159,6 +168,11 @@ const ImageGenerationTaskModal = ({
       return {
         color: 'var(--canvas-success, var(--semi-color-success))',
         text: t('生成成功'),
+      };
+    if (isExpiredCleaned)
+      return {
+        color: 'var(--canvas-warning, var(--semi-color-warning))',
+        text: t('已过期并清理'),
       };
     if (isFailed)
       return {
@@ -272,7 +286,9 @@ const ImageGenerationTaskModal = ({
     },
     body: {
       display: 'grid',
-      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.55fr) minmax(280px, 0.65fr)',
+      gridTemplateColumns: isMobile
+        ? '1fr'
+        : 'minmax(0, 1.55fr) minmax(280px, 0.65fr)',
       gap: isMobile ? 12 : 18,
       padding: isMobile ? 12 : 18,
       alignItems: 'start',
@@ -300,7 +316,8 @@ const ImageGenerationTaskModal = ({
       maxWidth: previewMaxWidth,
       maxHeight: previewMaxHeight,
       minHeight: isMobile ? 220 : 280,
-      aspectRatio: isSuccess && task.image_url ? normalizedPreviewRatio : undefined,
+      aspectRatio:
+        isSuccess && task.image_url ? normalizedPreviewRatio : undefined,
       borderRadius: 10,
       background: 'var(--canvas-toolbar-bg, var(--semi-color-fill-0))',
       overflow: 'hidden',
@@ -381,8 +398,7 @@ const ImageGenerationTaskModal = ({
       borderRadius: 8,
       border:
         '1px solid var(--canvas-danger-chip-border, rgba(239, 68, 68, 0.24))',
-      background:
-        'var(--canvas-danger-chip-bg, rgba(239, 68, 68, 0.08))',
+      background: 'var(--canvas-danger-chip-bg, rgba(239, 68, 68, 0.08))',
       color: 'var(--canvas-danger-chip-text, var(--canvas-error, #ef4444))',
       fontSize: 12,
       lineHeight: 1.55,
@@ -435,8 +451,7 @@ const ImageGenerationTaskModal = ({
             width: 64,
             height: 64,
             borderRadius: '50%',
-            border:
-              '1.5px solid var(--canvas-error, var(--semi-color-danger))',
+            border: '1.5px solid var(--canvas-error, var(--semi-color-danger))',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -444,6 +459,25 @@ const ImageGenerationTaskModal = ({
           }}
         >
           <IconAlertTriangle size='extra-large' />
+        </div>
+      );
+    }
+    if (isExpiredCleaned) {
+      return (
+        <div
+          style={{
+            color: 'var(--canvas-text-muted, var(--semi-color-text-3))',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 12,
+          }}
+        >
+          <IconAlertTriangle size='extra-large' />
+          <Text type='tertiary' size='small'>
+            {t('已过期并清理')}
+          </Text>
         </div>
       );
     }
@@ -458,7 +492,11 @@ const ImageGenerationTaskModal = ({
             color: 'var(--canvas-text-muted, var(--semi-color-text-2))',
           }}
         >
-          {isGenerating ? <Spin size='large' /> : <IconClock size='extra-large' />}
+          {isGenerating ? (
+            <Spin size='large' />
+          ) : (
+            <IconClock size='extra-large' />
+          )}
           <Text type='tertiary' size='small'>
             {isGenerating ? t('生成中') : t('等待中')}
           </Text>
@@ -519,7 +557,10 @@ const ImageGenerationTaskModal = ({
   const requestTypeText = (() => {
     if (task.request_type === 'edit') {
       const parts = [t('参考图编辑')];
-      if (typeof task.reference_count === 'number' && task.reference_count > 0) {
+      if (
+        typeof task.reference_count === 'number' &&
+        task.reference_count > 0
+      ) {
         parts.push(t('参考图 {{count}} 张', { count: task.reference_count }));
       }
       if (task.has_mask) {
@@ -536,7 +577,12 @@ const ImageGenerationTaskModal = ({
       : task.output_size_text || '-';
   const qualityText =
     task.quantity > 0
-      ? [task.quality_text && task.quality_text !== '-' ? task.quality_text : '', t('数量 {{count}}', { count: task.quantity })]
+      ? [
+          task.quality_text && task.quality_text !== '-'
+            ? task.quality_text
+            : '',
+          t('数量 {{count}}', { count: task.quantity }),
+        ]
           .filter(Boolean)
           .join(' · ')
       : task.quality_text || '-';
@@ -600,6 +646,16 @@ const ImageGenerationTaskModal = ({
                     <IconDownload size='small' />
                   </button>
                 )}
+                {isExpiredCleaned && (
+                  <button
+                    type='button'
+                    style={styles.actionIconBtn}
+                    title={t('已过期并清理')}
+                    disabled
+                  >
+                    <IconAlertTriangle size='small' />
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -636,7 +692,8 @@ const ImageGenerationTaskModal = ({
               <div style={styles.infoBlock}>
                 <span style={styles.infoLabel}>{t('尺寸/比例')}</span>
                 <span style={styles.infoValue}>
-                  {[outputSizeText, sizeText].filter(Boolean).join(' / ') || '-'}
+                  {[outputSizeText, sizeText].filter(Boolean).join(' / ') ||
+                    '-'}
                 </span>
               </div>
             </div>
@@ -681,7 +738,9 @@ const ImageGenerationTaskModal = ({
                   <div style={styles.metaCard}>
                     <div style={styles.infoBlock}>
                       <span style={styles.infoLabel}>{t('使用分组')}</span>
-                      <span style={styles.infoValue}>{task.selected_group}</span>
+                      <span style={styles.infoValue}>
+                        {task.selected_group}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -753,7 +812,7 @@ const ImageGenerationTaskModal = ({
               icon={<IconDownload />}
               style={styles.sideActionBtn}
               onClick={handleDownload}
-              disabled={!isSuccess || !task.image_url}
+              disabled={!isSuccess || !task.image_url || isExpiredCleaned}
             >
               {t('下载图片')}
             </Button>
