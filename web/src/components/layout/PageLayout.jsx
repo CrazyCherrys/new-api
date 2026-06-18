@@ -180,8 +180,8 @@ const PageLayout = () => {
           overflow: isCanvasRoute ? 'hidden' : isMobile ? 'visible' : 'auto',
           display: 'flex',
           flexDirection: 'column',
-          flex: '1 1 auto',
-          minHeight: 0,
+          flex: isCanvasRoute ? '1 1 auto' : undefined,
+          minHeight: isCanvasRoute ? 0 : undefined,
         }}
       >
         {showSider && (
@@ -212,16 +212,16 @@ const PageLayout = () => {
                 ? 'var(--sidebar-current-width)'
                 : '0',
             flex: '1 1 auto',
-            minHeight: 0,
+            minHeight: isCanvasRoute ? 0 : undefined,
             display: 'flex',
             flexDirection: 'column',
-            overflow: isCanvasRoute ? 'hidden' : 'visible',
+            overflow: isCanvasRoute ? 'hidden' : undefined,
           }}
         >
           <Content
             style={{
-              flex: '1 1 auto',
-              minHeight: 0,
+              flex: isCanvasRoute ? '1 1 auto' : '1 0 auto',
+              minHeight: isCanvasRoute ? 0 : undefined,
               overflowY: isCanvasRoute
                 ? 'hidden'
                 : isMobile
