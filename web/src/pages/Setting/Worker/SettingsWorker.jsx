@@ -437,6 +437,32 @@ export default function SettingsWorker(props) {
               publicBaseURLField: 'worker_setting.result_s3_public_base_url',
               localPathLabel: t('结果图本地目录'),
             })}
+            {resultStorageType === 'local' && (
+              <Row gutter={16}>
+                <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                  <Form.Switch
+                    field={'worker_setting.auto_cleanup_enabled'}
+                    label={t('结果图自动清理开关')}
+                    checkedText={t('开')}
+                    uncheckedText={t('关')}
+                    extraText={t('仅本地存储时自动清理过期结果图文件并保留任务记录')}
+                    onChange={handleFieldChange(
+                      'worker_setting.auto_cleanup_enabled',
+                    )}
+                  />
+                </Col>
+                <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                  <Form.InputNumber
+                    field={'worker_setting.retention_days'}
+                    label={t('结果图保留小时数')}
+                    extraText={t('仅控制本地结果图文件清理，不删除任务记录')}
+                    min={1}
+                    max={24 * 365}
+                    onChange={handleFieldChange('worker_setting.retention_days')}
+                  />
+                </Col>
+              </Row>
+            )}
           </Form.Section>
 
           <Form.Section text={t('参考图存储设置')}>
@@ -472,31 +498,34 @@ export default function SettingsWorker(props) {
               publicBaseURLField: 'worker_setting.reference_s3_public_base_url',
               localPathLabel: t('参考图本地目录'),
             })}
-            <Row gutter={16}>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.Switch
-                  field={'worker_setting.reference_auto_cleanup_enabled'}
-                  label={t('参考图自动清理开关')}
-                  checkedText={t('开')}
-                  uncheckedText={t('关')}
-                  onChange={handleFieldChange(
-                    'worker_setting.reference_auto_cleanup_enabled',
-                  )}
-                />
-              </Col>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.InputNumber
-                  field={'worker_setting.reference_retention_days'}
-                  label={t('参考图保留天数')}
-                  extraText={t('仅清理无引用的旧参考图资产')}
-                  min={1}
-                  max={365}
-                  onChange={handleFieldChange(
-                    'worker_setting.reference_retention_days',
-                  )}
-                />
-              </Col>
-            </Row>
+            {referenceStorageType === 'local' && (
+              <Row gutter={16}>
+                <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                  <Form.Switch
+                    field={'worker_setting.reference_auto_cleanup_enabled'}
+                    label={t('参考图自动清理开关')}
+                    checkedText={t('开')}
+                    uncheckedText={t('关')}
+                    extraText={t('仅本地存储时自动清理无引用的旧参考图资产')}
+                    onChange={handleFieldChange(
+                      'worker_setting.reference_auto_cleanup_enabled',
+                    )}
+                  />
+                </Col>
+                <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                  <Form.InputNumber
+                    field={'worker_setting.reference_retention_days'}
+                    label={t('参考图保留小时数')}
+                    extraText={t('仅清理本地存储中无引用的旧参考图资产')}
+                    min={1}
+                    max={24 * 365}
+                    onChange={handleFieldChange(
+                      'worker_setting.reference_retention_days',
+                    )}
+                  />
+                </Col>
+              </Row>
+            )}
           </Form.Section>
 
           {/* 超时设置 */}
@@ -606,26 +635,6 @@ export default function SettingsWorker(props) {
                   onChange={handleFieldChange(
                     'worker_setting.cleanup_interval_hours',
                   )}
-                />
-              </Col>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.Switch
-                  field={'worker_setting.auto_cleanup_enabled'}
-                  label={t('结果图自动清理开关')}
-                  extraText={t('是否自动清理过期结果图文件并保留任务记录')}
-                  onChange={handleFieldChange(
-                    'worker_setting.auto_cleanup_enabled',
-                  )}
-                />
-              </Col>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.InputNumber
-                  field={'worker_setting.retention_days'}
-                  label={t('结果图保留天数')}
-                  extraText={t('仅控制结果图文件清理，不删除任务记录')}
-                  min={1}
-                  max={365}
-                  onChange={handleFieldChange('worker_setting.retention_days')}
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>

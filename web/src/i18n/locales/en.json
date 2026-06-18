@@ -3997,6 +3997,15 @@
     "Enter 发送，Shift + Enter 换行": "Enter sends, Shift + Enter adds a new line",
     "当前没有可用视频模型": "No available video models",
     "当前分组下没有可用图片模型": "No available image models in the current group",
-    "已使用": "Used"
+    "已使用": "Used",
+    "结果图自动清理开关": "Result auto-cleanup",
+    "仅本地存储时自动清理过期结果图文件并保留任务记录": "Automatically clean up expired result files only for local storage while keeping task records.",
+    "结果图保留小时数": "Result retention hours",
+    "仅控制本地结果图文件清理，不删除任务记录": "Only controls local result file cleanup and does not delete task records.",
+    "参考图自动清理开关": "Reference auto-cleanup",
+    "仅本地存储时自动清理无引用的旧参考图资产": "Automatically clean up unreferenced old reference assets only for local storage.",
+    "参考图保留小时数": "Reference retention hours",
+    "仅清理本地存储中无引用的旧参考图资产": "Only cleans up unreferenced old reference assets stored locally.",
+    "结果图与参考图共用该调度间隔": "Result and reference cleanup share this scheduling interval."
   }
 }

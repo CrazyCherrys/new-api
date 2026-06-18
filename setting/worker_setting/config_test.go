@@ -88,3 +88,22 @@ func TestEffectiveCleanupIntervalHoursDefaultsTo24(t *testing.T) {
 		t.Fatalf("EffectiveCleanupIntervalHours() = %d, want 6", got)
 	}
 }
+
+func TestEffectiveRetentionHoursDefaults(t *testing.T) {
+	cfg := &WorkerSetting{}
+	if got := cfg.EffectiveResultRetentionHours(); got != 720 {
+		t.Fatalf("EffectiveResultRetentionHours() = %d, want 720", got)
+	}
+	if got := cfg.EffectiveReferenceRetentionHours(); got != 168 {
+		t.Fatalf("EffectiveReferenceRetentionHours() = %d, want 168", got)
+	}
+
+	cfg.RetentionDays = 12
+	cfg.ReferenceRetentionDays = 36
+	if got := cfg.EffectiveResultRetentionHours(); got != 12 {
+		t.Fatalf("EffectiveResultRetentionHours() = %d, want 12", got)
+	}
+	if got := cfg.EffectiveReferenceRetentionHours(); got != 36 {
+		t.Fatalf("EffectiveReferenceRetentionHours() = %d, want 36", got)
+	}
+}

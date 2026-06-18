@@ -62,9 +62,9 @@ export const WORKER_SETTING_DEFAULTS = Object.freeze({
   'worker_setting.inspiration_page_cache_ttl': 300,
   'worker_setting.inspiration_first_page_cache_ttl': 900,
   'worker_setting.auto_cleanup_enabled': false,
-  'worker_setting.retention_days': 30,
+  'worker_setting.retention_days': 720,
   'worker_setting.reference_auto_cleanup_enabled': false,
-  'worker_setting.reference_retention_days': 7,
+  'worker_setting.reference_retention_days': 168,
   'worker_setting.cleanup_interval_hours': 24,
   'worker_setting.max_image_size': 10,
 });

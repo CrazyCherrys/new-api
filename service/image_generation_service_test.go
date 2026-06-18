@@ -528,6 +528,10 @@ func TestRunImageCleanupTaskOnceReadsLatestConfig(t *testing.T) {
 	previousRetentionDays := cfg.RetentionDays
 	previousStorageType := cfg.StorageType
 	previousLocalPath := cfg.LocalStoragePath
+	previousResultStorageType := cfg.ResultStorageType
+	previousReferenceAutoCleanupEnabled := cfg.ReferenceAutoCleanupEnabled
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceRetentionDays := cfg.ReferenceRetentionDays
 	previousCleanupIntervalHours := cfg.CleanupIntervalHours
 	previousLastRun := imageCleanupLastRun.Load()
 	imageCleanupTaskRunning.Store(false)
@@ -536,12 +540,19 @@ func TestRunImageCleanupTaskOnceReadsLatestConfig(t *testing.T) {
 		cfg.RetentionDays = previousRetentionDays
 		cfg.StorageType = previousStorageType
 		cfg.LocalStoragePath = previousLocalPath
+		cfg.ResultStorageType = previousResultStorageType
+		cfg.ReferenceAutoCleanupEnabled = previousReferenceAutoCleanupEnabled
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceRetentionDays = previousReferenceRetentionDays
 		cfg.CleanupIntervalHours = previousCleanupIntervalHours
 		imageCleanupLastRun.Store(previousLastRun)
 		imageCleanupTaskRunning.Store(false)
 	})
 
 	cfg.StorageType = "local"
+	cfg.ResultStorageType = "local"
+	cfg.ReferenceStorageType = "local"
+	cfg.ReferenceAutoCleanupEnabled = false
 	cfg.LocalStoragePath = t.TempDir()
 	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
 	cfg.AutoCleanupEnabled = false
@@ -573,7 +584,7 @@ func TestRunImageCleanupTaskOnceReadsLatestConfig(t *testing.T) {
 		ImageUrl:          buildImageGenerationLocalObjectURL("image-generation/20260617/cleanup.png"),
 		ThumbnailUrl:      buildImageGenerationLocalObjectURL("image-generation/thumb/20260617/cleanup-thumb.jpg"),
 		ResultAssetStatus: model.ImageTaskResultAssetStatusAvailable,
-		CreatedTime:       common.GetTimestamp() - 10*24*60*60,
+		CreatedTime:       common.GetTimestamp() - 10*60*60,
 	}
 	if err := db.Create(task).Error; err != nil {
 		t.Fatalf("failed to create old task: %v", err)
@@ -641,11 +652,14 @@ func TestCleanupExpiredTaskResultAssetsPreservesTaskRecord(t *testing.T) {
 	cfg := worker_setting.GetWorkerSetting()
 	previousStorageType := cfg.StorageType
 	previousLocalPath := cfg.LocalStoragePath
+	previousResultStorageType := cfg.ResultStorageType
 	t.Cleanup(func() {
 		cfg.StorageType = previousStorageType
 		cfg.LocalStoragePath = previousLocalPath
+		cfg.ResultStorageType = previousResultStorageType
 	})
 	cfg.StorageType = "local"
+	cfg.ResultStorageType = "local"
 	cfg.LocalStoragePath = t.TempDir()
 	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
 
@@ -669,7 +683,7 @@ func TestCleanupExpiredTaskResultAssetsPreservesTaskRecord(t *testing.T) {
 		Status:            model.ImageTaskStatusSuccess,
 		ImageUrl:          buildImageGenerationLocalObjectURL(objectKey),
 		ResultAssetStatus: model.ImageTaskResultAssetStatusAvailable,
-		CreatedTime:       common.GetTimestamp() - 10*24*60*60,
+		CreatedTime:       common.GetTimestamp() - 10*60*60,
 	}
 	if err := db.Create(task).Error; err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -693,6 +707,152 @@ func TestCleanupExpiredTaskResultAssetsPreservesTaskRecord(t *testing.T) {
 	}
 	if _, err := os.Stat(imagePath); !os.IsNotExist(err) {
 		t.Fatalf("expected image file to be deleted, stat err=%v", err)
+	}
+}
+
+func TestRunImageCleanupTaskOnceSkipsResultCleanupForS3Storage(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousAutoCleanupEnabled := cfg.AutoCleanupEnabled
+	previousRetentionDays := cfg.RetentionDays
+	previousStorageType := cfg.StorageType
+	previousResultStorageType := cfg.ResultStorageType
+	previousReferenceAutoCleanupEnabled := cfg.ReferenceAutoCleanupEnabled
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceRetentionDays := cfg.ReferenceRetentionDays
+	previousCleanupIntervalHours := cfg.CleanupIntervalHours
+	previousLastRun := imageCleanupLastRun.Load()
+	imageCleanupTaskRunning.Store(false)
+	t.Cleanup(func() {
+		cfg.AutoCleanupEnabled = previousAutoCleanupEnabled
+		cfg.RetentionDays = previousRetentionDays
+		cfg.StorageType = previousStorageType
+		cfg.ResultStorageType = previousResultStorageType
+		cfg.ReferenceAutoCleanupEnabled = previousReferenceAutoCleanupEnabled
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceRetentionDays = previousReferenceRetentionDays
+		cfg.CleanupIntervalHours = previousCleanupIntervalHours
+		imageCleanupLastRun.Store(previousLastRun)
+		imageCleanupTaskRunning.Store(false)
+	})
+
+	cfg.StorageType = "s3"
+	cfg.ResultStorageType = "s3"
+	cfg.ReferenceStorageType = "s3"
+	cfg.ReferenceAutoCleanupEnabled = false
+	cfg.AutoCleanupEnabled = true
+	cfg.RetentionDays = 1
+	cfg.CleanupIntervalHours = 1
+	imageCleanupLastRun.Store(0)
+
+	task := &model.ImageGenerationTask{
+		UserId:            1,
+		ModelId:           "s3-cleanup-skip-model",
+		Prompt:            "s3 cleanup skip prompt",
+		RequestEndpoint:   "openai",
+		Status:            model.ImageTaskStatusSuccess,
+		ImageUrl:          "https://example.com/result.png",
+		ResultAssetStatus: model.ImageTaskResultAssetStatusAvailable,
+		CreatedTime:       common.GetTimestamp() - 10*60*60,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	runImageCleanupTaskOnce(time.Now())
+
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("expected task record to remain")
+	}
+	if reloaded.ResultAssetStatus != model.ImageTaskResultAssetStatusAvailable {
+		t.Fatalf("expected s3 result assets to remain available, got %q", reloaded.ResultAssetStatus)
+	}
+	if imageCleanupLastRun.Load() == 0 {
+		t.Fatal("expected cleanup scheduler to record a run even when all expired result assets are non-local")
+	}
+}
+
+func TestRunImageCleanupTaskOnceStillCleansHistoricalLocalAssetsAfterSwitchToS3(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousAutoCleanupEnabled := cfg.AutoCleanupEnabled
+	previousRetentionDays := cfg.RetentionDays
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousResultStorageType := cfg.ResultStorageType
+	previousReferenceAutoCleanupEnabled := cfg.ReferenceAutoCleanupEnabled
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceRetentionDays := cfg.ReferenceRetentionDays
+	previousCleanupIntervalHours := cfg.CleanupIntervalHours
+	previousLastRun := imageCleanupLastRun.Load()
+	imageCleanupTaskRunning.Store(false)
+	t.Cleanup(func() {
+		cfg.AutoCleanupEnabled = previousAutoCleanupEnabled
+		cfg.RetentionDays = previousRetentionDays
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		cfg.ResultStorageType = previousResultStorageType
+		cfg.ReferenceAutoCleanupEnabled = previousReferenceAutoCleanupEnabled
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceRetentionDays = previousReferenceRetentionDays
+		cfg.CleanupIntervalHours = previousCleanupIntervalHours
+		imageCleanupLastRun.Store(previousLastRun)
+		imageCleanupTaskRunning.Store(false)
+	})
+
+	cfg.StorageType = "s3"
+	cfg.ResultStorageType = "s3"
+	cfg.ReferenceStorageType = "s3"
+	cfg.ReferenceAutoCleanupEnabled = false
+	cfg.AutoCleanupEnabled = true
+	cfg.RetentionDays = 1
+	cfg.CleanupIntervalHours = 1
+	cfg.LocalStoragePath = t.TempDir()
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.LocalStoragePath)
+	imageCleanupLastRun.Store(0)
+
+	taskImagePath := filepath.Join(cfg.LocalStoragePath, "image-generation", "20260618", "historical-local.png")
+	if err := os.MkdirAll(filepath.Dir(taskImagePath), 0o755); err != nil {
+		t.Fatalf("failed to create historical result directory: %v", err)
+	}
+	if err := os.WriteFile(taskImagePath, []byte("image"), 0o644); err != nil {
+		t.Fatalf("failed to create historical result image file: %v", err)
+	}
+
+	task := &model.ImageGenerationTask{
+		UserId:            1,
+		ModelId:           "historical-local-cleanup-model",
+		Prompt:            "historical local cleanup prompt",
+		RequestEndpoint:   "openai",
+		Status:            model.ImageTaskStatusSuccess,
+		ImageUrl:          buildImageGenerationLocalObjectURL("image-generation/20260618/historical-local.png"),
+		ResultAssetStatus: model.ImageTaskResultAssetStatusAvailable,
+		CreatedTime:       common.GetTimestamp() - 10*60*60,
+	}
+	if err := db.Create(task).Error; err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	runImageCleanupTaskOnce(time.Now())
+
+	reloaded, err := model.GetImageTaskByID(task.Id)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("expected task record to remain")
+	}
+	if reloaded.ResultAssetStatus != model.ImageTaskResultAssetStatusExpiredCleaned {
+		t.Fatalf("expected historical local result assets to be cleaned after storage switch, got %q", reloaded.ResultAssetStatus)
+	}
+	if _, err := os.Stat(taskImagePath); !os.IsNotExist(err) {
+		t.Fatalf("expected historical local result asset file to be deleted, stat err=%v", err)
 	}
 }
 
@@ -2420,8 +2580,8 @@ func TestCleanupExpiredReferenceAssetsRemovesUnreferencedLocalFiles(t *testing.T
 		ContentType:   "image/png",
 		FileSizeBytes: 3,
 		RefCount:      0,
-		CreatedTime:   common.GetTimestamp() - 10*24*60*60,
-		LastUsedTime:  common.GetTimestamp() - 10*24*60*60,
+		CreatedTime:   common.GetTimestamp() - 10*60*60,
+		LastUsedTime:  common.GetTimestamp() - 10*60*60,
 	}
 	if err := db.Create(asset).Error; err != nil {
 		t.Fatalf("failed to create reference asset row: %v", err)
@@ -2447,12 +2607,15 @@ func TestCleanupExpiredReferenceAssetsDeletesEmptyPathRecords(t *testing.T) {
 	db := setupImageGenerationServiceTestDB(t)
 
 	cfg := worker_setting.GetWorkerSetting()
+	previousReferenceStorageType := cfg.ReferenceStorageType
 	previousReferenceAutoCleanupEnabled := cfg.ReferenceAutoCleanupEnabled
 	previousReferenceRetentionDays := cfg.ReferenceRetentionDays
 	t.Cleanup(func() {
+		cfg.ReferenceStorageType = previousReferenceStorageType
 		cfg.ReferenceAutoCleanupEnabled = previousReferenceAutoCleanupEnabled
 		cfg.ReferenceRetentionDays = previousReferenceRetentionDays
 	})
+	cfg.ReferenceStorageType = "local"
 	cfg.ReferenceAutoCleanupEnabled = true
 	cfg.ReferenceRetentionDays = 7
 
@@ -2463,8 +2626,8 @@ func TestCleanupExpiredReferenceAssetsDeletesEmptyPathRecords(t *testing.T) {
 		ContentType:   "image/png",
 		FileSizeBytes: 0,
 		RefCount:      0,
-		CreatedTime:   common.GetTimestamp() - 10*24*60*60,
-		LastUsedTime:  common.GetTimestamp() - 10*24*60*60,
+		CreatedTime:   common.GetTimestamp() - 10*60*60,
+		LastUsedTime:  common.GetTimestamp() - 10*60*60,
 	}
 	if err := db.Create(asset).Error; err != nil {
 		t.Fatalf("failed to create empty-path reference asset row: %v", err)
@@ -2480,6 +2643,118 @@ func TestCleanupExpiredReferenceAssetsDeletesEmptyPathRecords(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected empty-path reference asset row to be deleted, got count=%d", count)
+	}
+}
+
+func TestCleanupExpiredReferenceAssetsSkipsS3Storage(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceAutoCleanupEnabled := cfg.ReferenceAutoCleanupEnabled
+	previousReferenceRetentionDays := cfg.ReferenceRetentionDays
+	t.Cleanup(func() {
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceAutoCleanupEnabled = previousReferenceAutoCleanupEnabled
+		cfg.ReferenceRetentionDays = previousReferenceRetentionDays
+	})
+	cfg.ReferenceStorageType = "s3"
+	cfg.ReferenceAutoCleanupEnabled = true
+	cfg.ReferenceRetentionDays = 7
+
+	asset := &model.ImageGenerationReferenceAsset{
+		ContentHash:   strings.Repeat("c", 64),
+		StorageType:   "s3",
+		StoragePath:   "https://example.com/reference.png",
+		ContentType:   "image/png",
+		FileSizeBytes: 1,
+		RefCount:      0,
+		CreatedTime:   common.GetTimestamp() - 10*60*60,
+		LastUsedTime:  common.GetTimestamp() - 10*60*60,
+	}
+	if err := db.Create(asset).Error; err != nil {
+		t.Fatalf("failed to create s3 reference asset row: %v", err)
+	}
+
+	if err := CleanupExpiredReferenceAssets(); err != nil {
+		t.Fatalf("expected reference cleanup to skip s3 storage without error: %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.ImageGenerationReferenceAsset{}).Where("id = ?", asset.Id).Count(&count).Error; err != nil {
+		t.Fatalf("failed to count reference assets after cleanup: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected s3 reference asset row to remain untouched, got count=%d", count)
+	}
+}
+
+func TestCleanupExpiredReferenceAssetsStillCleanHistoricalLocalFilesAfterSwitchToS3(t *testing.T) {
+	db := setupImageGenerationServiceTestDB(t)
+
+	cfg := worker_setting.GetWorkerSetting()
+	previousStorageType := cfg.StorageType
+	previousLocalPath := cfg.LocalStoragePath
+	previousReferenceStorageType := cfg.ReferenceStorageType
+	previousReferenceLocalPath := cfg.ReferenceLocalStoragePath
+	previousReferenceAutoCleanupEnabled := cfg.ReferenceAutoCleanupEnabled
+	previousReferenceRetentionDays := cfg.ReferenceRetentionDays
+	t.Cleanup(func() {
+		cfg.StorageType = previousStorageType
+		cfg.LocalStoragePath = previousLocalPath
+		cfg.ReferenceStorageType = previousReferenceStorageType
+		cfg.ReferenceLocalStoragePath = previousReferenceLocalPath
+		cfg.ReferenceAutoCleanupEnabled = previousReferenceAutoCleanupEnabled
+		cfg.ReferenceRetentionDays = previousReferenceRetentionDays
+	})
+
+	cfg.StorageType = "s3"
+	cfg.LocalStoragePath = t.TempDir()
+	cfg.ReferenceStorageType = "s3"
+	cfg.ReferenceLocalStoragePath = cfg.LocalStoragePath
+	setTestImageGenerationStorageEnv(t, cfg.LocalStoragePath, cfg.ReferenceLocalStoragePath)
+	cfg.ReferenceAutoCleanupEnabled = true
+	cfg.ReferenceRetentionDays = 1
+
+	objectKey := "image-generation/ref/20260618/historical-local-ref.png"
+	fullPath, err := imageGenerationLocalAssetPath(cfg, objectKey, imageGenerationAssetKindReference)
+	if err != nil {
+		t.Fatalf("failed to resolve historical local reference path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("failed to create historical reference dir: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("png"), 0o644); err != nil {
+		t.Fatalf("failed to create historical reference file: %v", err)
+	}
+
+	asset := &model.ImageGenerationReferenceAsset{
+		ContentHash:   strings.Repeat("d", 64),
+		StorageType:   "local",
+		StoragePath:   buildImageGenerationLocalObjectURL(objectKey),
+		ContentType:   "image/png",
+		FileSizeBytes: 3,
+		RefCount:      0,
+		CreatedTime:   common.GetTimestamp() - 10*60*60,
+		LastUsedTime:  common.GetTimestamp() - 10*60*60,
+	}
+	if err := db.Create(asset).Error; err != nil {
+		t.Fatalf("failed to create historical local reference asset row: %v", err)
+	}
+
+	if err := CleanupExpiredReferenceAssets(); err != nil {
+		t.Fatalf("expected historical local reference cleanup to succeed after storage switch: %v", err)
+	}
+	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
+		t.Fatalf("expected historical local reference file to be removed by GC, stat err=%v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.ImageGenerationReferenceAsset{}).Where("id = ?", asset.Id).Count(&count).Error; err != nil {
+		t.Fatalf("failed to count reference assets after cleanup: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected historical local reference asset row to be deleted, got count=%d", count)
 	}
 }
 

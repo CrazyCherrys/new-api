@@ -88,13 +88,13 @@ type WorkerSetting struct {
 	InspirationPageCacheTTL int `json:"inspiration_page_cache_ttl"`
 	// InspirationFirstPageCacheTTL /inspiration 首页缓存时长（秒）
 	InspirationFirstPageCacheTTL int `json:"inspiration_first_page_cache_ttl"`
-	// AutoCleanupEnabled 自动清理开关
+	// AutoCleanupEnabled 结果图自动清理开关（仅本地存储生效）
 	AutoCleanupEnabled bool `json:"auto_cleanup_enabled"`
-	// RetentionDays 保留天数
+	// RetentionDays 结果图保留时长（小时，历史 key 名保持不变）
 	RetentionDays int `json:"retention_days"`
-	// ReferenceAutoCleanupEnabled 参考图自动清理开关
+	// ReferenceAutoCleanupEnabled 参考图自动清理开关（仅本地存储生效）
 	ReferenceAutoCleanupEnabled bool `json:"reference_auto_cleanup_enabled"`
-	// ReferenceRetentionDays 参考图保留天数
+	// ReferenceRetentionDays 参考图保留时长（小时，历史 key 名保持不变）
 	ReferenceRetentionDays int `json:"reference_retention_days"`
 	// CleanupIntervalHours 清理调度间隔（小时）
 	CleanupIntervalHours int `json:"cleanup_interval_hours"`
@@ -147,9 +147,9 @@ var workerSetting = WorkerSetting{
 	InspirationPageCacheTTL:      common.GetEnvOrDefault("INSPIRATION_ASSET_LIST_CACHE_TTL", 300),
 	InspirationFirstPageCacheTTL: common.GetEnvOrDefault("INSPIRATION_ASSET_FIRST_PAGE_CACHE_TTL", 900),
 	AutoCleanupEnabled:           false,
-	RetentionDays:                30,
+	RetentionDays:                720,
 	ReferenceAutoCleanupEnabled:  false,
-	ReferenceRetentionDays:       7,
+	ReferenceRetentionDays:       168,
 	CleanupIntervalHours:         24,
 	MaxImageSize:                 10,
 }
@@ -275,6 +275,20 @@ func (ws *WorkerSetting) EffectiveCleanupIntervalHours() int {
 		return 24
 	}
 	return ws.CleanupIntervalHours
+}
+
+func (ws *WorkerSetting) EffectiveResultRetentionHours() int {
+	if ws == nil || ws.RetentionDays <= 0 {
+		return 720
+	}
+	return ws.RetentionDays
+}
+
+func (ws *WorkerSetting) EffectiveReferenceRetentionHours() int {
+	if ws == nil || ws.ReferenceRetentionDays <= 0 {
+		return 168
+	}
+	return ws.ReferenceRetentionDays
 }
 
 func effectiveImageGenerationLocalStoragePath(raw string) string {

@@ -1888,19 +1888,14 @@ func CleanupExpiredImageTasks() error {
 		return err
 	}
 
-	// 检查是否启用自动清理
-	if !cfg.AutoCleanupEnabled {
+	if cfg == nil || !cfg.AutoCleanupEnabled {
 		return nil
 	}
 
-	// 计算过期时间戳
-	retentionDays := cfg.RetentionDays
-	if retentionDays <= 0 {
-		retentionDays = 30 // 默认保留30天
-	}
-	expirationTime := common.GetTimestamp() - int64(retentionDays*24*60*60)
+	retentionHours := cfg.EffectiveResultRetentionHours()
+	expirationTime := common.GetTimestamp() - int64(retentionHours*60*60)
 
-	common.SysLog(fmt.Sprintf("Starting image result asset cleanup: retention_days=%d, expiration_time=%d", retentionDays, expirationTime))
+	common.SysLog(fmt.Sprintf("Starting image result asset cleanup: retention_hours=%d, expiration_time=%d", retentionHours, expirationTime))
 
 	// 查询过期任务
 	expiredTasks, err := model.ListExpiredImageTasksBefore(expirationTime)
@@ -1937,11 +1932,8 @@ func CleanupExpiredReferenceAssets() error {
 		return nil
 	}
 
-	retentionDays := cfg.ReferenceRetentionDays
-	if retentionDays <= 0 {
-		retentionDays = 7
-	}
-	expirationTime := common.GetTimestamp() - int64(retentionDays*24*60*60)
+	retentionHours := cfg.EffectiveReferenceRetentionHours()
+	expirationTime := common.GetTimestamp() - int64(retentionHours*60*60)
 
 	assets, err := model.ListExpiredUnusedReferenceAssets(expirationTime)
 	if err != nil {
@@ -1950,6 +1942,9 @@ func CleanupExpiredReferenceAssets() error {
 
 	for _, asset := range assets {
 		if asset == nil {
+			continue
+		}
+		if !referenceAssetNeedsLocalCleanup(asset) {
 			continue
 		}
 		if strings.TrimSpace(asset.StoragePath) == "" {
@@ -1984,7 +1979,10 @@ func shouldRunImageCleanup(now time.Time) bool {
 
 func runImageCleanupTaskOnce(now time.Time) {
 	cfg := worker_setting.GetWorkerSetting()
-	if cfg == nil || (!cfg.AutoCleanupEnabled && !cfg.ReferenceAutoCleanupEnabled) {
+	if cfg == nil {
+		return
+	}
+	if !cfg.AutoCleanupEnabled && !cfg.ReferenceAutoCleanupEnabled {
 		return
 	}
 	if !shouldRunImageCleanup(now) {
@@ -2048,6 +2046,10 @@ func cleanupExpiredTaskResultAssets(task *model.ImageGenerationTask, cfg *worker
 		return nil
 	}
 
+	if !taskHasLocalResultAssets(task) {
+		return nil
+	}
+
 	if task.ImageUrl != "" {
 		if err := deleteImageFileByKind(task.ImageUrl, cfg, imageGenerationAssetKindResult); err != nil {
 			return err
@@ -2066,6 +2068,32 @@ func cleanupExpiredTaskResultAssets(task *model.ImageGenerationTask, cfg *worker
 		publishImageGenerationTaskUpdateByID(task.Id)
 	}
 	return nil
+}
+
+func taskHasLocalResultAssets(task *model.ImageGenerationTask) bool {
+	if task == nil {
+		return false
+	}
+	if _, ok := imageGenerationLocalAssetKeyFromURL(task.ImageUrl); ok {
+		return true
+	}
+	if _, ok := imageGenerationLocalAssetKeyFromURL(task.ThumbnailUrl); ok {
+		return true
+	}
+	return false
+}
+
+func referenceAssetNeedsLocalCleanup(asset *model.ImageGenerationReferenceAsset) bool {
+	if asset == nil {
+		return false
+	}
+	if strings.TrimSpace(asset.StoragePath) == "" {
+		return true
+	}
+	if _, ok := imageGenerationLocalAssetKeyFromURL(asset.StoragePath); ok {
+		return true
+	}
+	return false
 }
 
 // cleanupSingleTask 清理单个任务

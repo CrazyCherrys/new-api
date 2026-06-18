@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   getWorkerSettingEffectiveDisplayInputs,
   getWorkerStorageDisplayConfig,
+  WORKER_SETTING_DEFAULTS,
   WORKER_SETTING_LOCAL_PATHS,
 } from './workerSettingSchema.js';
 
@@ -31,4 +32,12 @@ test('worker setting effective display prefers synthetic effective local paths',
 
   assert.equal(display.resultLocalStoragePath, '/mnt/results');
   assert.equal(display.referenceLocalStoragePath, '/mnt/references');
+});
+
+test('worker setting cleanup defaults use hour-based retention values', () => {
+  assert.equal(WORKER_SETTING_DEFAULTS['worker_setting.retention_days'], 720);
+  assert.equal(
+    WORKER_SETTING_DEFAULTS['worker_setting.reference_retention_days'],
+    168,
+  );
 });
